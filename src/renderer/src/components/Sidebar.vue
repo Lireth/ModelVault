@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { MODEL_TYPES, state, typeCounts, formatSize } from '../store/appStore'
+import { MODEL_TYPES, state, typeCounts, formatSize, chooseFolder, scanModels, openSettings } from '../store/appStore'
 
 const emit = defineEmits(['select-type'])
 
@@ -14,6 +14,10 @@ function selectType(key) {
   state.typeFilter = key
   emit('select-type', key)
 }
+
+function onScanClick() {
+  if (!state.scanning) scanModels()
+}
 </script>
 
 <template>
@@ -26,6 +30,14 @@ function selectType(key) {
           {{ state.lastScan.count }} 个模型 · {{ (state.lastScan.durationMs / 1000).toFixed(1) }}s
         </span>
       </div>
+    </div>
+
+    <!-- 操作按钮区：位于「模型文件夹」与「分类」之间 -->
+    <div class="side-section action-section">
+      <button class="btn action-btn" title="重新扫描当前模型文件夹" :disabled="state.scanning || !state.folder" @click="onScanClick">
+        {{ state.scanning ? '扫描中…' : '重新扫描' }}
+      </button>
+      <button class="btn action-btn" title="选择模型文件夹" @click="chooseFolder">选择文件夹</button>
     </div>
 
     <div class="side-section">
@@ -74,6 +86,12 @@ function selectType(key) {
         </button>
       </div>
     </div>
+
+    <!-- 设置按钮：位于「排序」下方，宽度自适应侧边栏 -->
+    <button class="btn settings-btn" title="打开设置" @click="openSettings">
+      <span class="settings-icon">⚙</span>
+      <span class="settings-text">设置</span>
+    </button>
 
     <div class="side-footer">
       <span v-if="state.folder" class="muted-small" :title="state.folder">{{ state.folder }}</span>
@@ -212,6 +230,38 @@ function selectType(key) {
   color: var(--accent);
 }
 
+/* ---------- 操作按钮区（模型文件夹与分类之间） ---------- */
+.action-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.action-btn {
+  width: 100%;
+  text-align: center;
+}
+
+/* ---------- 设置按钮（排序下方，全宽） ---------- */
+.settings-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 10px;
+  flex-shrink: 0;
+}
+
+.settings-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.settings-icon {
+  font-size: 13px;
+}
+
 .side-footer {
   margin-top: auto;
   display: flex;
@@ -239,7 +289,9 @@ function selectType(key) {
   .sort-group,
   .type-label,
   .type-count,
-  .side-section h3 {
+  .side-section h3,
+  .action-section,
+  .settings-text {
     display: none;
   }
   .type-item {

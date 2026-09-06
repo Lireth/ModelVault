@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import TopBar from './components/TopBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import ModelCard from './components/ModelCard.vue'
@@ -13,6 +13,23 @@ import {
   typeInfo,
   chooseFolder
 } from './store/appStore'
+
+const searchInput = ref(state.search)
+let searchTimer = null
+
+// 搜索输入防抖，避免大量模型时每键触发过滤
+watch(searchInput, (value) => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    state.search = value
+  }, 200)
+})
+
+function clearSearch() {
+  clearTimeout(searchTimer)
+  searchInput.value = ''
+  state.search = ''
+}
 
 let unsubscribeProgress = null
 
@@ -37,6 +54,20 @@ onUnmounted(() => {
       <Sidebar />
 
       <main class="content">
+        <!-- 搜索框：位于模型清单上方（选择文件夹后显示） -->
+        <div v-if="state.folder" class="search-row">
+          <div class="search-box" title="按模型名称搜索">
+            <span class="search-icon">🔍</span>
+            <input
+              v-model="searchInput"
+              type="text"
+              placeholder="搜索模型名称…"
+              spellcheck="false"
+            />
+            <button v-if="searchInput" class="search-clear" title="清空搜索" @click="clearSearch">✕</button>
+          </div>
+        </div>
+
         <!-- 未选择文件夹 -->
         <div v-if="!state.folder && !state.scanning" class="empty-state">
           <div class="empty-icon">📁</div>
@@ -110,6 +141,59 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 16px;
   align-content: start;
+}
+
+/* ---------- 搜索框（模型清单上方） ---------- */
+.search-row {
+  display: flex;
+}
+
+.search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: min(360px, 40vw);
+}
+
+.search-icon {
+  position: absolute;
+  left: 10px;
+  font-size: 12px;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.search-box input {
+  width: 100%;
+  padding: 8px 30px 8px 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.search-box input:focus {
+  border-color: var(--accent);
+}
+
+.search-clear {
+  position: absolute;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.search-clear:hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .result-bar {
