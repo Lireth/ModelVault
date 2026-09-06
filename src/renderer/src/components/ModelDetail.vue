@@ -32,10 +32,8 @@ const form = reactive({
   cfg: '',
   sampler: '',
   scheduler: '',
-  resMinW: '',
-  resMinH: '',
-  resMaxW: '',
-  resMaxH: '',
+  resMin: '',
+  resMax: '',
   note: '',
   subCategory: ''
 })
@@ -47,10 +45,8 @@ function fillForm(model) {
   form.cfg = Number.isFinite(p.cfg) ? p.cfg : ''
   form.sampler = p.sampler || ''
   form.scheduler = p.scheduler || ''
-  form.resMinW = Number.isFinite(p.resMinW) ? p.resMinW : ''
-  form.resMinH = Number.isFinite(p.resMinH) ? p.resMinH : ''
-  form.resMaxW = Number.isFinite(p.resMaxW) ? p.resMaxW : ''
-  form.resMaxH = Number.isFinite(p.resMaxH) ? p.resMaxH : ''
+  form.resMin = Number.isFinite(p.resMin) ? p.resMin : ''
+  form.resMax = Number.isFinite(p.resMax) ? p.resMax : ''
   form.note = model?.note || ''
   form.subCategory = model?.subCategory || ''
 }
@@ -83,19 +79,15 @@ function collectParams() {
     cfg: num(form.cfg),
     sampler: form.sampler.trim(),
     scheduler: form.scheduler.trim(),
-    resMinW: num(form.resMinW),
-    resMinH: num(form.resMinH),
-    resMaxW: num(form.resMaxW),
-    resMaxH: num(form.resMaxH)
+    resMin: num(form.resMin),
+    resMax: num(form.resMax)
   }
   // 校验
   const rangeChecks = [
     ['采样步数', params.steps, 1, 200],
     ['CFG', params.cfg, 0, 100],
-    ['最小宽度', params.resMinW, 16, 16384],
-    ['最小高度', params.resMinH, 16, 16384],
-    ['最大宽度', params.resMaxW, 16, 16384],
-    ['最大高度', params.resMaxH, 16, 16384]
+    ['最小分辨率', params.resMin, 16, 16384],
+    ['最大分辨率', params.resMax, 16, 16384]
   ]
   for (const [label, value, min, max] of rangeChecks) {
     if (Number.isNaN(value)) return { error: `${label} 请输入有效数字` }
@@ -103,15 +95,8 @@ function collectParams() {
       return { error: `${label} 超出合理范围（${min} ~ ${max}）` }
     }
   }
-  if (
-    params.resMinW !== null && params.resMaxW !== null && params.resMinW > params.resMaxW
-  ) {
-    return { error: '最小宽度不能大于最大宽度' }
-  }
-  if (
-    params.resMinH !== null && params.resMaxH !== null && params.resMinH > params.resMaxH
-  ) {
-    return { error: '最小高度不能大于最大高度' }
+  if (params.resMin !== null && params.resMax !== null && params.resMin > params.resMax) {
+    return { error: '最小分辨率不能大于最大分辨率' }
   }
   return { params }
 }
@@ -239,20 +224,12 @@ async function onUploadCover() {
             <h3>推荐分辨率区间</h3>
             <div class="form-grid">
               <label class="field">
-                <span>最小宽度 (px)</span>
-                <input v-model="form.resMinW" type="number" min="16" max="16384" placeholder="如 512" />
+                <span>最小分辨率（宽 = 高，px）</span>
+                <input v-model="form.resMin" type="number" min="16" max="16384" placeholder="如 512" />
               </label>
               <label class="field">
-                <span>最小高度 (px)</span>
-                <input v-model="form.resMinH" type="number" min="16" max="16384" placeholder="如 512" />
-              </label>
-              <label class="field">
-                <span>最大宽度 (px)</span>
-                <input v-model="form.resMaxW" type="number" min="16" max="16384" placeholder="如 1024" />
-              </label>
-              <label class="field">
-                <span>最大高度 (px)</span>
-                <input v-model="form.resMaxH" type="number" min="16" max="16384" placeholder="如 1536" />
+                <span>最大分辨率（宽 = 高，px）</span>
+                <input v-model="form.resMax" type="number" min="16" max="16384" placeholder="如 1024" />
               </label>
             </div>
 

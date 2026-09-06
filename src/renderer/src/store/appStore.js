@@ -40,10 +40,8 @@ export function defaultParams() {
     cfg: null,
     sampler: '',
     scheduler: '',
-    resMinW: null,
-    resMinH: null,
-    resMaxW: null,
-    resMaxH: null
+    resMin: null,
+    resMax: null
   }
 }
 

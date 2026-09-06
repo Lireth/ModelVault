@@ -22,8 +22,8 @@ const paramSummary = computed(() => {
   if (Number.isFinite(p.steps)) parts.push(`${p.steps} 步`)
   if (Number.isFinite(p.cfg)) parts.push(`CFG ${p.cfg}`)
   if (p.sampler) parts.push(p.sampler)
-  if (Number.isFinite(p.resMinW) && Number.isFinite(p.resMaxW)) {
-    parts.push(`${p.resMinW}~${p.resMaxW}px`)
+  if (Number.isFinite(p.resMin) && Number.isFinite(p.resMax)) {
+    parts.push(`${p.resMin}~${p.resMax}px`)
   }
   return parts.join(' · ')
 })

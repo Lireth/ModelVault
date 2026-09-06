@@ -45,12 +45,18 @@ function normalizeModelMeta(raw) {
       cfg: Number.isFinite(params.cfg) ? params.cfg : null,
       sampler: typeof params.sampler === 'string' ? params.sampler : '',
       scheduler: typeof params.scheduler === 'string' ? params.scheduler : '',
-      resMinW: Number.isFinite(params.resMinW) ? params.resMinW : null,
-      resMinH: Number.isFinite(params.resMinH) ? params.resMinH : null,
-      resMaxW: Number.isFinite(params.resMaxW) ? params.resMaxW : null,
-      resMaxH: Number.isFinite(params.resMaxH) ? params.resMaxH : null
+      // 兼容旧版四字段（resMinW/resMinH/resMaxW/resMaxH），迁移为宽高共用的单值区间
+      resMin: pickLegacyRes(params.resMin, [params.resMinW, params.resMinH]),
+      resMax: pickLegacyRes(params.resMax, [params.resMaxW, params.resMaxH])
     }
   }
+}
+
+/** 取新字段；缺失时回退到旧版宽/高字段中的较小值 */
+function pickLegacyRes(value, legacyValues) {
+  if (Number.isFinite(value)) return value
+  const legacy = legacyValues.filter((v) => Number.isFinite(v))
+  return legacy.length > 0 ? Math.min(...legacy) : null
 }
 
 /** 启动时加载存储文件；文件缺失或损坏时回退到默认数据 */
