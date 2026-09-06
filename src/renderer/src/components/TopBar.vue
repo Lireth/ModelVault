@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch } from 'vue'
-import { state, chooseFolder, scanModels } from '../store/appStore'
+import { state, chooseFolder, scanModels, openSettings } from '../store/appStore'
 
 const searchInput = ref(state.search)
 let searchTimer = null

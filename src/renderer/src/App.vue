@@ -90,6 +90,7 @@ onUnmounted(() => {
     </footer>
 
     <ModelDetail />
+    <SettingsModal />
     <ToastHost />
   </div>
 </template>
