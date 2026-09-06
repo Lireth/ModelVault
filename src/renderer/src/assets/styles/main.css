@@ -8,6 +8,8 @@
   --text-muted: #8a97a5;
   --accent: #4f9cf9;
   --danger: #e5484d;
+  /* 深色半透明覆盖层（图片角标等） */
+  --overlay: rgba(16, 20, 26, 0.75);
   color-scheme: dark;
 }
 
@@ -22,6 +24,7 @@ html.light {
   --text-muted: #6a7683;
   --accent: #2f7fe0;
   --danger: #d93036;
+  --overlay: rgba(255, 255, 255, 0.85);
   color-scheme: light;
 }
 

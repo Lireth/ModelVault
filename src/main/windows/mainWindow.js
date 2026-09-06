@@ -1,6 +1,13 @@
 import { BrowserWindow } from 'electron'
 import path from 'node:path'
 import logger from '../logger'
+import { getSettings } from '../services/store'
+
+/** 各主题对应的原生窗口颜色 */
+const THEME_WINDOW_COLORS = {
+  dark: { backgroundColor: '#101418', overlayColor: '#101418', symbolColor: '#e6eaee' },
+  light: { backgroundColor: '#f5f7fa', overlayColor: '#f5f7fa', symbolColor: '#24292f' }
+}
 
 let mainWindow = null
 
@@ -10,6 +17,9 @@ let mainWindow = null
  * - 生产环境：加载打包后的本地文件
  */
 export function createMainWindow() {
+  // 窗口底色与标题栏叠加层颜色跟随已保存的主题设置
+  const colors = THEME_WINDOW_COLORS[getSettings().theme] || THEME_WINDOW_COLORS.dark
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -22,11 +32,11 @@ export function createMainWindow() {
     // 的拖拽区域由操作系统处理，确保可拖动移动窗口
     titleBarStyle: 'hidden',
     titleBarOverlay: {
-      color: '#101418',
-      symbolColor: '#e6eaee',
+      color: colors.overlayColor,
+      symbolColor: colors.symbolColor,
       height: 40
     },
-    backgroundColor: '#101418',
+    backgroundColor: colors.backgroundColor,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       // 安全配置：隔离上下文，禁用 Node 能力

@@ -1,9 +1,9 @@
 <script setup>
-import { reactive, ref, watch } from 'vue'
+import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
+  applyTheme,
   chooseFolder,
   closeSettings,
-  formatSize,
   revealModel,
   saveSettings,
   scanModels,
@@ -22,6 +22,10 @@ const form = reactive({
   cardSize: 'normal'
 })
 
+/** 打开弹窗时记录已保存值，用于取消时还原预览 */
+let savedTheme = 'dark'
+let savedCardSize = 'normal'
+
 const saving = ref(false)
 
 const CARD_SIZES = [
@@ -35,13 +39,45 @@ watch(
   () => state.settingsOpen,
   (open) => {
     if (!open) return
+    savedTheme = state.settings.theme || 'dark'
+    savedCardSize = state.settings.cardSize || 'normal'
     form.autoScan = state.settings.autoScan !== false
     form.excludeText = (state.settings.excludeDirs || []).join('\n')
-    form.theme = state.settings.theme || 'dark'
-    form.cardSize = state.settings.cardSize || 'normal'
+    form.theme = savedTheme
+    form.cardSize = savedCardSize
     loadAppInfo()
   }
 )
+
+/** 实时预览：主题与卡片尺寸改动立即应用到界面，无需先保存 */
+watch(
+  () => form.theme,
+  (theme) => {
+    if (state.settingsOpen) applyTheme(theme)
+  }
+)
+
+watch(
+  () => form.cardSize,
+  (size) => {
+    if (state.settingsOpen) state.settings.cardSize = size
+  }
+)
+
+/** 取消/关闭：还原预览，回到已保存的设置 */
+function onCancel() {
+  applyTheme(savedTheme)
+  state.settings.cardSize = savedCardSize
+  closeSettings()
+}
+
+/** ESC 键关闭设置弹窗（还原预览） */
+function onKeydown(e) {
+  if (e.key === 'Escape' && state.settingsOpen) onCancel()
+}
+
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
 async function loadAppInfo() {
   if (appInfo.value) return
@@ -80,7 +116,7 @@ async function onSave() {
       cardSize: form.cardSize
     })
     if (!ok) return
-    toast('success', '设置已保存')
+    toast('success', excludeChanged ? `设置已保存（排除 ${excludeDirs.length} 个目录）` : '设置已保存')
     // 排除目录变化且已设置模型文件夹时，自动重新扫描使规则生效
     if (excludeChanged && state.folder && !state.scanning) {
       await scanModels()
@@ -201,7 +237,7 @@ async function onSave() {
         </div>
 
         <footer class="settings-footer">
-          <button class="btn" @click="closeSettings">取消</button>
+          <button class="btn" @click="onCancel">取消</button>
           <button class="btn btn-primary" :disabled="saving" @click="onSave">保存</button>
         </footer>
       </section>

@@ -3,7 +3,7 @@ import { createMainWindow, getMainWindow } from './windows/mainWindow'
 import { registerWindowShortcuts } from './menu'
 import { registerIpcHandlers } from './ipc'
 import { registerImageScheme, registerImageProtocolHandler } from './protocol'
-import { saveStoreNow } from './services/store'
+import { loadSettings, saveStoreNow } from './services/store'
 import logger from './logger'
 
 // 自定义协议必须在 app ready 之前注册
@@ -39,12 +39,15 @@ if (!gotSingleInstanceLock) {
     }
   })
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     // 移除原生菜单栏（不设置则 Electron 会启用默认英文菜单）
     Menu.setApplicationMenu(null)
     // 仅注册窗口级快捷键
     registerImageProtocolHandler()
     registerIpcHandlers()
+
+    // 先加载应用设置，确保窗口主题（背景色/标题栏颜色）与已保存设置一致
+    await loadSettings()
 
     const win = createMainWindow()
     registerWindowShortcuts(win)

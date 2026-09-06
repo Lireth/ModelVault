@@ -135,7 +135,7 @@ const mtimeText = computed(() => {
   padding: 2px 9px;
   border-radius: 999px;
   border: 1px solid;
-  background: rgba(16, 20, 26, 0.75);
+  background: var(--overlay);
   backdrop-filter: blur(2px);
 }
 

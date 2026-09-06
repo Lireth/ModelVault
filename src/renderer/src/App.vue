@@ -102,7 +102,7 @@ onUnmounted(() => {
           <p class="muted">
             {{
               state.models.length === 0
-                ? '当前文件夹中未发现支持的模型文件（.safetensors / .ckpt / .pt / .pth / .bin），可尝试点击顶栏「重新扫描」。'
+                ? '当前文件夹中未发现支持的模型文件（.safetensors / .ckpt / .pt / .pth / .bin），可尝试点击侧边栏「重新扫描」。'
                 : '当前筛选或搜索条件下没有模型，试试切换分类或清空搜索词。'
             }}
           </p>

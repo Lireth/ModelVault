@@ -40,18 +40,25 @@ export function registerIpcHandlers() {
     BrowserWindow.fromWebContents(event.sender)?.close()
   })
 
-  // 主题切换时同步原生标题栏叠加层（WCO）颜色
+  // 主题切换时同步原生窗口颜色（标题栏叠加层 + 窗口背景）
   ipcMain.handle('window:setTheme', (event, { theme } = {}) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    if (!win || typeof win.setTitleBarOverlay !== 'function') return
-    try {
-      if (theme === 'light') {
-        win.setTitleBarOverlay({ color: '#f5f7fa', symbolColor: '#24292f' })
-      } else {
-        win.setTitleBarOverlay({ color: '#101418', symbolColor: '#e6eaee' })
+    const colors = theme === 'light'
+      ? { overlay: '#f5f7fa', symbol: '#24292f', background: '#f5f7fa' }
+      : { overlay: '#101418', symbol: '#e6eaee', background: '#101418' }
+    if (win) {
+      try {
+        win.setBackgroundColor(colors.background)
+      } catch (err) {
+        logger.warn(`窗口背景色更新失败: ${err.message}`)
       }
-    } catch (err) {
-      logger.warn(`标题栏主题更新失败: ${err.message}`)
+    }
+    if (win && typeof win.setTitleBarOverlay === 'function') {
+      try {
+        win.setTitleBarOverlay({ color: colors.overlay, symbolColor: colors.symbol })
+      } catch (err) {
+        logger.warn(`标题栏主题更新失败: ${err.message}`)
+      }
     }
   })
 
