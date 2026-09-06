@@ -1,7 +1,7 @@
 {
   "name": "modelvault",
   "version": "1.0.0",
-  "description": "ModelVault（模匣）—— Windows 平台 Electron 桌面应用",
+  "description": "ModelVault（模匣）—— Windows 平台本地 AI 绘画模型管理软件",
   "main": "./out/main/index.js",
   "author": {
     "name": "ModelVault Team"

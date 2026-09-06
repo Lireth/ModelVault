@@ -1,11 +1,14 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import logger from './logger'
+import { registerModelIpcHandlers } from './ipc/models'
 
 /**
  * 注册所有主进程 IPC 处理器。
  * 渲染进程通过 preload 暴露的 window.api 调用这些处理器。
  */
 export function registerIpcHandlers() {
+  registerModelIpcHandlers()
+
   // ---- invoke 型通信（渲染进程 -> 主进程，带返回值） ----
 
   // 获取应用与运行时版本信息

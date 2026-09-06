@@ -2,7 +2,12 @@ import { app, BrowserWindow, dialog, shell } from 'electron'
 import { createMainWindow, getMainWindow } from './windows/mainWindow'
 import { createAppMenu } from './menu'
 import { registerIpcHandlers } from './ipc'
+import { registerImageScheme, registerImageProtocolHandler } from './protocol'
+import { saveStoreNow } from './services/store'
 import logger from './logger'
+
+// 自定义协议必须在 app ready 之前注册
+registerImageScheme()
 
 /**
  * 全局错误处理：捕获主进程未处理异常，写入日志，避免应用静默崩溃。
@@ -36,6 +41,7 @@ if (!gotSingleInstanceLock) {
 
   app.whenReady().then(() => {
     createAppMenu()
+    registerImageProtocolHandler()
     registerIpcHandlers()
 
     const win = createMainWindow()
@@ -56,8 +62,11 @@ if (!gotSingleInstanceLock) {
 
 // Windows 平台惯例：所有窗口关闭后退出应用
 app.on('window-all-closed', () => {
-  logger.info('所有窗口已关闭，应用退出')
-  app.quit()
+  // 退出前确保持久化数据完整落盘
+  saveStoreNow().finally(() => {
+    logger.info('所有窗口已关闭，应用退出')
+    app.quit()
+  })
 })
 
 // macOS 平台：点击 Dock 图标时重新创建窗口（兼容性保留）

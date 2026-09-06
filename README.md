@@ -1,6 +1,16 @@
 # ModelVault（模匣）
 
-基于 **Electron + Vite + Vue 3** 的 Windows 平台桌面应用模板，开箱即用。
+基于 **Electron + Vite + Vue 3** 的 Windows 平台本地 AI 绘画模型管理软件。
+
+核心功能：
+
+- **模型扫描与自动分类**：选择模型根目录后递归扫描 `.safetensors` / `.ckpt` / `.pt` / `.pth` / `.bin`，按文件夹名与文件名关键词自动分类（底模、LoRA、VAE、Embedding、ControlNet、放大模型、HyperNetwork 等）
+- **模型浏览**：卡片式首页，支持按名称搜索、按分类筛选、多种排序，扫描全程异步不阻塞 UI
+- **封面管理**：详情页上传封面图片，自动作为首页卡片封面；自动识别模型同名 sidecar 预览图
+- **推荐参数**：为每个模型保存采样步数、CFG、采样器、调度器、推荐分辨率区间与备注
+- **数据持久化**：模型元数据以 JSON 原子写入用户数据目录，重启不丢失
+
+用户操作说明见 [docs/用户操作手册.md](docs/用户操作手册.md)。
 
 ## 技术栈
 
@@ -27,6 +37,7 @@ npm start
 ModelVault/
 ├── build/                        # 打包资源（应用图标 icon.ico 放此处）
 ├── dist/                         # electron-builder 打包输出（构建后生成）
+├── docs/                         # 文档（用户操作手册）
 ├── out/                          # electron-vite 编译输出（构建后生成）
 ├── src/
 │   ├── main/                     # 主进程
@@ -34,8 +45,15 @@ ModelVault/
 │   │   ├── windows/
 │   │   │   └── mainWindow.js     # 主窗口创建与管理
 │   │   ├── menu.js               # 应用菜单与快捷键
-│   │   ├── ipc.js                # IPC 处理器注册
-│   │   └── logger.js             # 日志模块（控制台 + 文件）
+│   │   ├── ipc.js                # IPC 处理器注册入口
+│   │   ├── ipc/
+│   │   │   └── models.js         # 模型管理 IPC 处理器
+│   │   ├── protocol.js           # mvimg:// 自定义图片协议
+│   │   ├── logger.js             # 日志模块（控制台 + 文件）
+│   │   └── services/
+│   │       ├── scanner.js        # 模型扫描与自动分类
+│   │       ├── store.js          # JSON 持久化（原子写入 + 防抖）
+│   │       └── covers.js         # 封面图片选择与保存
 │   ├── preload/
 │   │   └── index.js              # 预加载脚本：contextBridge 安全暴露 API
 │   └── renderer/                 # 渲染进程（Vue 3）
@@ -43,7 +61,15 @@ ModelVault/
 │       ├── public/               # 静态资源（原样复制）
 │       └── src/
 │           ├── main.js           # Vue 应用入口
-│           ├── App.vue           # 根组件（演示 IPC 通信与窗口控制）
+│           ├── App.vue           # 根组件（整体布局与空状态）
+│           ├── store/
+│           │   └── appStore.js   # 全局响应式状态仓库
+│           ├── components/
+│           │   ├── TopBar.vue        # 顶栏：搜索 / 扫描 / 选文件夹 / 窗口控制
+│           │   ├── Sidebar.vue       # 侧栏：分类筛选与排序
+│           │   ├── ModelCard.vue     # 模型卡片（封面、类型、参数摘要）
+│           │   ├── ModelDetail.vue   # 详情弹层：封面上传 + 推荐参数表单
+│           │   └── ToastHost.vue     # 轻提示通知
 │           └── assets/styles/    # 全局样式
 ├── electron.vite.config.mjs      # electron-vite 配置
 ├── electron-builder.yml          # Windows 打包配置
