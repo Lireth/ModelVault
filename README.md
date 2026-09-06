@@ -4,7 +4,7 @@
 
 核心功能：
 
-- **模型扫描与自动分类**：选择模型根目录后递归扫描 `.safetensors` / `.ckpt` / `.pt` / `.pth` / `.bin`，按文件夹名与文件名关键词自动分类（底模、LoRA、VAE、Embedding、ControlNet、放大模型、HyperNetwork 等）
+- **模型扫描与自动分类**：选择模型根目录后递归扫描 `.safetensors` / `.ckpt` / `.pt` / `.pth` / `.bin`，按文件夹名与文件名关键词自动分类为 Checkpoint/大模型、TextEncoders/文本编码器、VAE/变分自编码器、LoRA，其余归入「其他模型」，并支持在详情页添加二级分类标签（Embedding / ControlNet / 放大模型 / HyperNetwork / 其他）
 - **模型浏览**：卡片式首页，支持按名称搜索、按分类筛选、多种排序，扫描全程异步不阻塞 UI
 - **封面管理**：详情页上传封面图片，自动作为首页卡片封面；自动识别模型同名 sidecar 预览图
 - **推荐参数**：为每个模型保存采样步数、CFG、采样器、调度器、推荐分辨率区间与备注

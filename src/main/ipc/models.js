@@ -32,7 +32,8 @@ async function decorateModels(models) {
       coverUrl: cover ? toImageUrl(cover) : '',
       hasManualCover: Boolean(meta.cover),
       params: meta.params || null,
-      note: meta.note || ''
+      note: meta.note || '',
+      subCategory: meta.subCategory || ''
     })
   }
   return result
@@ -115,12 +116,12 @@ export function registerModelIpcHandlers() {
     }
   })
 
-  // 保存单个模型的元数据（推荐参数 / 备注）
-  ipcMain.handle('models:saveModelData', (event, { id, params, note } = {}) => {
+  // 保存单个模型的元数据（推荐参数 / 备注 / 二级分类标签）
+  ipcMain.handle('models:saveModelData', (event, { id, params, note, subCategory } = {}) => {
     if (typeof id !== 'string' || !id) {
       return { error: '无效的模型标识' }
     }
-    const meta = setModelMeta(id, { params, note })
+    const meta = setModelMeta(id, { params, note, subCategory })
     if (!meta) {
       return { error: '模型元数据保存失败' }
     }

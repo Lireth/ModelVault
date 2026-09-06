@@ -1,12 +1,18 @@
 <script setup>
 import { computed } from 'vue'
-import { formatSize, openDetail, typeInfo } from '../store/appStore'
+import { formatSize, openDetail, subCategoryInfo, typeInfo } from '../store/appStore'
 
 const props = defineProps({
   model: { type: Object, required: true }
 })
 
 const info = computed(() => typeInfo(props.model.type))
+
+/** 「其他模型」已标注时的二级分类标签 */
+const subTag = computed(() => {
+  if (props.model.type !== 'other' || !props.model.subCategory) return null
+  return subCategoryInfo(props.model.subCategory)
+})
 
 /** 参数摘要：卡片底部一行展示已填写的推荐参数 */
 const paramSummary = computed(() => {
@@ -42,6 +48,9 @@ const mtimeText = computed(() => {
         <span class="cover-ext">{{ model.ext }}</span>
       </div>
       <span class="type-badge" :style="{ background: info.color }">{{ info.label }}</span>
+      <span v-if="subTag" class="sub-badge" :style="{ color: subTag.color, borderColor: subTag.color }">
+        {{ subTag.label }}
+      </span>
     </div>
     <div class="card-body">
       <h4 class="model-name" :title="model.name">{{ model.name }}</h4>
@@ -115,6 +124,19 @@ const mtimeText = computed(() => {
   padding: 3px 9px;
   border-radius: 999px;
   opacity: 0.95;
+}
+
+.sub-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid;
+  background: rgba(16, 20, 26, 0.75);
+  backdrop-filter: blur(2px);
 }
 
 .card-body {

@@ -5,17 +5,31 @@ import { computed, reactive } from 'vue'
  * 负责模型列表、筛选排序、扫描状态、详情选择与 Toast 通知。
  */
 
-/** 模型类型定义：key 与主进程 scanner.js 分类结果一致 */
+/**
+ * 模型类型定义：key 与主进程 scanner.js 分类结果一致，
+ * 数组顺序即侧栏展示顺序（固定排列）。
+ */
 export const MODEL_TYPES = [
-  { key: 'checkpoint', label: '底模 / 大模型', color: '#4f9cf9' },
+  { key: 'checkpoint', label: 'Checkpoint/大模型', color: '#4f9cf9' },
+  { key: 'text_encoder', label: 'TextEncoders/文本编码器', color: '#ffb86b' },
+  { key: 'vae', label: 'VAE/变分自编码器', color: '#3ddc97' },
   { key: 'lora', label: 'LoRA', color: '#b18cff' },
-  { key: 'vae', label: 'VAE', color: '#3ddc97' },
+  { key: 'other', label: '其他模型', color: '#8a97a5' }
+]
+
+/**
+ * 「其他模型」的二级分类标签（用于详情页标注）。
+ * key 与主进程 store.js 的 VALID_SUB_CATEGORIES 保持一致。
+ */
+export const SUB_CATEGORIES = [
   { key: 'embedding', label: 'Embedding', color: '#ffb86b' },
   { key: 'controlnet', label: 'ControlNet', color: '#ff7eb6' },
   { key: 'upscale', label: '放大模型', color: '#4dd0e1' },
   { key: 'hypernetwork', label: 'HyperNetwork', color: '#c3e88d' },
   { key: 'other', label: '其他', color: '#8a97a5' }
 ]
+
+const SUB_MAP = Object.fromEntries(SUB_CATEGORIES.map((t) => [t.key, t]))
 
 const TYPE_MAP = Object.fromEntries(MODEL_TYPES.map((t) => [t.key, t]))
 
@@ -67,6 +81,11 @@ export function toast(type, text, duration = 3200) {
 /** 获取类型显示信息 */
 export function typeInfo(key) {
   return TYPE_MAP[key] || TYPE_MAP.other
+}
+
+/** 获取二级分类标签显示信息 */
+export function subCategoryInfo(key) {
+  return SUB_MAP[key] || null
 }
 
 /** 文件大小格式化 */
@@ -185,9 +204,9 @@ export function closeDetail() {
 }
 
 /**
- * 保存模型详情（推荐参数 + 备注），并同步本地列表。
+ * 保存模型详情（推荐参数 + 备注 + 二级分类标签），并同步本地列表。
  * @param {string} id 模型 id
- * @param {{params: object, note: string}} payload
+ * @param {{params: object, note: string, subCategory?: string}} payload
  */
 export async function saveModelData(id, payload) {
   const res = await window.api.models.saveModelData({ id, ...payload })
@@ -200,7 +219,8 @@ export async function saveModelData(id, payload) {
     state.models[idx] = {
       ...state.models[idx],
       params: res.meta.params,
-      note: res.meta.note
+      note: res.meta.note,
+      subCategory: res.meta.subCategory || ''
     }
   }
   toast('success', '参数已保存')

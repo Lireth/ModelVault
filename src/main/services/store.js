@@ -12,6 +12,9 @@ import logger from '../logger'
 const STORE_FILE = 'store.json'
 const SAVE_DELAY = 500
 
+/** 「其他模型」允许的二级分类标签 */
+const VALID_SUB_CATEGORIES = new Set(['embedding', 'controlnet', 'upscale', 'hypernetwork', 'other'])
+
 const DEFAULT_DATA = {
   version: 1,
   settings: {
@@ -36,6 +39,7 @@ function normalizeModelMeta(raw) {
   return {
     cover: typeof raw.cover === 'string' ? raw.cover : '',
     note: typeof raw.note === 'string' ? raw.note.slice(0, 2000) : '',
+    subCategory: VALID_SUB_CATEGORIES.has(raw.subCategory) ? raw.subCategory : '',
     params: {
       steps: Number.isFinite(params.steps) ? params.steps : null,
       cfg: Number.isFinite(params.cfg) ? params.cfg : null,

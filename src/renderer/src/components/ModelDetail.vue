@@ -6,6 +6,8 @@ import {
   revealModel,
   saveModelData,
   selectedModel,
+  SUB_CATEGORIES,
+  subCategoryInfo,
   toast,
   typeInfo,
   uploadCover
@@ -34,7 +36,8 @@ const form = reactive({
   resMinH: '',
   resMaxW: '',
   resMaxH: '',
-  note: ''
+  note: '',
+  subCategory: ''
 })
 
 /** 从模型对象填充表单（打开详情或切换模型时触发） */
@@ -49,6 +52,12 @@ function fillForm(model) {
   form.resMaxW = Number.isFinite(p.resMaxW) ? p.resMaxW : ''
   form.resMaxH = Number.isFinite(p.resMaxH) ? p.resMaxH : ''
   form.note = model?.note || ''
+  form.subCategory = model?.subCategory || ''
+}
+
+/** 切换二级分类标签（再次点击取消标注） */
+function toggleSubCategory(key) {
+  form.subCategory = form.subCategory === key ? '' : key
 }
 
 watch(selectedModel, (m) => fillForm(m), { immediate: true })
@@ -117,7 +126,11 @@ async function onSave() {
   }
   busy.value = true
   try {
-    await saveModelData(model.id, { params, note: form.note })
+    await saveModelData(model.id, {
+      params,
+      note: form.note,
+      subCategory: model.type === 'other' ? form.subCategory : ''
+    })
   } catch (err) {
     toast('error', `保存失败: ${err.message}`)
   } finally {
@@ -178,6 +191,25 @@ async function onUploadCover() {
 
           <!-- 右侧：推荐参数 -->
           <div class="detail-form-col">
+            <!-- 二级分类标签：仅「其他模型」可标注 -->
+            <template v-if="selectedModel.type === 'other'">
+              <h3>二级分类标签</h3>
+              <div class="subcat-group">
+                <button
+                  v-for="sc in SUB_CATEGORIES"
+                  :key="sc.key"
+                  class="subcat-chip"
+                  :class="{ active: form.subCategory === sc.key }"
+                  :style="form.subCategory === sc.key ? { borderColor: sc.color, color: sc.color } : {}"
+                  type="button"
+                  @click="toggleSubCategory(sc.key)"
+                >
+                  {{ sc.label }}
+                </button>
+                <span class="subcat-hint">标注后显示在首页卡片上，点击已选标签可取消</span>
+              </div>
+            </template>
+
             <h3>推荐参数</h3>
             <div class="form-grid">
               <label class="field">
@@ -393,6 +425,39 @@ async function onUploadCover() {
   color: var(--accent);
   letter-spacing: 1px;
   margin-top: 4px;
+}
+
+/* 二级分类标签 */
+.subcat-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.subcat-chip {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.subcat-chip:hover {
+  border-color: var(--text-muted);
+}
+
+.subcat-chip.active {
+  background: var(--bg-active);
+  border-width: 1.5px;
+  font-weight: 600;
+}
+
+.subcat-hint {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .form-grid {

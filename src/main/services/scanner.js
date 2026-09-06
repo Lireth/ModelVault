@@ -22,15 +22,13 @@ const EXCLUDED_DIRS = new Set(['node_modules', '.git', '$RECYCLE.BIN', 'System V
 
 /**
  * 分类规则：按文件夹段匹配（ComfyUI / WebUI 常见目录布局，全部小写比较）。
- * 顺序即优先级。
+ * 顺序即优先级。Embedding、ControlNet、放大模型、HyperNetwork 等不再单独分类，
+ * 统一归入 other（其他模型），可在详情页通过二级分类标签标注。
  */
 const FOLDER_RULES = [
   { type: 'lora', folders: ['lora', 'loras'] },
   { type: 'vae', folders: ['vae', 'vae_models'] },
-  { type: 'embedding', folders: ['embeddings', 'embedding', 'textual_inversion'] },
-  { type: 'controlnet', folders: ['controlnet', 'control_net', 'control_nets', 't2iadapter', 'adapters'] },
-  { type: 'upscale', folders: ['upscale_models', 'upscale', 'esrgan', 'realesrgan', 'swinir'] },
-  { type: 'hypernetwork', folders: ['hypernetworks', 'hypernetwork'] },
+  { type: 'text_encoder', folders: ['text_encoders', 'text_encoder', 'clip'] },
   { type: 'checkpoint', folders: ['stable-diffusion', 'stable_diffusion', 'checkpoints', 'checkpoint', 'diffusion_models', 'diffusers', 'unet'] }
 ]
 
@@ -38,10 +36,8 @@ const FOLDER_RULES = [
 const FILE_KEYWORD_RULES = [
   { type: 'lora', re: /[-_. ]lora([-. _]|\d|$)/i },
   { type: 'vae', re: /[-_. ]vae/i },
-  { type: 'controlnet', re: /control[-_.]?net|t2i[-_. ]?adapter/i },
-  { type: 'upscale', re: /esrgan|realesrgan|swinir|ultrasharp|ultramix|upscale/i },
-  { type: 'embedding', re: /[-_. ](embedding|ti)([-_. ]|$)/i },
-  { type: 'hypernetwork', re: /hyper[-_. ]?network/i }
+  { type: 'text_encoder', re: /text[-_. ]?encoder|\bt5[-_. ]|\bclip[-_. ]/i },
+  { type: 'checkpoint', re: /(checkpoint|sd15|sdxl|sd3|flux|pony|illustrious)/i }
 ]
 
 /**
