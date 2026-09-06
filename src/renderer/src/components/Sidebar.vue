@@ -68,16 +68,11 @@ function onScanClick() {
       </ul>
     </div>
 
-    <!-- 设置按钮：位于分类板块下方，宽度自适应侧边栏 -->
+    <!-- 设置按钮：固定在侧边栏最底部，宽度自适应侧边栏 -->
     <button class="btn settings-btn" title="打开设置" @click="openSettings">
       <span class="settings-icon">⚙</span>
       <span class="settings-text">设置</span>
     </button>
-
-    <div class="side-footer">
-      <span v-if="state.folder" class="muted-small" :title="state.folder">{{ state.folder }}</span>
-      <span class="muted-small">数据保存在本地，重启后不丢失</span>
-    </div>
   </aside>
 </template>
 
@@ -197,7 +192,7 @@ function onScanClick() {
   text-align: center;
 }
 
-/* ---------- 设置按钮（排序下方，全宽） ---------- */
+/* ---------- 设置按钮（固定侧边栏最底部，全宽） ---------- */
 .settings-btn {
   width: 100%;
   display: flex;
@@ -206,6 +201,7 @@ function onScanClick() {
   gap: 6px;
   padding: 9px 10px;
   flex-shrink: 0;
+  margin-top: auto;
 }
 
 .settings-btn:hover:not(:disabled) {
@@ -217,30 +213,12 @@ function onScanClick() {
   font-size: 13px;
 }
 
-.side-footer {
-  margin-top: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-
-.muted-small {
-  font-size: 11px;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 @media (max-width: 900px) {
   .sidebar {
     width: 64px;
     padding: 16px 6px;
   }
   .folder-box,
-  .side-footer,
   .type-label,
   .type-count,
   .side-section h3,
