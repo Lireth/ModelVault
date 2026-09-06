@@ -45,6 +45,17 @@ export function defaultParams() {
   }
 }
 
+/** 默认应用设置（与主进程 store.js 的 defaultSettings 保持一致） */
+export function defaultSettings() {
+  return {
+    modelsFolder: '',
+    autoScan: true,
+    excludeDirs: [],
+    theme: 'dark',
+    cardSize: 'normal'
+  }
+}
+
 export const state = reactive({
   ready: false,
   folder: '',
@@ -60,6 +71,9 @@ export const state = reactive({
   sortBy: 'name', // name | size | mtime
   // 详情
   selectedId: null,
+  // 设置
+  settings: defaultSettings(),
+  settingsOpen: false,
   // Toast
   toasts: []
 })
@@ -99,12 +113,14 @@ export function formatSize(bytes) {
   return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${units[i]}`
 }
 
-/** 应用初始化：加载持久化数据，若已设置目录则自动扫描 */
+/** 应用初始化：加载持久化数据与应用设置，按设置决定是否自动扫描 */
 export async function initApp() {
   try {
     const data = await window.api.models.loadStore()
     state.folder = data.settings?.modelsFolder || ''
-    if (state.folder) {
+    state.settings = { ...defaultSettings(), ...data.settings }
+    applyTheme(state.settings.theme)
+    if (state.folder && state.settings.autoScan !== false) {
       await scanModels()
     }
   } catch (err) {
@@ -112,6 +128,37 @@ export async function initApp() {
   } finally {
     state.ready = true
   }
+}
+
+/** 应用主题：切换 CSS 变量并同步原生标题栏颜色 */
+export function applyTheme(theme) {
+  document.documentElement.classList.toggle('light', theme === 'light')
+  window.api.window.setTheme(theme).catch(() => {})
+}
+
+export function openSettings() {
+  state.settingsOpen = true
+}
+
+export function closeSettings() {
+  state.settingsOpen = false
+}
+
+/**
+ * 保存应用设置（主进程规范化后返回完整设置），并同步主题。
+ * @param {object} patch 设置增量
+ */
+export async function saveSettings(patch) {
+  const res = await window.api.settings.update(patch)
+  if (res?.error) {
+    toast('error', res.error)
+    return false
+  }
+  if (res?.settings) {
+    state.settings = res.settings
+    applyTheme(state.settings.theme)
+  }
+  return true
 }
 
 /** 选择新的模型根目录并重新扫描 */

@@ -4,6 +4,7 @@ import {
   getCurrentRoot,
   getMetaMapByAbsPath,
   getModelMeta,
+  getSettings,
   loadSettings,
   loadData,
   relativizeCover,
@@ -191,6 +192,14 @@ export function registerModelIpcHandlers() {
     }
     logger.info(`模型封面已更新: ${id}`)
     return { cover: result.cover, coverUrl: toImageUrl(result.cover), meta }
+  })
+
+  // 更新应用设置（通用/扫描/外观），返回规范化后的完整设置
+  ipcMain.handle('settings:update', async (event, patch = {}) => {
+    await updateSettings(patch)
+    const settings = getSettings()
+    logger.info(`应用设置已更新: ${JSON.stringify(patch).slice(0, 200)}`)
+    return { settings }
   })
 
   // 在资源管理器中显示模型文件

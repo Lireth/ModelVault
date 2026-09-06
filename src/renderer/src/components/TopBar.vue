@@ -50,6 +50,7 @@ function onScanClick() {
       {{ state.scanning ? '扫描中…' : '重新扫描' }}
     </button>
     <button class="btn btn-primary" title="选择模型文件夹" @click="chooseFolder">选择文件夹</button>
+    <button class="btn icon-btn" title="设置" @click="openSettings">⚙</button>
   </div>
 </template>
 
@@ -66,6 +67,13 @@ function onScanClick() {
 
 .toolbar-row .btn {
   flex-shrink: 0;
+}
+
+.icon-btn {
+  width: 36px;
+  padding: 8px 0;
+  text-align: center;
+  font-size: 14px;
 }
 
 .search-box {

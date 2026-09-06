@@ -27,7 +27,44 @@ const SAVE_DELAY = 500
 /** 「其他模型」允许的二级分类标签 */
 const VALID_SUB_CATEGORIES = new Set(['embedding', 'controlnet', 'upscale', 'hypernetwork', 'other'])
 
-let settings = { modelsFolder: '' }
+/** 应用设置允许的主题取值 */
+const VALID_THEMES = new Set(['dark', 'light'])
+/** 应用设置允许的卡片尺寸取值 */
+const VALID_CARD_SIZES = new Set(['compact', 'normal', 'large'])
+
+/** 默认应用设置 */
+function defaultSettings() {
+  return {
+    modelsFolder: '',
+    autoScan: true,
+    excludeDirs: [],
+    theme: 'dark',
+    cardSize: 'normal'
+  }
+}
+
+/** 规范化应用设置：仅接受已知字段并校验类型 */
+function normalizeSettings(raw) {
+  const base = defaultSettings()
+  if (!raw || typeof raw !== 'object') return base
+  const excludeDirs = Array.isArray(raw.excludeDirs)
+    ? [...new Set(
+        raw.excludeDirs
+          .filter((d) => typeof d === 'string')
+          .map((d) => d.trim())
+          .filter((d) => d && d.length <= 100)
+      )].slice(0, 100)
+    : base.excludeDirs
+  return {
+    modelsFolder: typeof raw.modelsFolder === 'string' ? raw.modelsFolder : base.modelsFolder,
+    autoScan: typeof raw.autoScan === 'boolean' ? raw.autoScan : base.autoScan,
+    excludeDirs,
+    theme: VALID_THEMES.has(raw.theme) ? raw.theme : base.theme,
+    cardSize: VALID_CARD_SIZES.has(raw.cardSize) ? raw.cardSize : base.cardSize
+  }
+}
+
+let settings = defaultSettings()
 let currentRoot = null
 /** 当前根目录的元数据，键为相对路径（'/' 分隔） */
 let data = null
@@ -114,13 +151,13 @@ function pickLegacyRes(value, legacyValues) {
 
 /* ---------------- 应用设置（全局） ---------------- */
 
-/** 加载应用设置（最近使用的模型根目录；旧版数据内嵌于 store.json，自动回退并迁移） */
+/** 加载应用设置（含通用/扫描/外观设置；旧版数据内嵌于 store.json，自动回退并迁移） */
 export async function loadSettings() {
   try {
     const text = await fs.readFile(getSettingsFilePath(), 'utf-8')
     const parsed = JSON.parse(text)
-    if (typeof parsed?.modelsFolder === 'string') {
-      settings.modelsFolder = parsed.modelsFolder
+    if (parsed && typeof parsed === 'object') {
+      settings = normalizeSettings(parsed)
     }
   } catch {
     // settings.json 不存在：尝试从旧版 store.json 恢复设置
@@ -131,23 +168,26 @@ export async function loadSettings() {
       )
       const legacy = JSON.parse(legacyText)
       if (typeof legacy?.settings?.modelsFolder === 'string') {
-        settings.modelsFolder = legacy.settings.modelsFolder
-        await updateSettings({ modelsFolder: settings.modelsFolder })
+        settings = normalizeSettings(legacy.settings)
+        await updateSettings(settings)
         logger.info(`已从旧版存储恢复应用设置: ${settings.modelsFolder}`)
       }
     } catch {
-      settings = { modelsFolder: '' }
+      settings = defaultSettings()
     }
   }
   return settings
 }
 
-/** 更新应用设置并立即落盘 */
+/** 获取当前内存中的应用设置 */
+export function getSettings() {
+  return settings
+}
+
+/** 更新应用设置（规范化后立即落盘） */
 export async function updateSettings(patch) {
   if (!patch) return
-  if (typeof patch.modelsFolder === 'string') {
-    settings.modelsFolder = patch.modelsFolder
-  }
+  settings = normalizeSettings({ ...settings, ...patch })
   try {
     const file = getSettingsFilePath()
     await fs.mkdir(path.dirname(file), { recursive: true })

@@ -4,6 +4,7 @@ import TopBar from './components/TopBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import ModelCard from './components/ModelCard.vue'
 import ModelDetail from './components/ModelDetail.vue'
+import SettingsModal from './components/SettingsModal.vue'
 import ToastHost from './components/ToastHost.vue'
 import {
   filteredModels,
@@ -75,7 +76,7 @@ onUnmounted(() => {
               {{ typeInfo(state.typeFilter).label }}
             </span>
           </div>
-          <div class="model-grid">
+          <div class="model-grid" :class="`grid-${state.settings.cardSize || 'normal'}`">
             <ModelCard v-for="m in filteredModels" :key="m.id" :model="m" />
           </div>
         </template>
@@ -129,6 +130,16 @@ onUnmounted(() => {
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 14px;
   align-content: start;
+}
+
+.model-grid.grid-compact {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.model-grid.grid-large {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 18px;
 }
 
 /* 空状态 */

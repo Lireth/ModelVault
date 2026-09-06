@@ -40,6 +40,21 @@ export function registerIpcHandlers() {
     BrowserWindow.fromWebContents(event.sender)?.close()
   })
 
+  // 主题切换时同步原生标题栏叠加层（WCO）颜色
+  ipcMain.handle('window:setTheme', (event, { theme } = {}) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || typeof win.setTitleBarOverlay !== 'function') return
+    try {
+      if (theme === 'light') {
+        win.setTitleBarOverlay({ color: '#f5f7fa', symbolColor: '#24292f' })
+      } else {
+        win.setTitleBarOverlay({ color: '#101418', symbolColor: '#e6eaee' })
+      }
+    } catch (err) {
+      logger.warn(`标题栏主题更新失败: ${err.message}`)
+    }
+  })
+
   // 原生对话框示例
   ipcMain.handle('dialog:info', (event, { title = '提示', message = '' } = {}) => {
     const win = BrowserWindow.fromWebContents(event.sender)

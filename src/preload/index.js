@@ -10,7 +10,9 @@ const VALID_INVOKE_CHANNELS = [
   'window:minimize',
   'window:toggleMaximize',
   'window:close',
+  'window:setTheme',
   'dialog:info',
+  'settings:update',
   'models:loadStore',
   'models:chooseFolder',
   'models:scan',
@@ -62,7 +64,15 @@ const api = {
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
     toggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),
-    close: () => ipcRenderer.invoke('window:close')
+    close: () => ipcRenderer.invoke('window:close'),
+    /** 切换主题（同步原生标题栏颜色） */
+    setTheme: (theme) => ipcRenderer.invoke('window:setTheme', { theme })
+  },
+
+  /** 应用设置 */
+  settings: {
+    /** 更新设置，返回 { settings }（规范化后的完整设置） */
+    update: (patch) => ipcRenderer.invoke('settings:update', patch)
   },
 
   /** 原生对话框 */

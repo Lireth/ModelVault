@@ -11,6 +11,20 @@
   color-scheme: dark;
 }
 
+/* ---------- 浅色主题（设置中切换） ---------- */
+html.light {
+  --bg: #f5f7fa;
+  --bg-card: #ffffff;
+  --bg-hover: #e9eef4;
+  --bg-active: #e3ebf5;
+  --border: #d4dce5;
+  --text: #24292f;
+  --text-muted: #6a7683;
+  --accent: #2f7fe0;
+  --danger: #d93036;
+  color-scheme: light;
+}
+
 * {
   margin: 0;
   padding: 0;

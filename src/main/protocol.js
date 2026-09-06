@@ -1,10 +1,10 @@
-import { protocol, net } from 'electron'
+import { protocol, net, app } from 'electron'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
 import logger from './logger'
-import { getCoversDir, isValidImageFile } from './services/covers'
-import { getStore } from './services/store'
+import { isValidImageFile } from './services/covers'
+import { getCurrentRoot } from './services/store'
 
 /**
  * 自定义图片协议 mvimg://

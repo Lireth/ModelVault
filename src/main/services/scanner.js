@@ -68,9 +68,13 @@ export function isValidType(type) {
  * 递归扫描模型目录。
  * @param {string} root 模型根目录绝对路径
  * @param {(progress: {dirs: number, found: number, current: string}) => void} [onProgress] 进度回调
+ * @param {{excludeDirs?: string[]|Set<string>}} [options] 额外排除的目录名（不区分大小写）
  * @returns {Promise<{models: Array, errors: Array, dirCount: number}>}
  */
-export async function scanModels(root, onProgress) {
+export async function scanModels(root, onProgress, options = {}) {
+  const userExclude = options.excludeDirs instanceof Set
+    ? options.excludeDirs
+    : new Set(options.excludeDirs || [])
   const models = []
   const errors = []
   let dirCount = 0
@@ -98,7 +102,8 @@ export async function scanModels(root, onProgress) {
       const relChild = rel ? `${rel}/${name}` : name
 
       if (entry.isDirectory()) {
-        if (!EXCLUDED_DIRS.has(name)) {
+        const lowerName = name.toLowerCase()
+        if (!EXCLUDED_DIRS.has(name) && !userExclude.has(lowerName)) {
           stack.push({ dir: fullPath, depth: depth + 1, rel: relChild })
         }
         continue
