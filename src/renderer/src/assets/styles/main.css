@@ -36,15 +36,18 @@ body {
   height: 100vh;
 }
 
-/* ---------- 顶栏 ---------- */
-.header {
+/* ---------- 标题栏（整行可拖动移动窗口） ---------- */
+.titlebar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 10px 20px;
+  height: 40px;
+  padding: 0 20px;
   border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
+  user-select: none;
+  flex-shrink: 0;
 }
 
 .brand {
@@ -63,12 +66,6 @@ body {
 .brand-en {
   font-size: 13px;
   color: var(--text-muted);
-}
-
-.window-controls {
-  display: flex;
-  gap: 4px;
-  -webkit-app-region: no-drag;
 }
 
 .wc-btn {

@@ -17,6 +17,15 @@ export function createMainWindow() {
     minHeight: 640,
     title: '模匣',
     show: false,
+    // 隐藏原生标题栏，启用原生窗口控件叠加层（WCO）：
+    // 右上角显示原生最小化/最大化/关闭按钮，-webkit-app-region: drag
+    // 的拖拽区域由操作系统处理，确保可拖动移动窗口
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#101418',
+      symbolColor: '#e6eaee',
+      height: 40
+    },
     backgroundColor: '#101418',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
