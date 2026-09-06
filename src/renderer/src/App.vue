@@ -54,7 +54,7 @@ onUnmounted(() => {
       <Sidebar />
 
       <main class="content">
-        <!-- 搜索框：位于模型清单上方（选择文件夹后显示） -->
+        <!-- 搜索 + 排序：位于模型清单上方（选择文件夹后显示） -->
         <div v-if="state.folder" class="search-row">
           <div class="search-box" title="按模型名称搜索">
             <span class="search-icon">🔍</span>
@@ -66,6 +66,15 @@ onUnmounted(() => {
             />
             <button v-if="searchInput" class="search-clear" title="清空搜索" @click="clearSearch">✕</button>
           </div>
+
+          <label class="sort-select" title="排序方式">
+            <span class="sort-label">排序</span>
+            <select v-model="state.sortBy">
+              <option value="name">按名称</option>
+              <option value="size">按大小</option>
+              <option value="mtime">按修改时间</option>
+            </select>
+          </label>
         </div>
 
         <!-- 未选择文件夹 -->
@@ -146,6 +155,9 @@ onUnmounted(() => {
 /* ---------- 搜索框（模型清单上方） ---------- */
 .search-row {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .search-box {
@@ -194,6 +206,40 @@ onUnmounted(() => {
 .search-clear:hover {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+/* ---------- 排序下拉（搜索行最右侧） ---------- */
+.sort-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.sort-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.sort-select select {
+  padding: 7px 28px 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238a97a5' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.sort-select select:hover,
+.sort-select select:focus {
+  border-color: var(--accent);
 }
 
 .result-bar {

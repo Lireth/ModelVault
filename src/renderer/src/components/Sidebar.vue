@@ -68,26 +68,7 @@ function onScanClick() {
       </ul>
     </div>
 
-    <div class="side-section">
-      <h3>排序</h3>
-      <div class="sort-group">
-        <button
-          v-for="opt in [
-            { key: 'name', label: '按名称' },
-            { key: 'size', label: '按大小' },
-            { key: 'mtime', label: '按修改时间' }
-          ]"
-          :key="opt.key"
-          class="sort-btn"
-          :class="{ active: state.sortBy === opt.key }"
-          @click="state.sortBy = opt.key"
-        >
-          {{ opt.label }}
-        </button>
-      </div>
-    </div>
-
-    <!-- 设置按钮：位于「排序」下方，宽度自适应侧边栏 -->
+    <!-- 设置按钮：位于分类板块下方，宽度自适应侧边栏 -->
     <button class="btn settings-btn" title="打开设置" @click="openSettings">
       <span class="settings-icon">⚙</span>
       <span class="settings-text">设置</span>
@@ -204,32 +185,6 @@ function onScanClick() {
   text-align: center;
 }
 
-.sort-group {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.sort-btn {
-  padding: 7px 10px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-  text-align: left;
-}
-
-.sort-btn:hover {
-  background: var(--bg-hover);
-}
-
-.sort-btn.active {
-  background: var(--bg-active);
-  color: var(--accent);
-}
-
 /* ---------- 操作按钮区（模型文件夹与分类之间） ---------- */
 .action-section {
   display: flex;
@@ -286,7 +241,6 @@ function onScanClick() {
   }
   .folder-box,
   .side-footer,
-  .sort-group,
   .type-label,
   .type-count,
   .side-section h3,
