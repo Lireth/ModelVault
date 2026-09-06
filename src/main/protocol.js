@@ -26,12 +26,14 @@ export function registerImageScheme() {
   ])
 }
 
-/** 校验请求路径是否允许访问：仅限封面目录与当前模型根目录 */
+/** 校验请求路径是否允许访问：仅限当前模型根目录（含关联存储）与旧版封面目录 */
 function isAllowedPath(filePath) {
   const normalized = path.normalize(filePath)
-  const allowed = [getCoversDir()]
-  const modelsFolder = getStore()?.settings?.modelsFolder
-  if (modelsFolder) allowed.push(path.normalize(modelsFolder))
+  const allowed = []
+  const root = getCurrentRoot()
+  if (root) allowed.push(path.normalize(root))
+  // 旧版全局封面目录（迁移前的历史数据兼容）
+  allowed.push(path.join(app.getPath('userData'), 'covers'))
   return allowed.some((dir) => {
     const rel = path.relative(dir, normalized)
     return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))

@@ -1,14 +1,24 @@
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import path from 'node:path'
 import logger from '../logger'
-import { getStore, loadStore, saveStoreNow, setModelMeta, updateSettings } from '../services/store'
+import {
+  getCurrentRoot,
+  getMetaMapByAbsPath,
+  getModelMeta,
+  loadSettings,
+  loadData,
+  relativizeCover,
+  setDataRoot,
+  setModelMeta,
+  updateSettings
+} from '../services/store'
 import { findSidecarPreview, scanModels } from '../services/scanner'
-import { pickAndSaveCover } from '../services/covers'
+import { isValidImageFile, pickAndSaveCover } from '../services/covers'
 import { toImageUrl } from '../protocol'
 
 /**
  * 模型管理相关 IPC 处理器。
  * 通道命名统一使用 models: 前缀，需与 preload 白名单保持一致。
+ * 元数据与封面采用「关联存储」：保存在模型根目录的 .modelvault/ 下。
  */
 
 /** 进度事件节流间隔（ms），避免大量小文件时 IPC 过载 */
@@ -16,13 +26,28 @@ const PROGRESS_INTERVAL = 120
 
 let scanning = false
 
-/** 为扫描结果补充元数据（封面 URL、参数、备注）与 sidecar 自动预览图 */
+/** 确保指定根目录的关联存储已加载 */
+async function ensureRootStore(root) {
+  if (getCurrentRoot() !== root) {
+    setDataRoot(root)
+    await loadData()
+  }
+}
+
+/** 为扫描结果补充元数据（封面 URL、参数、备注、二级分类）与 sidecar 自动预览图 */
 async function decorateModels(models) {
-  const store = getStore()
   const result = []
   for (const model of models) {
-    const meta = store.models[model.id] || {}
+    const meta = getModelMeta(model.id) || {}
     let cover = meta.cover || ''
+    if (cover) {
+      const resolved = resolveCoverSafe(cover)
+      if (!(await isValidImageFile(resolved))) {
+        cover = '' // 已存封面文件丢失，回退到 sidecar 预览图
+      } else {
+        cover = resolved
+      }
+    }
     if (!cover) {
       cover = await findSidecarPreview(model.id)
     }
@@ -39,13 +64,27 @@ async function decorateModels(models) {
   return result
 }
 
+/** 解析相对封面路径（容错：加载失败返回空字符串） */
+function resolveCoverSafe(cover) {
+  try {
+    return resolveCover(cover)
+  } catch {
+    return ''
+  }
+}
+
 export function registerModelIpcHandlers() {
-  // 加载持久化数据（设置 + 模型元数据）
+  // 加载持久化数据（设置 + 当前模型根目录的元数据，键为绝对路径）
   ipcMain.handle('models:loadStore', async () => {
-    const data = await loadStore()
+    const settings = await loadSettings()
+    let metaMap = {}
+    if (settings.modelsFolder) {
+      await ensureRootStore(settings.modelsFolder)
+      metaMap = getMetaMapByAbsPath()
+    }
     return {
-      settings: data.settings,
-      models: data.models
+      settings,
+      models: metaMap
     }
   })
 
@@ -58,14 +97,14 @@ export function registerModelIpcHandlers() {
     })
     if (result.canceled || result.filePaths.length === 0) return null
     const folder = result.filePaths[0]
-    updateSettings({ modelsFolder: folder })
+    await updateSettings({ modelsFolder: folder })
     logger.info(`模型目录已设置为: ${folder}`)
     return folder
   })
 
   // 扫描模型目录（耗时操作，进度通过 models:scanProgress 事件推送）
   ipcMain.handle('models:scan', async (event, { folder } = {}) => {
-    const root = typeof folder === 'string' && folder ? folder : getStore()?.settings?.modelsFolder
+    const root = typeof folder === 'string' && folder ? folder : (await loadSettings()).modelsFolder
     if (!root) {
       return { error: '尚未设置模型文件夹' }
     }
@@ -79,6 +118,9 @@ export function registerModelIpcHandlers() {
     logger.info(`开始扫描模型目录: ${root}`)
 
     try {
+      // 切换/加载该根目录的关联存储
+      await ensureRootStore(root)
+
       let lastSent = 0
       const { models, errors, dirCount } = await scanModels(root, (progress) => {
         const now = Date.now()
@@ -123,7 +165,7 @@ export function registerModelIpcHandlers() {
     }
     const meta = setModelMeta(id, { params, note, subCategory })
     if (!meta) {
-      return { error: '模型元数据保存失败' }
+      return { error: '模型元数据保存失败（模型需位于当前模型根目录内）' }
     }
     logger.info(`模型元数据已保存: ${id}`)
     return { meta }
@@ -139,10 +181,14 @@ export function registerModelIpcHandlers() {
     if (result.canceled) return { canceled: true }
     if (result.error) return { error: result.error }
 
-    const meta = setModelMeta(id, {
-      ...(getStore().models[id] || {}),
-      cover: result.cover
-    })
+    const coverRel = relativizeCover(result.cover)
+    if (!coverRel) {
+      return { error: '封面保存位置异常，无法关联到当前模型文件夹' }
+    }
+    const meta = setModelMeta(id, { ...(getModelMeta(id) || {}), cover: coverRel })
+    if (!meta) {
+      return { error: '封面关联失败（模型需位于当前模型根目录内）' }
+    }
     logger.info(`模型封面已更新: ${id}`)
     return { cover: result.cover, coverUrl: toImageUrl(result.cover), meta }
   })
@@ -158,7 +204,7 @@ export function registerModelIpcHandlers() {
 
   // 强制立即落盘（窗口关闭前等场景）
   ipcMain.handle('models:flushStore', async () => {
-    await saveStoreNow()
+    await flushAll()
     return { ok: true }
   })
 

@@ -1,23 +1,15 @@
-import { app, dialog } from 'electron'
+import { dialog } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
 import { IMAGE_EXTENSIONS } from './scanner'
+import { getCoversDir } from './store'
 
 /**
  * 封面图片管理：用户在详情页上传的预览图会复制到
- * 用户数据目录 covers/ 下统一保管，避免模型目录被意外修改。
+ * 模型根目录下的 .modelvault/covers/ 统一保管（关联存储），
+ * 避免模型目录被意外修改，且随模型文件夹一起移动。
  */
-
-let coversDir = null
-
-/** 封面存储目录（延迟初始化，需在 app ready 后调用） */
-export function getCoversDir() {
-  if (!coversDir) {
-    coversDir = path.join(app.getPath('userData'), 'covers')
-  }
-  return coversDir
-}
 
 /** 清理文件名中的非法字符 */
 function sanitizeBaseName(name) {
@@ -25,9 +17,10 @@ function sanitizeBaseName(name) {
 }
 
 /**
- * 弹出图片选择对话框，并将选中的图片复制到封面目录。
+ * 弹出图片选择对话框，并将选中的图片复制到关联存储的封面目录。
  * @param {BrowserWindow} parentWin 父窗口
  * @returns {Promise<{cover: string} | {canceled: true} | {error: string}>}
+ *   cover 为复制后的绝对路径
  */
 export async function pickAndSaveCover(parentWin) {
   const result = await dialog.showOpenDialog(parentWin, {

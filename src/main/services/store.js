@@ -4,33 +4,86 @@ import path from 'node:path'
 import logger from '../logger'
 
 /**
- * 数据持久化模块：将模型元数据（推荐参数、封面、备注）与应用设置
- * 以 JSON 形式保存在用户数据目录（%APPDATA%/modelvault/store.json）。
- * 写入采用防抖 + 原子替换（先写临时文件再重命名），避免写入中断损坏数据。
+ * 关联存储模块：
+ * - 应用设置（最近使用的模型根目录）保存在用户数据目录 settings.json
+ * - 模型的所有用户数据（封面图片、推荐参数、备注、二级分类标签等）
+ *   统一保存在用户所选模型根目录下的 .modelvault/ 文件夹中：
+ *     <模型根目录>/.modelvault/store.json   元数据（按相对路径关联模型）
+ *     <模型根目录>/.modelvault/covers/      上传的封面图片
+ * - 元数据键为相对于模型根目录的路径，封面为相对路径，
+ *   因此整个模型文件夹移动/复制到其他位置后关联关系依然成立。
+ * - 首次对某个根目录启用关联存储时，自动从旧版（%APPDATA% 全局存储）
+ *   迁移属于该目录的记录，并复制封面文件。
+ * 写入采用防抖 + 原子替换（先写临时文件再重命名）。
  */
 
-const STORE_FILE = 'store.json'
+const SETTINGS_FILE = 'settings.json'
+const LEGACY_STORE_FILE = 'store.json'
+const DATA_DIR = '.modelvault'
+const DATA_FILE = 'store.json'
+const COVERS_DIR = 'covers'
 const SAVE_DELAY = 500
 
 /** 「其他模型」允许的二级分类标签 */
 const VALID_SUB_CATEGORIES = new Set(['embedding', 'controlnet', 'upscale', 'hypernetwork', 'other'])
 
-const DEFAULT_DATA = {
-  version: 1,
-  settings: {
-    modelsFolder: ''
-  },
-  models: {}
-}
-
+let settings = { modelsFolder: '' }
+let currentRoot = null
+/** 当前根目录的元数据，键为相对路径（'/' 分隔） */
 let data = null
 let saveTimer = null
 let saving = false
 
-/** 存储文件绝对路径 */
-function getStoreFilePath() {
-  return path.join(app.getPath('userData'), STORE_FILE)
+/* ---------------- 路径辅助 ---------------- */
+
+function getSettingsFilePath() {
+  return path.join(app.getPath('userData'), SETTINGS_FILE)
 }
+
+/** 根目录下的关联存储目录 */
+function getDataDir(root = currentRoot) {
+  return path.join(root, DATA_DIR)
+}
+
+function getDataFilePath(root = currentRoot) {
+  return path.join(getDataDir(root), DATA_FILE)
+}
+
+/** 封面图片目录（位于模型根目录内） */
+export function getCoversDir() {
+  if (!currentRoot) throw new Error('尚未设置模型根目录')
+  return path.join(getDataDir(), COVERS_DIR)
+}
+
+/** 当前生效的模型根目录 */
+export function getCurrentRoot() {
+  return currentRoot
+}
+
+/** 绝对模型路径 -> 相对键（'/' 分隔）；不在根目录内时返回 null */
+function toRelKey(absPath) {
+  if (!currentRoot || typeof absPath !== 'string') return null
+  const rel = path.relative(currentRoot, absPath)
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null
+  return rel.split(path.sep).join('/')
+}
+
+/** 相对封面路径 -> 绝对路径 */
+export function resolveCover(coverRel) {
+  if (!coverRel || !currentRoot) return ''
+  if (path.isAbsolute(coverRel)) return coverRel
+  return path.join(currentRoot, coverRel)
+}
+
+/** 绝对封面路径 -> 相对封面路径（仅限封面目录内的文件） */
+export function relativizeCover(absCover) {
+  if (!currentRoot || typeof absCover !== 'string') return ''
+  const rel = path.relative(getCoversDir(), absCover)
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return ''
+  return `${DATA_DIR}/${COVERS_DIR}/${rel.split(path.sep).join('/')}`
+}
+
+/* ---------------- 元数据规范化 ---------------- */
 
 /** 规范化单条模型元数据，剔除未知字段 */
 function normalizeModelMeta(raw) {
@@ -59,64 +112,161 @@ function pickLegacyRes(value, legacyValues) {
   return legacy.length > 0 ? Math.min(...legacy) : null
 }
 
-/** 启动时加载存储文件；文件缺失或损坏时回退到默认数据 */
-export async function loadStore() {
-  const file = getStoreFilePath()
+/* ---------------- 应用设置（全局） ---------------- */
+
+/** 加载应用设置（最近使用的模型根目录；旧版数据内嵌于 store.json，自动回退并迁移） */
+export async function loadSettings() {
+  try {
+    const text = await fs.readFile(getSettingsFilePath(), 'utf-8')
+    const parsed = JSON.parse(text)
+    if (typeof parsed?.modelsFolder === 'string') {
+      settings.modelsFolder = parsed.modelsFolder
+    }
+  } catch {
+    // settings.json 不存在：尝试从旧版 store.json 恢复设置
+    try {
+      const legacyText = await fs.readFile(
+        path.join(app.getPath('userData'), LEGACY_STORE_FILE),
+        'utf-8'
+      )
+      const legacy = JSON.parse(legacyText)
+      if (typeof legacy?.settings?.modelsFolder === 'string') {
+        settings.modelsFolder = legacy.settings.modelsFolder
+        await updateSettings({ modelsFolder: settings.modelsFolder })
+        logger.info(`已从旧版存储恢复应用设置: ${settings.modelsFolder}`)
+      }
+    } catch {
+      settings = { modelsFolder: '' }
+    }
+  }
+  return settings
+}
+
+/** 更新应用设置并立即落盘 */
+export async function updateSettings(patch) {
+  if (!patch) return
+  if (typeof patch.modelsFolder === 'string') {
+    settings.modelsFolder = patch.modelsFolder
+  }
+  try {
+    const file = getSettingsFilePath()
+    await fs.mkdir(path.dirname(file), { recursive: true })
+    await fs.writeFile(file, JSON.stringify(settings, null, 2), 'utf-8')
+  } catch (err) {
+    logger.error(`设置写入失败: ${err.message}`)
+  }
+}
+
+/* ---------------- 关联存储（按模型根目录） ---------------- */
+
+/** 切换当前关联存储的模型根目录（重置内存数据） */
+export function setDataRoot(root) {
+  currentRoot = root
+  data = null
+}
+
+/**
+ * 加载当前根目录的关联存储数据。
+ * store.json 不存在时创建空数据，并尝试从旧版全局存储迁移属于该目录的记录。
+ */
+export async function loadData() {
+  if (!currentRoot) {
+    data = { version: 1, models: {} }
+    return data
+  }
+  const file = getDataFilePath()
   try {
     const text = await fs.readFile(file, 'utf-8')
     const parsed = JSON.parse(text)
-    data = {
-      version: 1,
-      settings: {
-        modelsFolder: typeof parsed?.settings?.modelsFolder === 'string' ? parsed.settings.modelsFolder : ''
-      },
-      models: {}
+    data = { version: 1, models: {} }
+    for (const [key, meta] of Object.entries(parsed?.models || {})) {
+      const normalized = normalizeModelMeta(meta)
+      if (normalized) data.models[key] = normalized
     }
-    if (parsed?.models && typeof parsed.models === 'object') {
-      for (const [id, meta] of Object.entries(parsed.models)) {
-        const normalized = normalizeModelMeta(meta)
-        if (normalized) data.models[id] = normalized
-      }
-    }
-    logger.info(`存储数据加载完成（${Object.keys(data.models).length} 条模型记录）`)
+    logger.info(`关联存储加载完成：${Object.keys(data.models).length} 条记录（${file}）`)
   } catch (err) {
     if (err.code === 'ENOENT') {
-      data = structuredClone(DEFAULT_DATA)
-      logger.info('存储文件不存在，使用默认数据')
+      data = { version: 1, models: {} }
+      await migrateLegacyData()
     } else {
-      data = structuredClone(DEFAULT_DATA)
-      logger.error(`存储文件加载失败，已重置: ${err.message}`)
+      data = { version: 1, models: {} }
+      logger.error(`关联存储加载失败，已重置: ${err.message}`)
     }
   }
   return data
 }
 
-/** 获取当前存储数据（须在 loadStore 之后调用） */
-export function getStore() {
-  return data
-}
+/**
+ * 从旧版全局存储（%APPDATA%/modelvault/store.json，绝对路径作键）迁移
+ * 属于当前根目录的记录，并复制其封面文件到 <根目录>/.modelvault/covers/。
+ */
+async function migrateLegacyData() {
+  const oldFile = path.join(app.getPath('userData'), LEGACY_STORE_FILE)
+  try {
+    const text = await fs.readFile(oldFile, 'utf-8')
+    const parsed = JSON.parse(text)
+    let imported = 0
+    for (const [absId, meta] of Object.entries(parsed?.models || {})) {
+      const relKey = toRelKey(absId)
+      if (!relKey) continue
+      const normalized = normalizeModelMeta(meta)
+      if (!normalized) continue
 
-/** 更新应用设置 */
-export function updateSettings(patch) {
-  if (!data || !patch) return
-  if (typeof patch.modelsFolder === 'string') {
-    data.settings.modelsFolder = patch.modelsFolder
+      // 迁移封面文件：旧版为 %APPDATA% 下的绝对路径
+      if (normalized.cover) {
+        try {
+          const oldAbs = normalized.cover
+          await fs.access(oldAbs)
+          await fs.mkdir(getCoversDir(), { recursive: true })
+          const dest = path.join(getCoversDir(), path.basename(oldAbs))
+          await fs.copyFile(oldAbs, dest)
+          normalized.cover = `${DATA_DIR}/${COVERS_DIR}/${path.basename(oldAbs).split(path.sep).join('/')}`
+        } catch {
+          normalized.cover = ''
+        }
+      }
+      data.models[relKey] = normalized
+      imported += 1
+    }
+    if (imported > 0) {
+      await saveStoreNow()
+      logger.info(`已从旧版存储迁移 ${imported} 条记录到 ${getDataDir()}`)
+    }
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      logger.warn(`旧版存储迁移跳过: ${err.message}`)
+    }
   }
-  scheduleSave()
 }
 
-/** 读取单条模型元数据 */
+/** 读取单条模型元数据（键为模型绝对路径） */
 export function getModelMeta(modelId) {
   if (!data) return null
-  return data.models[modelId] || null
+  const relKey = toRelKey(modelId)
+  return relKey ? data.models[relKey] || null : null
 }
 
-/** 写入单条模型元数据（合并保存） */
+/** 以绝对路径返回模型元数据表（供渲染进程使用） */
+export function getMetaMapByAbsPath() {
+  const result = {}
+  if (!data || !currentRoot) return result
+  for (const [relKey, meta] of Object.entries(data.models)) {
+    result[path.join(currentRoot, relKey)] = meta
+  }
+  return result
+}
+
+/** 写入单条模型元数据（合并保存，键为模型绝对路径） */
 export function setModelMeta(modelId, meta) {
   if (!data || typeof modelId !== 'string' || !modelId) return null
+  const relKey = toRelKey(modelId)
+  if (!relKey) {
+    logger.warn(`模型不在当前根目录内，忽略保存: ${modelId}`)
+    return null
+  }
   const normalized = normalizeModelMeta(meta)
   if (!normalized) return null
-  data.models[modelId] = normalized
+  data.models[relKey] = normalized
   scheduleSave()
   return normalized
 }
@@ -126,22 +276,22 @@ export function scheduleSave() {
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     saveTimer = null
-    saveStoreNow().catch((err) => logger.error(`保存存储失败: ${err.message}`))
+    saveStoreNow().catch((err) => logger.error(`保存关联存储失败: ${err.message}`))
   }, SAVE_DELAY)
 }
 
 /** 立即落盘（原子写入：临时文件 -> 重命名） */
 export async function saveStoreNow() {
-  if (!data || saving) return
+  if (!data || !currentRoot || saving) return
   saving = true
-  const file = getStoreFilePath()
+  const file = getDataFilePath()
   const tmp = `${file}.${process.pid}.tmp`
   try {
     await fs.mkdir(path.dirname(file), { recursive: true })
     await fs.writeFile(tmp, JSON.stringify(data, null, 2), 'utf-8')
     await fs.rename(tmp, file)
   } catch (err) {
-    logger.error(`存储写入失败: ${err.message}`)
+    logger.error(`关联存储写入失败: ${err.message}`)
     try {
       await fs.rm(tmp, { force: true })
     } catch {
