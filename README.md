@@ -111,9 +111,11 @@ const result = await window.api.invoke('my:channel', payload)
 
 窗口统一在 `src/main/windows/` 目录管理，可参照 `mainWindow.js` 创建多窗口。
 
-### 应用菜单与快捷键
+### 快捷键
 
-菜单定义在 `src/main/menu.js`，使用 Electron `accelerator` 语法定义快捷键（如 `CmdOrCtrl+Shift+I`）。
+应用不显示原生菜单栏，快捷键在 `src/main/menu.js` 中通过 `before-input-event`
+在窗口级别注册：`Ctrl+Shift+I` 开发者工具、`Ctrl+R` 重新加载、`Ctrl+Shift+R`
+强制刷新、`F11` 全屏。
 
 ### 日志
 

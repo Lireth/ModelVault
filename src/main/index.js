@@ -1,6 +1,6 @@
-import { app, BrowserWindow, dialog, shell } from 'electron'
+import { app, BrowserWindow, Menu, dialog, shell } from 'electron'
 import { createMainWindow, getMainWindow } from './windows/mainWindow'
-import { createAppMenu } from './menu'
+import { registerWindowShortcuts } from './menu'
 import { registerIpcHandlers } from './ipc'
 import { registerImageScheme, registerImageProtocolHandler } from './protocol'
 import { saveStoreNow } from './services/store'
@@ -40,11 +40,14 @@ if (!gotSingleInstanceLock) {
   })
 
   app.whenReady().then(() => {
-    createAppMenu()
+    // 移除原生菜单栏（不设置则 Electron 会启用默认英文菜单）
+    Menu.setApplicationMenu(null)
+    // 仅注册窗口级快捷键
     registerImageProtocolHandler()
     registerIpcHandlers()
 
     const win = createMainWindow()
+    registerWindowShortcuts(win)
 
     // 阻止在应用内打开新窗口，外部链接交给系统默认浏览器
     win.webContents.setWindowOpenHandler(({ url }) => {
