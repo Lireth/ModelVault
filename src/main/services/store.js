@@ -126,8 +126,20 @@ export function relativizeCover(absCover) {
 function normalizeModelMeta(raw) {
   if (!raw || typeof raw !== 'object') return null
   const params = raw.params && typeof raw.params === 'object' ? raw.params : {}
+  // 多封面列表（相对路径，顺序即添加顺序），兼容旧版单封面字段
+  let covers = Array.isArray(raw.covers)
+    ? raw.covers
+        .filter((c) => typeof c === 'string' && c && c.length <= 500)
+        .slice(0, 50)
+    : []
+  if (covers.length === 0 && typeof raw.cover === 'string' && raw.cover) {
+    covers = [raw.cover]
+  }
+  let cover = typeof raw.cover === 'string' ? raw.cover : ''
+  if (!cover && covers.length > 0) cover = covers[0]
   return {
-    cover: typeof raw.cover === 'string' ? raw.cover : '',
+    cover,
+    covers,
     note: typeof raw.note === 'string' ? raw.note.slice(0, 2000) : '',
     subCategory: VALID_SUB_CATEGORIES.has(raw.subCategory) ? raw.subCategory : '',
     params: {

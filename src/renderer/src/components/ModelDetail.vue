@@ -1,11 +1,13 @@
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   closeDetail,
   formatSize,
+  pasteCover,
   revealModel,
   saveModelData,
   selectedModel,
+  setDefaultCover,
   SUB_CATEGORIES,
   subCategoryInfo,
   toast,
@@ -60,12 +62,61 @@ watch(selectedModel, (m) => fillForm(m), { immediate: true })
 
 const info = computed(() => (selectedModel.value ? typeInfo(selectedModel.value.type) : null))
 
-/** 封面 URL 加时间戳防缓存 */
+/** 多封面列表（{ rel, path, url }），首页卡片默认显示其中的默认封面 */
+const covers = computed(() => selectedModel.value?.covers || [])
+
+/** 大图预览：默认封面（加时间戳防缓存） */
 const coverSrc = computed(() => {
   const m = selectedModel.value
   if (!m?.coverUrl) return ''
   return `${m.coverUrl}?v=${m.cover ? Math.floor(m.mtimeMs) : 0}`
 })
+
+/** 封面是否为默认显示（与模型当前默认封面路径比对） */
+function isDefault(c) {
+  return selectedModel.value?.cover && c.path === selectedModel.value.cover
+}
+
+/** 粘贴剪贴板图片为预览图 */
+async function onPasteCover() {
+  const model = selectedModel.value
+  if (!model) return
+  busy.value = true
+  try {
+    await pasteCover(model.id)
+  } catch (err) {
+    toast('error', `粘贴失败: ${err.message}`)
+  } finally {
+    busy.value = false
+  }
+}
+
+/** 将指定封面设为默认显示 */
+async function onSetDefault(c) {
+  const model = selectedModel.value
+  if (!model || isDefault(c)) return
+  busy.value = true
+  try {
+    await setDefaultCover(model.id, c.rel)
+  } catch (err) {
+    toast('error', `设置默认封面失败: ${err.message}`)
+  } finally {
+    busy.value = false
+  }
+}
+
+/** 全局粘贴事件：详情页打开且剪贴板内容为图片时，走添加预览图流程 */
+function onWindowPaste(e) {
+  if (!selectedModel.value) return
+  const items = Array.from(e.clipboardData?.items || [])
+  if (items.some((it) => it.type.startsWith('image/'))) {
+    e.preventDefault()
+    onPasteCover()
+  }
+}
+
+onMounted(() => window.addEventListener('paste', onWindowPaste))
+onBeforeUnmount(() => window.removeEventListener('paste', onWindowPaste))
 
 /** 将表单收集为可校验的参数对象 */
 function collectParams() {
@@ -160,9 +211,26 @@ async function onUploadCover() {
               <span class="type-badge" :style="{ background: info.color }">{{ info.label }}</span>
             </div>
             <button class="btn btn-primary" :disabled="busy" @click="onUploadCover">
-              {{ selectedModel.hasManualCover ? '更换封面图片' : '上传封面图片' }}
+              {{ covers.length ? '上传图片' : '上传封面图片' }}
             </button>
-            <p class="cover-hint">支持 png / jpg / webp / gif / bmp，上传后将作为首页卡片封面</p>
+            <button class="btn" :disabled="busy" @click="onPasteCover">粘贴图片 (Ctrl+V)</button>
+            <p class="cover-hint">
+              支持 png / jpg / webp / gif / bmp，可添加多张预览图，点击缩略图将其设为首页默认显示
+            </p>
+
+            <div v-if="covers.length" class="cover-thumbs">
+              <div
+                v-for="c in covers"
+                :key="c.path"
+                class="cover-thumb"
+                :class="{ active: isDefault(c) }"
+                :title="isDefault(c) ? '当前默认显示' : '点击设为默认显示'"
+                @click="onSetDefault(c)"
+              >
+                <img :src="c.url" alt="预览图" loading="lazy" draggable="false" />
+                <span v-if="isDefault(c)" class="thumb-badge">默认</span>
+              </div>
+            </div>
 
             <dl class="file-info">
               <dt>文件格式</dt>
@@ -365,6 +433,53 @@ async function onUploadCover() {
   font-size: 11px;
   color: var(--text-muted);
   line-height: 1.6;
+}
+
+/* 多封面缩略图网格 */
+.cover-thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 8px;
+}
+
+.cover-thumb {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  cursor: pointer;
+  transition: border-color 0.12s ease, transform 0.12s ease;
+}
+
+.cover-thumb:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.cover-thumb.active {
+  border: 2px solid var(--accent);
+}
+
+.cover-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.thumb-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #10141a;
+  background: var(--accent);
+  border-radius: 999px;
+  padding: 1px 7px;
+  opacity: 0.95;
 }
 
 .file-info {

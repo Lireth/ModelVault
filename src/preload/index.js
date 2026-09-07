@@ -18,6 +18,8 @@ const VALID_INVOKE_CHANNELS = [
   'models:scan',
   'models:saveModelData',
   'models:uploadCover',
+  'models:pasteCover',
+  'models:setDefaultCover',
   'models:reveal',
   'models:flushStore'
 ]
@@ -90,8 +92,12 @@ const api = {
     scan: (folder) => ipcRenderer.invoke('models:scan', { folder }),
     /** 保存模型推荐参数与备注 */
     saveModelData: (payload) => ipcRenderer.invoke('models:saveModelData', payload),
-    /** 上传模型封面，返回 { cover, coverUrl, meta } 或 { canceled } / { error } */
+    /** 上传模型封面，返回 { cover, coverUrl, covers, meta } 或 { canceled } / { error } */
     uploadCover: (id) => ipcRenderer.invoke('models:uploadCover', { id }),
+    /** 将剪贴板图片添加为模型预览图，返回 { cover, coverUrl, covers, meta } 或 { error } */
+    pasteCover: (id) => ipcRenderer.invoke('models:pasteCover', { id }),
+    /** 设置默认封面（cover 为封面相对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */
+    setDefaultCover: (id, cover) => ipcRenderer.invoke('models:setDefaultCover', { id, cover }),
     /** 在资源管理器中显示文件 */
     reveal: (path) => ipcRenderer.invoke('models:reveal', { path }),
     /** 立即落盘 */

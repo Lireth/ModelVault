@@ -1,4 +1,4 @@
-import { dialog } from 'electron'
+import { clipboard, dialog } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
@@ -64,5 +64,26 @@ export async function isValidImageFile(p) {
     return stat.isFile()
   } catch {
     return false
+  }
+}
+
+/**
+ * 读取系统剪贴板中的图片并保存到关联存储的封面目录（PNG 格式）。
+ * @returns {Promise<{cover: string} | {error: string}>} cover 为保存后的绝对路径
+ */
+export async function saveClipboardImage() {
+  try {
+    const image = clipboard.readImage()
+    if (image.isEmpty()) {
+      return { error: '剪贴板中没有图片内容' }
+    }
+    await fs.mkdir(getCoversDir(), { recursive: true })
+    const dest = path.join(getCoversDir(), `${Date.now()}-clipboard.png`)
+    await fs.writeFile(dest, image.toPNG())
+    logger.info(`剪贴板图片已保存: ${dest}`)
+    return { cover: dest }
+  } catch (err) {
+    logger.error(`剪贴板图片保存失败: ${err.message}`)
+    return { error: `剪贴板图片保存失败: ${err.message}` }
   }
 }

@@ -272,8 +272,22 @@ export async function saveModelData(id, payload) {
   return true
 }
 
+/** 将封面操作结果同步到本地模型列表 */
+function applyCoverResult(id, res) {
+  const idx = state.models.findIndex((m) => m.id === id)
+  if (idx >= 0) {
+    state.models[idx] = {
+      ...state.models[idx],
+      cover: res.cover,
+      coverUrl: res.coverUrl,
+      covers: res.covers || [],
+      hasManualCover: (res.covers || []).length > 0
+    }
+  }
+}
+
 /**
- * 上传并设置模型封面，成功后同步本地列表。
+ * 上传并添加模型封面（追加到封面列表，无默认时设为默认）。
  * @param {string} id 模型 id
  */
 export async function uploadCover(id) {
@@ -283,16 +297,39 @@ export async function uploadCover(id) {
     toast('error', res.error)
     return false
   }
-  const idx = state.models.findIndex((m) => m.id === id)
-  if (idx >= 0) {
-    state.models[idx] = {
-      ...state.models[idx],
-      cover: res.cover,
-      coverUrl: res.coverUrl,
-      hasManualCover: true
-    }
+  applyCoverResult(id, res)
+  toast('success', '封面已添加')
+  return true
+}
+
+/**
+ * 将剪贴板中的图片添加为模型预览图。
+ * @param {string} id 模型 id
+ */
+export async function pasteCover(id) {
+  const res = await window.api.models.pasteCover(id)
+  if (res.error) {
+    toast('error', res.error)
+    return false
   }
-  toast('success', '封面已更新')
+  applyCoverResult(id, res)
+  toast('success', '已从剪贴板添加预览图')
+  return true
+}
+
+/**
+ * 设置默认封面（首页卡片显示该图）。
+ * @param {string} id 模型 id
+ * @param {string} cover 封面相对路径
+ */
+export async function setDefaultCover(id, cover) {
+  const res = await window.api.models.setDefaultCover(id, cover)
+  if (res.error) {
+    toast('error', res.error)
+    return false
+  }
+  applyCoverResult(id, res)
+  toast('success', '已设为默认显示')
   return true
 }
 

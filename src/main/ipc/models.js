@@ -15,7 +15,7 @@ import {
   updateSettings
 } from '../services/store'
 import { findSidecarPreview, scanModels } from '../services/scanner'
-import { isValidImageFile, pickAndSaveCover } from '../services/covers'
+import { isValidImageFile, pickAndSaveCover, saveClipboardImage } from '../services/covers'
 import { toImageUrl } from '../protocol'
 
 /**
@@ -37,20 +37,22 @@ async function ensureRootStore(root) {
   }
 }
 
-/** 为扫描结果补充元数据（封面 URL、参数、备注、二级分类）与 sidecar 自动预览图 */
+/** 为扫描结果补充元数据（封面列表、默认封面 URL、参数、备注、二级分类）与 sidecar 自动预览图 */
 async function decorateModels(models) {
   const result = []
   for (const model of models) {
     const meta = getModelMeta(model.id) || {}
-    let cover = meta.cover || ''
-    if (cover) {
-      const resolved = resolveCoverSafe(cover)
-      if (!(await isValidImageFile(resolved))) {
-        cover = '' // 已存封面文件丢失，回退到 sidecar 预览图
-      } else {
-        cover = resolved
+    // 校验多封面列表，过滤已丢失的文件
+    const covers = []
+    for (const rel of meta.covers || []) {
+      const resolved = resolveCoverSafe(rel)
+      if (resolved && (await isValidImageFile(resolved))) {
+        covers.push({ rel, path: resolved, url: toImageUrl(resolved) })
       }
     }
+    // 默认封面：优先显式设置值，缺省取第一张；再缺省回退 sidecar 预览图
+    const defaultEntry = covers.find((c) => c.rel === meta.cover) || covers[0] || null
+    let cover = defaultEntry ? defaultEntry.path : ''
     if (!cover) {
       cover = await findSidecarPreview(model.id)
     }
@@ -58,7 +60,8 @@ async function decorateModels(models) {
       ...model,
       cover,
       coverUrl: cover ? toImageUrl(cover) : '',
-      hasManualCover: Boolean(meta.cover),
+      covers,
+      hasManualCover: covers.length > 0,
       params: meta.params || null,
       note: meta.note || '',
       subCategory: meta.subCategory || ''
@@ -74,6 +77,35 @@ function resolveCoverSafe(cover) {
   } catch {
     return ''
   }
+}
+
+/** 由元数据构造渲染进程使用的封面列表（含绝对路径与 mvimg URL） */
+function coverListFromMeta(meta) {
+  return (meta?.covers || []).map((rel) => {
+    const abs = resolveCoverSafe(rel)
+    return { rel, path: abs, url: abs ? toImageUrl(abs) : '' }
+  })
+}
+
+/**
+ * 将新封面文件追加到模型的封面列表（去重）。
+ * 若尚无默认封面，则将新图设为默认（首页第一张默认显示）。
+ */
+function appendCoverMeta(id, absCover) {
+  const coverRel = relativizeCover(absCover)
+  if (!coverRel) {
+    return { error: '封面保存位置异常，无法关联到当前模型文件夹' }
+  }
+  const existing = getModelMeta(id) || {}
+  const covers = Array.isArray(existing.covers)
+    ? existing.covers.filter((c) => c !== coverRel)
+    : []
+  covers.push(coverRel)
+  const meta = setModelMeta(id, { ...existing, covers, cover: existing.cover || coverRel })
+  if (!meta) {
+    return { error: '封面关联失败（模型需位于当前模型根目录内）' }
+  }
+  return { coverRel, meta }
 }
 
 export function registerModelIpcHandlers() {
@@ -176,7 +208,7 @@ export function registerModelIpcHandlers() {
     return { meta }
   })
 
-  // 上传/更换模型封面图
+  // 上传/添加模型封面图（追加到多封面列表，无默认时设为默认）
   ipcMain.handle('models:uploadCover', async (event, { id } = {}) => {
     if (typeof id !== 'string' || !id) {
       return { error: '无效的模型标识' }
@@ -186,16 +218,58 @@ export function registerModelIpcHandlers() {
     if (result.canceled) return { canceled: true }
     if (result.error) return { error: result.error }
 
-    const coverRel = relativizeCover(result.cover)
-    if (!coverRel) {
-      return { error: '封面保存位置异常，无法关联到当前模型文件夹' }
+    const applied = appendCoverMeta(id, result.cover)
+    if (applied.error) return applied
+    logger.info(`模型封面已添加: ${id}`)
+    return {
+      cover: result.cover,
+      coverUrl: toImageUrl(result.cover),
+      covers: coverListFromMeta(applied.meta),
+      meta: applied.meta
     }
-    const meta = setModelMeta(id, { ...(getModelMeta(id) || {}), cover: coverRel })
+  })
+
+  // 将剪贴板中的图片添加为模型预览图
+  ipcMain.handle('models:pasteCover', async (event, { id } = {}) => {
+    if (typeof id !== 'string' || !id) {
+      return { error: '无效的模型标识' }
+    }
+    const result = await saveClipboardImage()
+    if (result.error) return result
+
+    const applied = appendCoverMeta(id, result.cover)
+    if (applied.error) return applied
+    logger.info(`剪贴板封面已添加: ${id}`)
+    return {
+      cover: result.cover,
+      coverUrl: toImageUrl(result.cover),
+      covers: coverListFromMeta(applied.meta),
+      meta: applied.meta
+    }
+  })
+
+  // 设置默认封面（首页卡片显示的图片）
+  ipcMain.handle('models:setDefaultCover', (event, { id, cover } = {}) => {
+    if (typeof id !== 'string' || !id || typeof cover !== 'string' || !cover) {
+      return { error: '无效的参数' }
+    }
+    const existing = getModelMeta(id) || {}
+    const covers = Array.isArray(existing.covers) ? existing.covers : []
+    if (!covers.includes(cover)) {
+      return { error: '封面不存在，无法设为默认' }
+    }
+    const meta = setModelMeta(id, { ...existing, cover })
     if (!meta) {
-      return { error: '封面关联失败（模型需位于当前模型根目录内）' }
+      return { error: '默认封面设置失败' }
     }
-    logger.info(`模型封面已更新: ${id}`)
-    return { cover: result.cover, coverUrl: toImageUrl(result.cover), meta }
+    logger.info(`默认封面已切换: ${id} -> ${cover}`)
+    const abs = resolveCoverSafe(cover)
+    return {
+      cover: abs,
+      coverUrl: abs ? toImageUrl(abs) : '',
+      covers: coverListFromMeta(meta),
+      meta
+    }
   })
 
   // 更新应用设置（通用/扫描/外观），返回规范化后的完整设置
