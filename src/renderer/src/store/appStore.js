@@ -223,6 +223,15 @@ export const filteredModels = computed(() => {
     case 'mtime':
       sorted.sort((a, b) => b.mtimeMs - a.mtimeMs)
       break
+    case 'type':
+      // 按分类排序：遵循固定分类顺序（Checkpoint → TextEncoders → VAE → LoRA → 其他），同分类内按名称
+      {
+        const order = Object.fromEntries(MODEL_TYPES.map((t, i) => [t.key, i]))
+        sorted.sort(
+          (a, b) => order[a.type] - order[b.type] || a.name.localeCompare(b.name, 'zh-CN')
+        )
+      }
+      break
     default:
       sorted.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
   }

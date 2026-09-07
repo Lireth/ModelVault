@@ -71,6 +71,7 @@ onUnmounted(() => {
             <span class="sort-label">排序</span>
             <select v-model="state.sortBy">
               <option value="name">按名称</option>
+              <option value="type">按分类</option>
               <option value="size">按大小</option>
               <option value="mtime">按修改时间</option>
             </select>
