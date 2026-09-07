@@ -157,13 +157,22 @@ export function registerModelIpcHandlers() {
       await ensureRootStore(root)
 
       let lastSent = 0
-      const { models, errors, dirCount } = await scanModels(root, (progress) => {
-        const now = Date.now()
-        if (now - lastSent >= PROGRESS_INTERVAL) {
-          lastSent = now
-          win?.webContents.send('models:scanProgress', progress)
+      // 应用扫描规则：排除目录 + 扫描文件扩展名（来自应用设置）
+      const appSettings = getSettings()
+      const { models, errors, dirCount } = await scanModels(
+        root,
+        (progress) => {
+          const now = Date.now()
+          if (now - lastSent >= PROGRESS_INTERVAL) {
+            lastSent = now
+            win?.webContents.send('models:scanProgress', progress)
+          }
+        },
+        {
+          excludeDirs: appSettings.excludeDirs || [],
+          extensions: appSettings.scanExtensions || []
         }
-      })
+      )
 
       const decorated = await decorateModels(models)
       const byType = {}

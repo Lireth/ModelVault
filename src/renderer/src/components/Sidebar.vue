@@ -70,8 +70,7 @@ function onScanClick() {
 
     <!-- 设置按钮：固定在侧边栏最底部，宽度自适应侧边栏 -->
     <button class="btn settings-btn" title="打开设置" @click="openSettings">
-      <span class="settings-icon">⚙</span>
-      <span class="settings-text">设置</span>
+      设置
     </button>
   </aside>
 </template>
@@ -209,10 +208,6 @@ function onScanClick() {
   border-color: var(--accent);
 }
 
-.settings-icon {
-  font-size: 13px;
-}
-
 @media (max-width: 900px) {
   .sidebar {
     width: 64px;
@@ -222,8 +217,7 @@ function onScanClick() {
   .type-label,
   .type-count,
   .side-section h3,
-  .action-section,
-  .settings-text {
+  .action-section {
     display: none;
   }
   .type-item {

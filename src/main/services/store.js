@@ -31,6 +31,10 @@ const VALID_SUB_CATEGORIES = new Set(['embedding', 'controlnet', 'upscale', 'hyp
 const VALID_THEMES = new Set(['dark', 'light'])
 /** 应用设置允许的卡片尺寸取值 */
 const VALID_CARD_SIZES = new Set(['compact', 'normal', 'large'])
+/** 应用设置允许的默认排序方式 */
+const VALID_SORT_BY = new Set(['name', 'type', 'size', 'mtime'])
+/** 应用设置允许的扫描文件扩展名（与 scanner.js 的 MODEL_EXTENSIONS 保持一致） */
+const VALID_SCAN_EXTENSIONS = new Set(['.safetensors', '.ckpt', '.pt', '.pth', '.bin'])
 
 /** 默认应用设置 */
 function defaultSettings() {
@@ -39,8 +43,25 @@ function defaultSettings() {
     autoScan: true,
     excludeDirs: [],
     theme: 'dark',
-    cardSize: 'normal'
+    cardSize: 'normal',
+    sortBy: 'name',
+    scanExtensions: [...VALID_SCAN_EXTENSIONS],
+    showSize: true,
+    showMtime: true,
+    showParams: true
   }
+}
+
+/** 规范化扩展名列表：仅接受已知扩展名并去重；为空时回退到全部 */
+function normalizeExtensions(raw) {
+  const list = Array.isArray(raw)
+    ? raw
+        .filter((e) => typeof e === 'string')
+        .map((e) => e.trim().toLowerCase())
+        .filter((e) => VALID_SCAN_EXTENSIONS.has(e))
+    : []
+  const unique = [...new Set(list)]
+  return unique.length > 0 ? unique : [...VALID_SCAN_EXTENSIONS]
 }
 
 /** 规范化应用设置：仅接受已知字段并校验类型 */
@@ -60,7 +81,12 @@ function normalizeSettings(raw) {
     autoScan: typeof raw.autoScan === 'boolean' ? raw.autoScan : base.autoScan,
     excludeDirs,
     theme: VALID_THEMES.has(raw.theme) ? raw.theme : base.theme,
-    cardSize: VALID_CARD_SIZES.has(raw.cardSize) ? raw.cardSize : base.cardSize
+    cardSize: VALID_CARD_SIZES.has(raw.cardSize) ? raw.cardSize : base.cardSize,
+    sortBy: VALID_SORT_BY.has(raw.sortBy) ? raw.sortBy : base.sortBy,
+    scanExtensions: normalizeExtensions(raw.scanExtensions),
+    showSize: typeof raw.showSize === 'boolean' ? raw.showSize : base.showSize,
+    showMtime: typeof raw.showMtime === 'boolean' ? raw.showMtime : base.showMtime,
+    showParams: typeof raw.showParams === 'boolean' ? raw.showParams : base.showParams
   }
 }
 

@@ -52,7 +52,12 @@ export function defaultSettings() {
     autoScan: true,
     excludeDirs: [],
     theme: 'dark',
-    cardSize: 'normal'
+    cardSize: 'normal',
+    sortBy: 'name',
+    scanExtensions: ['.safetensors', '.ckpt', '.pt', '.pth', '.bin'],
+    showSize: true,
+    showMtime: true,
+    showParams: true
   }
 }
 
@@ -120,6 +125,8 @@ export async function initApp() {
     state.folder = data.settings?.modelsFolder || ''
     state.settings = { ...defaultSettings(), ...data.settings }
     applyTheme(state.settings.theme)
+    // 应用默认排序方式
+    if (state.settings.sortBy) state.sortBy = state.settings.sortBy
     if (state.folder && state.settings.autoScan !== false) {
       await scanModels()
     }

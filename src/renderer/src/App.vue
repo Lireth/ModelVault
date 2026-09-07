@@ -4,7 +4,7 @@ import TopBar from './components/TopBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import ModelCard from './components/ModelCard.vue'
 import ModelDetail from './components/ModelDetail.vue'
-import SettingsModal from './components/SettingsModal.vue'
+import SettingsPage from './components/SettingsPage.vue'
 import ToastHost from './components/ToastHost.vue'
 import {
   filteredModels,
@@ -54,6 +54,11 @@ onUnmounted(() => {
       <Sidebar />
 
       <main class="content">
+        <!-- 设置页面：占用模型预览区位置 -->
+        <SettingsPage v-if="state.settingsOpen" />
+
+        <!-- 模型预览区 -->
+        <template v-else>
         <!-- 搜索 + 排序：位于模型清单上方（选择文件夹后显示） -->
         <div v-if="state.folder" class="search-row">
           <div class="search-box" title="按模型名称搜索">
@@ -121,6 +126,7 @@ onUnmounted(() => {
             <ModelCard v-for="m in filteredModels" :key="m.id" :model="m" />
           </div>
         </template>
+      </template>
       </main>
     </div>
 
@@ -129,7 +135,6 @@ onUnmounted(() => {
     </footer>
 
     <ModelDetail />
-    <SettingsModal />
     <ToastHost />
   </div>
 </template>

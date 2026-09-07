@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { formatSize, openDetail, subCategoryInfo, typeInfo } from '../store/appStore'
+import { formatSize, openDetail, state, subCategoryInfo, typeInfo } from '../store/appStore'
 
 const props = defineProps({
   model: { type: Object, required: true }
@@ -54,12 +54,12 @@ const mtimeText = computed(() => {
     </div>
     <div class="card-body">
       <h4 class="model-name" :title="model.name">{{ model.name }}</h4>
-      <div class="model-meta">
-        <span>{{ formatSize(model.size) }}</span>
-        <span>{{ mtimeText }}</span>
+      <div v-if="state.settings.showSize || state.settings.showMtime" class="model-meta">
+        <span v-if="state.settings.showSize">{{ formatSize(model.size) }}</span>
+        <span v-if="state.settings.showMtime">{{ mtimeText }}</span>
       </div>
-      <p v-if="paramSummary" class="param-summary" :title="paramSummary">{{ paramSummary }}</p>
-      <p v-else class="param-summary empty">未设置推荐参数</p>
+      <p v-if="state.settings.showParams && paramSummary" class="param-summary" :title="paramSummary">{{ paramSummary }}</p>
+      <p v-else-if="state.settings.showParams" class="param-summary empty">未设置推荐参数</p>
     </div>
   </article>
 </template>
