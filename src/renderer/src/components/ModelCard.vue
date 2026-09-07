@@ -83,7 +83,7 @@ const mtimeText = computed(() => {
 
 .cover {
   position: relative;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 2 / 3;
   background: var(--bg);
   overflow: hidden;
 }
