@@ -126,8 +126,6 @@ onUnmounted(() => {
 
     <footer class="footer">
       <span>模匣 · 本地 AI 绘画模型管理</span>
-      <span v-if="state.folder" class="footer-path" :title="state.folder">{{ state.folder }}</span>
-      <span>Ctrl+Shift+I 开发者工具</span>
     </footer>
 
     <ModelDetail />
@@ -327,13 +325,5 @@ onUnmounted(() => {
 .btn-large {
   padding: 10px 22px;
   font-size: 14px;
-}
-
-.footer-path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 45vw;
-  font-family: Consolas, monospace;
 }
 </style>
