@@ -68,18 +68,30 @@ export async function isValidImageFile(p) {
 }
 
 /**
- * 读取系统剪贴板中的图片并保存到关联存储的封面目录（PNG 格式）。
+ * 读取系统剪贴板中的图片并保存到关联存储的封面目录。
+ * Electron 44 起 clipboard 对齐 W3C Clipboard API：readImage 已移除，
+ * 改用 clipboard.read() 返回 ClipboardItem[]，按 MIME 类型取图片 Blob。
  * @returns {Promise<{cover: string} | {error: string}>} cover 为保存后的绝对路径
  */
 export async function saveClipboardImage() {
   try {
-    const image = clipboard.readImage()
-    if (image.isEmpty()) {
+    const MIME_EXT = {
+      'image/png': '.png',
+      'image/jpeg': '.jpg',
+      'image/webp': '.webp',
+      'image/gif': '.gif',
+      'image/bmp': '.bmp'
+    }
+    const items = await clipboard.read()
+    const item = items.find((it) => it.types.some((t) => t in MIME_EXT))
+    if (!item) {
       return { error: '剪贴板中没有图片内容' }
     }
+    const mime = item.types.find((t) => t in MIME_EXT)
+    const blob = await item.getType(mime)
     await fs.mkdir(getCoversDir(), { recursive: true })
-    const dest = path.join(getCoversDir(), `${Date.now()}-clipboard.png`)
-    await fs.writeFile(dest, image.toPNG())
+    const dest = path.join(getCoversDir(), `${Date.now()}-clipboard${MIME_EXT[mime]}`)
+    await fs.writeFile(dest, Buffer.from(await blob.arrayBuffer()))
     logger.info(`剪贴板图片已保存: ${dest}`)
     return { cover: dest }
   } catch (err) {
