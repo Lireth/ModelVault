@@ -9,8 +9,19 @@
 - **封面管理**：详情页上传封面图片，自动作为首页卡片封面；自动识别模型同名 sidecar 预览图
 - **推荐参数**：为每个模型保存采样步数、CFG、采样器、调度器、推荐分辨率区间与备注
 - **关联存储**：模型的封面、推荐参数、备注等用户数据统一保存在所选模型根目录的 `.modelvault/` 文件夹内，按相对路径关联，随文件夹移动/复制保持关联；不同根目录数据相互独立
+- **个性化设置**：支持亮/暗主题切换、扫描文件类型选择、默认排序方式、卡片展示内容（文件大小 / 修改日期 / 推荐参数）等配置
 
 用户操作说明见 [docs/用户操作手册.md](docs/用户操作手册.md)。
+
+## 界面展示
+
+**模型浏览**：卡片式首页，左侧分类筛选与计数、顶部搜索与排序，扫描全程异步不阻塞 UI。
+
+![模型浏览主界面](image/Exhibition-1.png)
+
+**模型详情**：上传/粘贴封面图片、编辑推荐参数（采样步数、CFG、采样器、调度器、推荐分辨率区间）与备注。
+
+![模型详情页](image/Exhibition-2.png)
 
 ## 技术栈
 
@@ -38,6 +49,7 @@ ModelVault/
 ├── build/                        # 打包资源（应用图标 icon.ico 放此处）
 ├── dist/                         # electron-builder 打包输出（构建后生成）
 ├── docs/                         # 文档（用户操作手册）
+├── image/                        # 软件界面截图（README 展示用）
 ├── out/                          # electron-vite 编译输出（构建后生成）
 ├── src/
 │   ├── main/                     # 主进程
@@ -84,7 +96,7 @@ ModelVault/
 | `npm start` / `npm run dev` | 启动开发模式（主进程/渲染进程热重载） |
 | `npm run build` | 编译主进程、preload、渲染进程到 `out/` |
 | `npm run preview` | 以生产构建产物启动应用预览 |
-| `npm run dist` | 编译并打包 NSIS 安装包到 `dist/{version}/` |
+| `npm run dist` | 编译并打包单文件便携版 EXE 到 `dist/{version}/` |
 | `npm run dist:dir` | 编译并生成免安装目录（快速验证打包结果） |
 
 ## 开发指南
@@ -125,8 +137,9 @@ const result = await window.api.invoke('my:channel', payload)
 
 ## 打包说明
 
-- 打包配置见 `electron-builder.yml`（NSIS 安装包，x64，允许自定义安装路径）
-- 桌面/开始菜单快捷方式名称为「模匣」
+- 打包配置见 `electron-builder.yml`（portable 单文件便携版，x64），产物为 `dist/{version}/ModelVault-beta0.1.exe`
+- 单文件 EXE 运行时不在其所在目录生成任何文件：设置与日志保存在 `%APPDATA%\modelvault\`，模型元数据保存在用户选择的模型文件夹
+- 首次启动需解压到系统临时目录，启动速度略慢于常规安装版
 - 如需自定义应用图标，将 `icon.ico`（256×256 及以上）放入 `build/` 目录
 - Windows 10 及以上版本可直接运行，无额外运行时依赖
 
