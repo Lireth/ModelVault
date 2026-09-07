@@ -11,8 +11,6 @@
 - **关联存储**：模型的封面、推荐参数、备注等用户数据统一保存在所选模型根目录的 `.modelvault/` 文件夹内，按相对路径关联，随文件夹移动/复制保持关联；不同根目录数据相互独立
 - **个性化设置**：支持亮/暗主题切换、扫描文件类型选择、默认排序方式、卡片展示内容（文件大小 / 修改日期 / 推荐参数）等配置
 
-用户操作说明见 [docs/用户操作手册.md](docs/用户操作手册.md)。
-
 ## 界面展示
 
 **模型浏览**：卡片式首页，左侧分类筛选与计数、顶部搜索与排序，扫描全程异步不阻塞 UI。
@@ -25,12 +23,12 @@
 
 ## 技术栈
 
-| 组件 | 版本 | 说明 |
-| --- | --- | --- |
-| Electron | ^44 | 跨平台桌面运行时 |
-| electron-vite | ^5 | 构建/开发工具链，内置 HMR 热重载 |
-| Vue 3 | ^3.5 | 渲染进程前端框架 |
-| electron-builder | ^26 | Windows 打包（NSIS 安装包） |
+| 组件             | 版本 | 说明                             |
+| ---------------- | ---- | -------------------------------- |
+| Electron         | ^44  | 跨平台桌面运行时                 |
+| electron-vite    | ^5   | 构建/开发工具链，内置 HMR 热重载 |
+| Vue 3            | ^3.5 | 渲染进程前端框架                 |
+| electron-builder | ^26  | Windows 打包（NSIS 安装包）      |
 
 ## 快速开始
 
@@ -46,11 +44,7 @@ npm start
 
 ```
 ModelVault/
-├── build/                        # 打包资源（应用图标 icon.ico 放此处）
-├── dist/                         # electron-builder 打包输出（构建后生成）
-├── docs/                         # 文档（用户操作手册）
 ├── image/                        # 软件界面截图（README 展示用）
-├── out/                          # electron-vite 编译输出（构建后生成）
 ├── src/
 │   ├── main/                     # 主进程
 │   │   ├── index.js              # 应用入口：生命周期、单实例锁、全局错误处理
@@ -84,20 +78,18 @@ ModelVault/
 │           │   └── ToastHost.vue     # 轻提示通知
 │           └── assets/styles/    # 全局样式
 ├── electron.vite.config.mjs      # electron-vite 配置
-├── electron-builder.yml          # Windows 打包配置
-├── .npmrc                        # Electron 二进制国内镜像加速
 └── package.json
 ```
 
 ## 常用脚本
 
-| 命令 | 说明 |
-| --- | --- |
-| `npm start` / `npm run dev` | 启动开发模式（主进程/渲染进程热重载） |
-| `npm run build` | 编译主进程、preload、渲染进程到 `out/` |
-| `npm run preview` | 以生产构建产物启动应用预览 |
-| `npm run dist` | 编译并打包单文件便携版 EXE 到 `dist/{version}/` |
-| `npm run dist:dir` | 编译并生成免安装目录（快速验证打包结果） |
+| 命令                        | 说明                                            |
+| --------------------------- | ----------------------------------------------- |
+| `npm start` / `npm run dev` | 启动开发模式（主进程/渲染进程热重载）           |
+| `npm run build`             | 编译主进程、preload、渲染进程到 `out/`          |
+| `npm run preview`           | 以生产构建产物启动应用预览                      |
+| `npm run dist`              | 编译并打包单文件便携版 EXE 到 `dist/{version}/` |
+| `npm run dist:dir`          | 编译并生成免安装目录（快速验证打包结果）        |
 
 ## 开发指南
 
@@ -106,9 +98,9 @@ ModelVault/
 1. 在 `src/main/ipc.js` 中注册处理器：
 
 ```js
-ipcMain.handle('my:channel', (event, payload) => {
-  return 'result'
-})
+ipcMain.handle("my:channel", (event, payload) => {
+  return "result";
+});
 ```
 
 2. 在 `src/preload/index.js` 中将通道加入 `VALID_INVOKE_CHANNELS` 白名单。
@@ -116,7 +108,7 @@ ipcMain.handle('my:channel', (event, payload) => {
 3. 在渲染进程中调用：
 
 ```js
-const result = await window.api.invoke('my:channel', payload)
+const result = await window.api.invoke("my:channel", payload);
 ```
 
 ### 窗口管理
