@@ -337,7 +337,7 @@ async function onSave() {
       <div class="settings-group">
         <dl v-if="appInfo" class="about-list">
           <dt>软件</dt>
-          <dd>{{ appInfo.name }} v{{ appInfo.version }}</dd>
+          <dd>{{ appInfo.name }} v{{ appInfo.version }} Beta</dd>
           <dt>Electron</dt>
           <dd>{{ appInfo.electron }}</dd>
           <dt>Node</dt>
