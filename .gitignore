@@ -29,3 +29,7 @@ test/
 
 # npm 配置文件
 .npmrc
+
+# 其他
+build/
+electron-builder.yml
