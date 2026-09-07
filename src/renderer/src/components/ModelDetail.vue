@@ -324,7 +324,11 @@ async function onUploadCover() {
 <style scoped>
 .detail-mask {
   position: fixed;
-  inset: 0;
+  /* 从标题栏下方开始，不遮挡标题栏与原生窗口控件（最小化/最大化/关闭） */
+  top: var(--titlebar-height);
+  left: 0;
+  right: 0;
+  bottom: 0;
   background: rgba(6, 9, 12, 0.6);
   backdrop-filter: blur(3px);
   display: flex;
@@ -339,7 +343,7 @@ async function onUploadCover() {
   border: 1px solid var(--border);
   border-radius: 14px;
   width: min(960px, 100%);
-  max-height: calc(100vh - 48px);
+  max-height: calc(100vh - var(--titlebar-height) - 48px);
   display: flex;
   flex-direction: column;
   overflow: hidden;

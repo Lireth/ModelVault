@@ -1,4 +1,6 @@
 :root {
+  /* 标题栏高度：需与 mainWindow.js 中 titleBarOverlay.height 保持一致 */
+  --titlebar-height: 40px;
   --bg: #101418;
   --bg-card: #1a2027;
   --bg-hover: #222a33;
@@ -59,7 +61,9 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  height: 40px;
+  /* 与 mainWindow.js 中 titleBarOverlay.height 保持一致；
+     弹窗遮罩以此为顶部起点，避免覆盖原生窗口控件区域 */
+  height: var(--titlebar-height);
   padding: 0 20px;
   border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
