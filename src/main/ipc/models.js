@@ -164,7 +164,9 @@ export function registerModelIpcHandlers() {
     if (typeof id !== 'string' || !id) {
       return { error: '无效的模型标识' }
     }
-    const meta = setModelMeta(id, { params, note, subCategory })
+    // 合并已有元数据，避免覆盖丢失封面等未随本次请求传入的字段
+    const existing = getModelMeta(id) || {}
+    const meta = setModelMeta(id, { ...existing, params, note, subCategory })
     if (!meta) {
       return { error: '模型元数据保存失败（模型需位于当前模型根目录内）' }
     }
