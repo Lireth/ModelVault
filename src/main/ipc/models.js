@@ -8,6 +8,8 @@ import {
   loadSettings,
   loadData,
   relativizeCover,
+  resolveCover,
+  saveStoreNow,
   setDataRoot,
   setModelMeta,
   updateSettings
@@ -215,7 +217,7 @@ export function registerModelIpcHandlers() {
 
   // 强制立即落盘（窗口关闭前等场景）
   ipcMain.handle('models:flushStore', async () => {
-    await flushAll()
+    await saveStoreNow()
     return { ok: true }
   })
 
