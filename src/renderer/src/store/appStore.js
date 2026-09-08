@@ -37,7 +37,8 @@ const TYPE_MAP = Object.fromEntries(MODEL_TYPES.map((t) => [t.key, t]))
 export function defaultParams() {
   return {
     steps: null,
-    cfg: null,
+    cfgMin: null,
+    cfgMax: null,
     sampler: '',
     scheduler: '',
     resMin: null,

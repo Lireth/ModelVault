@@ -170,7 +170,9 @@ function normalizeModelMeta(raw) {
     subCategory: VALID_SUB_CATEGORIES.has(raw.subCategory) ? raw.subCategory : '',
     params: {
       steps: Number.isFinite(params.steps) ? params.steps : null,
-      cfg: Number.isFinite(params.cfg) ? params.cfg : null,
+      // CFG 为区间字段；兼容旧版单值 cfg（迁移为 min = max = 旧值）
+      cfgMin: pickLegacyRes(params.cfgMin, [params.cfg]),
+      cfgMax: pickLegacyRes(params.cfgMax, [params.cfg]),
       sampler: typeof params.sampler === 'string' ? params.sampler : '',
       scheduler: typeof params.scheduler === 'string' ? params.scheduler : '',
       // 兼容旧版四字段（resMinW/resMinH/resMaxW/resMaxH），迁移为宽高共用的单值区间

@@ -31,7 +31,8 @@ const busy = ref(false)
 /** 表单本地副本：编辑期间不直接影响全局状态，保存后才同步 */
 const form = reactive({
   steps: '',
-  cfg: '',
+  cfgMin: '',
+  cfgMax: '',
   sampler: '',
   scheduler: '',
   resMin: '',
@@ -44,7 +45,8 @@ const form = reactive({
 function fillForm(model) {
   const p = model?.params || {}
   form.steps = Number.isFinite(p.steps) ? p.steps : ''
-  form.cfg = Number.isFinite(p.cfg) ? p.cfg : ''
+  form.cfgMin = Number.isFinite(p.cfgMin) ? p.cfgMin : ''
+  form.cfgMax = Number.isFinite(p.cfgMax) ? p.cfgMax : ''
   form.sampler = p.sampler || ''
   form.scheduler = p.scheduler || ''
   form.resMin = Number.isFinite(p.resMin) ? p.resMin : ''
@@ -127,7 +129,8 @@ function collectParams() {
   }
   const params = {
     steps: num(form.steps),
-    cfg: num(form.cfg),
+    cfgMin: num(form.cfgMin),
+    cfgMax: num(form.cfgMax),
     sampler: form.sampler.trim(),
     scheduler: form.scheduler.trim(),
     resMin: num(form.resMin),
@@ -136,7 +139,8 @@ function collectParams() {
   // 校验
   const rangeChecks = [
     ['采样步数', params.steps, 1, 200],
-    ['CFG', params.cfg, 0, 100],
+    ['CFG 最小值', params.cfgMin, 0, 100],
+    ['CFG 最大值', params.cfgMax, 0, 100],
     ['最小分辨率', params.resMin, 16, 16384],
     ['最大分辨率', params.resMax, 16, 16384]
   ]
@@ -145,6 +149,9 @@ function collectParams() {
     if (value !== null && (value < min || value > max)) {
       return { error: `${label} 超出合理范围（${min} ~ ${max}）` }
     }
+  }
+  if (params.cfgMin !== null && params.cfgMax !== null && params.cfgMin > params.cfgMax) {
+    return { error: 'CFG 最小值不能大于最大值' }
   }
   if (params.resMin !== null && params.resMax !== null && params.resMin > params.resMax) {
     return { error: '最小分辨率不能大于最大分辨率' }
@@ -269,9 +276,12 @@ async function onUploadCover() {
                 <span>采样步数 (Sampling Steps)</span>
                 <input v-model="form.steps" type="number" min="1" max="200" placeholder="如 20 / 28 / 30" />
               </label>
-              <label class="field">
-                <span>CFG 值</span>
-                <input v-model="form.cfg" type="number" min="0" max="100" step="0.5" placeholder="如 7 / 4.5" />
+              <label class="field range-field">
+                <span>CFG 值（范围）</span>
+                <div class="range-inputs">
+                  <input v-model="form.cfgMin" type="number" min="0" max="100" step="0.5" placeholder="最小，如 4" />
+                  <input v-model="form.cfgMax" type="number" min="0" max="100" step="0.5" placeholder="最大，如 8" />
+                </div>
               </label>
               <label class="field">
                 <span>采样器 (Sampler)</span>
@@ -588,6 +598,17 @@ async function onUploadCover() {
 .field input:focus,
 .note-input:focus {
   border-color: var(--accent);
+}
+
+/* CFG 范围输入：两个数字框并排 */
+.range-inputs {
+  display: flex;
+  gap: 6px;
+}
+
+.range-inputs input {
+  min-width: 0;
+  flex: 1;
 }
 
 .note-input {

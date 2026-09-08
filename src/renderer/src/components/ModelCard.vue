@@ -20,7 +20,14 @@ const paramSummary = computed(() => {
   if (!p) return ''
   const parts = []
   if (Number.isFinite(p.steps)) parts.push(`${p.steps} 步`)
-  if (Number.isFinite(p.cfg)) parts.push(`CFG ${p.cfg}`)
+  // CFG 区间：min/max 相等或缺失时只显示单个值
+  if (Number.isFinite(p.cfgMin) && Number.isFinite(p.cfgMax) && p.cfgMin !== p.cfgMax) {
+    parts.push(`CFG ${p.cfgMin}~${p.cfgMax}`)
+  } else if (Number.isFinite(p.cfgMin)) {
+    parts.push(`CFG ${p.cfgMin}`)
+  } else if (Number.isFinite(p.cfgMax)) {
+    parts.push(`CFG ${p.cfgMax}`)
+  }
   if (p.sampler) parts.push(p.sampler)
   if (Number.isFinite(p.resMin) && Number.isFinite(p.resMax)) {
     parts.push(`${p.resMin}~${p.resMax}px`)
