@@ -8,6 +8,9 @@ const props = defineProps({
 
 const info = computed(() => typeInfo(props.model.type))
 
+/** 显示名称：备注名优先，为空时回退文件名 */
+const displayName = computed(() => props.model.alias || props.model.name)
+
 /** 「其他模型」已标注时的二级分类标签 */
 const subTag = computed(() => {
   if (props.model.type !== 'other' || !props.model.subCategory) return null
@@ -60,7 +63,7 @@ const mtimeText = computed(() => {
       </span>
     </div>
     <div class="card-body">
-      <h4 class="model-name" :title="model.name">{{ model.name }}</h4>
+      <h4 class="model-name" :title="model.name">{{ displayName }}</h4>
       <div v-if="state.settings.showSize || state.settings.showMtime" class="model-meta">
         <span v-if="state.settings.showSize">{{ formatSize(model.size) }}</span>
         <span v-if="state.settings.showMtime">{{ mtimeText }}</span>

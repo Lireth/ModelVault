@@ -63,6 +63,7 @@ async function decorateModels(models) {
       covers,
       hasManualCover: covers.length > 0,
       params: meta.params || null,
+      alias: meta.alias || '',
       note: meta.note || '',
       subCategory: meta.subCategory || ''
     })
@@ -202,14 +203,14 @@ export function registerModelIpcHandlers() {
     }
   })
 
-  // 保存单个模型的元数据（推荐参数 / 备注 / 二级分类标签）
-  ipcMain.handle('models:saveModelData', (event, { id, params, note, subCategory } = {}) => {
+  // 保存单个模型的元数据（备注名 / 推荐参数 / 备注 / 二级分类标签）
+  ipcMain.handle('models:saveModelData', (event, { id, alias, params, note, subCategory } = {}) => {
     if (typeof id !== 'string' || !id) {
       return { error: '无效的模型标识' }
     }
     // 合并已有元数据，避免覆盖丢失封面等未随本次请求传入的字段
     const existing = getModelMeta(id) || {}
-    const meta = setModelMeta(id, { ...existing, params, note, subCategory })
+    const meta = setModelMeta(id, { ...existing, alias, params, note, subCategory })
     if (!meta) {
       return { error: '模型元数据保存失败（模型需位于当前模型根目录内）' }
     }

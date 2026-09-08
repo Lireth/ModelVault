@@ -30,6 +30,7 @@ const busy = ref(false)
 
 /** 表单本地副本：编辑期间不直接影响全局状态，保存后才同步 */
 const form = reactive({
+  alias: '',
   steps: '',
   cfgMin: '',
   cfgMax: '',
@@ -44,6 +45,7 @@ const form = reactive({
 /** 从模型对象填充表单（打开详情或切换模型时触发） */
 function fillForm(model) {
   const p = model?.params || {}
+  form.alias = model?.alias || ''
   form.steps = Number.isFinite(p.steps) ? p.steps : ''
   form.cfgMin = Number.isFinite(p.cfgMin) ? p.cfgMin : ''
   form.cfgMax = Number.isFinite(p.cfgMax) ? p.cfgMax : ''
@@ -63,6 +65,11 @@ function toggleSubCategory(key) {
 watch(selectedModel, (m) => fillForm(m), { immediate: true })
 
 const info = computed(() => (selectedModel.value ? typeInfo(selectedModel.value.type) : null))
+
+/** 显示名称：备注名优先，为空时回退文件名 */
+const displayName = computed(
+  () => selectedModel.value?.alias || selectedModel.value?.name || ''
+)
 
 /** 多封面列表（{ rel, path, url }），首页卡片默认显示其中的默认封面 */
 const covers = computed(() => selectedModel.value?.covers || [])
@@ -170,6 +177,7 @@ async function onSave() {
   busy.value = true
   try {
     await saveModelData(model.id, {
+      alias: form.alias.trim(),
       params,
       note: form.note,
       subCategory: model.type === 'other' ? form.subCategory : ''
@@ -200,7 +208,7 @@ async function onUploadCover() {
     <div v-if="selectedModel" class="detail-mask" @click.self="closeDetail">
       <section class="detail-panel">
         <header class="detail-header">
-          <h2 :title="selectedModel.name">{{ selectedModel.name }}</h2>
+          <h2 :title="selectedModel.name">{{ displayName }}</h2>
           <div class="detail-header-actions">
             <button class="btn" @click="revealModel(selectedModel.id)">打开所在文件夹</button>
             <button class="wc-btn" title="关闭" @click="closeDetail">✕</button>
@@ -238,15 +246,6 @@ async function onUploadCover() {
                 <span v-if="isDefault(c)" class="thumb-badge">默认</span>
               </div>
             </div>
-
-            <dl class="file-info">
-              <dt>文件格式</dt>
-              <dd>{{ selectedModel.ext }}</dd>
-              <dt>文件大小</dt>
-              <dd>{{ formatSize(selectedModel.size) }}</dd>
-              <dt>所在目录</dt>
-              <dd class="path" :title="selectedModel.folder">{{ selectedModel.relDir || selectedModel.folder }}</dd>
-            </dl>
           </div>
 
           <!-- 右侧：推荐参数 -->
@@ -269,6 +268,21 @@ async function onUploadCover() {
                 <span class="subcat-hint">标注后显示在首页卡片上，点击已选标签可取消</span>
               </div>
             </template>
+
+            <!-- 备注名（占一半宽度）+ 文件信息（右侧） -->
+            <h3>备注名</h3>
+            <div class="alias-row">
+              <label class="field alias-field">
+                <span>自定义显示名称（为空时显示文件名）</span>
+                <input v-model="form.alias" type="text" maxlength="100" :placeholder="selectedModel.name" />
+              </label>
+              <dl class="file-info">
+                <dt>文件大小</dt>
+                <dd>{{ formatSize(selectedModel.size) }}</dd>
+                <dt>所在目录</dt>
+                <dd class="path" :title="selectedModel.folder">{{ selectedModel.relDir || selectedModel.folder }}</dd>
+              </dl>
+            </div>
 
             <h3>推荐参数</h3>
             <div class="form-grid">
@@ -570,6 +584,28 @@ async function onUploadCover() {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 10px;
+}
+
+/* 备注名 + 文件信息行：底部对齐（信息框底部与备注名输入框底部平齐） */
+.alias-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+/* 备注名占该层一半宽度 */
+.alias-field {
+  width: 50%;
+  min-width: 240px;
+  flex-shrink: 0;
+}
+
+.alias-row .file-info {
+  flex: 1;
+  min-width: 0;
+  /* 与备注名输入框高度贴近，避免视觉上过度下沉 */
+  padding: 8px 12px;
 }
 
 .field {

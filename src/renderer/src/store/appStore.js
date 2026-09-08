@@ -281,6 +281,7 @@ export async function saveModelData(id, payload) {
     state.models[idx] = {
       ...state.models[idx],
       params: res.meta.params,
+      alias: res.meta.alias || '',
       note: res.meta.note,
       subCategory: res.meta.subCategory || ''
     }

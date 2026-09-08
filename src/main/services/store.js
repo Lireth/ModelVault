@@ -166,6 +166,8 @@ function normalizeModelMeta(raw) {
   return {
     cover,
     covers,
+    // 备注名：用户自定义显示名称（为空时回退文件名）
+    alias: typeof raw.alias === 'string' ? raw.alias.trim().slice(0, 100) : '',
     note: typeof raw.note === 'string' ? raw.note.slice(0, 2000) : '',
     subCategory: VALID_SUB_CATEGORIES.has(raw.subCategory) ? raw.subCategory : '',
     params: {
