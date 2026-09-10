@@ -383,6 +383,8 @@ async function onSave() {
 .settings-body {
   padding: 16px max(20px, calc((100% - 960px) / 2));
   overflow-y: auto;
+  /* 预留滚动条空间，避免滚动条出现/消失时模块左右错位 */
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   gap: 8px;

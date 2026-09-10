@@ -166,6 +166,8 @@ onUnmounted(() => {
 .content {
   flex: 1;
   overflow-y: auto;
+  /* 预留滚动条空间，避免滚动条出现/消失时模块左右错位 */
+  scrollbar-gutter: stable;
   padding: 20px 24px;
   display: flex;
   flex-direction: column;
