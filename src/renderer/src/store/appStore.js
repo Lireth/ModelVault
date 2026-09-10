@@ -29,7 +29,31 @@ export const SUB_CATEGORIES = [
   { key: 'other', label: '其他', color: '#8a97a5' }
 ]
 
-const SUB_MAP = Object.fromEntries(SUB_CATEGORIES.map((t) => [t.key, t]))
+/** LoRA 模型的分类标签（key 与主进程 VALID_SUB_CATEGORIES 保持一致） */
+export const LORA_TAGS = [
+  { key: 'role', label: '角色', color: '#ff7eb6' },
+  { key: 'style', label: '风格', color: '#b18cff' },
+  { key: 'concept', label: '概念', color: '#ffb86b' },
+  { key: 'outfit', label: '服饰', color: '#4dd0e1' },
+  { key: 'background', label: '背景', color: '#3ddc97' },
+  { key: 'pose', label: '姿势', color: '#c3e88d' },
+  { key: 'tool', label: '工具', color: '#8a97a5' }
+]
+
+/** Checkpoint 模型的自动分类标签（无需手动标注） */
+export const CHECKPOINT_TAGS = [{ key: 'base', label: '基底模型', color: '#4f9cf9' }]
+
+const SUB_MAP = Object.fromEntries(
+  [...SUB_CATEGORIES, ...LORA_TAGS, ...CHECKPOINT_TAGS].map((t) => [t.key, t])
+)
+
+/** 按模型类型返回可用的分类标签列表（无标签的类型返回 null） */
+export function tagsForType(type) {
+  if (type === 'lora') return LORA_TAGS
+  if (type === 'checkpoint') return CHECKPOINT_TAGS
+  if (type === 'other') return SUB_CATEGORIES
+  return null
+}
 
 const TYPE_MAP = Object.fromEntries(MODEL_TYPES.map((t) => [t.key, t]))
 

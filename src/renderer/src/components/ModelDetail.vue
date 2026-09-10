@@ -8,8 +8,8 @@ import {
   saveModelData,
   selectedModel,
   setDefaultCover,
-  SUB_CATEGORIES,
   subCategoryInfo,
+  tagsForType,
   toast,
   typeInfo,
   uploadCover
@@ -60,16 +60,27 @@ function fillForm(model) {
   form.resMax = Number.isFinite(p.resMax) ? p.resMax : ''
   form.note = model?.note || ''
   form.subCategory = model?.subCategory || ''
+  // 大模型自动标注为「基底模型」分类
+  if (model?.type === 'checkpoint') form.subCategory = 'base'
 }
 
-/** 切换二级分类标签（再次点击取消标注） */
+/** 切换二级分类标签（再次点击取消标注）；基底模型为自动分类，不可手动更改 */
 function toggleSubCategory(key) {
+  if (selectedModel.value?.type === 'checkpoint') return
   form.subCategory = form.subCategory === key ? '' : key
 }
 
 watch(selectedModel, (m) => fillForm(m), { immediate: true })
 
 const info = computed(() => (selectedModel.value ? typeInfo(selectedModel.value.type) : null))
+
+/** 当前模型类型可用的分类标签列表（无标签的类型返回 null） */
+const typeTags = computed(() => (selectedModel.value ? tagsForType(selectedModel.value.type) : null))
+
+/** 分类标签区标题：其他模型沿用「二级分类标签」，其余为「分类标签」 */
+const typeTagsTitle = computed(() =>
+  selectedModel.value?.type === 'other' ? '二级分类标签' : '分类标签'
+)
 
 /** 显示名称：备注名优先，为空时回退文件名 */
 const displayName = computed(
@@ -256,22 +267,26 @@ async function onUploadCover() {
 
           <!-- 右侧：推荐参数 -->
           <div class="detail-form-col">
-            <!-- 二级分类标签：仅「其他模型」可标注 -->
-            <template v-if="selectedModel.type === 'other'">
-              <h3>二级分类标签</h3>
+            <!-- 分类标签：LoRA / Checkpoint / 其他模型可标注 -->
+            <template v-if="typeTags">
+              <h3>{{ typeTagsTitle }}</h3>
               <div class="subcat-group">
                 <button
-                  v-for="sc in SUB_CATEGORIES"
+                  v-for="sc in typeTags"
                   :key="sc.key"
                   class="subcat-chip"
-                  :class="{ active: form.subCategory === sc.key }"
+                  :class="{ active: form.subCategory === sc.key, locked: selectedModel.type === 'checkpoint' }"
                   :style="form.subCategory === sc.key ? { borderColor: sc.color, color: sc.color } : {}"
                   type="button"
+                  :title="selectedModel.type === 'checkpoint' ? '大模型自动标注为基底模型' : ''"
                   @click="toggleSubCategory(sc.key)"
                 >
                   {{ sc.label }}
                 </button>
-                <span class="subcat-hint">标注后显示在首页卡片上，点击已选标签可取消</span>
+                <span v-if="selectedModel.type !== 'checkpoint'" class="subcat-hint">
+                  标注后显示在首页卡片上，点击已选标签可取消
+                </span>
+                <span v-else class="subcat-hint">大模型自动标注为基底模型</span>
               </div>
             </template>
 
@@ -586,6 +601,12 @@ async function onUploadCover() {
   background: var(--bg-active);
   border-width: 1.5px;
   font-weight: 600;
+}
+
+/* 自动分类标签（如大模型的基底模型）：不可点击更改 */
+.subcat-chip.locked {
+  cursor: default;
+  opacity: 0.9;
 }
 
 .subcat-hint {

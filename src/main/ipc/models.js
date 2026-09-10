@@ -65,7 +65,8 @@ async function decorateModels(models) {
       params: meta.params || null,
       alias: meta.alias || '',
       note: meta.note || '',
-      subCategory: meta.subCategory || ''
+      // 大模型自动标注为「基底模型」分类（未手动标注时默认生效）
+      subCategory: meta.subCategory || (model.type === 'checkpoint' ? 'base' : '')
     })
   }
   return result

@@ -25,7 +25,13 @@ const COVERS_DIR = 'covers'
 const SAVE_DELAY = 500
 
 /** 「其他模型」允许的二级分类标签 */
-const VALID_SUB_CATEGORIES = new Set(['embedding', 'controlnet', 'upscale', 'hypernetwork', 'other'])
+const VALID_SUB_CATEGORIES = new Set([
+  'embedding', 'controlnet', 'upscale', 'hypernetwork', 'other',
+  // LoRA 分类标签
+  'role', 'style', 'concept', 'outfit', 'background', 'pose', 'tool',
+  // Checkpoint 自动分类
+  'base'
+])
 
 /** 应用设置允许的主题取值 */
 const VALID_THEMES = new Set(['dark', 'light'])

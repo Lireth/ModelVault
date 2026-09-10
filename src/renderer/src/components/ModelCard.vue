@@ -11,9 +11,10 @@ const info = computed(() => typeInfo(props.model.type))
 /** 显示名称：备注名优先，为空时回退文件名 */
 const displayName = computed(() => props.model.alias || props.model.name)
 
-/** 「其他模型」已标注时的二级分类标签 */
+/** 已标注的分类标签（支持其他模型二级分类、LoRA 分类、大模型基底模型） */
+const TAGGED_TYPES = ['other', 'lora', 'checkpoint']
 const subTag = computed(() => {
-  if (props.model.type !== 'other' || !props.model.subCategory) return null
+  if (!TAGGED_TYPES.includes(props.model.type) || !props.model.subCategory) return null
   return subCategoryInfo(props.model.subCategory)
 })
 
