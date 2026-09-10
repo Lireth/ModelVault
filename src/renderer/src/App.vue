@@ -9,6 +9,7 @@ import ToastHost from './components/ToastHost.vue'
 import {
   filteredModels,
   initApp,
+  LORA_TAGS,
   state,
   typeInfo,
   chooseFolder
@@ -121,6 +122,14 @@ onUnmounted(() => {
             <span v-if="state.typeFilter !== 'all'" class="chip">
               {{ typeInfo(state.typeFilter).label }}
             </span>
+            <!-- LoRA 分类筛选：仅选中 LoRA 分类时显示 -->
+            <label v-if="state.typeFilter === 'lora'" class="sort-select sub-filter" title="按 LoRA 分类筛选">
+              <span class="sort-label">分类</span>
+              <select v-model="state.subFilter">
+                <option value="">全部</option>
+                <option v-for="t in LORA_TAGS" :key="t.key" :value="t.key">{{ t.label }}</option>
+              </select>
+            </label>
           </div>
           <div class="model-grid" :class="`grid-${state.settings.cardSize || 'normal'}`">
             <ModelCard v-for="m in filteredModels" :key="m.id" :model="m" />
@@ -250,6 +259,11 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+/* LoRA 分类筛选：靠结果栏右侧 */
+.sub-filter {
+  margin-left: auto;
 }
 
 .chip {

@@ -1,4 +1,4 @@
-import { computed, reactive } from 'vue'
+import { computed, reactive, watch } from 'vue'
 
 /**
  * 渲染进程全局状态仓库（基于 Vue reactive，无需引入额外状态库）。
@@ -98,6 +98,7 @@ export const state = reactive({
   byType: {},
   // 筛选 / 排序
   typeFilter: 'all',
+  subFilter: '', // LoRA 分类筛选（仅 typeFilter 为 lora 时生效）
   search: '',
   sortBy: 'name', // name | size | mtime
   // 详情
@@ -245,6 +246,10 @@ export const filteredModels = computed(() => {
   if (state.typeFilter !== 'all') {
     list = list.filter((m) => m.type === state.typeFilter)
   }
+  // LoRA 分类筛选：仅选中 LoRA 分类且指定了子分类时生效
+  if (state.typeFilter === 'lora' && state.subFilter) {
+    list = list.filter((m) => m.subCategory === state.subFilter)
+  }
   if (keyword) {
     list = list.filter((m) => m.name.toLowerCase().includes(keyword))
   }
@@ -280,6 +285,14 @@ export const typeCounts = computed(() => {
 /** 当前选中的模型对象 */
 export const selectedModel = computed(
   () => state.models.find((m) => m.id === state.selectedId) || null
+)
+
+// 切换主分类时清空 LoRA 子分类筛选，避免残留条件
+watch(
+  () => state.typeFilter,
+  () => {
+    state.subFilter = ''
+  }
 )
 
 export function openDetail(id) {
