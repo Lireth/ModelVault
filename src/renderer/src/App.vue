@@ -103,7 +103,7 @@ onUnmounted(() => {
         </div>
 
         <!-- 空结果 -->
-        <div v-else-if="filteredModels.length === 0" class="empty-state">
+        <div v-else-if="filteredModels.length === 0 && state.typeFilter !== 'lora'" class="empty-state">
           <div class="empty-icon">🔍</div>
           <h2>没有匹配的模型</h2>
           <p class="muted">
@@ -122,7 +122,7 @@ onUnmounted(() => {
             <span v-if="state.typeFilter !== 'all'" class="chip">
               {{ typeInfo(state.typeFilter).label }}
             </span>
-            <!-- LoRA 分类筛选：仅选中 LoRA 分类时显示 -->
+            <!-- LoRA 分类筛选：仅选中 LoRA 分类时显示（即使筛选结果为空也保持可见） -->
             <label v-if="state.typeFilter === 'lora'" class="sort-select sub-filter" title="按 LoRA 分类筛选">
               <span class="sort-label">分类</span>
               <select v-model="state.subFilter">
@@ -131,7 +131,15 @@ onUnmounted(() => {
               </select>
             </label>
           </div>
-          <div class="model-grid" :class="`grid-${state.settings.cardSize || 'normal'}`">
+
+          <!-- 空结果（LoRA 分类筛选无匹配时，保留结果栏以便切换分类） -->
+          <div v-if="filteredModels.length === 0" class="empty-state">
+            <div class="empty-icon">🔍</div>
+            <h2>没有匹配的模型</h2>
+            <p class="muted">当前筛选或搜索条件下没有模型，试试切换分类或清空搜索词。</p>
+          </div>
+
+          <div v-else class="model-grid" :class="`grid-${state.settings.cardSize || 'normal'}`">
             <ModelCard v-for="m in filteredModels" :key="m.id" :model="m" />
           </div>
         </template>
