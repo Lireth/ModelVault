@@ -41,6 +41,7 @@ export function defaultParams() {
     cfgMax: null,
     sampler: '',
     scheduler: '',
+    precision: '',
     resMin: null,
     resMax: null
   }

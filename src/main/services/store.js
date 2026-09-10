@@ -177,6 +177,8 @@ function normalizeModelMeta(raw) {
       cfgMax: pickLegacyRes(params.cfgMax, [params.cfg]),
       sampler: typeof params.sampler === 'string' ? params.sampler : '',
       scheduler: typeof params.scheduler === 'string' ? params.scheduler : '',
+      // 模型精度（如 FP16 / BF16 / FP32 / FP8）
+      precision: typeof params.precision === 'string' ? params.precision.slice(0, 20) : '',
       // 兼容旧版四字段（resMinW/resMinH/resMaxW/resMaxH），迁移为宽高共用的单值区间
       resMin: pickLegacyRes(params.resMin, [params.resMinW, params.resMinH]),
       resMax: pickLegacyRes(params.resMax, [params.resMaxW, params.resMaxH])

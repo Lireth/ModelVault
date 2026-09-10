@@ -26,6 +26,9 @@ const SCHEDULERS = [
   'normal', 'karras', 'exponential', 'sgm_uniform', 'simple', 'ddim_uniform', 'beta'
 ]
 
+/** 常用模型精度选项（可直接输入自定义值） */
+const PRECISIONS = ['FP8', 'FP16', 'BF16', 'FP32']
+
 const busy = ref(false)
 
 /** 表单本地副本：编辑期间不直接影响全局状态，保存后才同步 */
@@ -36,6 +39,7 @@ const form = reactive({
   cfgMax: '',
   sampler: '',
   scheduler: '',
+  precision: '',
   resMin: '',
   resMax: '',
   note: '',
@@ -51,6 +55,7 @@ function fillForm(model) {
   form.cfgMax = Number.isFinite(p.cfgMax) ? p.cfgMax : ''
   form.sampler = p.sampler || ''
   form.scheduler = p.scheduler || ''
+  form.precision = p.precision || ''
   form.resMin = Number.isFinite(p.resMin) ? p.resMin : ''
   form.resMax = Number.isFinite(p.resMax) ? p.resMax : ''
   form.note = model?.note || ''
@@ -140,6 +145,7 @@ function collectParams() {
     cfgMax: num(form.cfgMax),
     sampler: form.sampler.trim(),
     scheduler: form.scheduler.trim(),
+    precision: form.precision.trim(),
     resMin: num(form.resMin),
     resMax: num(form.resMax)
   }
@@ -309,6 +315,13 @@ async function onUploadCover() {
                 <input v-model="form.scheduler" list="scheduler-list" placeholder="选择或输入调度器" />
                 <datalist id="scheduler-list">
                   <option v-for="s in SCHEDULERS" :key="s" :value="s" />
+                </datalist>
+              </label>
+              <label class="field">
+                <span>精度 (Precision)</span>
+                <input v-model="form.precision" list="precision-list" placeholder="选择或输入精度，如 FP16" />
+                <datalist id="precision-list">
+                  <option v-for="p in PRECISIONS" :key="p" :value="p" />
                 </datalist>
               </label>
             </div>
