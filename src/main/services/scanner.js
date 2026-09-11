@@ -16,6 +16,9 @@ export const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif
 /** 最大递归深度，避免目录环或异常深层结构拖慢扫描 */
 const MAX_DEPTH = 8
 
+/** 并行 stat 的分批大小：单批内并发获取 size/mtime，批间串行，避免一次性打开过多文件句柄 */
+const STAT_BATCH_SIZE = 64
+
 /** 跳过的文件/目录名（说明文件、隐藏项、无关目录） */
 const EXCLUDED_ENTRY = /^(put_|\.)/i
 const EXCLUDED_DIRS = new Set(['node_modules', '.git', '$RECYCLE.BIN', 'System Volume Information'])
@@ -97,9 +100,13 @@ export async function scanModels(root, onProgress, options = {}) {
     }
     dirCount += 1
 
+    // 先遍历目录项：入队子目录 + 收集待 stat 的模型文件
+    const fileEntries = []
     for (const entry of entries) {
       const name = entry.name
       if (EXCLUDED_ENTRY.test(name)) continue
+      // 跳过符号链接/junction：避免目录环、越界扫描与重复条目
+      if (entry.isSymbolicLink()) continue
 
       const fullPath = path.join(dir, name)
       const relChild = rel ? `${rel}/${name}` : name
@@ -113,24 +120,33 @@ export async function scanModels(root, onProgress, options = {}) {
       }
       if (!entry.isFile()) continue
       if (!extensions.has(path.extname(name).toLowerCase())) continue
+      fileEntries.push({ fullPath, name, relChild })
+    }
 
-      try {
-        const stat = await fs.stat(fullPath)
-        const ext = path.extname(name).toLowerCase()
+    // 分批并行 stat（仅取 size/mtime），批间串行控制并发句柄数
+    for (let i = 0; i < fileEntries.length; i += STAT_BATCH_SIZE) {
+      const batch = fileEntries.slice(i, i + STAT_BATCH_SIZE)
+      const stats = await Promise.allSettled(batch.map((f) => fs.stat(f.fullPath)))
+      batch.forEach((f, j) => {
+        const s = stats[j]
+        if (s.status === 'rejected') {
+          errors.push({ dir: f.fullPath, message: s.reason?.message || String(s.reason) })
+          return
+        }
+        const stat = s.value
+        const ext = path.extname(f.name).toLowerCase()
         models.push({
-          id: fullPath,
-          name: path.basename(name, ext),
+          id: f.fullPath,
+          name: path.basename(f.name, ext),
           ext,
-          type: classifyModel(rel ? rel.split('/') : [], name),
+          type: classifyModel(rel ? rel.split('/') : [], f.name),
           folder: dir,
           relDir: rel,
           size: stat.size,
           mtimeMs: stat.mtimeMs
         })
-        onProgress?.({ dirs: dirCount, found: models.length, current: relChild })
-      } catch (err) {
-        errors.push({ dir: fullPath, message: err.message })
-      }
+        onProgress?.({ dirs: dirCount, found: models.length, current: f.relChild })
+      })
     }
   }
 
