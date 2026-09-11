@@ -538,3 +538,53 @@ export async function setModelTags(id, tags) {
   if (res.meta) applyMetaFlags(id, res.meta)
   return true
 }
+
+/**
+ * 弹出模型右键菜单（主进程原生菜单）。
+ * @param {string} id 模型 id
+ */
+export async function showContextMenu(id) {
+  const res = await window.api.models.popupMenu(id)
+  if (res?.error) toast('error', res.error)
+}
+
+/**
+ * 处理主进程右键菜单回传的动作。
+ * @param {string} id 模型 id
+ * @param {string} action 动作标识
+ */
+export async function handleMenuAction(id, action) {
+  switch (action) {
+    case 'openDetail':
+      openDetail(id)
+      break
+    case 'toggleFavorite':
+      await toggleFavorite(id)
+      break
+    case 'deleteModel': {
+      const m = state.models.find((x) => x.id === id)
+      if (!m) break
+      if (!window.confirm(`确定将「${m.alias || m.name}」移入系统回收站吗？`)) break
+      await deleteModel(id)
+      break
+    }
+    default:
+      break
+  }
+}
+
+/**
+ * 拖拽导入封面（外部图片文件复制到封面目录并追加）。
+ * @param {string} id 模型 id
+ * @param {string} sourcePath 外部图片绝对路径
+ */
+export async function importCoverFromDrop(id, sourcePath) {
+  const res = await window.api.models.importCover(id, sourcePath)
+  if (res?.error) {
+    toast('error', res.error)
+    return false
+  }
+  applyCoverResult(id, res)
+  toast('success', '已从拖拽文件添加预览图')
+  return true
+}

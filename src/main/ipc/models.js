@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
@@ -22,6 +22,7 @@ import {
 import { findSidecarPreview, scanModels } from '../services/scanner'
 import {
   deleteCoverFile,
+  importCoverFromPath,
   isValidImageFile,
   pickAndSaveCover,
   pruneOrphanCovers,
@@ -136,6 +137,24 @@ function coverListFromMeta(meta) {
     const abs = resolveCoverSafe(rel)
     return { rel, path: abs, url: abs ? toImageUrl(abs) : '' }
   })
+}
+
+/** 将推荐参数格式化为可复制的文本（用于右键菜单「复制推荐参数」） */
+function paramSummaryFromMeta(params) {
+  if (!params) return ''
+  const parts = []
+  if (Number.isFinite(params.steps)) parts.push(`Steps: ${params.steps}`)
+  if (Number.isFinite(params.cfgMin) && Number.isFinite(params.cfgMax) && params.cfgMin !== params.cfgMax) {
+    parts.push(`CFG: ${params.cfgMin}~${params.cfgMax}`)
+  } else if (Number.isFinite(params.cfgMin)) {
+    parts.push(`CFG: ${params.cfgMin}`)
+  }
+  if (params.sampler) parts.push(`Sampler: ${params.sampler}`)
+  if (params.scheduler) parts.push(`Scheduler: ${params.scheduler}`)
+  if (Number.isFinite(params.resMin) && Number.isFinite(params.resMax)) {
+    parts.push(`Size: ${params.resMin}x${params.resMax}`)
+  }
+  return parts.join(', ')
 }
 
 /**
@@ -519,6 +538,50 @@ export function registerModelIpcHandlers() {
       return { error: '保存失败（模型需位于当前模型根目录内）' }
     }
     return { meta }
+  })
+
+  // 卡片/详情右键菜单：主进程构建原生菜单，动作经 menuAction 事件回传渲染进程
+  ipcMain.handle('models:popupMenu', (event, { id } = {}) => {
+    if (typeof id !== 'string' || !id || !isInRoot(id)) {
+      return { error: '无效的模型标识' }
+    }
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const meta = getModelMeta(id) || {}
+    const send = (action) => win?.webContents.send('models:menuAction', { id, action })
+    const items = [
+      { label: '打开详情', click: () => send('openDetail') },
+      { label: '打开所在文件夹', click: () => shell.showItemInFolder(id) },
+      { label: '复制文件路径', click: () => clipboard.writeText(id) }
+    ]
+    const summary = paramSummaryFromMeta(meta.params)
+    if (summary) {
+      items.push({ label: '复制推荐参数', click: () => clipboard.writeText(summary) })
+    }
+    items.push(
+      { type: 'separator' },
+      { label: meta.favorite ? '取消收藏' : '收藏', click: () => send('toggleFavorite') },
+      { label: '移入回收站', click: () => send('deleteModel') }
+    )
+    Menu.buildFromTemplate(items).popup({ window: win })
+    return { ok: true }
+  })
+
+  // 拖拽导入封面：将外部图片文件复制到封面目录并追加到封面列表
+  ipcMain.handle('models:importCover', async (event, { id, path: source } = {}) => {
+    if (typeof id !== 'string' || !id) {
+      return { error: '无效的模型标识' }
+    }
+    const result = await importCoverFromPath(source)
+    if (result.error) return result
+    const applied = appendCoverMeta(id, result.cover)
+    if (applied.error) return applied
+    logger.info(`拖拽封面已添加: ${id}`)
+    return {
+      cover: result.cover,
+      coverUrl: toImageUrl(result.cover),
+      covers: coverListFromMeta(applied.meta),
+      meta: applied.meta
+    }
   })
 
   // 在资源管理器中显示模型文件

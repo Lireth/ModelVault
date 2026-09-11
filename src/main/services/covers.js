@@ -17,6 +17,34 @@ function sanitizeBaseName(name) {
 }
 
 /**
+ * 校验并将外部图片文件复制到关联存储的封面目录（对话框选择与拖拽导入共用）。
+ * @param {string} source 源图片绝对路径
+ * @returns {Promise<{cover: string} | {error: string}>} cover 为复制后的绝对路径
+ */
+export async function importCoverFromPath(source) {
+  if (typeof source !== 'string' || !source) {
+    return { error: '无效的文件路径' }
+  }
+  const ext = path.extname(source).toLowerCase()
+  if (!IMAGE_EXTENSIONS.has(ext)) {
+    return { error: '不支持的图片格式，请选择 png/jpg/webp/gif/bmp 图片' }
+  }
+  try {
+    await fs.access(source)
+    await fs.mkdir(getCoversDir(), { recursive: true })
+    const baseName = sanitizeBaseName(path.basename(source, ext))
+    const fileName = `${Date.now()}-${baseName}${ext}`
+    const dest = path.join(getCoversDir(), fileName)
+    await fs.copyFile(source, dest)
+    logger.info(`封面已保存: ${dest}`)
+    return { cover: dest }
+  } catch (err) {
+    logger.error(`封面保存失败: ${err.message}`)
+    return { error: `封面保存失败: ${err.message}` }
+  }
+}
+
+/**
  * 弹出图片选择对话框，并将选中的图片复制到关联存储的封面目录。
  * @param {BrowserWindow} parentWin 父窗口
  * @returns {Promise<{cover: string} | {canceled: true} | {error: string}>}
@@ -33,26 +61,7 @@ export async function pickAndSaveCover(parentWin) {
   if (result.canceled || result.filePaths.length === 0) {
     return { canceled: true }
   }
-
-  const source = result.filePaths[0]
-  const ext = path.extname(source).toLowerCase()
-  if (!IMAGE_EXTENSIONS.has(ext)) {
-    return { error: '不支持的图片格式，请选择 png/jpg/webp/gif/bmp 图片' }
-  }
-
-  try {
-    await fs.access(source)
-    await fs.mkdir(getCoversDir(), { recursive: true })
-    const baseName = sanitizeBaseName(path.basename(source, ext))
-    const fileName = `${Date.now()}-${baseName}${ext}`
-    const dest = path.join(getCoversDir(), fileName)
-    await fs.copyFile(source, dest)
-    logger.info(`封面已保存: ${dest}`)
-    return { cover: dest }
-  } catch (err) {
-    logger.error(`封面保存失败: ${err.message}`)
-    return { error: `封面保存失败: ${err.message}` }
-  }
+  return importCoverFromPath(result.filePaths[0])
 }
 
 /** 校验路径是否为存在的图片文件 */

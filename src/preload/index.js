@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 /**
  * IPC 通道白名单：渲染进程只能通过以下通道通信，防止任意通道调用。
@@ -20,11 +20,13 @@ const VALID_INVOKE_CHANNELS = [
   'models:deleteModel',
   'models:renameModel',
   'models:setMetaFlags',
+  'models:popupMenu',
+  'models:importCover',
   'models:reveal',
   'models:flushStore'
 ]
 
-const VALID_RECEIVE_CHANNELS = ['models:scanProgress']
+const VALID_RECEIVE_CHANNELS = ['models:scanProgress', 'models:menuAction']
 
 /** 带白名单校验的 invoke（所有便捷方法的统一入口） */
 function invokeValidated(channel, payload) {
@@ -44,11 +46,16 @@ function subscribe(channel, listener) {
   return () => ipcRenderer.removeListener(channel, handler)
 }
 
-/**
- * 通过 contextBridge 向渲染进程暴露安全的 API。
- * 渲染进程无 Node 能力，只能使用此处显式暴露的接口。
- */
+/** 通过 contextBridge 向渲染进程暴露安全的 API。 */
 const api = {
+  /**
+   * 获取拖拽文件的真实路径（Electron 32+ 移除了 File.path，
+   * 渲染进程须通过 webUtils 解析）。
+   * @param {File} file 拖拽事件中的文件对象
+   * @returns {string} 文件绝对路径
+   */
+  getPathForFile: (file) => webUtils.getPathForFile(file),
+
   /** 应用信息 */
   app: {
     /** 应用与运行时版本信息 */
@@ -93,12 +100,18 @@ const api = {
     renameModel: (id, newName) => invokeValidated('models:renameModel', { id, newName }),
     /** 更新快捷标记（收藏/评分/标签，仅传需更新的字段），返回 { meta } 或 { error } */
     setMetaFlags: (payload) => invokeValidated('models:setMetaFlags', payload),
+    /** 弹出模型右键菜单（原生菜单），动作经 onMenuAction 事件回传 */
+    popupMenu: (id) => invokeValidated('models:popupMenu', { id }),
+    /** 拖拽导入封面（sourcePath 为外部图片绝对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */
+    importCover: (id, sourcePath) => invokeValidated('models:importCover', { id, path: sourcePath }),
     /** 在资源管理器中显示文件 */
     reveal: (path) => invokeValidated('models:reveal', { path }),
     /** 立即落盘 */
     flushStore: () => invokeValidated('models:flushStore'),
     /** 订阅扫描进度，返回取消监听函数 */
-    onScanProgress: (listener) => subscribe('models:scanProgress', listener)
+    onScanProgress: (listener) => subscribe('models:scanProgress', listener),
+    /** 订阅右键菜单动作事件，返回取消监听函数 */
+    onMenuAction: (listener) => subscribe('models:menuAction', listener)
   }
 }
 

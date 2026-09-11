@@ -8,6 +8,7 @@ import ToastHost from './components/ToastHost.vue'
 import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import {
   filteredModels,
+  handleMenuAction,
   initApp,
   LORA_TAGS,
   state,
@@ -33,17 +34,23 @@ function clearSearch() {
 }
 
 let unsubscribeProgress = null
+let unsubscribeMenu = null
 
 onMounted(async () => {
   // 订阅扫描进度事件
   unsubscribeProgress = window.api.models.onScanProgress((progress) => {
     state.progress = progress
   })
+  // 订阅右键菜单动作事件
+  unsubscribeMenu = window.api.models.onMenuAction(({ id, action }) => {
+    handleMenuAction(id, action)
+  })
   await initApp()
 })
 
 onUnmounted(() => {
   unsubscribeProgress?.()
+  unsubscribeMenu?.()
 })
 </script>
 

@@ -5,6 +5,7 @@ import {
   deleteCover,
   deleteModel,
   formatSize,
+  importCoverFromDrop,
   matchCivitai,
   pasteCover,
   renameModel,
@@ -14,6 +15,7 @@ import {
   setDefaultCover,
   setModelTags,
   setRating,
+  showContextMenu,
   subCategoryInfo,
   tagsForType,
   toast,
@@ -255,6 +257,48 @@ async function removeTag(tag) {
   }
 }
 
+/* ---------------- 拖拽导入封面 ---------------- */
+
+/** 拖拽悬停高亮 */
+const dropActive = ref(false)
+
+/** 拖拽悬停：仅当包含文件时高亮 */
+function onDragOver(e) {
+  if (Array.from(e.dataTransfer?.types || []).includes('Files')) {
+    e.preventDefault()
+    dropActive.value = true
+  }
+}
+
+function onDragLeave() {
+  dropActive.value = false
+}
+
+/** 放下文件：逐个导入为预览图（多个文件依次追加） */
+async function onDropCover(e) {
+  dropActive.value = false
+  const model = selectedModel.value
+  if (!model) return
+  const files = Array.from(e.dataTransfer?.files || [])
+  if (files.length === 0) return
+  e.preventDefault()
+  busy.value = true
+  try {
+    for (const file of files) {
+      const sourcePath = window.api.getPathForFile(file)
+      if (!sourcePath) continue
+      await importCoverFromDrop(model.id, sourcePath)
+    }
+  } finally {
+    busy.value = false
+  }
+}
+
+/** 详情面板右键菜单 */
+function onPanelContextMenu() {
+  if (selectedModel.value) showContextMenu(selectedModel.value.id)
+}
+
 const info = computed(() => (selectedModel.value ? typeInfo(selectedModel.value.type) : null))
 
 /** 当前模型类型可用的分类标签列表（无标签的类型返回 null） */
@@ -421,7 +465,7 @@ async function onUploadCover() {
 <template>
   <Teleport to="body">
     <div v-if="selectedModel" class="detail-mask" @click.self="closeDetail">
-      <section class="detail-panel">
+      <section class="detail-panel" @contextmenu.prevent="onPanelContextMenu">
         <header class="detail-header">
           <h2 :title="selectedModel.name">{{ displayName }}</h2>
           <div class="detail-header-actions">
@@ -441,19 +485,28 @@ async function onUploadCover() {
         <div class="detail-body">
           <!-- 左侧：封面 -->
           <div class="detail-cover-col">
-            <div class="detail-cover">
+            <div
+              class="detail-cover"
+              :class="{ 'drop-active': dropActive }"
+              title="可直接拖入图片文件作为预览图"
+              @dragover="onDragOver"
+              @dragleave="onDragLeave"
+              @drop="onDropCover"
+            >
               <img v-if="coverSrc" :src="coverSrc" :alt="selectedModel.name" draggable="false" />
               <div v-else class="cover-placeholder">
                 <span class="cover-ext">{{ selectedModel.ext }}</span>
               </div>
               <span class="type-badge" :style="{ background: info.color }">{{ info.label }}</span>
+              <span v-if="dropActive" class="drop-hint">松开导入</span>
             </div>
             <button class="btn btn-primary" :disabled="busy" @click="onUploadCover">
               {{ covers.length ? '上传图片' : '上传封面图片' }}
             </button>
             <button class="btn" :disabled="busy" @click="onPasteCover">粘贴图片 (Ctrl+V)</button>
             <p class="cover-hint">
-              支持 png / jpg / webp / gif / bmp，可添加多张预览图，点击缩略图将其设为首页默认显示
+              支持 png / jpg / webp / gif / bmp，可添加多张预览图（上传 / Ctrl+V / 直接拖入图片文件），
+              点击缩略图将其设为首页默认显示
             </p>
 
             <div v-if="covers.length" class="cover-thumbs">
@@ -794,6 +847,24 @@ async function onUploadCover() {
   color: #10141a;
   padding: 3px 10px;
   border-radius: 999px;
+}
+
+/* 拖拽导入封面：悬停高亮 + 提示 */
+.detail-cover.drop-active {
+  border: 2px dashed var(--accent);
+}
+
+.drop-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 9, 12, 0.55);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  pointer-events: none;
 }
 
 .cover-hint {

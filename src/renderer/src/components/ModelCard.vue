@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { formatSize, openDetail, state, subCategoryInfo, toggleFavorite, typeInfo } from '../store/appStore'
+import { formatSize, openDetail, showContextMenu, state, subCategoryInfo, toggleFavorite, typeInfo } from '../store/appStore'
 
 const props = defineProps({
   model: { type: Object, required: true }
@@ -11,6 +11,11 @@ const info = computed(() => typeInfo(props.model.type))
 /** 收藏/取消收藏（阻止冒泡，避免打开详情页） */
 function onToggleFavorite() {
   toggleFavorite(props.model.id)
+}
+
+/** 右键菜单（阻止默认浏览器菜单） */
+function onContextMenu() {
+  showContextMenu(props.model.id)
 }
 
 /** 显示名称：备注名优先，为空时回退文件名 */
@@ -51,7 +56,7 @@ const mtimeText = computed(() => {
 </script>
 
 <template>
-  <article class="model-card" :title="model.id" @click="openDetail(model.id)">
+  <article class="model-card" :title="model.id" @click="openDetail(model.id)" @contextmenu.prevent="onContextMenu">
     <div class="cover">
       <img
         v-if="model.coverUrl"
