@@ -12,9 +12,12 @@ import {
   saveModelData,
   selectedModel,
   setDefaultCover,
+  setModelTags,
+  setRating,
   subCategoryInfo,
   tagsForType,
   toast,
+  toggleFavorite,
   typeInfo,
   uploadCover
 } from '../store/appStore'
@@ -189,6 +192,66 @@ async function onDeleteModel() {
     toast('error', `删除失败: ${err.message}`)
   } finally {
     busy.value = false
+  }
+}
+
+/* ---------------- 收藏 / 评分 / 自定义标签 ---------------- */
+
+/** 详情页切换收藏 */
+async function onToggleFavorite() {
+  const model = selectedModel.value
+  if (!model) return
+  try {
+    await toggleFavorite(model.id)
+  } catch (err) {
+    toast('error', `收藏操作失败: ${err.message}`)
+  }
+}
+
+/** 点击星标设置评分（点击当前评分则清零） */
+async function onSetRating(value) {
+  const model = selectedModel.value
+  if (!model) return
+  const next = model.rating === value ? 0 : value
+  try {
+    await setRating(model.id, next)
+  } catch (err) {
+    toast('error', `评分失败: ${err.message}`)
+  }
+}
+
+/** 新标签输入内容 */
+const tagInput = ref('')
+
+/** 添加标签（去重，上限 20 个） */
+async function addTag() {
+  const model = selectedModel.value
+  const tag = tagInput.value.trim().slice(0, 30)
+  if (!model || !tag) return
+  if ((model.tags || []).includes(tag)) {
+    tagInput.value = ''
+    return
+  }
+  if ((model.tags || []).length >= 20) {
+    toast('warn', '每个模型最多添加 20 个标签')
+    return
+  }
+  tagInput.value = ''
+  try {
+    await setModelTags(model.id, [...(model.tags || []), tag])
+  } catch (err) {
+    toast('error', `添加标签失败: ${err.message}`)
+  }
+}
+
+/** 移除标签 */
+async function removeTag(tag) {
+  const model = selectedModel.value
+  if (!model) return
+  try {
+    await setModelTags(model.id, (model.tags || []).filter((t) => t !== tag))
+  } catch (err) {
+    toast('error', `移除标签失败: ${err.message}`)
   }
 }
 
@@ -454,6 +517,45 @@ async function onUploadCover() {
                   target="_blank"
                 >打开模型页面 ↗</a>
               </div>
+            </div>
+
+            <!-- 收藏 / 评分 / 自定义标签 -->
+            <div class="flags-row">
+              <button
+                class="fav-toggle"
+                :class="{ active: selectedModel.favorite }"
+                type="button"
+                :title="selectedModel.favorite ? '取消收藏' : '收藏该模型'"
+                @click="onToggleFavorite"
+              >{{ selectedModel.favorite ? '★ 已收藏' : '☆ 收藏' }}</button>
+              <div class="rating" title="点击星标评分，再次点击当前星标清除">
+                <span class="rating-label">评分</span>
+                <button
+                  v-for="i in 5"
+                  :key="i"
+                  class="star"
+                  :class="{ on: i <= (selectedModel.rating || 0) }"
+                  type="button"
+                  @click="onSetRating(i)"
+                >★</button>
+              </div>
+            </div>
+
+            <h3>自定义标签</h3>
+            <div class="tags-editor">
+              <span v-for="t in selectedModel.tags || []" :key="t" class="tag-chip">
+                {{ t }}
+                <button class="tag-remove" type="button" :title="`移除标签 ${t}`" @click="removeTag(t)">✕</button>
+              </span>
+              <input
+                v-model="tagInput"
+                class="tag-input"
+                type="text"
+                maxlength="30"
+                spellcheck="false"
+                placeholder="添加标签，回车确认"
+                @keyup.enter="addTag"
+              />
             </div>
 
             <!-- 分类标签：LoRA / Checkpoint / 其他模型可标注 -->
@@ -938,6 +1040,123 @@ async function onUploadCover() {
 }
 
 .rename-row input:focus {
+  border-color: var(--accent);
+}
+
+/* ---------- 收藏 / 评分 / 自定义标签 ---------- */
+.flags-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.fav-toggle {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.fav-toggle:hover {
+  border-color: #f5b301;
+  color: #f5b301;
+}
+
+.fav-toggle.active {
+  border-color: #f5b301;
+  color: #f5b301;
+  font-weight: 600;
+}
+
+.rating {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.rating-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-right: 6px;
+}
+
+.star {
+  border: none;
+  background: transparent;
+  color: var(--border);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 1px;
+  cursor: pointer;
+  transition: color 0.12s ease, transform 0.12s ease;
+}
+
+.star:hover {
+  transform: scale(1.15);
+}
+
+.star.on {
+  color: #f5b301;
+}
+
+.tags-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  max-width: 240px;
+}
+
+.tag-chip > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.tag-remove:hover {
+  color: #e5484d;
+  background: var(--bg-hover);
+}
+
+.tag-input {
+  width: 160px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+
+.tag-input:focus {
   border-color: var(--accent);
 }
 

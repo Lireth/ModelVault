@@ -86,6 +86,9 @@ async function decorateOne(model, usedThumbs) {
     params: meta.params || null,
     alias: meta.alias || '',
     note: meta.note || '',
+    favorite: meta.favorite === true,
+    rating: meta.rating || 0,
+    tags: meta.tags || [],
     // 大模型自动标注为「基底模型」分类（未手动标注时默认生效）
     subCategory: meta.subCategory || (model.type === 'checkpoint' ? 'base' : '')
   }
@@ -485,6 +488,37 @@ export function registerModelIpcHandlers() {
     renameModelMeta(id, newId)
     logger.info(`模型已重命名: ${id} -> ${newId}`)
     return { ok: true, id: newId, name }
+  })
+
+  // 更新模型快捷标记（收藏/评分/自定义标签；仅更新传入的字段，即时落盘）
+  ipcMain.handle('models:setMetaFlags', (event, { id, favorite, rating, tags } = {}) => {
+    if (typeof id !== 'string' || !id) {
+      return { error: '无效的模型标识' }
+    }
+    const patch = {}
+    if (favorite !== undefined) {
+      if (typeof favorite !== 'boolean') return { error: '无效的收藏状态' }
+      patch.favorite = favorite
+    }
+    if (rating !== undefined) {
+      if (!Number.isInteger(rating) || rating < 0 || rating > 5) {
+        return { error: '评分需为 0-5 的整数' }
+      }
+      patch.rating = rating
+    }
+    if (tags !== undefined) {
+      if (!Array.isArray(tags)) return { error: '无效的标签列表' }
+      patch.tags = tags
+    }
+    if (Object.keys(patch).length === 0) {
+      return { error: '无有效的更新字段' }
+    }
+    const existing = getModelMeta(id) || {}
+    const meta = setModelMeta(id, { ...existing, ...patch })
+    if (!meta) {
+      return { error: '保存失败（模型需位于当前模型根目录内）' }
+    }
+    return { meta }
   })
 
   // 在资源管理器中显示模型文件

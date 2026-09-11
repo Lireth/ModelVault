@@ -19,6 +19,7 @@ const VALID_INVOKE_CHANNELS = [
   'models:civitaiMatch',
   'models:deleteModel',
   'models:renameModel',
+  'models:setMetaFlags',
   'models:reveal',
   'models:flushStore'
 ]
@@ -90,6 +91,8 @@ const api = {
     deleteModel: (id) => invokeValidated('models:deleteModel', { id }),
     /** 重命名模型文件（联动元数据与 sidecar），返回 { ok, id, name } 或 { error } */
     renameModel: (id, newName) => invokeValidated('models:renameModel', { id, newName }),
+    /** 更新快捷标记（收藏/评分/标签，仅传需更新的字段），返回 { meta } 或 { error } */
+    setMetaFlags: (payload) => invokeValidated('models:setMetaFlags', payload),
     /** 在资源管理器中显示文件 */
     reveal: (path) => invokeValidated('models:reveal', { path }),
     /** 立即落盘 */

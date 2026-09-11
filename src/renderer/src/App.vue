@@ -122,6 +122,13 @@ onUnmounted(() => {
             <span v-if="state.typeFilter !== 'all'" class="chip">
               {{ typeInfo(state.typeFilter).label }}
             </span>
+            <!-- 收藏筛选：仅显示收藏的模型 -->
+            <button
+              class="fav-filter"
+              :class="{ active: state.showFavoritesOnly }"
+              :title="state.showFavoritesOnly ? '显示全部模型' : '仅显示收藏的模型'"
+              @click="state.showFavoritesOnly = !state.showFavoritesOnly"
+            >★ 收藏</button>
             <!-- LoRA 分类筛选：仅选中 LoRA 分类时显示（即使筛选结果为空也保持可见） -->
             <label v-if="state.typeFilter === 'lora'" class="sort-select sub-filter" title="按 LoRA 分类筛选">
               <span class="sort-label">分类</span>
@@ -281,6 +288,29 @@ onUnmounted(() => {
   border-radius: 999px;
   background: var(--bg-active);
   color: var(--accent);
+}
+
+/* 收藏筛选按钮 */
+.fav-filter {
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.fav-filter:hover {
+  color: #f5b301;
+  border-color: #f5b301;
+}
+
+.fav-filter.active {
+  border-color: #f5b301;
+  color: #f5b301;
+  font-weight: 600;
 }
 
 /* 空状态 */

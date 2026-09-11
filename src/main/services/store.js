@@ -192,6 +192,15 @@ function normalizeModelMeta(raw) {
   }
   let cover = typeof raw.cover === 'string' ? raw.cover : ''
   if (!cover && covers.length > 0) cover = covers[0]
+  // 自定义标签：字符串数组，去空、去重、限量
+  const tags = Array.isArray(raw.tags)
+    ? [...new Set(
+        raw.tags
+          .filter((t) => typeof t === 'string')
+          .map((t) => t.trim().slice(0, 30))
+          .filter(Boolean)
+      )].slice(0, 20)
+    : []
   return {
     cover,
     covers,
@@ -199,6 +208,12 @@ function normalizeModelMeta(raw) {
     alias: typeof raw.alias === 'string' ? raw.alias.trim().slice(0, 100) : '',
     note: typeof raw.note === 'string' ? raw.note.slice(0, 2000) : '',
     subCategory: VALID_SUB_CATEGORIES.has(raw.subCategory) ? raw.subCategory : '',
+    // 收藏标记（false 为未收藏）
+    favorite: raw.favorite === true,
+    // 评分（0-5 整数，0 为未评分）
+    rating: Number.isInteger(raw.rating) && raw.rating >= 0 && raw.rating <= 5 ? raw.rating : 0,
+    // 自定义多标签
+    tags,
     params: {
       steps: Number.isFinite(params.steps) ? params.steps : null,
       // CFG 为区间字段；兼容旧版单值 cfg（迁移为 min = max = 旧值）

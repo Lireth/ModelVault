@@ -99,6 +99,7 @@ export const state = reactive({
   // 筛选 / 排序
   typeFilter: 'all',
   subFilter: '', // LoRA 分类筛选（仅 typeFilter 为 lora 时生效）
+  showFavoritesOnly: false, // 仅显示收藏的模型
   search: '',
   sortBy: 'name', // name | size | mtime
   // 详情
@@ -250,8 +251,12 @@ export const filteredModels = computed(() => {
   if (state.typeFilter === 'lora' && state.subFilter) {
     list = list.filter((m) => m.subCategory === state.subFilter)
   }
+  // 收藏筛选
+  if (state.showFavoritesOnly) {
+    list = list.filter((m) => m.favorite)
+  }
   if (keyword) {
-    // 搜索范围：文件名、备注名、备注（触发词常记录在备注中）、分类标签（含中文标签）
+    // 搜索范围：文件名、备注名、备注（触发词常记录在备注中）、分类标签（含中文标签）、自定义标签
     list = list.filter((m) => {
       if (m.name.toLowerCase().includes(keyword)) return true
       if (m.alias && m.alias.toLowerCase().includes(keyword)) return true
@@ -261,6 +266,7 @@ export const filteredModels = computed(() => {
         const info = SUB_MAP[m.subCategory]
         if (info && info.label.toLowerCase().includes(keyword)) return true
       }
+      if ((m.tags || []).some((t) => t.toLowerCase().includes(keyword))) return true
       return false
     })
   }
@@ -471,5 +477,64 @@ export async function renameModel(id, newName) {
   // 详情面板跟随新 id 保持打开
   if (state.selectedId === id && res.id) state.selectedId = res.id
   toast('success', '重命名成功')
+  return true
+}
+
+/** 将快捷标记同步到本地模型列表 */
+function applyMetaFlags(id, meta) {
+  const idx = state.models.findIndex((m) => m.id === id)
+  if (idx >= 0) {
+    state.models[idx] = {
+      ...state.models[idx],
+      favorite: meta.favorite === true,
+      rating: meta.rating || 0,
+      tags: meta.tags || []
+    }
+  }
+}
+
+/**
+ * 切换收藏状态（即时落盘，不弹提示）。
+ * @param {string} id 模型 id
+ */
+export async function toggleFavorite(id) {
+  const m = state.models.find((x) => x.id === id)
+  const next = !m?.favorite
+  const res = await window.api.models.setMetaFlags({ id, favorite: next })
+  if (res?.error) {
+    toast('error', res.error)
+    return false
+  }
+  if (res.meta) applyMetaFlags(id, res.meta)
+  return true
+}
+
+/**
+ * 设置评分（0-5 整数，即时落盘）。
+ * @param {string} id 模型 id
+ * @param {number} rating 评分
+ */
+export async function setRating(id, rating) {
+  const res = await window.api.models.setMetaFlags({ id, rating })
+  if (res?.error) {
+    toast('error', res.error)
+    return false
+  }
+  if (res.meta) applyMetaFlags(id, res.meta)
+  return true
+}
+
+/**
+ * 更新自定义标签列表（即时落盘）。
+ * @param {string} id 模型 id
+ * @param {string[]} tags 标签列表
+ */
+export async function setModelTags(id, tags) {
+  const res = await window.api.models.setMetaFlags({ id, tags })
+  if (res?.error) {
+    toast('error', res.error)
+    return false
+  }
+  if (res.meta) applyMetaFlags(id, res.meta)
   return true
 }

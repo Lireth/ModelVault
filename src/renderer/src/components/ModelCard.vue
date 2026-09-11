@@ -1,12 +1,17 @@
 <script setup>
 import { computed } from 'vue'
-import { formatSize, openDetail, state, subCategoryInfo, typeInfo } from '../store/appStore'
+import { formatSize, openDetail, state, subCategoryInfo, toggleFavorite, typeInfo } from '../store/appStore'
 
 const props = defineProps({
   model: { type: Object, required: true }
 })
 
 const info = computed(() => typeInfo(props.model.type))
+
+/** 收藏/取消收藏（阻止冒泡，避免打开详情页） */
+function onToggleFavorite() {
+  toggleFavorite(props.model.id)
+}
 
 /** 显示名称：备注名优先，为空时回退文件名 */
 const displayName = computed(() => props.model.alias || props.model.name)
@@ -64,7 +69,15 @@ const mtimeText = computed(() => {
       </span>
     </div>
     <div class="card-body">
-      <h4 class="model-name" :title="model.name">{{ displayName }}</h4>
+      <div class="name-row">
+        <h4 class="model-name" :title="model.name">{{ displayName }}</h4>
+        <button
+          class="fav-btn"
+          :class="{ active: model.favorite }"
+          :title="model.favorite ? '取消收藏' : '收藏'"
+          @click.stop="onToggleFavorite"
+        >★</button>
+      </div>
       <div v-if="state.settings.showSize || state.settings.showMtime" class="model-meta">
         <span v-if="state.settings.showSize">{{ formatSize(model.size) }}</span>
         <span v-if="state.settings.showMtime">{{ mtimeText }}</span>
@@ -76,6 +89,38 @@ const mtimeText = computed(() => {
 </template>
 
 <style scoped>
+/* 名称 + 收藏星标行 */
+.name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fav-btn {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--border);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.fav-btn:hover {
+  color: #f5b301;
+}
+
+.fav-btn.active {
+  color: #f5b301;
+}
+
+.name-row .model-name {
+  flex: 1;
+  min-width: 0;
+}
 .model-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
