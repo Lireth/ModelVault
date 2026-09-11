@@ -251,7 +251,18 @@ export const filteredModels = computed(() => {
     list = list.filter((m) => m.subCategory === state.subFilter)
   }
   if (keyword) {
-    list = list.filter((m) => m.name.toLowerCase().includes(keyword))
+    // 搜索范围：文件名、备注名、备注（触发词常记录在备注中）、分类标签（含中文标签）
+    list = list.filter((m) => {
+      if (m.name.toLowerCase().includes(keyword)) return true
+      if (m.alias && m.alias.toLowerCase().includes(keyword)) return true
+      if (m.note && m.note.toLowerCase().includes(keyword)) return true
+      if (m.subCategory) {
+        if (m.subCategory.toLowerCase().includes(keyword)) return true
+        const info = SUB_MAP[m.subCategory]
+        if (info && info.label.toLowerCase().includes(keyword)) return true
+      }
+      return false
+    })
   }
   const sorted = [...list]
   switch (state.sortBy) {

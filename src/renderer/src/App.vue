@@ -62,12 +62,12 @@ onUnmounted(() => {
         <template v-else>
         <!-- 搜索 + 排序：位于模型清单上方（选择文件夹后显示） -->
         <div v-if="state.folder" class="search-row">
-          <div class="search-box" title="按模型名称搜索">
+          <div class="search-box" title="搜索名称、备注名、备注与分类标签">
             <span class="search-icon">🔍</span>
             <input
               v-model="searchInput"
               type="text"
-              placeholder="搜索模型名称…"
+              placeholder="搜索名称 / 备注 / 触发词…"
               spellcheck="false"
             />
             <button v-if="searchInput" class="search-clear" title="清空搜索" @click="clearSearch">✕</button>
