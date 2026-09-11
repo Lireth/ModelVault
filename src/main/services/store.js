@@ -282,7 +282,13 @@ export async function loadData() {
       await migrateLegacyData()
     } else {
       data = { version: 1, models: {} }
-      logger.error(`关联存储加载失败，已重置: ${err.message}`)
+      // store.json 损坏（如写入中断电、磁盘错误）：先备份原文件再重置，保留手动恢复机会
+      try {
+        await fs.rename(file, `${file}.bak`)
+        logger.error(`关联存储文件损坏，原文件已备份为 ${DATA_FILE}.bak 后重置: ${err.message}`)
+      } catch (backupErr) {
+        logger.error(`关联存储加载失败，已重置（备份失败: ${backupErr.message}）: ${err.message}`)
+      }
     }
   }
   return data
