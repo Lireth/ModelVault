@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
 import { IMAGE_EXTENSIONS } from './scanner'
-import { getCoversDir } from './store'
+import { COVERS_DIR, DATA_DIR, getCoversDir, getReferencedCovers, relativizeCover, wasDataReset } from './store'
 
 /**
  * 封面图片管理：用户在详情页上传的预览图会复制到
@@ -97,5 +97,46 @@ export async function saveClipboardImage() {
   } catch (err) {
     logger.error(`剪贴板图片保存失败: ${err.message}`)
     return { error: `剪贴板图片保存失败: ${err.message}` }
+  }
+}
+
+/**
+ * 删除封面物理文件（仅允许删除关联存储封面目录内的文件）。
+ * @param {string} absCover 封面绝对路径
+ * @returns {Promise<boolean>} 是否删除成功（路径越界或删除失败返回 false）
+ */
+export async function deleteCoverFile(absCover) {
+  if (!absCover || typeof absCover !== 'string') return false
+  if (!relativizeCover(absCover)) return false
+  try {
+    await fs.rm(absCover, { force: true })
+    return true
+  } catch (err) {
+    logger.warn(`封面文件删除失败: ${err.message}`)
+    return false
+  }
+}
+
+/**
+ * 清理封面目录中不再被任何元数据引用的孤儿文件
+ * （元数据被手动删除/损坏修复后遗留的失效封面）。
+ * 元数据因损坏被重置时跳过清理，避免把仍有价值的封面误删。
+ */
+export async function pruneOrphanCovers() {
+  try {
+    if (wasDataReset()) {
+      logger.warn('元数据曾损坏重置，跳过孤儿封面清理以避免误删')
+      return
+    }
+    const referenced = getReferencedCovers()
+    const dir = getCoversDir()
+    const entries = await fs.readdir(dir)
+    const prefix = `${DATA_DIR}/${COVERS_DIR}/`
+    const stale = entries.filter((n) => !referenced.has(`${prefix}${n}`))
+    if (stale.length === 0) return
+    await Promise.all(stale.map((n) => fs.rm(path.join(dir, n), { force: true })))
+    logger.info(`已清理 ${stale.length} 个孤儿封面文件`)
+  } catch (err) {
+    if (err.code !== 'ENOENT') logger.warn(`孤儿封面清理失败: ${err.message}`)
   }
 }

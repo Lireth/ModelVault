@@ -389,6 +389,23 @@ export async function setDefaultCover(id, cover) {
   return true
 }
 
+/**
+ * 删除单张封面（物理文件 + 元数据），并同步本地列表。
+ * 删除默认封面时主进程自动回退到下一张；无剩余封面时卡片回退 sidecar 预览图。
+ * @param {string} id 模型 id
+ * @param {string} cover 封面相对路径
+ */
+export async function deleteCover(id, cover) {
+  const res = await window.api.models.deleteCover(id, cover)
+  if (res.error) {
+    toast('error', res.error)
+    return false
+  }
+  applyCoverResult(id, res)
+  toast('success', '封面已删除')
+  return true
+}
+
 /** 在资源管理器中显示模型文件 */
 export async function revealModel(modelPath) {
   const res = await window.api.models.reveal(modelPath)

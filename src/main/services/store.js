@@ -19,9 +19,9 @@ import logger from '../logger'
 
 const SETTINGS_FILE = 'settings.json'
 const LEGACY_STORE_FILE = 'store.json'
-const DATA_DIR = '.modelvault'
-const DATA_FILE = 'store.json'
-const COVERS_DIR = 'covers'
+export const DATA_DIR = '.modelvault'
+export const DATA_FILE = 'store.json'
+export const COVERS_DIR = 'covers'
 const SAVE_DELAY = 500
 
 /** 「其他模型」允许的二级分类标签 */
@@ -106,6 +106,8 @@ let saveTimer = null
 let saving = false
 /** 写盘进行期间收到的新保存请求（落盘完成后需补写一次，避免丢失） */
 let pendingSave = false
+/** 元数据是否因损坏被重置（为 true 时应跳过孤儿封面清理，避免误删） */
+let dataReset = false
 
 /* ---------------- 路径辅助 ---------------- */
 
@@ -277,6 +279,7 @@ export function setDataRoot(root) {
  * store.json 不存在时创建空数据，并尝试从旧版全局存储迁移属于该目录的记录。
  */
 export async function loadData() {
+  dataReset = false
   if (!currentRoot) {
     data = { version: 1, models: {} }
     return data
@@ -297,6 +300,7 @@ export async function loadData() {
       await migrateLegacyData()
     } else {
       data = { version: 1, models: {} }
+      dataReset = true
       // store.json 损坏（如写入中断电、磁盘错误）：先备份原文件再重置，保留手动恢复机会
       try {
         await fs.rename(file, `${file}.bak`)
@@ -307,6 +311,22 @@ export async function loadData() {
     }
   }
   return data
+}
+
+/** 元数据是否因损坏被重置（孤儿封面清理前应检查，避免误删） */
+export function wasDataReset() {
+  return dataReset
+}
+
+/** 收集元数据中引用的所有封面相对路径（孤儿封面清理的保留名单） */
+export function getReferencedCovers() {
+  const refs = new Set()
+  if (!data) return refs
+  for (const meta of Object.values(data.models)) {
+    if (meta.cover) refs.add(meta.cover)
+    for (const c of meta.covers || []) refs.add(c)
+  }
+  return refs
 }
 
 /**

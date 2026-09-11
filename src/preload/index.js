@@ -20,6 +20,7 @@ const VALID_INVOKE_CHANNELS = [
   'models:uploadCover',
   'models:pasteCover',
   'models:setDefaultCover',
+  'models:deleteCover',
   'models:reveal',
   'models:flushStore'
 ]
@@ -98,6 +99,8 @@ const api = {
     pasteCover: (id) => ipcRenderer.invoke('models:pasteCover', { id }),
     /** 设置默认封面（cover 为封面相对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */
     setDefaultCover: (id, cover) => ipcRenderer.invoke('models:setDefaultCover', { id, cover }),
+    /** 删除单张封面（cover 为封面相对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */
+    deleteCover: (id, cover) => ipcRenderer.invoke('models:deleteCover', { id, cover }),
     /** 在资源管理器中显示文件 */
     reveal: (path) => ipcRenderer.invoke('models:reveal', { path }),
     /** 立即落盘 */

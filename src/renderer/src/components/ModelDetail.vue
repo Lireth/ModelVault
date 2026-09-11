@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   closeDetail,
+  deleteCover,
   formatSize,
   pasteCover,
   revealModel,
@@ -125,6 +126,21 @@ async function onSetDefault(c) {
     await setDefaultCover(model.id, c.rel)
   } catch (err) {
     toast('error', `设置默认封面失败: ${err.message}`)
+  } finally {
+    busy.value = false
+  }
+}
+
+/** 删除指定封面（需确认；默认封面被删时自动回退到下一张） */
+async function onDeleteCover(c) {
+  const model = selectedModel.value
+  if (!model) return
+  if (!window.confirm('确定删除这张预览图吗？该操作不可恢复。')) return
+  busy.value = true
+  try {
+    await deleteCover(model.id, c.rel)
+  } catch (err) {
+    toast('error', `删除封面失败: ${err.message}`)
   } finally {
     busy.value = false
   }
@@ -261,6 +277,12 @@ async function onUploadCover() {
               >
                 <img :src="c.url" alt="预览图" loading="lazy" draggable="false" />
                 <span v-if="isDefault(c)" class="thumb-badge">默认</span>
+                <button
+                  class="thumb-delete"
+                  title="删除这张预览图"
+                  type="button"
+                  @click.stop="onDeleteCover(c)"
+                >✕</button>
               </div>
             </div>
           </div>
@@ -536,6 +558,34 @@ async function onUploadCover() {
   border-radius: 999px;
   padding: 1px 7px;
   opacity: 0.95;
+}
+
+/* 封面删除按钮：悬停缩略图时显示在左上角 */
+.thumb-delete {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.cover-thumb:hover .thumb-delete {
+  display: flex;
+}
+
+.thumb-delete:hover {
+  background: #e5484d;
 }
 
 .file-info {

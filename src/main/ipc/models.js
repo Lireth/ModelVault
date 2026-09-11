@@ -16,7 +16,13 @@ import {
   updateSettings
 } from '../services/store'
 import { findSidecarPreview, scanModels } from '../services/scanner'
-import { isValidImageFile, pickAndSaveCover, saveClipboardImage } from '../services/covers'
+import {
+  deleteCoverFile,
+  isValidImageFile,
+  pickAndSaveCover,
+  pruneOrphanCovers,
+  saveClipboardImage
+} from '../services/covers'
 import { getThumbPath, pruneThumbs } from '../services/thumbs'
 import { toImageUrl } from '../protocol'
 
@@ -141,6 +147,8 @@ export function registerModelIpcHandlers() {
     let metaMap = {}
     if (settings.modelsFolder) {
       await ensureRootStore(settings.modelsFolder)
+      // 清理不再被元数据引用的孤儿封面文件
+      await pruneOrphanCovers()
       metaMap = getMetaMapByAbsPath()
     }
     return {
@@ -179,8 +187,9 @@ export function registerModelIpcHandlers() {
     logger.info(`开始扫描模型目录: ${root}`)
 
     try {
-      // 切换/加载该根目录的关联存储
+      // 切换/加载该根目录的关联存储，并清理孤儿封面文件
       await ensureRootStore(root)
+      await pruneOrphanCovers()
 
       let lastSent = 0
       // 应用扫描规则：排除目录 + 扫描文件扩展名（来自应用设置）
@@ -302,6 +311,39 @@ export function registerModelIpcHandlers() {
     return {
       cover: abs,
       coverUrl: abs ? toImageUrl(abs) : '',
+      covers: coverListFromMeta(meta),
+      meta
+    }
+  })
+
+  // 删除单张封面（更新元数据默认封面，并删除物理文件）
+  ipcMain.handle('models:deleteCover', async (event, { id, cover } = {}) => {
+    if (typeof id !== 'string' || !id || typeof cover !== 'string' || !cover) {
+      return { error: '无效的参数' }
+    }
+    const existing = getModelMeta(id) || {}
+    const covers = Array.isArray(existing.covers) ? existing.covers : []
+    if (!covers.includes(cover)) {
+      return { error: '封面不存在，无法删除' }
+    }
+    const abs = resolveCoverSafe(cover)
+    const wasDefault = existing.cover === cover
+    const newCovers = covers.filter((c) => c !== cover)
+    // 删除默认封面时自动回退到下一张（无剩余则为空，卡片回退 sidecar 预览图）
+    const meta = setModelMeta(id, {
+      ...existing,
+      covers: newCovers,
+      cover: wasDefault ? newCovers[0] || '' : existing.cover
+    })
+    if (!meta) {
+      return { error: '封面删除失败' }
+    }
+    if (abs) await deleteCoverFile(abs)
+    logger.info(`封面已删除: ${id} -> ${cover}`)
+    const nextAbs = resolveCoverSafe(meta.cover)
+    return {
+      cover: nextAbs,
+      coverUrl: nextAbs ? toImageUrl(nextAbs) : '',
       covers: coverListFromMeta(meta),
       meta
     }
