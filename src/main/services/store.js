@@ -102,6 +102,8 @@ let currentRoot = null
 let data = null
 let saveTimer = null
 let saving = false
+/** 写盘进行期间收到的新保存请求（落盘完成后需补写一次，避免丢失） */
+let pendingSave = false
 
 /* ---------------- 路径辅助 ---------------- */
 
@@ -370,9 +372,14 @@ export function scheduleSave() {
   }, SAVE_DELAY)
 }
 
-/** 立即落盘（原子写入：临时文件 -> 重命名） */
+/** 立即落盘（原子写入：临时文件 -> 重命名；并发请求排队补写，不会丢失） */
 export async function saveStoreNow() {
-  if (!data || !currentRoot || saving) return
+  if (!data || !currentRoot) return
+  if (saving) {
+    // 写盘进行中又有新修改：标记待补写，由 finally 在落盘完成后触发补写
+    pendingSave = true
+    return
+  }
   saving = true
   const file = getDataFilePath()
   const tmp = `${file}.${process.pid}.tmp`
@@ -389,5 +396,10 @@ export async function saveStoreNow() {
     }
   } finally {
     saving = false
+    if (pendingSave) {
+      pendingSave = false
+      // 补写读取的是当前最新 data，覆盖写盘期间的任何后续修改
+      saveStoreNow().catch((err) => logger.error(`保存关联存储失败: ${err.message}`))
+    }
   }
 }
