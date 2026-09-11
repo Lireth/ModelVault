@@ -39,10 +39,11 @@ export function createMainWindow() {
     backgroundColor: colors.backgroundColor,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
-      // 安全配置：隔离上下文，禁用 Node 能力
+      // 安全配置：隔离上下文，禁用 Node 能力，启用渲染进程沙箱
+      // （preload 仅使用 contextBridge/ipcRenderer，完全兼容沙箱模式）
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       spellcheck: false
     }
   })
