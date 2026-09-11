@@ -37,37 +37,49 @@ async function ensureRootStore(root) {
   }
 }
 
-/** 为扫描结果补充元数据（封面列表、默认封面 URL、参数、备注、二级分类）与 sidecar 自动预览图 */
+/** 并行装饰的分批大小：单批内并发 stat，批间串行，避免一次性打开过多文件句柄 */
+const DECORATE_BATCH_SIZE = 64
+
+/** 单模型的元数据装饰（封面列表校验、默认封面回退 sidecar 预览图） */
+async function decorateOne(model) {
+  const meta = getModelMeta(model.id) || {}
+  // 校验多封面列表，过滤已丢失的文件
+  const covers = []
+  for (const rel of meta.covers || []) {
+    const resolved = resolveCoverSafe(rel)
+    if (resolved && (await isValidImageFile(resolved))) {
+      covers.push({ rel, path: resolved, url: toImageUrl(resolved) })
+    }
+  }
+  // 默认封面：优先显式设置值，缺省取第一张；再缺省回退 sidecar 预览图
+  const defaultEntry = covers.find((c) => c.rel === meta.cover) || covers[0] || null
+  let cover = defaultEntry ? defaultEntry.path : ''
+  if (!cover) {
+    cover = await findSidecarPreview(model.id)
+  }
+  return {
+    ...model,
+    cover,
+    coverUrl: cover ? toImageUrl(cover) : '',
+    covers,
+    hasManualCover: covers.length > 0,
+    params: meta.params || null,
+    alias: meta.alias || '',
+    note: meta.note || '',
+    // 大模型自动标注为「基底模型」分类（未手动标注时默认生效）
+    subCategory: meta.subCategory || (model.type === 'checkpoint' ? 'base' : '')
+  }
+}
+
+/** 为扫描结果补充元数据（封面列表、默认封面 URL、参数、备注、二级分类），分批并行处理并保持原始顺序 */
 async function decorateModels(models) {
-  const result = []
-  for (const model of models) {
-    const meta = getModelMeta(model.id) || {}
-    // 校验多封面列表，过滤已丢失的文件
-    const covers = []
-    for (const rel of meta.covers || []) {
-      const resolved = resolveCoverSafe(rel)
-      if (resolved && (await isValidImageFile(resolved))) {
-        covers.push({ rel, path: resolved, url: toImageUrl(resolved) })
-      }
+  const result = new Array(models.length)
+  for (let i = 0; i < models.length; i += DECORATE_BATCH_SIZE) {
+    const batch = models.slice(i, i + DECORATE_BATCH_SIZE)
+    const decorated = await Promise.all(batch.map((m) => decorateOne(m)))
+    for (let j = 0; j < decorated.length; j++) {
+      result[i + j] = decorated[j]
     }
-    // 默认封面：优先显式设置值，缺省取第一张；再缺省回退 sidecar 预览图
-    const defaultEntry = covers.find((c) => c.rel === meta.cover) || covers[0] || null
-    let cover = defaultEntry ? defaultEntry.path : ''
-    if (!cover) {
-      cover = await findSidecarPreview(model.id)
-    }
-    result.push({
-      ...model,
-      cover,
-      coverUrl: cover ? toImageUrl(cover) : '',
-      covers,
-      hasManualCover: covers.length > 0,
-      params: meta.params || null,
-      alias: meta.alias || '',
-      note: meta.note || '',
-      // 大模型自动标注为「基底模型」分类（未手动标注时默认生效）
-      subCategory: meta.subCategory || (model.type === 'checkpoint' ? 'base' : '')
-    })
   }
   return result
 }
