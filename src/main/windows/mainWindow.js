@@ -1,4 +1,5 @@
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, app, screen } from 'electron'
+import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
 import { getSettings } from '../services/store'
@@ -9,20 +10,60 @@ const THEME_WINDOW_COLORS = {
   light: { backgroundColor: '#f5f7fa', overlayColor: '#f5f7fa', symbolColor: '#24292f' }
 }
 
+/** 默认窗口尺寸 */
+const DEFAULT_WIDTH = 1200
+const DEFAULT_HEIGHT = 800
+
+/** 窗口状态持久化文件（保存在 %APPDATA%\modelvault\） */
+const WINDOW_STATE_FILE = 'window-state.json'
+
 let mainWindow = null
+
+/**
+ * 加载上次保存的窗口状态（尺寸/位置/是否最大化）。
+ * 数据无效或位置落在所有显示器之外（如外接显示器被拔掉）时返回 null，回退默认值。
+ */
+async function loadWindowState() {
+  try {
+    const file = path.join(app.getPath('userData'), WINDOW_STATE_FILE)
+    const raw = JSON.parse(await fs.readFile(file, 'utf-8'))
+    const { x, y, width, height } = raw || {}
+    if (![x, y, width, height].every((n) => Number.isFinite(n))) return null
+    const visible = screen.getAllDisplays().some((d) => {
+      const a = d.workArea
+      return x + width > a.x && y + height > a.y && x < a.x + a.width && y < a.y + a.height
+    })
+    if (!visible) return null
+    return { x, y, width, height, maximized: raw.maximized === true }
+  } catch {
+    return null
+  }
+}
+
+/** 保存窗口状态（取最大化前的正常边界，避免记录铺满全屏的坐标） */
+async function saveWindowState(win) {
+  try {
+    const state = { ...win.getNormalBounds(), maximized: win.isMaximized() }
+    const file = path.join(app.getPath('userData'), WINDOW_STATE_FILE)
+    await fs.writeFile(file, JSON.stringify(state, null, 2), 'utf-8')
+  } catch (err) {
+    logger.warn(`窗口状态保存失败: ${err.message}`)
+  }
+}
 
 /**
  * 创建应用主窗口，并根据运行环境加载渲染页面。
  * - 开发环境：加载 electron-vite 开发服务器（支持 HMR 热重载）
  * - 生产环境：加载打包后的本地文件
  */
-export function createMainWindow() {
+export async function createMainWindow() {
   // 窗口底色与标题栏叠加层颜色跟随已保存的主题设置
   const colors = THEME_WINDOW_COLORS[getSettings().theme] || THEME_WINDOW_COLORS.dark
+  const state = await loadWindowState()
 
-  mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+  const options = {
+    width: state?.width ?? DEFAULT_WIDTH,
+    height: state?.height ?? DEFAULT_HEIGHT,
     minWidth: 960,
     minHeight: 640,
     title: '模匣',
@@ -46,7 +87,15 @@ export function createMainWindow() {
       sandbox: true,
       spellcheck: false
     }
-  })
+  }
+  // 恢复上次的窗口位置（无有效记录时居中显示）
+  if (state) {
+    options.x = state.x
+    options.y = state.y
+  }
+
+  mainWindow = new BrowserWindow(options)
+  if (state?.maximized) mainWindow.maximize()
 
   // 避免窗口尺寸变化时出现白屏闪烁
   mainWindow.once('ready-to-show', () => {
@@ -59,6 +108,11 @@ export function createMainWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
+
+  // 关闭时保存窗口状态（尺寸/位置/是否最大化），下次启动恢复
+  mainWindow.on('close', () => {
+    saveWindowState(mainWindow)
+  })
 
   mainWindow.on('closed', () => {
     mainWindow = null

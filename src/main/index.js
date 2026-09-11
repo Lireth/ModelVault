@@ -9,6 +9,9 @@ import logger from './logger'
 // 自定义协议必须在 app ready 之前注册
 registerImageScheme()
 
+// Windows 任务栏分组/跳转列表标识（与 electron-builder.yml 的 appId 一致）
+app.setAppUserModelId('com.modelvault.app')
+
 /**
  * 全局错误处理：捕获主进程未处理异常，写入日志，避免应用静默崩溃。
  */
@@ -49,7 +52,7 @@ if (!gotSingleInstanceLock) {
     // 先加载应用设置，确保窗口主题（背景色/标题栏颜色）与已保存设置一致
     await loadSettings()
 
-    const win = createMainWindow()
+    const win = await createMainWindow()
     registerWindowShortcuts(win)
 
     // 阻止在应用内打开新窗口，外部链接交给系统默认浏览器
