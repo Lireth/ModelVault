@@ -48,10 +48,10 @@ const FILE_KEYWORD_RULES = [
  */
 export function classifyModel(relSegments, fileName) {
   const lowerSegments = relSegments.map((s) => s.toLowerCase())
-  for (const seg of lowerSegments) {
-    for (const rule of FOLDER_RULES) {
-      if (rule.folders.includes(seg)) return rule.type
-    }
+  // 先遍历规则、再遍历路径段：保证 FOLDER_RULES 的声明顺序（lora > vae > text_encoder > checkpoint）
+  // 作为优先级生效，与注释「顺序即优先级」一致；否则优先级会取决于路径段出现的先后
+  for (const rule of FOLDER_RULES) {
+    if (lowerSegments.some((seg) => rule.folders.includes(seg))) return rule.type
   }
   for (const rule of FILE_KEYWORD_RULES) {
     if (rule.re.test(fileName)) return rule.type
