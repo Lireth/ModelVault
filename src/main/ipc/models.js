@@ -1,4 +1,5 @@
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import path from 'node:path'
 import logger from '../logger'
 import {
   getCurrentRoot,
@@ -16,6 +17,7 @@ import {
 } from '../services/store'
 import { findSidecarPreview, scanModels } from '../services/scanner'
 import { isValidImageFile, pickAndSaveCover, saveClipboardImage } from '../services/covers'
+import { getThumbPath, pruneThumbs } from '../services/thumbs'
 import { toImageUrl } from '../protocol'
 
 /**
@@ -41,7 +43,7 @@ async function ensureRootStore(root) {
 const DECORATE_BATCH_SIZE = 64
 
 /** 单模型的元数据装饰（封面列表校验、默认封面回退 sidecar 预览图） */
-async function decorateOne(model) {
+async function decorateOne(model, usedThumbs) {
   const meta = getModelMeta(model.id) || {}
   // 校验多封面列表，过滤已丢失的文件
   const covers = []
@@ -57,10 +59,17 @@ async function decorateOne(model) {
   if (!cover) {
     cover = await findSidecarPreview(model.id)
   }
+  // 卡片显示使用缩略图（缓存未命中时生成），生成失败回退原图
+  let coverUrl = ''
+  if (cover) {
+    const thumbPath = await getThumbPath(cover)
+    if (thumbPath) usedThumbs?.add(path.basename(thumbPath))
+    coverUrl = toImageUrl(thumbPath || cover)
+  }
   return {
     ...model,
     cover,
-    coverUrl: cover ? toImageUrl(cover) : '',
+    coverUrl,
     covers,
     hasManualCover: covers.length > 0,
     params: meta.params || null,
@@ -73,14 +82,17 @@ async function decorateOne(model) {
 
 /** 为扫描结果补充元数据（封面列表、默认封面 URL、参数、备注、二级分类），分批并行处理并保持原始顺序 */
 async function decorateModels(models) {
+  /** 本次扫描仍在使用的缩略图文件名（用于清理失效缓存） */
+  const usedThumbs = new Set()
   const result = new Array(models.length)
   for (let i = 0; i < models.length; i += DECORATE_BATCH_SIZE) {
     const batch = models.slice(i, i + DECORATE_BATCH_SIZE)
-    const decorated = await Promise.all(batch.map((m) => decorateOne(m)))
+    const decorated = await Promise.all(batch.map((m) => decorateOne(m, usedThumbs)))
     for (let j = 0; j < decorated.length; j++) {
       result[i + j] = decorated[j]
     }
   }
+  await pruneThumbs(usedThumbs)
   return result
 }
 
