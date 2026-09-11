@@ -2,10 +2,10 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import TopBar from './components/TopBar.vue'
 import Sidebar from './components/Sidebar.vue'
-import ModelCard from './components/ModelCard.vue'
 import ModelDetail from './components/ModelDetail.vue'
 import SettingsPage from './components/SettingsPage.vue'
 import ToastHost from './components/ToastHost.vue'
+import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import {
   filteredModels,
   initApp,
@@ -139,9 +139,8 @@ onUnmounted(() => {
             <p class="muted">当前筛选或搜索条件下没有模型，试试切换分类或清空搜索词。</p>
           </div>
 
-          <div v-else class="model-grid" :class="`grid-${state.settings.cardSize || 'normal'}`">
-            <ModelCard v-for="m in filteredModels" :key="m.id" :model="m" />
-          </div>
+          <!-- 模型网格：虚拟滚动，仅渲染视口附近的卡片 -->
+          <VirtualModelGrid v-else :models="filteredModels" />
         </template>
       </template>
       </main>
@@ -282,23 +281,6 @@ onUnmounted(() => {
   border-radius: 999px;
   background: var(--bg-active);
   color: var(--accent);
-}
-
-.model-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 14px;
-  align-content: start;
-}
-
-.model-grid.grid-compact {
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 10px;
-}
-
-.model-grid.grid-large {
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 18px;
 }
 
 /* 空状态 */
