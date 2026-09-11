@@ -98,6 +98,8 @@ function normalizeSettings(raw) {
 
 let settings = defaultSettings()
 let currentRoot = null
+/** 根目录的小写形式（Windows 大小写不敏感路径匹配兜底用） */
+let currentRootLower = null
 /** 当前根目录的元数据，键为相对路径（'/' 分隔） */
 let data = null
 let saveTimer = null
@@ -135,7 +137,19 @@ export function getCurrentRoot() {
 function toRelKey(absPath) {
   if (!currentRoot || typeof absPath !== 'string') return null
   const rel = path.relative(currentRoot, absPath)
-  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+    // Windows 文件系统大小写不敏感：路径仅大小写不同时 path.relative
+    // 会返回 '..\..' 导致关联失联，改用大小写不敏感的前缀匹配兜底
+    if (process.platform !== 'win32' || !currentRootLower) return null
+    const absLower = absPath.toLowerCase()
+    const rootLower = currentRootLower.endsWith(path.sep)
+      ? currentRootLower
+      : currentRootLower + path.sep
+    if (!absLower.startsWith(rootLower)) return null
+    const rest = absPath.slice(rootLower.length)
+    if (!rest) return null
+    return rest.split(path.sep).join('/')
+  }
   return rel.split(path.sep).join('/')
 }
 
@@ -254,6 +268,7 @@ export async function updateSettings(patch) {
 /** 切换当前关联存储的模型根目录（重置内存数据） */
 export function setDataRoot(root) {
   currentRoot = root
+  currentRootLower = root ? root.toLowerCase() : null
   data = null
 }
 
