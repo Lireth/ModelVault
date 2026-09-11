@@ -222,6 +222,30 @@ function pickLegacyRes(value, legacyValues) {
   return legacy.length > 0 ? Math.min(...legacy) : null
 }
 
+/** 删除单条模型元数据（模型文件被移入回收站时调用） */
+export function removeModelMeta(modelId) {
+  if (!data) return false
+  const relKey = toRelKey(modelId)
+  if (!relKey || !data.models[relKey]) return false
+  delete data.models[relKey]
+  scheduleSave()
+  return true
+}
+
+/** 模型重命名后迁移元数据键（保留封面、参数、备注等全部标注数据） */
+export function renameModelMeta(oldId, newId) {
+  if (!data) return false
+  const oldKey = toRelKey(oldId)
+  const newKey = toRelKey(newId)
+  if (!oldKey || !newKey || !data.models[oldKey]) return false
+  // 目标键已存在时拒绝覆盖（重命名前已校验目标文件不存在，此处为防御性保护）
+  if (data.models[newKey]) return false
+  data.models[newKey] = data.models[oldKey]
+  delete data.models[oldKey]
+  scheduleSave()
+  return true
+}
+
 /* ---------------- 应用设置（全局） ---------------- */
 
 /** 加载应用设置（含通用/扫描/外观设置；旧版数据内嵌于 store.json，自动回退并迁移） */

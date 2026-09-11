@@ -17,6 +17,8 @@ const VALID_INVOKE_CHANNELS = [
   'models:setDefaultCover',
   'models:deleteCover',
   'models:civitaiMatch',
+  'models:deleteModel',
+  'models:renameModel',
   'models:reveal',
   'models:flushStore'
 ]
@@ -84,6 +86,10 @@ const api = {
     deleteCover: (id, cover) => invokeValidated('models:deleteCover', { id, cover }),
     /** Civitai 匹配：返回 { matched, hash, info } 或 { error }（大文件哈希耗时较长） */
     civitaiMatch: (id) => invokeValidated('models:civitaiMatch', { id }),
+    /** 删除模型文件（移入回收站并清理元数据），返回 { ok } 或 { error } */
+    deleteModel: (id) => invokeValidated('models:deleteModel', { id }),
+    /** 重命名模型文件（联动元数据与 sidecar），返回 { ok, id, name } 或 { error } */
+    renameModel: (id, newName) => invokeValidated('models:renameModel', { id, newName }),
     /** 在资源管理器中显示文件 */
     reveal: (path) => invokeValidated('models:reveal', { path }),
     /** 立即落盘 */

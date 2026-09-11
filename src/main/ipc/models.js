@@ -1,4 +1,5 @@
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
 import {
@@ -10,6 +11,8 @@ import {
   loadSettings,
   loadData,
   relativizeCover,
+  removeModelMeta,
+  renameModelMeta,
   resolveCover,
   saveStoreNow,
   setDataRoot,
@@ -111,6 +114,17 @@ function resolveCoverSafe(cover) {
   } catch {
     return ''
   }
+}
+
+/** 模型同名的 sidecar 文件（SD WebUI 惯例：同名预览图 + 说明文本） */
+function sidecarFilesFor(absModelPath) {
+  const dir = path.dirname(absModelPath)
+  const base = path.basename(absModelPath, path.extname(absModelPath))
+  const files = [path.join(dir, `${base}.txt`), path.join(dir, `${base}.preview.png`)]
+  for (const ext of ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']) {
+    files.push(path.join(dir, `${base}${ext}`))
+  }
+  return files
 }
 
 /** 由元数据构造渲染进程使用的封面列表（含绝对路径与 mvimg URL） */
@@ -374,6 +388,103 @@ export function registerModelIpcHandlers() {
       logger.warn(`Civitai 匹配失败: ${err.message}`)
       return { error: `Civitai 匹配失败: ${err.message}` }
     }
+  })
+
+  // 删除模型文件（移入系统回收站）并清理关联元数据与同名 sidecar 文件
+  ipcMain.handle('models:deleteModel', async (event, { id } = {}) => {
+    if (typeof id !== 'string' || !id) {
+      return { error: '无效的模型标识' }
+    }
+    if (!isInRoot(id)) {
+      return { error: '模型不在当前根目录内，无法删除' }
+    }
+    try {
+      const stat = await fs.stat(id)
+      if (!stat.isFile()) {
+        return { error: '无效的模型文件' }
+      }
+    } catch {
+      return { error: '模型文件不存在' }
+    }
+    try {
+      await shell.trashItem(id)
+    } catch (err) {
+      logger.warn(`模型删除失败: ${err.message}`)
+      return { error: `删除失败: ${err.message}` }
+    }
+    // 同步移除同名的 sidecar 预览图/说明文件（失败不阻塞）
+    for (const f of sidecarFilesFor(id)) {
+      await shell.trashItem(f).catch(() => {})
+    }
+    removeModelMeta(id)
+    logger.info(`模型已移入回收站: ${id}`)
+    return { ok: true }
+  })
+
+  // 重命名模型文件（保留扩展名，联动迁移元数据键与同名 sidecar 文件）
+  ipcMain.handle('models:renameModel', async (event, { id, newName } = {}) => {
+    if (typeof id !== 'string' || !id || typeof newName !== 'string') {
+      return { error: '无效的参数' }
+    }
+    const name = newName.trim()
+    if (!name || /[\\/:*?"<>|]/.test(name)) {
+      return { error: '名称为空或包含非法字符' }
+    }
+    if (name.length > 200) {
+      return { error: '名称过长（最多 200 字符）' }
+    }
+    if (!isInRoot(id)) {
+      return { error: '模型不在当前根目录内，无法重命名' }
+    }
+    try {
+      const stat = await fs.stat(id)
+      if (!stat.isFile()) {
+        return { error: '无效的模型文件' }
+      }
+    } catch {
+      return { error: '模型文件不存在' }
+    }
+
+    const ext = path.extname(id)
+    const dir = path.dirname(id)
+    const newId = path.join(dir, `${name}${ext}`)
+    if (newId === path.normalize(id)) {
+      return { ok: true, id, name }
+    }
+    try {
+      await fs.access(newId)
+      return { error: '目标文件名已存在' }
+    } catch {
+      /* 目标不存在，可以重命名 */
+    }
+    try {
+      await fs.rename(id, newId)
+    } catch (err) {
+      logger.warn(`模型重命名失败: ${err.message}`)
+      return { error: `重命名失败: ${err.message}` }
+    }
+
+    // 联动重命名同名 sidecar 文件（预览图/说明文本）
+    const oldBase = path.basename(id, ext)
+    for (const f of sidecarFilesFor(id)) {
+      try {
+        await fs.access(f)
+      } catch {
+        continue
+      }
+      const suffix = path.basename(f).slice(oldBase.length)
+      const newF = path.join(dir, `${name}${suffix}`)
+      if (newF === f) continue
+      try {
+        await fs.rename(f, newF)
+      } catch (err) {
+        logger.warn(`sidecar 文件重命名失败: ${f} -> ${newF}: ${err.message}`)
+      }
+    }
+
+    renameModelMeta(id, newId)
+    logger.info(`模型已重命名: ${id} -> ${newId}`)
+    return { ok: true, id: newId, name }
   })
 
   // 在资源管理器中显示模型文件

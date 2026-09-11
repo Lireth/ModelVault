@@ -3,9 +3,11 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   closeDetail,
   deleteCover,
+  deleteModel,
   formatSize,
   matchCivitai,
   pasteCover,
+  renameModel,
   revealModel,
   saveModelData,
   selectedModel,
@@ -133,8 +135,62 @@ watch(
   () => selectedModel.value?.id,
   () => {
     civitaiResult.value = null
+    renaming.value = false
   }
 )
+
+/* ---------------- 模型文件管理（重命名 / 删除） ---------------- */
+
+/** 是否处于重命名编辑状态 */
+const renaming = ref(false)
+/** 重命名输入（不含扩展名） */
+const renameInput = ref('')
+
+/** 进入/退出重命名编辑 */
+function startRename() {
+  if (renaming.value) {
+    renaming.value = false
+    return
+  }
+  // model.name 为不含扩展名的文件名
+  renameInput.value = selectedModel.value?.name || ''
+  renaming.value = true
+}
+
+/** 确认重命名 */
+async function confirmRename() {
+  const model = selectedModel.value
+  if (!model) return
+  const name = renameInput.value.trim()
+  if (!name || name === model.name) {
+    renaming.value = false
+    return
+  }
+  busy.value = true
+  try {
+    const ok = await renameModel(model.id, name)
+    if (ok) renaming.value = false
+  } catch (err) {
+    toast('error', `重命名失败: ${err.message}`)
+  } finally {
+    busy.value = false
+  }
+}
+
+/** 删除模型文件（移入系统回收站，需确认） */
+async function onDeleteModel() {
+  const model = selectedModel.value
+  if (!model) return
+  if (!window.confirm(`确定将「${model.alias || model.name}」移入系统回收站吗？`)) return
+  busy.value = true
+  try {
+    await deleteModel(model.id)
+  } catch (err) {
+    toast('error', `删除失败: ${err.message}`)
+  } finally {
+    busy.value = false
+  }
+}
 
 const info = computed(() => (selectedModel.value ? typeInfo(selectedModel.value.type) : null))
 
@@ -436,6 +492,26 @@ async function onUploadCover() {
                 <dt>所在目录</dt>
                 <dd class="path" :title="selectedModel.folder">{{ selectedModel.relDir || selectedModel.folder }}</dd>
               </dl>
+            </div>
+
+            <!-- 文件管理：重命名 / 删除（移入回收站） -->
+            <div class="file-actions">
+              <button class="btn" type="button" @click="startRename">
+                {{ renaming ? '取消重命名' : '重命名文件' }}
+              </button>
+              <button class="btn btn-danger" type="button" @click="onDeleteModel">删除文件（回收站）</button>
+            </div>
+            <div v-if="renaming" class="rename-row">
+              <input
+                v-model="renameInput"
+                type="text"
+                maxlength="200"
+                spellcheck="false"
+                placeholder="输入新的文件名（不含扩展名）"
+                @keyup.enter="confirmRename"
+                @keyup.esc="renaming = false"
+              />
+              <button class="btn btn-primary" type="button" :disabled="busy" @click="confirmRename">确定</button>
             </div>
 
             <h3>推荐参数</h3>
@@ -825,6 +901,44 @@ async function onUploadCover() {
 
 .civitai-link:hover {
   text-decoration: underline;
+}
+
+/* ---------- 模型文件管理（重命名 / 删除） ---------- */
+.file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn-danger {
+  color: #e5484d;
+  border-color: rgba(229, 72, 77, 0.4);
+}
+
+.btn-danger:hover {
+  border-color: #e5484d;
+  background: rgba(229, 72, 77, 0.08);
+}
+
+.rename-row {
+  display: flex;
+  gap: 8px;
+}
+
+.rename-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.rename-row input:focus {
+  border-color: var(--accent);
 }
 
 /* 二级分类标签 */

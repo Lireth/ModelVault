@@ -431,3 +431,45 @@ export async function revealModel(modelPath) {
 export async function matchCivitai(id) {
   return window.api.models.civitaiMatch(id)
 }
+
+/**
+ * 删除模型文件（移入系统回收站）并从本地列表移除。
+ * @param {string} id 模型 id
+ */
+export async function deleteModel(id) {
+  const res = await window.api.models.deleteModel(id)
+  if (res?.error) {
+    toast('error', res.error)
+    return false
+  }
+  const idx = state.models.findIndex((m) => m.id === id)
+  if (idx >= 0) state.models.splice(idx, 1)
+  if (state.selectedId === id) state.selectedId = null
+  toast('success', '模型已移入回收站')
+  return true
+}
+
+/**
+ * 重命名模型文件（联动迁移元数据与 sidecar 文件），并同步本地列表。
+ * @param {string} id 模型 id（旧）
+ * @param {string} newName 新名称（不含扩展名）
+ */
+export async function renameModel(id, newName) {
+  const res = await window.api.models.renameModel(id, newName)
+  if (res?.error) {
+    toast('error', res.error)
+    return false
+  }
+  const idx = state.models.findIndex((m) => m.id === id)
+  if (idx >= 0 && res.id) {
+    state.models[idx] = {
+      ...state.models[idx],
+      id: res.id,
+      name: res.name || state.models[idx].name
+    }
+  }
+  // 详情面板跟随新 id 保持打开
+  if (state.selectedId === id && res.id) state.selectedId = res.id
+  toast('success', '重命名成功')
+  return true
+}
