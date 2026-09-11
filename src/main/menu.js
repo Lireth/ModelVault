@@ -1,4 +1,4 @@
-import { BrowserWindow } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import logger from './logger'
 
 /**
@@ -14,6 +14,10 @@ import logger from './logger'
 export function registerWindowShortcuts(win) {
   if (!win) return
 
+  // 开发/调试类快捷键仅在开发环境生效，打包发布版不注册，
+  // 避免用户在生产环境打开 DevTools 或触发页面重载
+  const isDev = !app.isPackaged
+
   win.webContents.on('before-input-event', (event, input) => {
     // 仅处理按键按下，忽略带鼠标修饰的事件
     if (input.type !== 'keyDown') return
@@ -22,20 +26,20 @@ export function registerWindowShortcuts(win) {
     const shift = input.shift
     const key = input.key.toLowerCase()
 
-    // Ctrl+Shift+I 开发者工具
-    if (ctrl && shift && key === 'i') {
+    // Ctrl+Shift+I 开发者工具（仅开发环境）
+    if (isDev && ctrl && shift && key === 'i') {
       win.webContents.toggleDevTools()
       event.preventDefault()
       return
     }
-    // Ctrl+R 重新加载
-    if (ctrl && !shift && key === 'r') {
+    // Ctrl+R 重新加载（仅开发环境）
+    if (isDev && ctrl && !shift && key === 'r') {
       win.webContents.reload()
       event.preventDefault()
       return
     }
-    // Ctrl+Shift+R 强制重新加载
-    if (ctrl && shift && key === 'r') {
+    // Ctrl+Shift+R 强制重新加载（仅开发环境）
+    if (isDev && ctrl && shift && key === 'r') {
       win.webContents.reloadIgnoringCache()
       event.preventDefault()
       return

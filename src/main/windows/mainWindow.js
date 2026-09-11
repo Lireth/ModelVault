@@ -64,6 +64,14 @@ export function createMainWindow() {
     mainWindow = null
   })
 
+  // 拦截页面自身的导航尝试（如 location.href 跳转）：
+  // 渲染页应始终停留在本地页面，任何导航请求一律阻止（防御纵深，
+  // 不影响主进程的 loadURL/loadFile 初始化加载）
+  mainWindow.webContents.on('will-navigate', (event) => {
+    event.preventDefault()
+    logger.warn('已阻止渲染页面的导航请求')
+  })
+
   // 渲染进程异常退出时的错误处理
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     logger.error(`渲染进程异常退出: ${details.reason} (exitCode=${details.exitCode})`)
