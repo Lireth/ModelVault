@@ -3,12 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
 import { getSettings } from '../services/store'
-
-/** 各主题对应的原生窗口颜色 */
-const THEME_WINDOW_COLORS = {
-  dark: { backgroundColor: '#101418', overlayColor: '#101418', symbolColor: '#e6eaee' },
-  light: { backgroundColor: '#f5f7fa', overlayColor: '#f5f7fa', symbolColor: '#24292f' }
-}
+import { themeColors } from '../theme'
 
 /** 默认窗口尺寸 */
 const DEFAULT_WIDTH = 1200
@@ -58,7 +53,7 @@ async function saveWindowState(win) {
  */
 export async function createMainWindow() {
   // 窗口底色与标题栏叠加层颜色跟随已保存的主题设置
-  const colors = THEME_WINDOW_COLORS[getSettings().theme] || THEME_WINDOW_COLORS.dark
+  const colors = themeColors(getSettings().theme)
   const state = await loadWindowState()
 
   const options = {

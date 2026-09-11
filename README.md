@@ -129,7 +129,7 @@ const result = await window.api.invoke("my:channel", payload);
 
 ## 打包说明
 
-- 打包配置见 `electron-builder.yml`（portable 单文件便携版，x64），产物为 `dist/{version}/ModelVault-beta0.1.exe`
+- 打包配置见 `electron-builder.yml`（portable 单文件便携版，x64），产物为 `dist/{version}/ModelVault-{version}.exe`（版本号随 `package.json` 自动生成）
 - 单文件 EXE 运行时不在其所在目录生成任何文件：设置与日志保存在 `%APPDATA%\modelvault\`，模型元数据保存在用户选择的模型文件夹
 - 首次启动需解压到系统临时目录，启动速度略慢于常规安装版
 - 如需自定义应用图标，将 `icon.ico`（256×256 及以上）放入 `build/` 目录
