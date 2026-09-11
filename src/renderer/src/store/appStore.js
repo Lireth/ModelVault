@@ -422,3 +422,12 @@ export async function revealModel(modelPath) {
   const res = await window.api.models.reveal(modelPath)
   if (res?.error) toast('error', res.error)
 }
+
+/**
+ * 请求 Civitai 匹配（主进程计算 SHA256 并查询 API，大文件需数秒）。
+ * @param {string} id 模型 id
+ * @returns {Promise<{matched: boolean, hash?: string, info?: object} | {error: string}>}
+ */
+export async function matchCivitai(id) {
+  return window.api.models.civitaiMatch(id)
+}

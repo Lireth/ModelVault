@@ -155,6 +155,11 @@ function toRelKey(absPath) {
   return rel.split(path.sep).join('/')
 }
 
+/** 判断绝对路径是否位于当前根目录内（Windows 大小写不敏感） */
+export function isInRoot(absPath) {
+  return typeof absPath === 'string' && !!toRelKey(absPath)
+}
+
 /** 相对封面路径 -> 绝对路径 */
 export function resolveCover(coverRel) {
   if (!coverRel || !currentRoot) return ''

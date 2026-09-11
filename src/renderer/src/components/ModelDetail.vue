@@ -4,6 +4,7 @@ import {
   closeDetail,
   deleteCover,
   formatSize,
+  matchCivitai,
   pasteCover,
   revealModel,
   saveModelData,
@@ -72,6 +73,68 @@ function toggleSubCategory(key) {
 }
 
 watch(selectedModel, (m) => fillForm(m), { immediate: true })
+
+/* ---------------- Civitai 匹配 ---------------- */
+
+/** 匹配结果（{ matched, hash, info }），切换模型时清空 */
+const civitaiResult = ref(null)
+/** 匹配请求进行中（大文件哈希需数秒） */
+const civitaiBusy = ref(false)
+
+/** 请求 Civitai 匹配当前模型 */
+async function onCivitaiMatch() {
+  const model = selectedModel.value
+  if (!model || civitaiBusy.value) return
+  civitaiBusy.value = true
+  try {
+    const res = await matchCivitai(model.id)
+    if (res.error) {
+      toast('error', res.error)
+      return
+    }
+    civitaiResult.value = res
+    if (!res.matched) {
+      toast('warn', '未在 Civitai 找到与该文件哈希匹配的模型版本')
+    }
+  } catch (err) {
+    toast('error', `Civitai 匹配失败: ${err.message}`)
+  } finally {
+    civitaiBusy.value = false
+  }
+}
+
+/** 将匹配到的示例图生成参数填入推荐参数表单（保存后生效） */
+function applyCivitaiParams() {
+  const { info } = civitaiResult.value || {}
+  const ex = info?.exampleParams
+  if (!ex) return
+  if (Number.isFinite(ex.steps)) form.steps = String(ex.steps)
+  if (Number.isFinite(ex.cfgMin)) form.cfgMin = String(ex.cfgMin)
+  if (Number.isFinite(ex.cfgMax)) form.cfgMax = String(ex.cfgMax)
+  if (ex.sampler) form.sampler = ex.sampler
+  if (ex.scheduler) form.scheduler = ex.scheduler
+  if (Number.isFinite(ex.resMin)) form.resMin = String(ex.resMin)
+  if (Number.isFinite(ex.resMax)) form.resMax = String(ex.resMax)
+  if (info.precision) form.precision = info.precision
+  toast('success', '推荐参数已填入表单，点击「保存参数」生效')
+}
+
+/** 将匹配到的触发词追加到备注文本框 */
+function appendCivitaiWords() {
+  const words = civitaiResult.value?.info?.trainedWords || []
+  if (words.length === 0) return
+  const text = words.join(', ')
+  form.note = form.note ? `${form.note}\n触发词: ${text}` : `触发词: ${text}`
+  toast('success', '触发词已追加到备注，点击「保存参数」生效')
+}
+
+// 切换模型时清空 Civitai 匹配结果（独立 watch，避免在 fillForm watch 的 immediate 回调中提前引用）
+watch(
+  () => selectedModel.value?.id,
+  () => {
+    civitaiResult.value = null
+  }
+)
 
 const info = computed(() => (selectedModel.value ? typeInfo(selectedModel.value.type) : null))
 
@@ -243,6 +306,14 @@ async function onUploadCover() {
         <header class="detail-header">
           <h2 :title="selectedModel.name">{{ displayName }}</h2>
           <div class="detail-header-actions">
+            <button
+              class="btn"
+              :disabled="civitaiBusy"
+              title="计算文件哈希并匹配 Civitai 模型信息（大文件需数秒）"
+              @click="onCivitaiMatch"
+            >
+              {{ civitaiBusy ? '匹配中…' : 'Civitai 匹配' }}
+            </button>
             <button class="btn" @click="revealModel(selectedModel.id)">打开所在文件夹</button>
             <button class="wc-btn" title="关闭" @click="closeDetail">✕</button>
           </div>
@@ -289,6 +360,46 @@ async function onUploadCover() {
 
           <!-- 右侧：推荐参数 -->
           <div class="detail-form-col">
+            <!-- Civitai 匹配结果面板 -->
+            <div v-if="civitaiResult?.matched" class="civitai-panel">
+              <div class="civitai-head">
+                <span class="civitai-title">Civitai 匹配结果</span>
+                <button class="civitai-close" title="关闭" type="button" @click="civitaiResult = null">✕</button>
+              </div>
+              <p class="civitai-name" :title="civitaiResult.info.modelName">
+                {{ civitaiResult.info.modelName || '未知模型' }}
+                <span v-if="civitaiResult.info.versionName"> · {{ civitaiResult.info.versionName }}</span>
+              </p>
+              <p class="civitai-meta">
+                <span v-if="civitaiResult.info.creator">作者 {{ civitaiResult.info.creator }}</span>
+                <span v-if="civitaiResult.info.baseModel">基底 {{ civitaiResult.info.baseModel }}</span>
+                <span v-if="civitaiResult.info.precision">{{ civitaiResult.info.precision }}</span>
+              </p>
+              <div v-if="civitaiResult.info.trainedWords.length" class="civitai-words">
+                <span v-for="w in civitaiResult.info.trainedWords" :key="w" class="civitai-word" :title="w">{{ w }}</span>
+              </div>
+              <div class="civitai-actions">
+                <button
+                  v-if="civitaiResult.info.trainedWords.length"
+                  class="btn"
+                  type="button"
+                  @click="appendCivitaiWords"
+                >触发词追加到备注</button>
+                <button
+                  v-if="civitaiResult.info.exampleParams"
+                  class="btn btn-primary"
+                  type="button"
+                  @click="applyCivitaiParams"
+                >应用推荐参数</button>
+                <a
+                  v-if="civitaiResult.info.pageUrl"
+                  class="civitai-link"
+                  :href="civitaiResult.info.pageUrl"
+                  target="_blank"
+                >打开模型页面 ↗</a>
+              </div>
+            </div>
+
             <!-- 分类标签：LoRA / Checkpoint / 其他模型可标注 -->
             <template v-if="typeTags">
               <h3>{{ typeTagsTitle }}</h3>
@@ -623,6 +734,97 @@ async function onUploadCover() {
   color: var(--accent);
   letter-spacing: 1px;
   margin-top: 4px;
+}
+
+/* ---------- Civitai 匹配结果面板 ---------- */
+.civitai-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.civitai-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.civitai-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 1px;
+}
+
+.civitai-close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.civitai-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.civitai-name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.civitai-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.civitai-words {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.civitai-word {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.civitai-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.civitai-link {
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.civitai-link:hover {
+  text-decoration: underline;
 }
 
 /* 二级分类标签 */

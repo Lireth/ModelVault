@@ -6,6 +6,7 @@ import {
   getMetaMapByAbsPath,
   getModelMeta,
   getSettings,
+  isInRoot,
   loadSettings,
   loadData,
   relativizeCover,
@@ -24,6 +25,7 @@ import {
   saveClipboardImage
 } from '../services/covers'
 import { getThumbPath, pruneThumbs } from '../services/thumbs'
+import { matchCivitai } from '../services/civitai'
 import { toImageUrl } from '../protocol'
 
 /**
@@ -355,6 +357,23 @@ export function registerModelIpcHandlers() {
     const settings = getSettings()
     logger.info(`应用设置已更新: ${JSON.stringify(patch).slice(0, 200)}`)
     return { settings }
+  })
+
+  // Civitai 匹配：计算模型文件 SHA256 并查询 Civitai API（耗时操作，大文件需数秒）
+  ipcMain.handle('models:civitaiMatch', async (event, { id } = {}) => {
+    if (typeof id !== 'string' || !id) {
+      return { error: '无效的模型标识' }
+    }
+    if (!isInRoot(id)) {
+      return { error: '模型不在当前根目录内，无法匹配' }
+    }
+    try {
+      const result = await matchCivitai(id)
+      return result
+    } catch (err) {
+      logger.warn(`Civitai 匹配失败: ${err.message}`)
+      return { error: `Civitai 匹配失败: ${err.message}` }
+    }
   })
 
   // 在资源管理器中显示模型文件
