@@ -29,7 +29,7 @@ import {
   pruneOrphanCovers,
   saveClipboardImage
 } from '../services/covers'
-import { getThumbPath, pruneThumbs } from '../services/thumbs'
+import { drainDeferredThumbs, getThumbPathDeferred, pruneThumbs } from '../services/thumbs'
 import { matchCivitai } from '../services/civitai'
 import { toImageUrl } from '../protocol'
 
@@ -43,6 +43,10 @@ import { toImageUrl } from '../protocol'
 const PROGRESS_INTERVAL = 120
 
 let scanning = false
+/** 当前扫描的取消控制器（null 表示无进行中的扫描） */
+let scanAbort = null
+/** 后台缩略图生成任务（扫描响应返回后异步执行，新扫描启动前需等待其完成） */
+let thumbDrainPromise = null
 
 /** 确保指定根目录的关联存储已加载 */
 async function ensureRootStore(root) {
@@ -55,9 +59,99 @@ async function ensureRootStore(root) {
 /** 并行装饰的分批大小：单批内并发 stat，批间串行，避免一次性打开过多文件句柄 */
 const DECORATE_BATCH_SIZE = 64
 
+/* ---------------- 装饰结果缓存（增量扫描） ----------------
+ * 重复扫描（如启动自动扫描）时，模型文件 mtime 与元数据内容
+ * 均未变化的模型直接复用上次的装饰结果，跳过封面逐张 stat、
+ * sidecar 查找等重复 IO，扫描耗时与库规模解耦。
+ * 缓存仅在会话内有效（不落盘），键为模型绝对路径。 */
+const decorateCache = new Map()
+/** 缓存对应的模型根目录（切换根目录时清空缓存） */
+let decorateCacheRoot = null
+/** 缓存容量上限：超出后按插入顺序淘汰最旧条目 */
+const DECORATE_CACHE_MAX = 8000
+
+/**
+ * 计算影响装饰结果的元数据签名（任一标注变化都会使缓存失效）。
+ * @param {object} meta 模型元数据
+ * @returns {string} 签名字符串
+ */
+function metaSignature(meta) {
+  return JSON.stringify([
+    meta.cover, meta.covers, meta.alias, meta.note, meta.subCategory,
+    meta.favorite, meta.rating, meta.tags, meta.params, meta.hash
+  ])
+}
+
+/**
+ * 构造取消异常（与 AbortController 的 AbortError 同名，便于统一识别）。
+ */
+function abortError() {
+  const err = new Error('扫描已取消')
+  err.name = 'AbortError'
+  return err
+}
+
+/**
+ * 后台缩略图延迟登记的归属表：源图路径 -> 引用该封面的模型 id 集合。
+ * 后台生成完成后按此推送渲染进程更新对应卡片的 coverUrl。
+ */
+const deferredOwners = new Map()
+
+/** 登记一条延迟缩略图的模型归属 */
+function trackDeferredThumb(absCover, modelId) {
+  let owners = deferredOwners.get(absCover)
+  if (!owners) {
+    owners = new Set()
+    deferredOwners.set(absCover, owners)
+  }
+  owners.add(modelId)
+}
+
+/**
+ * 扫描响应返回后，后台补齐缺失的缩略图（批内并发、批间串行），
+ * 完成后经 models:thumbsReady 事件推送受影响模型的封面 URL 更新。
+ */
+function startThumbDrain(win) {
+  if (deferredOwners.size === 0) return
+  const ownersSnapshot = new Map(deferredOwners)
+  deferredOwners.clear()
+  thumbDrainPromise = drainDeferredThumbs((absCover, thumbPath) => {
+    const ids = ownersSnapshot.get(absCover)
+    if (!ids?.size) return
+    const coverUrl = toImageUrl(thumbPath)
+    // 同步更新装饰缓存，使下一次扫描的缓存命中直接携带缩略图 URL
+    for (const id of ids) {
+      const entry = decorateCache.get(id)
+      if (entry && entry.deferredCover === absCover) {
+        entry.deferredCover = ''
+        entry.thumbPath = thumbPath
+        entry.decorated.coverUrl = coverUrl
+      }
+    }
+    if (!win.isDestroyed()) {
+      win.webContents.send('models:thumbsReady', {
+        updates: [...ids].map((id) => ({ id, coverUrl }))
+      })
+    }
+  }).finally(() => {
+    thumbDrainPromise = null
+  })
+}
+
 /** 单模型的元数据装饰（封面列表校验、默认封面回退 sidecar 预览图） */
 async function decorateOne(model, usedThumbs) {
   const meta = getModelMeta(model.id) || {}
+  // 增量扫描缓存命中：mtime 与元数据签名均未变化时复用上次结果
+  const signature = metaSignature(meta)
+  const cached = decorateCache.get(model.id)
+  if (cached && cached.mtimeMs === model.mtimeMs && cached.signature === signature) {
+    // 刷新插入顺序实现简易 LRU
+    decorateCache.delete(model.id)
+    decorateCache.set(model.id, cached)
+    if (cached.thumbPath) usedThumbs.add(path.basename(cached.thumbPath))
+    return cached.decorated
+  }
+
   // 校验多封面列表，过滤已丢失的文件
   const covers = []
   for (const rel of meta.covers || []) {
@@ -72,14 +166,23 @@ async function decorateOne(model, usedThumbs) {
   if (!cover) {
     cover = await findSidecarPreview(model.id)
   }
-  // 卡片显示使用缩略图（缓存未命中时生成），生成失败回退原图
+  // 卡片显示使用缩略图：命中缓存直接用；未命中登记后台生成，
+  // 先用原图显示（后台完成后经 thumbsReady 事件更新），避免阻塞扫描响应
   let coverUrl = ''
+  let thumbPath = ''
+  let deferredCover = ''
   if (cover) {
-    const thumbPath = await getThumbPath(cover)
-    if (thumbPath) usedThumbs?.add(path.basename(thumbPath))
-    coverUrl = toImageUrl(thumbPath || cover)
+    thumbPath = await getThumbPathDeferred(cover)
+    if (thumbPath) {
+      usedThumbs.add(path.basename(thumbPath))
+      coverUrl = toImageUrl(thumbPath)
+    } else {
+      coverUrl = toImageUrl(cover)
+      deferredCover = cover
+      trackDeferredThumb(cover, model.id)
+    }
   }
-  return {
+  const decorated = {
     ...model,
     cover,
     coverUrl,
@@ -94,14 +197,22 @@ async function decorateOne(model, usedThumbs) {
     // 大模型自动标注为「基底模型」分类（未手动标注时默认生效）
     subCategory: meta.subCategory || (model.type === 'checkpoint' ? 'base' : '')
   }
+  // 写入装饰缓存（容量超限时按插入顺序淘汰最旧条目）
+  decorateCache.set(model.id, { mtimeMs: model.mtimeMs, signature, thumbPath, deferredCover, decorated })
+  if (decorateCache.size > DECORATE_CACHE_MAX) {
+    const oldest = decorateCache.keys().next().value
+    decorateCache.delete(oldest)
+  }
+  return decorated
 }
 
 /** 为扫描结果补充元数据（封面列表、默认封面 URL、参数、备注、二级分类），分批并行处理并保持原始顺序 */
-async function decorateModels(models) {
+async function decorateModels(models, signal) {
   /** 本次扫描仍在使用的缩略图文件名（用于清理失效缓存） */
   const usedThumbs = new Set()
   const result = new Array(models.length)
   for (let i = 0; i < models.length; i += DECORATE_BATCH_SIZE) {
+    if (signal?.aborted) throw abortError()
     const batch = models.slice(i, i + DECORATE_BATCH_SIZE)
     const decorated = await Promise.all(batch.map((m) => decorateOne(m, usedThumbs)))
     for (let j = 0; j < decorated.length; j++) {
@@ -210,7 +321,8 @@ export function registerModelIpcHandlers() {
     return folder
   })
 
-  // 扫描模型目录（耗时操作，进度通过 models:scanProgress 事件推送）
+  // 扫描模型目录（耗时操作，进度通过 models:scanProgress 事件推送，
+  // 可经 models:cancelScan 取消）
   ipcMain.handle('models:scan', async (event, { folder } = {}) => {
     const root = typeof folder === 'string' && folder ? folder : (await loadSettings()).modelsFolder
     if (!root) {
@@ -222,13 +334,24 @@ export function registerModelIpcHandlers() {
 
     const win = BrowserWindow.fromWebContents(event.sender)
     scanning = true
+    scanAbort = new AbortController()
+    const signal = scanAbort.signal
     const startedAt = Date.now()
     logger.info(`开始扫描模型目录: ${root}`)
 
     try {
+      // 等待上一轮后台缩略图生成完成，避免与新扫描的缩略图清理逻辑竞争
+      if (thumbDrainPromise) {
+        await thumbDrainPromise.catch(() => {})
+      }
       // 切换/加载该根目录的关联存储，并清理孤儿封面文件
       await ensureRootStore(root)
       await pruneOrphanCovers()
+      // 切换根目录后装饰缓存全部失效
+      if (decorateCacheRoot !== root) {
+        decorateCache.clear()
+        decorateCacheRoot = root
+      }
 
       let lastSent = 0
       // 应用扫描规则：排除目录 + 扫描文件扩展名（来自应用设置）
@@ -244,11 +367,12 @@ export function registerModelIpcHandlers() {
         },
         {
           excludeDirs: appSettings.excludeDirs || [],
-          extensions: appSettings.scanExtensions || []
+          extensions: appSettings.scanExtensions || [],
+          signal
         }
       )
 
-      const decorated = await decorateModels(models)
+      const decorated = await decorateModels(models, signal)
       const byType = {}
       for (const m of decorated) {
         byType[m.type] = (byType[m.type] || 0) + 1
@@ -261,6 +385,9 @@ export function registerModelIpcHandlers() {
         logger.warn(`扫描错误详情: ${JSON.stringify(errors.slice(0, 20))}`)
       }
 
+      // 响应先返回，缺失的缩略图由后台队列补齐（完成后推送 thumbsReady 更新）
+      startThumbDrain(win)
+
       return {
         root,
         models: decorated,
@@ -269,11 +396,25 @@ export function registerModelIpcHandlers() {
         durationMs: Date.now() - startedAt
       }
     } catch (err) {
+      if (err?.name === 'AbortError') {
+        logger.info(`扫描已取消: ${root}`)
+        return { canceled: true }
+      }
       logger.error(`扫描失败: ${err.stack || err.message}`)
       return { error: `扫描失败: ${err.message}` }
     } finally {
       scanning = false
+      scanAbort = null
     }
+  })
+
+  // 取消进行中的扫描（经 AbortController 中止，扫描返回 { canceled: true }）
+  ipcMain.handle('models:cancelScan', () => {
+    if (scanning && scanAbort) {
+      scanAbort.abort()
+      return { ok: true }
+    }
+    return { ok: false }
   })
 
   // 保存单个模型的元数据（备注名 / 推荐参数 / 备注 / 二级分类标签）

@@ -67,12 +67,20 @@ export function isValidType(type) {
   return FOLDER_RULES.some((r) => r.type === type) || type === 'other'
 }
 
+/** 构造取消异常（与 AbortController 的 AbortError 同名，便于调用方识别） */
+function abortError() {
+  const err = new Error('扫描已取消')
+  err.name = 'AbortError'
+  return err
+}
+
 /**
  * 递归扫描模型目录。
  * @param {string} root 模型根目录绝对路径
  * @param {(progress: {dirs: number, found: number, current: string}) => void} [onProgress] 进度回调
- * @param {{excludeDirs?: string[]|Set<string>, extensions?: string[]|Set<string>}} [options] 额外排除的目录名（不区分大小写）与扫描的文件扩展名
+ * @param {{excludeDirs?: string[]|Set<string>, extensions?: string[]|Set<string>, signal?: AbortSignal}} [options] 额外排除的目录名（不区分大小写）、扫描的文件扩展名与取消信号
  * @returns {Promise<{models: Array, errors: Array, dirCount: number}>}
+ * @throws {Error} name 为 'AbortError' 表示扫描被取消
  */
 export async function scanModels(root, onProgress, options = {}) {
   const userExclude = options.excludeDirs instanceof Set
@@ -81,6 +89,7 @@ export async function scanModels(root, onProgress, options = {}) {
   const extensions = options.extensions instanceof Set
     ? options.extensions
     : new Set(options.extensions || MODEL_EXTENSIONS)
+  const signal = options.signal
   const models = []
   const errors = []
   let dirCount = 0
@@ -88,6 +97,7 @@ export async function scanModels(root, onProgress, options = {}) {
   const stack = [{ dir: root, depth: 0, rel: '' }]
 
   while (stack.length > 0) {
+    if (signal?.aborted) throw abortError()
     const { dir, depth, rel } = stack.pop()
     if (depth > MAX_DEPTH) continue
 
@@ -125,6 +135,7 @@ export async function scanModels(root, onProgress, options = {}) {
 
     // 分批并行 stat（仅取 size/mtime），批间串行控制并发句柄数
     for (let i = 0; i < fileEntries.length; i += STAT_BATCH_SIZE) {
+      if (signal?.aborted) throw abortError()
       const batch = fileEntries.slice(i, i + STAT_BATCH_SIZE)
       const stats = await Promise.allSettled(batch.map((f) => fs.stat(f.fullPath)))
       batch.forEach((f, j) => {

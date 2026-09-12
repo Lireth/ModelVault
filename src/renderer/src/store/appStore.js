@@ -219,6 +219,10 @@ export async function scanModels() {
   state.progress = { dirs: 0, found: 0, current: '' }
   try {
     const res = await window.api.models.scan(state.folder)
+    if (res.canceled) {
+      // 用户取消：保留上一次扫描结果，静默返回
+      return false
+    }
     if (res.error) {
       state.scanError = res.error
       toast('error', res.error)
@@ -237,6 +241,28 @@ export async function scanModels() {
     toast('error', `扫描失败: ${err.message}`)
   } finally {
     state.scanning = false
+  }
+}
+
+/** 取消进行中的扫描（扫描调用会以 { canceled: true } 返回） */
+export function cancelScan() {
+  window.api.models.cancelScan().catch((err) => {
+    toast('error', `取消扫描失败: ${err.message}`)
+  })
+}
+
+/**
+ * 应用后台缩略图生成完成的封面 URL 更新
+ * （首次扫描时卡片先显示原图，缩略图在后台补齐后替换）。
+ * @param {Array<{id: string, coverUrl: string}>} updates 更新列表
+ */
+export function applyThumbUpdates(updates) {
+  if (!Array.isArray(updates)) return
+  for (const { id, coverUrl } of updates) {
+    const idx = state.models.findIndex((m) => m.id === id)
+    if (idx >= 0 && coverUrl) {
+      state.models[idx] = { ...state.models[idx], coverUrl }
+    }
   }
 }
 

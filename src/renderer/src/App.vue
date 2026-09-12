@@ -7,6 +7,8 @@ import SettingsPage from './components/SettingsPage.vue'
 import ToastHost from './components/ToastHost.vue'
 import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import {
+  applyThumbUpdates,
+  cancelScan,
   filteredModels,
   handleMenuAction,
   initApp,
@@ -35,6 +37,7 @@ function clearSearch() {
 
 let unsubscribeProgress = null
 let unsubscribeMenu = null
+let unsubscribeThumbs = null
 
 onMounted(async () => {
   // 订阅扫描进度事件
@@ -45,12 +48,17 @@ onMounted(async () => {
   unsubscribeMenu = window.api.models.onMenuAction(({ id, action }) => {
     handleMenuAction(id, action)
   })
+  // 订阅后台缩略图生成完成事件（首扫卡片先显示原图，缩略图补齐后替换）
+  unsubscribeThumbs = window.api.models.onThumbsReady(({ updates }) => {
+    applyThumbUpdates(updates)
+  })
   await initApp()
 })
 
 onUnmounted(() => {
   unsubscribeProgress?.()
   unsubscribeMenu?.()
+  unsubscribeThumbs?.()
 })
 </script>
 
@@ -107,6 +115,7 @@ onUnmounted(() => {
             已扫描 {{ state.progress.dirs }} 个目录，发现 {{ state.progress.found }} 个模型
           </p>
           <p class="scan-current">{{ state.progress.current }}</p>
+          <button class="btn" @click="cancelScan">取消扫描</button>
         </div>
 
         <!-- 空结果 -->

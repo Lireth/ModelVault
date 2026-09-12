@@ -34,6 +34,21 @@ function thumbFileName(absCover, mtimeMs) {
 }
 
 /**
+ * 生成缩略图核心逻辑：读取源图、按需缩放并写入缓存文件。
+ * @returns {Promise<string>} 成功返回缩略图路径；源图过小/损坏返回 ''（回退原图）
+ */
+async function generateThumb(absCover, mtimeMs, thumbPath) {
+  const image = nativeImage.createFromPath(absCover)
+  if (image.isEmpty()) return ''
+  const { width } = image.getSize()
+  if (width <= MIN_SOURCE_WIDTH) return ''
+  const resized = image.resize({ width: THUMB_WIDTH })
+  await fs.mkdir(getThumbsDir(), { recursive: true })
+  await fs.writeFile(thumbPath, resized.toJPEG(JPEG_QUALITY))
+  return thumbPath
+}
+
+/**
  * 获取封面缩略图的绝对路径；缓存未命中时同步生成后返回。
  * 生成失败或无需缩放时返回空字符串，调用方应回退使用原图路径。
  * @param {string} absCover 封面图片绝对路径
@@ -43,25 +58,75 @@ export async function getThumbPath(absCover) {
   if (!absCover || typeof absCover !== 'string' || !getCurrentRoot()) return ''
   try {
     const stat = await fs.stat(absCover)
-    const name = thumbFileName(absCover, stat.mtimeMs)
-    const thumbPath = path.join(getThumbsDir(), name)
+    const thumbPath = path.join(getThumbsDir(), thumbFileName(absCover, stat.mtimeMs))
     try {
       await fs.access(thumbPath)
       return thumbPath
     } catch {
       /* 缓存未命中，继续生成 */
     }
-    const image = nativeImage.createFromPath(absCover)
-    if (image.isEmpty()) return ''
-    const { width } = image.getSize()
-    if (width <= MIN_SOURCE_WIDTH) return ''
-    const resized = image.resize({ width: THUMB_WIDTH })
-    await fs.mkdir(getThumbsDir(), { recursive: true })
-    await fs.writeFile(thumbPath, resized.toJPEG(JPEG_QUALITY))
-    return thumbPath
+    return await generateThumb(absCover, stat.mtimeMs, thumbPath)
   } catch (err) {
     logger.warn(`缩略图生成失败（回退原图）: ${err.message}`)
     return ''
+  }
+}
+
+/* ---------------- 后台延迟生成（扫描装饰阶段专用） ---------------- */
+
+/** 后台延迟生成队列：key 为缩略图路径，避免同一源图重复登记 */
+const deferredJobs = new Map()
+
+/**
+ * 请求封面缩略图（延迟生成模式，供扫描装饰阶段使用）：
+ * - 缓存命中：立即返回缩略图路径；
+ * - 缓存未命中：登记后台生成任务并返回 ''（调用方回退原图，
+ *   扫描响应不再被大量缩略图生成阻塞，完成后经 drain 通知更新）。
+ * @param {string} absCover 封面图片绝对路径
+ * @returns {Promise<string>} 缩略图绝对路径，未命中/失败返回 ''
+ */
+export async function getThumbPathDeferred(absCover) {
+  if (!absCover || typeof absCover !== 'string' || !getCurrentRoot()) return ''
+  try {
+    const stat = await fs.stat(absCover)
+    const thumbPath = path.join(getThumbsDir(), thumbFileName(absCover, stat.mtimeMs))
+    try {
+      await fs.access(thumbPath)
+      return thumbPath
+    } catch {
+      /* 缓存未命中，登记后台生成 */
+    }
+    deferredJobs.set(thumbPath, { absCover, mtimeMs: stat.mtimeMs })
+    return ''
+  } catch (err) {
+    logger.warn(`缩略图预检失败（回退原图）: ${err.message}`)
+    return ''
+  }
+}
+
+/**
+ * 依次处理后台延迟生成队列（批内并发、批间串行）。
+ * 每成功生成一个缩略图，调用 onGenerated(源图路径, 缩略图路径)
+ * 通知调用方（用于推送渲染进程更新卡片封面）。
+ * @param {(absCover: string, thumbPath: string) => void} onGenerated 生成成功回调
+ * @param {number} [batchSize] 单批并发数量
+ */
+export async function drainDeferredThumbs(onGenerated, batchSize = 16) {
+  const jobs = [...deferredJobs.values()]
+  deferredJobs.clear()
+  for (let i = 0; i < jobs.length; i += batchSize) {
+    const batch = jobs.slice(i, i + batchSize)
+    await Promise.allSettled(
+      batch.map(async ({ absCover, mtimeMs }) => {
+        const thumbPath = path.join(getThumbsDir(), thumbFileName(absCover, mtimeMs))
+        try {
+          const generated = await generateThumb(absCover, mtimeMs, thumbPath)
+          if (generated) onGenerated(absCover, generated)
+        } catch (err) {
+          logger.warn(`后台缩略图生成失败（回退原图）: ${err.message}`)
+        }
+      })
+    )
   }
 }
 

@@ -12,6 +12,8 @@
     "start": "electron-vite dev",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "preview": "electron-vite preview",
     "dist": "npm run build && electron-builder --win",
     "dist:dir": "npm run build && electron-builder --dir"
@@ -24,7 +26,8 @@
     "electron": "^44.2.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
-    "vite": "^7.0.0"
+    "vite": "^7.0.0",
+    "vitest": "^5.0.0"
   },
   "allowScripts": {
     "esbuild@0.25.12": true,

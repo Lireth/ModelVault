@@ -12,6 +12,7 @@ const VALID_INVOKE_CHANNELS = [
   'models:loadStore',
   'models:chooseFolder',
   'models:scan',
+  'models:cancelScan',
   'models:saveModelData',
   'models:uploadCover',
   'models:pasteCover',
@@ -27,7 +28,7 @@ const VALID_INVOKE_CHANNELS = [
   'models:flushStore'
 ]
 
-const VALID_RECEIVE_CHANNELS = ['models:scanProgress', 'models:menuAction']
+const VALID_RECEIVE_CHANNELS = ['models:scanProgress', 'models:menuAction', 'models:thumbsReady']
 
 /** 带白名单校验的 invoke（所有便捷方法的统一入口） */
 function invokeValidated(channel, payload) {
@@ -83,8 +84,10 @@ const api = {
     loadStore: () => invokeValidated('models:loadStore'),
     /** 弹出目录选择框，返回所选目录或 null */
     chooseFolder: () => invokeValidated('models:chooseFolder'),
-    /** 扫描模型目录，返回 { models, byType, errors } 或 { error } */
+    /** 扫描模型目录，返回 { models, byType, errors } 或 { canceled } / { error } */
     scan: (folder) => invokeValidated('models:scan', { folder }),
+    /** 取消进行中的扫描，返回 { ok } */
+    cancelScan: () => invokeValidated('models:cancelScan'),
     /** 保存模型推荐参数与备注 */
     saveModelData: (payload) => invokeValidated('models:saveModelData', payload),
     /** 上传模型封面，返回 { cover, coverUrl, covers, meta } 或 { canceled } / { error } */
@@ -113,6 +116,8 @@ const api = {
     flushStore: () => invokeValidated('models:flushStore'),
     /** 订阅扫描进度，返回取消监听函数 */
     onScanProgress: (listener) => subscribe('models:scanProgress', listener),
+    /** 订阅后台缩略图生成完成事件（updates: [{ id, coverUrl }]），返回取消监听函数 */
+    onThumbsReady: (listener) => subscribe('models:thumbsReady', listener),
     /** 订阅右键菜单动作事件，返回取消监听函数 */
     onMenuAction: (listener) => subscribe('models:menuAction', listener)
   }
