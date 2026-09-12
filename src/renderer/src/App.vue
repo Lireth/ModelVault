@@ -118,16 +118,12 @@ onUnmounted(() => {
           <button class="btn" @click="cancelScan">取消扫描</button>
         </div>
 
-        <!-- 空结果 -->
-        <div v-else-if="filteredModels.length === 0 && state.typeFilter !== 'lora'" class="empty-state">
+        <!-- 库中无任何模型（未应用筛选时；保留结果栏逻辑见下方，避免筛选状态死锁） -->
+        <div v-else-if="state.models.length === 0" class="empty-state">
           <div class="empty-icon">🔍</div>
           <h2>没有匹配的模型</h2>
           <p class="muted">
-            {{
-              state.models.length === 0
-                ? '当前文件夹中未发现支持的模型文件（.safetensors / .ckpt / .pt / .pth / .bin），可尝试点击侧边栏「重新扫描」。'
-                : '当前筛选或搜索条件下没有模型，试试切换分类或清空搜索词。'
-            }}
+            当前文件夹中未发现支持的模型文件（.safetensors / .ckpt / .pt / .pth / .bin），可尝试点击侧边栏「重新扫描」。
           </p>
         </div>
 
@@ -155,11 +151,11 @@ onUnmounted(() => {
             </label>
           </div>
 
-          <!-- 空结果（LoRA 分类筛选无匹配时，保留结果栏以便切换分类） -->
+          <!-- 空结果（有筛选条件时保留结果栏，便于切换分类/取消收藏筛选/清空搜索） -->
           <div v-if="filteredModels.length === 0" class="empty-state">
             <div class="empty-icon">🔍</div>
             <h2>没有匹配的模型</h2>
-            <p class="muted">当前筛选或搜索条件下没有模型，试试切换分类或清空搜索词。</p>
+            <p class="muted">当前筛选或搜索条件下没有模型，试试切换分类、取消「★ 收藏」筛选或清空搜索词。</p>
           </div>
 
           <!-- 模型网格：虚拟滚动，仅渲染视口附近的卡片 -->
