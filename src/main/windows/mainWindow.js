@@ -2,7 +2,7 @@ import { BrowserWindow, app, screen } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
-import { getSettings } from '../services/store'
+import { getSettings, atomicWriteFile } from '../services/store'
 import { themeColors } from '../theme'
 
 /** 默认窗口尺寸 */
@@ -35,12 +35,12 @@ async function loadWindowState() {
   }
 }
 
-/** 保存窗口状态（取最大化前的正常边界，避免记录铺满全屏的坐标） */
+/** 保存窗口状态（取最大化前的正常边界，避免记录铺满全屏的坐标；原子写入防损坏） */
 async function saveWindowState(win) {
   try {
     const state = { ...win.getNormalBounds(), maximized: win.isMaximized() }
     const file = path.join(app.getPath('userData'), WINDOW_STATE_FILE)
-    await fs.writeFile(file, JSON.stringify(state, null, 2), 'utf-8')
+    await atomicWriteFile(file, JSON.stringify(state, null, 2))
   } catch (err) {
     logger.warn(`窗口状态保存失败: ${err.message}`)
   }

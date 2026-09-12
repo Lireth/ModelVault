@@ -6,6 +6,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
  */
 const VALID_INVOKE_CHANNELS = [
   'app:getInfo',
+  'app:reportError',
   'window:setTheme',
   'settings:update',
   'models:loadStore',
@@ -59,7 +60,9 @@ const api = {
   /** 应用信息 */
   app: {
     /** 应用与运行时版本信息 */
-    getInfo: () => invokeValidated('app:getInfo')
+    getInfo: () => invokeValidated('app:getInfo'),
+    /** 上报渲染进程异常（写入主进程日志） */
+    reportError: (message, stack) => invokeValidated('app:reportError', { message, stack })
   },
 
   /** 窗口相关（最小化/最大化/关闭由原生标题栏叠加层控件处理） */

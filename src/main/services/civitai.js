@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
+import { net } from 'electron'
 import logger from '../logger'
 
 /**
@@ -7,7 +8,10 @@ import logger from '../logger'
  * - 对模型文件计算 SHA256（Civitai AutoV2 哈希），查询 Civitai API
  *   匹配对应的模型版本，获取模型名/作者/触发词/推荐参数/精度等信息；
  * - 大文件哈希耗时较长（GB 级约数秒），结果按「路径+修改时间」做
- *   进程内缓存，同一版本重复匹配时无需重新计算；
+ *   进程内缓存；已计算的哈希持久化到模型元数据（store.js），
+ *   应用重启后同一文件无需重新计算；
+ * - 网络请求使用 Electron net.fetch（走 Chromium 网络栈，
+ *   自动继承系统代理设置，Node 原生 fetch 不支持代理）；
  * - 请求超时与网络错误统一抛出，由 IPC 层转换为 { error } 返回。
  */
 
@@ -71,20 +75,28 @@ function mapVersion(v) {
 /**
  * 匹配 Civitai 模型版本。
  * @param {string} absPath 模型文件绝对路径
+ * @param {string} [knownHash] 已持久化的哈希（文件未变化时直接复用，跳过耗时计算）
  * @returns {Promise<{matched: false, hash: string} | {matched: true, hash: string, info: object}>}
  */
-export async function matchCivitai(absPath) {
+export async function matchCivitai(absPath, knownHash = '') {
   const stat = await fs.promises.stat(absPath)
   const cacheKey = `${absPath}:${Math.round(stat.mtimeMs)}`
   const cached = matchCache.get(cacheKey)
   if (cached) return cached
 
-  logger.info(`Civitai 匹配：开始计算文件哈希 ${absPath}`)
-  const hash = await sha256File(absPath)
+  const hash = typeof knownHash === 'string' && /^[0-9a-f]{64}$/i.test(knownHash)
+    ? knownHash.toLowerCase()
+    : await sha256File(absPath)
+  const useKnownHash = hash === knownHash?.toLowerCase()
+  if (!useKnownHash) {
+    logger.info(`Civitai 匹配：开始计算文件哈希 ${absPath}`)
+  }
 
   let response
   try {
-    response = await fetch(`${API_BASE}/model-versions/by-hash/${hash}`, {
+    // net.fetch 走 Chromium 网络栈，自动继承系统代理（含 PAC），
+    // 解决 Node 原生 fetch 不支持代理导致国内网络环境无法访问 Civitai 的问题
+    response = await net.fetch(`${API_BASE}/model-versions/by-hash/${hash}`, {
       headers: { 'User-Agent': 'ModelVault/0.1.0' },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     })

@@ -10,6 +10,14 @@ import { themeColors } from './theme'
 export function registerIpcHandlers() {
   registerModelIpcHandlers()
 
+  // 渲染进程异常上报（Vue errorHandler / unhandledrejection），写入主进程日志
+  ipcMain.handle('app:reportError', (event, { message, stack } = {}) => {
+    const msg = typeof message === 'string' ? message.slice(0, 2000) : '未知渲染进程错误'
+    const stackText = typeof stack === 'string' ? `\n${stack.slice(0, 4000)}` : ''
+    logger.error(`[渲染进程] ${msg}${stackText}`)
+    return { ok: true }
+  })
+
   // 获取应用与运行时版本信息
   ipcMain.handle('app:getInfo', () => ({
     name: app.getName(),

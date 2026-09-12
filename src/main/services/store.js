@@ -109,6 +109,29 @@ let pendingSave = false
 /** 元数据是否因损坏被重置（为 true 时应跳过孤儿封面清理，避免误删） */
 let dataReset = false
 
+/**
+ * 原子写入文本文件（先写临时文件再重命名）。
+ * 写入中断电/崩溃时不会损坏目标文件，settings.json、
+ * window-state.json 与关联存储统一采用该策略。
+ * @param {string} file 目标文件绝对路径
+ * @param {string} content 待写入内容
+ */
+export async function atomicWriteFile(file, content) {
+  const tmp = `${file}.${process.pid}.tmp`
+  try {
+    await fs.mkdir(path.dirname(file), { recursive: true })
+    await fs.writeFile(tmp, content, 'utf-8')
+    await fs.rename(tmp, file)
+  } catch (err) {
+    try {
+      await fs.rm(tmp, { force: true })
+    } catch {
+      /* 清理失败可忽略 */
+    }
+    throw err
+  }
+}
+
 /* ---------------- 路径辅助 ---------------- */
 
 function getSettingsFilePath() {
@@ -214,6 +237,10 @@ function normalizeModelMeta(raw) {
     rating: Number.isInteger(raw.rating) && raw.rating >= 0 && raw.rating <= 5 ? raw.rating : 0,
     // 自定义多标签
     tags,
+    // Civitai AutoV2 哈希（SHA256 hex）与计算时的文件 mtime，
+    // mtime 一致则重启后无需重新计算大文件哈希
+    hash: typeof raw.hash === 'string' && /^[0-9a-f]{64}$/i.test(raw.hash) ? raw.hash.toLowerCase() : '',
+    hashMtime: Number.isFinite(raw.hashMtime) ? raw.hashMtime : 0,
     params: {
       steps: Number.isFinite(params.steps) ? params.steps : null,
       // CFG 为区间字段；兼容旧版单值 cfg（迁移为 min = max = 旧值）
@@ -243,6 +270,24 @@ export function removeModelMeta(modelId) {
   const relKey = toRelKey(modelId)
   if (!relKey || !data.models[relKey]) return false
   delete data.models[relKey]
+  scheduleSave()
+  return true
+}
+
+/**
+ * 持久化模型的 AutoV2 哈希与计算时的文件 mtime（防抖落盘）。
+ * 文件被修改（mtime 变化）后哈希自动失效，下次匹配重新计算。
+ * @param {string} modelId 模型绝对路径
+ * @param {string} hash SHA256 hex 字符串
+ * @param {number} mtimeMs 计算哈希时的文件修改时间
+ */
+export function setModelHash(modelId, hash, mtimeMs) {
+  if (!data) return false
+  const relKey = toRelKey(modelId)
+  if (!relKey || !data.models[relKey]) return false
+  if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/i.test(hash)) return false
+  data.models[relKey].hash = hash.toLowerCase()
+  data.models[relKey].hashMtime = Number.isFinite(mtimeMs) ? mtimeMs : 0
   scheduleSave()
   return true
 }
@@ -296,14 +341,12 @@ export function getSettings() {
   return settings
 }
 
-/** 更新应用设置（规范化后立即落盘） */
+/** 更新应用设置（规范化后立即落盘，原子写入） */
 export async function updateSettings(patch) {
   if (!patch) return
   settings = normalizeSettings({ ...settings, ...patch })
   try {
-    const file = getSettingsFilePath()
-    await fs.mkdir(path.dirname(file), { recursive: true })
-    await fs.writeFile(file, JSON.stringify(settings, null, 2), 'utf-8')
+    await atomicWriteFile(getSettingsFilePath(), JSON.stringify(settings, null, 2))
   } catch (err) {
     logger.error(`设置写入失败: ${err.message}`)
   }
@@ -466,19 +509,10 @@ export async function saveStoreNow() {
     return
   }
   saving = true
-  const file = getDataFilePath()
-  const tmp = `${file}.${process.pid}.tmp`
   try {
-    await fs.mkdir(path.dirname(file), { recursive: true })
-    await fs.writeFile(tmp, JSON.stringify(data, null, 2), 'utf-8')
-    await fs.rename(tmp, file)
+    await atomicWriteFile(getDataFilePath(), JSON.stringify(data, null, 2))
   } catch (err) {
     logger.error(`关联存储写入失败: ${err.message}`)
-    try {
-      await fs.rm(tmp, { force: true })
-    } catch {
-      /* 清理失败可忽略 */
-    }
   } finally {
     saving = false
     if (pendingSave) {

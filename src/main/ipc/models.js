@@ -16,6 +16,7 @@ import {
   resolveCover,
   saveStoreNow,
   setDataRoot,
+  setModelHash,
   setModelMeta,
   updateSettings
 } from '../services/store'
@@ -395,7 +396,8 @@ export function registerModelIpcHandlers() {
     return { settings }
   })
 
-  // Civitai 匹配：计算模型文件 SHA256 并查询 Civitai API（耗时操作，大文件需数秒）
+  // Civitai 匹配：计算模型文件 SHA256 并查询 Civitai API（耗时操作，大文件需数秒）。
+  // 已计算的哈希持久化在元数据中（hash/hashMtime），文件未变化时直接复用，重启后无需重算
   ipcMain.handle('models:civitaiMatch', async (event, { id } = {}) => {
     if (typeof id !== 'string' || !id) {
       return { error: '无效的模型标识' }
@@ -403,8 +405,18 @@ export function registerModelIpcHandlers() {
     if (!isInRoot(id)) {
       return { error: '模型不在当前根目录内，无法匹配' }
     }
+    let mtimeMs = 0
     try {
-      const result = await matchCivitai(id)
+      mtimeMs = (await fs.stat(id)).mtimeMs
+    } catch {
+      return { error: '模型文件不存在' }
+    }
+    // mtime 一致时复用持久化哈希，跳过耗时的全文件 SHA256 计算
+    const meta = getModelMeta(id) || {}
+    const knownHash = meta.hash && meta.hashMtime === mtimeMs ? meta.hash : ''
+    try {
+      const result = await matchCivitai(id, knownHash)
+      if (result.hash) setModelHash(id, result.hash, mtimeMs)
       return result
     } catch (err) {
       logger.warn(`Civitai 匹配失败: ${err.message}`)
