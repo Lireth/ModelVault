@@ -21,15 +21,13 @@ logs/
 Thumbs.db
 $RECYCLE.BIN/
 
+# npm 配置文件
+.npmrc
+
 # 其他
 .trae/
 docs/
 tmp/
 test/
-
-# npm 配置文件
-.npmrc
-
-# 其他
 build/
 electron-builder.yml
