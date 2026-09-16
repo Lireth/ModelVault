@@ -78,7 +78,8 @@ const DECORATE_CACHE_MAX = 8000
 function metaSignature(meta) {
   return JSON.stringify([
     meta.cover, meta.covers, meta.alias, meta.note, meta.subCategory,
-    meta.favorite, meta.nsfw, meta.rating, meta.tags, meta.params, meta.hash
+    meta.triggerWords, meta.favorite, meta.nsfw, meta.rating, meta.tags,
+    meta.params, meta.hash
   ])
 }
 
@@ -197,7 +198,8 @@ async function decorateOne(model, usedThumbs) {
     rating: meta.rating || 0,
     tags: meta.tags || [],
     // 大模型自动标注为「基底模型」分类（未手动标注时默认生效）
-    subCategory: meta.subCategory || (model.type === 'checkpoint' ? 'base' : '')
+    subCategory: meta.subCategory || (model.type === 'checkpoint' ? 'base' : ''),
+    triggerWords: meta.triggerWords || ''
   }
   // 写入装饰缓存（容量超限时按插入顺序淘汰最旧条目）
   decorateCache.set(model.id, { mtimeMs: model.mtimeMs, signature, thumbPath, deferredCover, decorated })
@@ -419,14 +421,19 @@ export function registerModelIpcHandlers() {
     return { ok: false }
   })
 
-  // 保存单个模型的元数据（备注名 / 推荐参数 / 备注 / 二级分类标签）
-  ipcMain.handle('models:saveModelData', (event, { id, alias, params, note, subCategory } = {}) => {
+  // 保存单个模型的元数据（备注名 / 推荐参数 / 备注 / 二级分类标签 / 触发词）
+  ipcMain.handle('models:saveModelData', (event, { id, alias, params, note, subCategory, triggerWords } = {}) => {
     if (typeof id !== 'string' || !id) {
       return { error: '无效的模型标识' }
     }
     // 合并已有元数据，避免覆盖丢失封面等未随本次请求传入的字段
     const existing = getModelMeta(id) || {}
-    const meta = setModelMeta(id, { ...existing, alias, params, note, subCategory })
+    const merged = { ...existing, alias, params, note, subCategory }
+    // 触发词仅 LoRA 详情页编辑：请求未携带该字段时不更新，避免误清空
+    if (typeof triggerWords === 'string') {
+      merged.triggerWords = triggerWords
+    }
+    const meta = setModelMeta(id, merged)
     if (!meta) {
       return { error: '模型元数据保存失败（模型需位于当前模型根目录内）' }
     }

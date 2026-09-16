@@ -231,6 +231,9 @@ function normalizeModelMeta(raw) {
     alias: typeof raw.alias === 'string' ? raw.alias.trim().slice(0, 100) : '',
     note: typeof raw.note === 'string' ? raw.note.slice(0, 2000) : '',
     subCategory: VALID_SUB_CATEGORIES.has(raw.subCategory) ? raw.subCategory : '',
+    // 触发词（LoRA 等模型的唤起词，自由文本，详情页可一键复制）
+    triggerWords:
+      typeof raw.triggerWords === 'string' ? raw.triggerWords.trim().slice(0, 1000) : '',
     // 收藏标记（false 为未收藏）
     favorite: raw.favorite === true,
     // NSFW 标记：勾选后首页卡片预览图做模糊处理（详情页正常展示）

@@ -53,7 +53,8 @@ const form = reactive({
   resMin: '',
   resMax: '',
   note: '',
-  subCategory: ''
+  subCategory: '',
+  triggerWords: ''
 })
 
 /** 从模型对象填充表单（打开详情或切换模型时触发） */
@@ -70,6 +71,7 @@ function fillForm(model) {
   form.resMax = Number.isFinite(p.resMax) ? p.resMax : ''
   form.note = model?.note || ''
   form.subCategory = model?.subCategory || ''
+  form.triggerWords = model?.triggerWords || ''
   // 大模型自动标注为「基底模型」分类
   if (model?.type === 'checkpoint') form.subCategory = 'base'
 }
@@ -269,6 +271,25 @@ async function removeTag(tag) {
   }
 }
 
+/** 复制触发词到剪贴板（一键复制表单当前内容） */
+async function copyTriggerWords() {
+  const text = form.triggerWords.trim()
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    toast('success', '触发词已复制到剪贴板')
+  } catch {
+    // 剪贴板 API 不可用时的降级方案
+    const ta = document.createElement('textarea')
+    ta.value = text
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+    toast('success', '触发词已复制到剪贴板')
+  }
+}
+
 /* ---------------- 拖拽导入封面 ---------------- */
 
 /** 拖拽悬停高亮 */
@@ -447,12 +468,15 @@ async function onSave() {
   }
   busy.value = true
   try {
-    await saveModelData(model.id, {
+    const payload = {
       alias: form.alias.trim(),
       params,
       note: form.note,
       subCategory: model.type === 'other' ? form.subCategory : ''
-    })
+    }
+    // 触发词仅 LoRA 详情页提供编辑
+    if (model.type === 'lora') payload.triggerWords = form.triggerWords
+    await saveModelData(model.id, payload)
   } catch (err) {
     toast('error', `保存失败: ${err.message}`)
   } finally {
@@ -629,6 +653,28 @@ async function onUploadCover() {
                 @keyup.enter="addTag"
               />
             </div>
+
+            <!-- 触发词：仅 LoRA 模型提供，支持一键复制 -->
+            <template v-if="selectedModel.type === 'lora'">
+              <h3>触发词</h3>
+              <div class="trigger-row">
+                <textarea
+                  v-model="form.triggerWords"
+                  class="trigger-input"
+                  rows="2"
+                  maxlength="1000"
+                  spellcheck="false"
+                  placeholder="如：xxx, yyy（多个触发词用逗号分隔），点击「保存参数」生效"
+                ></textarea>
+                <button
+                  class="btn"
+                  type="button"
+                  :disabled="!form.triggerWords.trim()"
+                  title="复制触发词到剪贴板"
+                  @click="copyTriggerWords"
+                >复制</button>
+              </div>
+            </template>
 
             <!-- 分类标签：LoRA / Checkpoint / 其他模型可标注 -->
             <template v-if="typeTags">
@@ -1271,6 +1317,36 @@ async function onUploadCover() {
 }
 
 .tag-input:focus {
+  border-color: var(--accent);
+}
+
+/* 触发词行：文本框占满剩余宽度，复制按钮固定在右侧 */
+.trigger-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.trigger-row .btn {
+  flex-shrink: 0;
+}
+
+.trigger-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.6;
+}
+
+.trigger-input:focus {
   border-color: var(--accent);
 }
 

@@ -364,7 +364,8 @@ export async function saveModelData(id, payload) {
       params: res.meta.params,
       alias: res.meta.alias || '',
       note: res.meta.note,
-      subCategory: res.meta.subCategory || ''
+      subCategory: res.meta.subCategory || '',
+      triggerWords: res.meta.triggerWords || ''
     }
   }
   toast('success', '参数已保存')
