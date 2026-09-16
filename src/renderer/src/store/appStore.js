@@ -282,7 +282,7 @@ export const filteredModels = computed(() => {
     list = list.filter((m) => m.favorite)
   }
   if (keyword) {
-    // 搜索范围：文件名、备注名、备注（触发词常记录在备注中）、分类标签（含中文标签）、自定义标签
+    // 搜索范围：文件名、备注名、备注（触发词常记录在备注中）、分类标签（含中文标签）
     list = list.filter((m) => {
       if (m.name.toLowerCase().includes(keyword)) return true
       if (m.alias && m.alias.toLowerCase().includes(keyword)) return true
@@ -292,7 +292,6 @@ export const filteredModels = computed(() => {
         const info = SUB_MAP[m.subCategory]
         if (info && info.label.toLowerCase().includes(keyword)) return true
       }
-      if ((m.tags || []).some((t) => t.toLowerCase().includes(keyword))) return true
       return false
     })
   }
@@ -515,8 +514,7 @@ function applyMetaFlags(id, meta) {
       ...state.models[idx],
       favorite: meta.favorite === true,
       nsfw: meta.nsfw === true,
-      rating: meta.rating || 0,
-      tags: meta.tags || []
+      rating: meta.rating || 0
     }
   }
 }
@@ -559,21 +557,6 @@ export async function setNsfw(id, nsfw) {
  */
 export async function setRating(id, rating) {
   const res = await window.api.models.setMetaFlags({ id, rating })
-  if (res?.error) {
-    toast('error', res.error)
-    return false
-  }
-  if (res.meta) applyMetaFlags(id, res.meta)
-  return true
-}
-
-/**
- * 更新自定义标签列表（即时落盘）。
- * @param {string} id 模型 id
- * @param {string[]} tags 标签列表
- */
-export async function setModelTags(id, tags) {
-  const res = await window.api.models.setMetaFlags({ id, tags })
   if (res?.error) {
     toast('error', res.error)
     return false

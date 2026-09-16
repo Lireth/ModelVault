@@ -215,15 +215,6 @@ function normalizeModelMeta(raw) {
   }
   let cover = typeof raw.cover === 'string' ? raw.cover : ''
   if (!cover && covers.length > 0) cover = covers[0]
-  // 自定义标签：字符串数组，去空、去重、限量
-  const tags = Array.isArray(raw.tags)
-    ? [...new Set(
-        raw.tags
-          .filter((t) => typeof t === 'string')
-          .map((t) => t.trim().slice(0, 30))
-          .filter(Boolean)
-      )].slice(0, 20)
-    : []
   return {
     cover,
     covers,
@@ -240,8 +231,6 @@ function normalizeModelMeta(raw) {
     nsfw: raw.nsfw === true,
     // 评分（0-5 整数，0 为未评分）
     rating: Number.isInteger(raw.rating) && raw.rating >= 0 && raw.rating <= 5 ? raw.rating : 0,
-    // 自定义多标签
-    tags,
     // Civitai AutoV2 哈希（SHA256 hex）与计算时的文件 mtime，
     // mtime 一致则重启后无需重新计算大文件哈希
     hash: typeof raw.hash === 'string' && /^[0-9a-f]{64}$/i.test(raw.hash) ? raw.hash.toLowerCase() : '',

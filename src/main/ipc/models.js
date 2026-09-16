@@ -78,8 +78,7 @@ const DECORATE_CACHE_MAX = 8000
 function metaSignature(meta) {
   return JSON.stringify([
     meta.cover, meta.covers, meta.alias, meta.note, meta.subCategory,
-    meta.triggerWords, meta.favorite, meta.nsfw, meta.rating, meta.tags,
-    meta.params, meta.hash
+    meta.triggerWords, meta.favorite, meta.nsfw, meta.rating, meta.params, meta.hash
   ])
 }
 
@@ -196,7 +195,6 @@ async function decorateOne(model, usedThumbs) {
     // NSFW 标记：首页卡片预览图模糊展示（详情页正常展示）
     nsfw: meta.nsfw === true,
     rating: meta.rating || 0,
-    tags: meta.tags || [],
     // 大模型自动标注为「基底模型」分类（未手动标注时默认生效）
     subCategory: meta.subCategory || (model.type === 'checkpoint' ? 'base' : ''),
     triggerWords: meta.triggerWords || ''
@@ -671,8 +669,8 @@ export function registerModelIpcHandlers() {
     return { ok: true, id: newId, name }
   })
 
-  // 更新模型快捷标记（收藏/NSFW/评分/自定义标签；仅更新传入的字段，即时落盘）
-  ipcMain.handle('models:setMetaFlags', (event, { id, favorite, nsfw, rating, tags } = {}) => {
+  // 更新模型快捷标记（收藏/NSFW/评分；仅更新传入的字段，即时落盘）
+  ipcMain.handle('models:setMetaFlags', (event, { id, favorite, nsfw, rating } = {}) => {
     if (typeof id !== 'string' || !id) {
       return { error: '无效的模型标识' }
     }
@@ -690,10 +688,6 @@ export function registerModelIpcHandlers() {
         return { error: '评分需为 0-5 的整数' }
       }
       patch.rating = rating
-    }
-    if (tags !== undefined) {
-      if (!Array.isArray(tags)) return { error: '无效的标签列表' }
-      patch.tags = tags
     }
     if (Object.keys(patch).length === 0) {
       return { error: '无有效的更新字段' }

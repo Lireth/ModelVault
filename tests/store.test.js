@@ -60,16 +60,6 @@ describe('元数据规范化', () => {
     expect(getModelMeta(abs).alias).toBe('我的大模型')
   })
 
-  it('标签：去空、去重、单项截断、数量上限', async () => {
-    const abs = await touchModel('b.safetensors')
-    const tags = ['风格', '风格', '  ', 'x'.repeat(50), ...Array.from({ length: 25 }, (_, i) => `t${i}`)]
-    const meta = setModelMeta(abs, { tags })
-    expect(meta.tags[0]).toBe('风格')
-    expect(meta.tags.filter((t) => t === '风格')).toHaveLength(1)
-    expect(meta.tags.every((t) => t.length <= 30)).toBe(true)
-    expect(meta.tags.length).toBeLessThanOrEqual(20)
-  })
-
   it('评分越界回退 0，收藏仅接受 true', async () => {
     const abs = await touchModel('c.safetensors')
     expect(setModelMeta(abs, { rating: 9, favorite: 'yes' }).rating).toBe(0)
