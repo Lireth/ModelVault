@@ -1,0 +1,109 @@
+# ModelVault 持续集成工作流（CI）
+#
+# 触发条件：推送到 main 分支、针对 main 的 PR、手动触发
+# 职责：依赖安装 → 单元测试 → 三端编译 → 编译产物完整性校验
+# 与 release.yml 的分工：本工作流只做质量门禁，不打包 EXE、不发布；
+#   打包发布由推送 v* 标签触发的 release.yml 负责。
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch: # 允许手动触发
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true # 同分支新推送自动取消旧任务，节省构建资源
+
+jobs:
+  test-and-build:
+    name: Test & Build
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      # ---------- 环境准备 ----------
+
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm # 缓存 npm 依赖包
+
+      # 缓存 Electron / electron-builder 二进制（.npmrc 指向 npmmirror，
+      # 首次下载约 100MB+，缓存后大幅加速）。键随 lock 文件变化自动失效。
+      - name: 缓存 Electron 二进制
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      # ---------- 依赖安装 ----------
+
+      - name: 安装依赖
+        run: npm ci
+
+      # ---------- 测试与构建 ----------
+
+      - name: 运行单元测试
+        run: npm test
+
+      - name: 编译主进程 / preload / 渲染进程
+        run: npm run build
+
+      # ---------- 构建产物验证 ----------
+
+      - name: 验证编译产物
+        shell: pwsh
+        run: |
+          $required = @(
+            "out/main/index.js",
+            "out/preload/index.js",
+            "out/renderer/index.html"
+          )
+
+          $missing = $required | Where-Object { -not (Test-Path $_) }
+          if ($missing) {
+            Write-Host "::error::编译产物缺失: $($missing -join ', ')"
+            Get-ChildItem out -Recurse -File | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+          Write-Host "编译产物完整: main / preload / renderer 三端入口均存在"
+
+      # ---------- 结果通知 ----------
+
+      - name: 写入 CI 结果摘要
+        if: always()
+        shell: pwsh
+        env:
+          ACTOR: ${{ github.actor }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $result = if ("${{ job.status }}" -eq "success") { "✅ 通过" } else { "❌ 失败" }
+          Add-Content $env:GITHUB_STEP_SUMMARY @"
+          ## CI 结果：$result
+
+          - 触发者：``$env:ACTOR``
+          - 提交：``$env:SHA``
+          - [查看运行日志]($env:RUN_URL)
+          "@
+
+      - name: 失败通知
+        if: failure()
+        shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          Write-Host "::error::CI 失败（分支 $env:REF_NAME），请查看日志: $env:RUN_URL"

@@ -1,0 +1,192 @@
+# ModelVault 版本发布构建工作流
+#
+# 触发条件：推送形如 v0.1.0 的版本标签（或手动 workflow_dispatch 触发）
+# 运行环境：Windows（windows-latest），与项目目标平台一致
+# 构建产物：dist/{version}/ModelVault-{version}.exe（单文件便携版，
+#           路径由 electron-builder.yml 的 output: dist/${version} 决定）
+# 产物去向：上传为 Workflow Artifact + 自动创建 GitHub Release 并附加 EXE
+# 结果通知：每步输出详细日志；构建结束写入 Job Summary；失败时输出
+#           ::error:: 注解（在 Actions 页面与检查结果中高亮显示）
+#
+# 注意：标签版本号必须与 package.json 的 version 一致，否则构建提前失败，
+#       因为 electron-builder 产物路径由 package.json 的 version 决定。
+
+name: Release Build
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: # 允许手动触发，便于调试工作流本身
+
+permissions:
+  contents: write # 创建 GitHub Release 需要写权限
+
+jobs:
+  build-windows:
+    name: Build Windows Portable EXE
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      # ---------- 1. 环境准备 ----------
+
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm # 缓存 npm 依赖包
+
+      # 缓存 Electron / electron-builder 二进制（.npmrc 指向 npmmirror，
+      # 首次下载约 100MB+，缓存后大幅加速）。键随 lock 文件变化自动失效。
+      - name: 缓存 Electron 二进制
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: 解析标签版本号
+        id: ver
+        shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $tag = $env:REF_NAME
+          $version = $tag -replace '^v', ''
+          Write-Host "触发标签: $tag，解析版本号: $version"
+          "tag=$tag"         >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: 校验标签版本与 package.json 一致
+        shell: pwsh
+        env:
+          TAG_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          if ($pkg.version -ne $env:TAG_VERSION) {
+            Write-Host "::error::标签版本 v$($env:TAG_VERSION) 与 package.json version $($pkg.version) 不一致，请先更新 package.json 后重新打标签"
+            exit 1
+          }
+          Write-Host "版本校验通过: v$($env:TAG_VERSION)"
+
+      # build/ 目录当前未放置 icon.ico 时，electron-builder 会使用默认
+      # Electron 图标打包；此处仅提醒，不阻断构建。
+      - name: 检查应用图标配置
+        shell: pwsh
+        run: |
+          if (Test-Path "build/icon.ico") {
+            Write-Host "已检测到 build/icon.ico，将使用自定义应用图标"
+          } else {
+            Write-Host "::warning::未找到 build/icon.ico，产物将使用默认 Electron 图标。如需自定义，请提供 256×256 及以上的 icon.ico"
+          }
+
+      # ---------- 2. 依赖安装 ----------
+
+      - name: 安装依赖
+        run: npm ci
+
+      # ---------- 3. 构建过程 ----------
+
+      - name: 运行单元测试
+        run: npm test
+
+      - name: 编译主进程 / preload / 渲染进程
+        run: npm run build
+
+      # 不用 npm run dist（其会重复执行 build）；显式 --publish never
+      # 禁用 electron-builder 的自动发布，发布统一由下方专用步骤控制
+      - name: 打包单文件便携版 EXE
+        run: npx electron-builder --win --publish never
+
+      # ---------- 4. 构建产物验证 ----------
+
+      - name: 验证构建产物
+        id: artifact
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          $exePath = "dist/$($env:VERSION)/ModelVault-$($env:VERSION).exe"
+
+          if (-not (Test-Path $exePath)) {
+            Write-Host "::error::未找到预期产物 $exePath"
+            Get-ChildItem dist -Recurse | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+
+          $exe = Get-Item $exePath
+          $sizeMB = [math]::Round($exe.Length / 1MB, 2)
+          if ($exe.Length -lt 10MB) {
+            Write-Host "::error::产物体积异常（$sizeMB MB，Electron 便携版应大于 10MB），可能打包不完整"
+            exit 1
+          }
+
+          Write-Host "产物验证通过: $exePath（$sizeMB MB）"
+          "path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          "size=$sizeMB"          >> $env:GITHUB_OUTPUT
+
+      # ---------- 5. 发布与产物归档 ----------
+
+      - name: 上传 Workflow Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModelVault-${{ steps.ver.outputs.version }}
+          path: dist/${{ steps.ver.outputs.version }}/ModelVault-${{ steps.ver.outputs.version }}.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 创建 GitHub Release 并附加 EXE
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/${{ steps.ver.outputs.version }}/ModelVault-${{ steps.ver.outputs.version }}.exe
+          generate_release_notes: true # 自动根据提交生成 Release Notes
+          fail_on_unmatched_files: true
+
+      # ---------- 6. 构建结果通知 ----------
+
+      - name: 写入构建成功摘要
+        if: success()
+        shell: pwsh
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          SIZE: ${{ steps.artifact.outputs.size }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.ver.outputs.tag }}
+        run: |
+          Add-Content $env:GITHUB_STEP_SUMMARY @"
+          ## ✅ 构建成功：$env:TAG
+
+          | 项目 | 值 |
+          | ---- | -- |
+          | 产物 | ``ModelVault-$env:VERSION.exe`` |
+          | 体积 | $env:SIZE MB |
+          | 运行日志 | [查看详情]($env:RUN_URL) |
+
+          产物已附加到 [GitHub Release]($env:RELEASE_URL)，并可在本次运行页面下载。
+          "@
+
+      - name: 写入构建失败通知
+        if: failure()
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $url = $env:RUN_URL
+          Write-Host "::error::ModelVault $env:TAG 构建失败，请查看日志定位问题: $url"
+          Add-Content $env:GITHUB_STEP_SUMMARY @"
+          ## ❌ 构建失败：$env:TAG
+
+          构建未成功，请前往 [运行日志]($url) 排查问题。
+
+          常见原因：
+          - 标签版本号与 ``package.json`` 的 ``version`` 不一致
+          - 单元测试失败
+          - electron-builder 打包报错（检查 ``build/`` 目录与图标配置）
+          "@
