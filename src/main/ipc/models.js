@@ -12,7 +12,6 @@ import {
   loadData,
   relativizeCover,
   removeModelMeta,
-  renameModelMeta,
   resolveCover,
   saveStoreNow,
   setDataRoot,
@@ -601,72 +600,6 @@ export function registerModelIpcHandlers() {
     removeModelMeta(id)
     logger.info(`模型已移入回收站: ${id}`)
     return { ok: true }
-  })
-
-  // 重命名模型文件（保留扩展名，联动迁移元数据键与同名 sidecar 文件）
-  ipcMain.handle('models:renameModel', async (event, { id, newName } = {}) => {
-    if (typeof id !== 'string' || !id || typeof newName !== 'string') {
-      return { error: '无效的参数' }
-    }
-    const name = newName.trim()
-    if (!name || /[\\/:*?"<>|]/.test(name)) {
-      return { error: '名称为空或包含非法字符' }
-    }
-    if (name.length > 200) {
-      return { error: '名称过长（最多 200 字符）' }
-    }
-    if (!isInRoot(id)) {
-      return { error: '模型不在当前根目录内，无法重命名' }
-    }
-    try {
-      const stat = await fs.stat(id)
-      if (!stat.isFile()) {
-        return { error: '无效的模型文件' }
-      }
-    } catch {
-      return { error: '模型文件不存在' }
-    }
-
-    const ext = path.extname(id)
-    const dir = path.dirname(id)
-    const newId = path.join(dir, `${name}${ext}`)
-    if (newId === path.normalize(id)) {
-      return { ok: true, id, name }
-    }
-    try {
-      await fs.access(newId)
-      return { error: '目标文件名已存在' }
-    } catch {
-      /* 目标不存在，可以重命名 */
-    }
-    try {
-      await fs.rename(id, newId)
-    } catch (err) {
-      logger.warn(`模型重命名失败: ${err.message}`)
-      return { error: `重命名失败: ${err.message}` }
-    }
-
-    // 联动重命名同名 sidecar 文件（预览图/说明文本）
-    const oldBase = path.basename(id, ext)
-    for (const f of sidecarFilesFor(id)) {
-      try {
-        await fs.access(f)
-      } catch {
-        continue
-      }
-      const suffix = path.basename(f).slice(oldBase.length)
-      const newF = path.join(dir, `${name}${suffix}`)
-      if (newF === f) continue
-      try {
-        await fs.rename(f, newF)
-      } catch (err) {
-        logger.warn(`sidecar 文件重命名失败: ${f} -> ${newF}: ${err.message}`)
-      }
-    }
-
-    renameModelMeta(id, newId)
-    logger.info(`模型已重命名: ${id} -> ${newId}`)
-    return { ok: true, id: newId, name }
   })
 
   // 更新模型快捷标记（收藏/NSFW/评分；仅更新传入的字段，即时落盘）

@@ -8,7 +8,6 @@ import {
   isInRoot,
   loadData,
   removeModelMeta,
-  renameModelMeta,
   setDataRoot,
   setModelHash,
   setModelMeta
@@ -18,7 +17,7 @@ import {
  * store.js 单元测试（黑盒）：
  * - 元数据规范化（别名/标签/评分/参数旧版迁移/未知字段剔除）
  * - 路径关联（相对键、Windows 大小写不敏感兜底、越界拒绝）
- * - 元数据键迁移（重命名）、哈希持久化校验
+ * - 哈希持久化校验
  * - atomicWriteFile 原子写入
  * 说明：模块级内存状态按 beforeEach 重置（切换临时根目录）。
  */
@@ -102,20 +101,6 @@ describe('路径关联', () => {
     expect(meta).not.toBeNull()
     // 键按传入路径的相对形式记录，同一变体读取一致
     expect(getModelMeta(lower).alias).toBe('小写路径')
-  })
-
-  it('重命名迁移元数据键，目标键已存在时拒绝覆盖', async () => {
-    const oldAbs = await touchModel('old-name.safetensors')
-    const newAbs = await touchModel('new-name.safetensors')
-    setModelMeta(oldAbs, { alias: '迁移测试' })
-    // 目标元数据键已存在 -> 拒绝覆盖（文件存在性由 IPC 层校验）
-    setModelMeta(newAbs, { alias: '占位' })
-    expect(renameModelMeta(oldAbs, newAbs)).toBe(false)
-    removeModelMeta(newAbs)
-    // 目标键空闲后迁移成功，旧键清除且数据保留
-    expect(renameModelMeta(oldAbs, newAbs)).toBe(true)
-    expect(getModelMeta(oldAbs)).toBeNull()
-    expect(getModelMeta(newAbs).alias).toBe('迁移测试')
   })
 
   it('删除元数据', async () => {

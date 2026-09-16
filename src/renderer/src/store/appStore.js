@@ -481,31 +481,6 @@ export async function deleteModel(id) {
   return true
 }
 
-/**
- * 重命名模型文件（联动迁移元数据与 sidecar 文件），并同步本地列表。
- * @param {string} id 模型 id（旧）
- * @param {string} newName 新名称（不含扩展名）
- */
-export async function renameModel(id, newName) {
-  const res = await window.api.models.renameModel(id, newName)
-  if (res?.error) {
-    toast('error', res.error)
-    return false
-  }
-  const idx = state.models.findIndex((m) => m.id === id)
-  if (idx >= 0 && res.id) {
-    state.models[idx] = {
-      ...state.models[idx],
-      id: res.id,
-      name: res.name || state.models[idx].name
-    }
-  }
-  // 详情面板跟随新 id 保持打开
-  if (state.selectedId === id && res.id) state.selectedId = res.id
-  toast('success', '重命名成功')
-  return true
-}
-
 /** 将快捷标记同步到本地模型列表 */
 function applyMetaFlags(id, meta) {
   const idx = state.models.findIndex((m) => m.id === id)

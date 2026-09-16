@@ -20,7 +20,6 @@ const VALID_INVOKE_CHANNELS = [
   'models:deleteCover',
   'models:civitaiMatch',
   'models:deleteModel',
-  'models:renameModel',
   'models:setMetaFlags',
   'models:popupMenu',
   'models:importCover',
@@ -102,9 +101,7 @@ const api = {
     civitaiMatch: (id) => invokeValidated('models:civitaiMatch', { id }),
     /** 删除模型文件（移入回收站并清理元数据），返回 { ok } 或 { error } */
     deleteModel: (id) => invokeValidated('models:deleteModel', { id }),
-    /** 重命名模型文件（联动元数据与 sidecar），返回 { ok, id, name } 或 { error } */
-    renameModel: (id, newName) => invokeValidated('models:renameModel', { id, newName }),
-    /** 更新快捷标记（收藏/评分/标签，仅传需更新的字段），返回 { meta } 或 { error } */
+    /** 更新快捷标记（收藏/NSFW/评分，仅传需更新的字段），返回 { meta } 或 { error } */
     setMetaFlags: (payload) => invokeValidated('models:setMetaFlags', payload),
     /** 弹出模型右键菜单（原生菜单），动作经 onMenuAction 事件回传 */
     popupMenu: (id) => invokeValidated('models:popupMenu', { id }),
