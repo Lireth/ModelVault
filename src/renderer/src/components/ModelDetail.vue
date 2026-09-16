@@ -601,28 +601,6 @@ async function onUploadCover() {
               </div>
             </div>
 
-            <!-- 触发词：仅 LoRA 模型提供，支持一键复制 -->
-            <template v-if="selectedModel.type === 'lora'">
-              <h3>触发词</h3>
-              <div class="trigger-row">
-                <textarea
-                  v-model="form.triggerWords"
-                  class="trigger-input"
-                  rows="2"
-                  maxlength="1000"
-                  spellcheck="false"
-                  placeholder="如：xxx, yyy（多个触发词用逗号分隔），点击「保存参数」生效"
-                ></textarea>
-                <button
-                  class="btn"
-                  type="button"
-                  :disabled="!form.triggerWords.trim()"
-                  title="复制触发词到剪贴板"
-                  @click="copyTriggerWords"
-                >复制</button>
-              </div>
-            </template>
-
             <!-- 分类标签：LoRA / Checkpoint / 其他模型可标注 -->
             <template v-if="typeTags">
               <h3>{{ typeTagsTitle }}</h3>
@@ -728,6 +706,28 @@ async function onUploadCover() {
                 <input v-model="form.resMax" type="number" min="16" max="16384" placeholder="如 1024" />
               </label>
             </div>
+
+            <!-- 触发词：仅 LoRA 模型提供，支持一键复制 -->
+            <template v-if="selectedModel.type === 'lora'">
+              <h3>触发词</h3>
+              <div class="trigger-row">
+                <textarea
+                  v-model="form.triggerWords"
+                  class="trigger-input"
+                  rows="2"
+                  maxlength="1000"
+                  spellcheck="false"
+                  placeholder="如：xxx, yyy（多个触发词用逗号分隔），点击「保存参数」生效"
+                ></textarea>
+                <button
+                  class="btn"
+                  type="button"
+                  :disabled="!form.triggerWords.trim()"
+                  title="复制触发词到剪贴板"
+                  @click="copyTriggerWords"
+                >复制</button>
+              </div>
+            </template>
 
             <h3>备注</h3>
             <textarea
