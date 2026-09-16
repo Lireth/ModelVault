@@ -64,11 +64,13 @@ const mtimeText = computed(() => {
         :alt="model.name"
         loading="lazy"
         draggable="false"
+        :class="{ blurred: model.nsfw }"
       />
       <div v-else class="cover-placeholder">
         <span class="cover-ext">{{ model.ext }}</span>
       </div>
       <span class="type-badge" :style="{ background: info.color }">{{ info.label }}</span>
+      <span v-if="model.nsfw" class="nsfw-badge">NSFW</span>
       <span v-if="subTag" class="sub-badge" :style="{ color: subTag.color, borderColor: subTag.color }">
         {{ subTag.label }}
       </span>
@@ -156,6 +158,12 @@ const mtimeText = computed(() => {
   display: block;
 }
 
+/* NSFW 模型：首页预览图模糊展示（详情页正常显示） */
+.cover img.blurred {
+  filter: blur(14px);
+  transform: scale(1.1); /* 放大避免模糊边缘露出原图 */
+}
+
 .cover-placeholder {
   width: 100%;
   height: 100%;
@@ -198,6 +206,20 @@ const mtimeText = computed(() => {
   border: 1px solid;
   background: var(--overlay);
   backdrop-filter: blur(2px);
+}
+
+/* NSFW 标记角标：位于封面左下角（左上为类型角标、右上为分类角标） */
+.nsfw-badge {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #fff;
+  background: rgba(229, 72, 77, 0.85);
+  padding: 2px 8px;
+  border-radius: 999px;
 }
 
 .card-body {

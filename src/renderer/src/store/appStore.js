@@ -513,6 +513,7 @@ function applyMetaFlags(id, meta) {
     state.models[idx] = {
       ...state.models[idx],
       favorite: meta.favorite === true,
+      nsfw: meta.nsfw === true,
       rating: meta.rating || 0,
       tags: meta.tags || []
     }
@@ -527,6 +528,21 @@ export async function toggleFavorite(id) {
   const m = state.models.find((x) => x.id === id)
   const next = !m?.favorite
   const res = await window.api.models.setMetaFlags({ id, favorite: next })
+  if (res?.error) {
+    toast('error', res.error)
+    return false
+  }
+  if (res.meta) applyMetaFlags(id, res.meta)
+  return true
+}
+
+/**
+ * 设置 NSFW 标记（即时落盘）：勾选后首页卡片预览图模糊展示。
+ * @param {string} id 模型 id
+ * @param {boolean} nsfw 是否 NSFW
+ */
+export async function setNsfw(id, nsfw) {
+  const res = await window.api.models.setMetaFlags({ id, nsfw })
   if (res?.error) {
     toast('error', res.error)
     return false

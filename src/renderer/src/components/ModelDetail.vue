@@ -14,6 +14,7 @@ import {
   selectedModel,
   setDefaultCover,
   setModelTags,
+  setNsfw,
   setRating,
   showContextMenu,
   subCategoryInfo,
@@ -207,6 +208,17 @@ async function onToggleFavorite() {
     await toggleFavorite(model.id)
   } catch (err) {
     toast('error', `收藏操作失败: ${err.message}`)
+  }
+}
+
+/** 详情页切换 NSFW 标记（勾选后首页卡片预览图模糊展示） */
+async function onToggleNsfw() {
+  const model = selectedModel.value
+  if (!model) return
+  try {
+    await setNsfw(model.id, !model.nsfw)
+  } catch (err) {
+    toast('error', `NSFW 标记操作失败: ${err.message}`)
   }
 }
 
@@ -581,6 +593,13 @@ async function onUploadCover() {
                 :title="selectedModel.favorite ? '取消收藏' : '收藏该模型'"
                 @click="onToggleFavorite"
               >{{ selectedModel.favorite ? '★ 已收藏' : '☆ 收藏' }}</button>
+              <button
+                class="nsfw-toggle"
+                :class="{ active: selectedModel.nsfw }"
+                type="button"
+                :title="selectedModel.nsfw ? '取消 NSFW 标记' : '标记为 NSFW（首页预览图将模糊展示）'"
+                @click="onToggleNsfw"
+              >NSFW</button>
               <div class="rating" title="点击星标评分，再次点击当前星标清除">
                 <span class="rating-label">评分</span>
                 <button
@@ -1142,6 +1161,30 @@ async function onUploadCover() {
   border-color: #f5b301;
   color: #f5b301;
   font-weight: 600;
+}
+
+/* NSFW 标记按钮：激活时红色高亮，提示首页预览图将被模糊 */
+.nsfw-toggle {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.nsfw-toggle:hover {
+  border-color: #e5484d;
+  color: #e5484d;
+}
+
+.nsfw-toggle.active {
+  border-color: #e5484d;
+  color: #e5484d;
+  font-weight: 600;
+  background: rgba(229, 72, 77, 0.08);
 }
 
 .rating {

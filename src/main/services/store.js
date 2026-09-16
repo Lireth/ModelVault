@@ -233,6 +233,8 @@ function normalizeModelMeta(raw) {
     subCategory: VALID_SUB_CATEGORIES.has(raw.subCategory) ? raw.subCategory : '',
     // 收藏标记（false 为未收藏）
     favorite: raw.favorite === true,
+    // NSFW 标记：勾选后首页卡片预览图做模糊处理（详情页正常展示）
+    nsfw: raw.nsfw === true,
     // 评分（0-5 整数，0 为未评分）
     rating: Number.isInteger(raw.rating) && raw.rating >= 0 && raw.rating <= 5 ? raw.rating : 0,
     // 自定义多标签
