@@ -83,6 +83,21 @@ describe('元数据规范化', () => {
     expect(meta.covers).toEqual(['.modelvault/covers/old.png'])
     expect(meta.cover).toBe('.modelvault/covers/old.png')
   })
+
+  it('sidecar 来源标记仅接受 sidecar，非法值剔除', async () => {
+    const abs = await touchModel('src.safetensors')
+    const meta = setModelMeta(abs, {
+      note: 'n',
+      noteSource: 'sidecar',
+      triggerWords: 't',
+      triggerWordsSource: 'sidecar'
+    })
+    expect(meta.noteSource).toBe('sidecar')
+    expect(meta.triggerWordsSource).toBe('sidecar')
+    const bad = setModelMeta(abs, { noteSource: 'other', triggerWordsSource: 1 })
+    expect(bad.noteSource).toBe('')
+    expect(bad.triggerWordsSource).toBe('')
+  })
 })
 
 describe('路径关联', () => {

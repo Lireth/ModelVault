@@ -190,3 +190,52 @@ export async function findSidecarPreview(modelPath) {
   }
   return ''
 }
+
+/** sidecar 说明文本的大小上限：超出视为不可信（如误命中的大文本文件），跳过导入 */
+const SIDECAR_TEXT_MAX_BYTES = 256 * 1024
+
+/**
+ * 读取模型文件同名的 sidecar 说明文本（WebUI 惯例：name.txt，
+ * 内容为训练说明或标签文本）。
+ * @param {string} modelPath 模型文件绝对路径
+ * @returns {Promise<string>} 文本内容（已修剪首尾空白），未找到/过大/读取失败返回 ''
+ */
+export async function findSidecarText(modelPath) {
+  const txtPath = path.join(
+    path.dirname(modelPath),
+    `${path.basename(modelPath, path.extname(modelPath))}.txt`
+  )
+  try {
+    const stat = await fs.stat(txtPath)
+    if (!stat.isFile() || stat.size === 0 || stat.size > SIDECAR_TEXT_MAX_BYTES) return ''
+    const text = await fs.readFile(txtPath, 'utf8')
+    return text.trim()
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 由 sidecar 文本与当前元数据构造自动导入补丁（纯函数，便于单测）：
+ * - 备注为空：导入全文作为备注，标记来源 sidecar；
+ * - LoRA 且触发词为空：导入首行作为触发词，标记来源 sidecar；
+ * - 两个条件独立判断，均不满足时不产生补丁（不覆盖任何用户数据）。
+ * @param {string} type 模型类型（lora 时才考虑触发词导入）
+ * @param {object} meta 当前模型元数据
+ * @param {string} text sidecar 文本内容（已修剪）
+ * @returns {object|null} 可合并到元数据的补丁；无需导入返回 null
+ */
+export function sidecarImportPatch(type, meta, text) {
+  const trimmed = typeof text === 'string' ? text.trim() : ''
+  if (!trimmed) return null
+  const patch = {}
+  if (!meta.note) {
+    patch.note = trimmed
+    patch.noteSource = 'sidecar'
+  }
+  if (type === 'lora' && !meta.triggerWords) {
+    patch.triggerWords = trimmed.split(/\r?\n/)[0].trim()
+    patch.triggerWordsSource = 'sidecar'
+  }
+  return Object.keys(patch).length > 0 ? patch : null
+}

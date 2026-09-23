@@ -735,7 +735,12 @@ async function onUploadCover() {
               </div>
             </template>
 
-            <h3>备注</h3>
+            <h3>
+              备注
+              <span v-if="selectedModel.noteSource === 'sidecar'" class="sidecar-hint">
+                来自同名 .txt 自动导入，可自由修改
+              </span>
+            </h3>
             <textarea
               v-model="form.note"
               class="note-input"
@@ -1362,6 +1367,15 @@ async function onUploadCover() {
   resize: vertical;
   font-family: inherit;
   line-height: 1.6;
+}
+
+/* sidecar 自动导入来源提示（备注标题右侧） */
+.sidecar-hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .form-actions {

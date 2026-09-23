@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { classifyModel, findSidecarPreview, isValidType, scanModels } from '../src/main/services/scanner'
+import { classifyModel, findSidecarPreview, findSidecarText, isValidType, scanModels, sidecarImportPatch } from '../src/main/services/scanner'
 
 /**
  * scanner.js 单元测试：
@@ -148,5 +148,63 @@ describe('findSidecarPreview', () => {
     const modelPath = path.join(dir, 'model2.safetensors')
     await fs.writeFile(modelPath, 'x')
     expect(await findSidecarPreview(modelPath)).toBe('')
+  })
+})
+
+describe('findSidecarText', () => {
+  let dir
+
+  beforeAll(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-sidetext-'))
+  })
+
+  afterAll(async () => {
+    await fs.rm(dir, { recursive: true, force: true })
+  })
+
+  it('读取同名 txt 并修剪首尾空白', async () => {
+    const modelPath = path.join(dir, 'm1.safetensors')
+    await fs.writeFile(modelPath, 'x')
+    await fs.writeFile(path.join(dir, 'm1.txt'), '  hatsune miku, twintails\nsecond line\n  ')
+    expect(await findSidecarText(modelPath)).toBe('hatsune miku, twintails\nsecond line')
+  })
+
+  it('空文件、不存在、超大文件返回空字符串', async () => {
+    const modelPath = path.join(dir, 'm2.safetensors')
+    await fs.writeFile(modelPath, 'x')
+    await fs.writeFile(path.join(dir, 'm2.txt'), '')
+    expect(await findSidecarText(modelPath)).toBe('')
+    expect(await findSidecarText(path.join(dir, 'none.safetensors'))).toBe('')
+    const bigPath = path.join(dir, 'm3.safetensors')
+    await fs.writeFile(bigPath, 'x')
+    await fs.writeFile(path.join(dir, 'm3.txt'), 'a'.repeat(300 * 1024))
+    expect(await findSidecarText(bigPath)).toBe('')
+  })
+})
+
+describe('sidecarImportPatch', () => {
+  it('备注为空时导入全文并标记来源', () => {
+    const patch = sidecarImportPatch('checkpoint', { note: '' }, '全文说明')
+    expect(patch).toEqual({ note: '全文说明', noteSource: 'sidecar' })
+  })
+
+  it('LoRA 触发词为空时导入首行（与备注导入独立判断）', () => {
+    const patch = sidecarImportPatch('lora', { note: '', triggerWords: '' }, '第一行\n第二行')
+    expect(patch.note).toBe('第一行\n第二行')
+    expect(patch.triggerWords).toBe('第一行')
+    expect(patch.triggerWordsSource).toBe('sidecar')
+  })
+
+  it('已有备注/触发词时不覆盖；LoRA 仅触发词缺失时仍导入触发词', () => {
+    expect(sidecarImportPatch('lora', { note: '已有', triggerWords: '已有' }, '文本')).toBeNull()
+    const onlyTrigger = sidecarImportPatch('lora', { note: '已有', triggerWords: '' }, '第一行\n第二行')
+    expect(onlyTrigger).toEqual({ triggerWords: '第一行', triggerWordsSource: 'sidecar' })
+  })
+
+  it('非 LoRA 不产生触发词补丁；空文本返回 null', () => {
+    const patch = sidecarImportPatch('vae', { note: '' }, '说明')
+    expect(patch.triggerWords).toBeUndefined()
+    expect(sidecarImportPatch('lora', { note: '', triggerWords: '' }, '   ')).toBeNull()
+    expect(sidecarImportPatch('lora', { note: '' }, '')).toBeNull()
   })
 })

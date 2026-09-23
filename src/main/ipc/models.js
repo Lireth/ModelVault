@@ -19,7 +19,7 @@ import {
   setModelMeta,
   updateSettings
 } from '../services/store'
-import { findSidecarPreview, scanModels } from '../services/scanner'
+import { findSidecarPreview, findSidecarText, scanModels, sidecarImportPatch } from '../services/scanner'
 import {
   deleteCoverFile,
   importCoverFromPath,
@@ -78,7 +78,8 @@ const DECORATE_CACHE_MAX = 8000
 function metaSignature(meta) {
   return JSON.stringify([
     meta.cover, meta.covers, meta.alias, meta.note, meta.subCategory,
-    meta.triggerWords, meta.favorite, meta.nsfw, meta.rating, meta.params, meta.hash
+    meta.triggerWords, meta.favorite, meta.nsfw, meta.rating, meta.params, meta.hash,
+    meta.noteSource, meta.triggerWordsSource
   ])
 }
 
@@ -138,19 +139,43 @@ function startThumbDrain(win) {
   })
 }
 
+/**
+ * sidecar .txt 自动导入（WebUI 惯例的同名说明文本）：
+ * 仅当备注为空（LoRA 另加触发词为空）时读取同名 txt 导入，
+ * 导入结果经 setModelMeta 落盘并标记来源，不覆盖任何用户已有标注。
+ * @param {{id: string, type: string}} model 模型对象
+ * @param {object} meta 当前元数据
+ * @returns {Promise<object>} 导入后的最新元数据（未导入时原样返回）
+ */
+async function importSidecarMeta(model, meta) {
+  const needNote = !meta.note
+  const needTriggers = model.type === 'lora' && !meta.triggerWords
+  if (!needNote && !needTriggers) return meta
+  const text = await findSidecarText(model.id)
+  if (!text) return meta
+  const patch = sidecarImportPatch(model.type, meta, text)
+  if (!patch) return meta
+  return setModelMeta(model.id, { ...meta, ...patch }) || meta
+}
+
 /** 单模型的元数据装饰（封面列表校验、默认封面回退 sidecar 预览图） */
 async function decorateOne(model, usedThumbs) {
-  const meta = getModelMeta(model.id) || {}
-  // 增量扫描缓存命中：mtime 与元数据签名均未变化时复用上次结果
-  const signature = metaSignature(meta)
+  const meta0 = getModelMeta(model.id) || {}
   const cached = decorateCache.get(model.id)
-  if (cached && cached.mtimeMs === model.mtimeMs && cached.signature === signature) {
+  // 增量扫描缓存命中：mtime 与元数据签名均未变化时复用上次结果
+  //（命中路径不做任何文件 IO，sidecar 导入仅发生在缓存未命中时）
+  if (cached && cached.mtimeMs === model.mtimeMs && cached.signature === metaSignature(meta0)) {
     // 刷新插入顺序实现简易 LRU
     decorateCache.delete(model.id)
     decorateCache.set(model.id, cached)
     if (cached.thumbPath) usedThumbs.add(path.basename(cached.thumbPath))
     return cached.decorated
   }
+
+  // sidecar 导入可能更新元数据（首扫或元数据重置后的恢复），
+  // 缓存签名按导入后的 meta 计算，确保下一次扫描稳定命中
+  const meta = await importSidecarMeta(model, meta0)
+  const signature = metaSignature(meta)
 
   // 校验多封面列表，过滤已丢失的文件
   const covers = []
@@ -198,6 +223,8 @@ async function decorateOne(model, usedThumbs) {
     params: meta.params || null,
     alias: meta.alias || '',
     note: meta.note || '',
+    // 备注来源（'sidecar' 时详情页显示自动导入提示）
+    noteSource: meta.noteSource || '',
     favorite: meta.favorite === true,
     // NSFW 标记：首页卡片预览图模糊展示（详情页正常展示）
     nsfw: meta.nsfw === true,
@@ -435,9 +462,13 @@ export function registerModelIpcHandlers() {
     // 合并已有元数据，避免覆盖丢失封面等未随本次请求传入的字段
     const existing = getModelMeta(id) || {}
     const merged = { ...existing, alias, params, note, subCategory }
+    // 用户经详情页保存后内容归用户管理，清除自动导入来源标记
+    //（备注随每次保存必传；触发词仅 LoRA 详情页编辑时随请求传入）
+    merged.noteSource = ''
     // 触发词仅 LoRA 详情页编辑：请求未携带该字段时不更新，避免误清空
     if (typeof triggerWords === 'string') {
       merged.triggerWords = triggerWords
+      merged.triggerWordsSource = ''
     }
     const meta = setModelMeta(id, merged)
     if (!meta) {
