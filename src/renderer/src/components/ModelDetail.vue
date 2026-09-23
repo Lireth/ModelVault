@@ -143,6 +143,36 @@ watch(
   }
 )
 
+/* ---------------- 文件元数据自动解析（safetensors 头部） ---------------- */
+
+/** safetensors 头部自动解析信息（仅 .safetensors 且含有效元信息时非空） */
+const autoInfo = computed(() => selectedModel.value?.autoInfo || null)
+
+/** 触发词候选（来自训练集高频标签，仅 LoRA 提供填入，需用户确认后保存） */
+const autoTriggerCandidates = computed(() =>
+  selectedModel.value?.type === 'lora' ? autoInfo.value?.triggerCandidates || [] : []
+)
+
+/** 将训练分辨率填入推荐分辨率表单 */
+function applyAutoResolution() {
+  const a = autoInfo.value
+  if (!a || !Number.isFinite(a.resMin)) return
+  form.resMin = String(a.resMin)
+  form.resMax = String(Number.isFinite(a.resMax) ? a.resMax : a.resMin)
+  toast('success', '训练分辨率已填入表单，点击「保存参数」生效')
+}
+
+/** 将触发词候选填入触发词字段（已有内容时不覆盖，避免丢失用户标注） */
+function applyAutoTriggers() {
+  if (autoTriggerCandidates.value.length === 0) return
+  if (form.triggerWords.trim()) {
+    toast('warn', '触发词字段已有内容，为避免覆盖请手动合并')
+    return
+  }
+  form.triggerWords = autoTriggerCandidates.value.join(', ')
+  toast('success', '触发词已填入表单，点击「保存参数」生效')
+}
+
 /* ---------------- 收藏 / 评分 ---------------- */
 
 /** 详情页切换收藏 */
@@ -513,6 +543,58 @@ async function onUploadCover() {
                   :href="civitaiResult.info.pageUrl"
                   target="_blank"
                 >打开模型页面 ↗</a>
+              </div>
+            </div>
+
+            <!-- 文件元数据（safetensors 头部自动解析）：仅展示 + 一键填入表单，不覆盖已有内容 -->
+            <div v-if="autoInfo" class="autoinfo-panel">
+              <div class="autoinfo-head">
+                <span class="autoinfo-title">文件元数据（自动解析）</span>
+              </div>
+              <dl class="autoinfo-list">
+                <template v-if="autoInfo.title">
+                  <dt>标题</dt>
+                  <dd :title="autoInfo.title">{{ autoInfo.title }}</dd>
+                </template>
+                <template v-if="autoInfo.author">
+                  <dt>作者</dt>
+                  <dd>{{ autoInfo.author }}</dd>
+                </template>
+                <template v-if="autoInfo.baseModel">
+                  <dt>基底模型</dt>
+                  <dd>{{ autoInfo.baseModel }}</dd>
+                </template>
+                <template v-if="autoInfo.networkModule">
+                  <dt>网络结构</dt>
+                  <dd>
+                    {{ autoInfo.networkModule }}<template v-if="autoInfo.networkAlpha !== null">（α={{ autoInfo.networkAlpha }}）</template>
+                  </dd>
+                </template>
+                <template v-if="autoInfo.precision">
+                  <dt>训练精度</dt>
+                  <dd>{{ autoInfo.precision }}</dd>
+                </template>
+                <template v-if="Number.isFinite(autoInfo.resMin)">
+                  <dt>训练分辨率</dt>
+                  <dd>{{ autoInfo.resMin }} × {{ autoInfo.resMax }}</dd>
+                </template>
+              </dl>
+              <div v-if="autoTriggerCandidates.length" class="civitai-words">
+                <span v-for="w in autoTriggerCandidates" :key="w" class="civitai-word" :title="w">{{ w }}</span>
+              </div>
+              <div v-if="Number.isFinite(autoInfo.resMin) || autoTriggerCandidates.length" class="civitai-actions">
+                <button
+                  v-if="Number.isFinite(autoInfo.resMin)"
+                  class="btn"
+                  type="button"
+                  @click="applyAutoResolution"
+                >填入推荐分辨率</button>
+                <button
+                  v-if="autoTriggerCandidates.length"
+                  class="btn btn-primary"
+                  type="button"
+                  @click="applyAutoTriggers"
+                >填入触发词</button>
               </div>
             </div>
 
@@ -1010,6 +1092,49 @@ async function onUploadCover() {
 
 .civitai-link:hover {
   text-decoration: underline;
+}
+
+/* ---------- 文件元数据自动解析面板 ---------- */
+.autoinfo-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.autoinfo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.autoinfo-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 1px;
+}
+
+.autoinfo-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+
+.autoinfo-list dt {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.autoinfo-list dd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: Consolas, monospace;
 }
 
 /* ---------- 收藏 / 评分 ---------- */

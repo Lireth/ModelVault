@@ -30,6 +30,7 @@ import {
 } from '../services/covers'
 import { drainDeferredThumbs, getThumbPathDeferred, pruneThumbs } from '../services/thumbs'
 import { matchCivitai } from '../services/civitai'
+import { readSafetensorsInfo } from '../services/safetensors'
 import { toImageUrl } from '../protocol'
 
 /**
@@ -181,6 +182,13 @@ async function decorateOne(model, usedThumbs) {
       trackDeferredThumb(cover, model.id)
     }
   }
+  // 文件头部自动解析信息（仅 .safetensors：kohya ss_* / modelspec.* 训练元信息，
+  // 仅供详情页展示与一键填入，不写入元数据、不覆盖用户标注）。
+  // 仅读文件头部数 KB，装饰阶段可安全执行；结果随装饰缓存复用，会话内不重复读盘
+  let autoInfo = null
+  if (model.ext === '.safetensors') {
+    autoInfo = await readSafetensorsInfo(model.id)
+  }
   const decorated = {
     ...model,
     cover,
@@ -196,7 +204,8 @@ async function decorateOne(model, usedThumbs) {
     rating: meta.rating || 0,
     // 大模型自动标注为「基底模型」分类（未手动标注时默认生效）
     subCategory: meta.subCategory || (model.type === 'checkpoint' ? 'base' : ''),
-    triggerWords: meta.triggerWords || ''
+    triggerWords: meta.triggerWords || '',
+    autoInfo
   }
   // 写入装饰缓存（容量超限时按插入顺序淘汰最旧条目）
   decorateCache.set(model.id, { mtimeMs: model.mtimeMs, signature, thumbPath, deferredCover, decorated })
