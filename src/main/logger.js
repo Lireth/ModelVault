@@ -49,6 +49,23 @@ class Logger {
     this.currentDate = ''
   }
 
+  /**
+   * 创建日志写入流并挂错误监听（B14）。
+   * 未监听 error 时，磁盘满/权限错误会作为 uncaughtException 抛出，
+   * 且此后写日志静默失败；这里降级为控制台输出并置空流，下次写入时尝试重建。
+   */
+  createStream(today) {
+    const stream = fs.createWriteStream(path.join(this.logDir, `modelvault-${today}.log`), {
+      flags: 'a',
+      encoding: 'utf-8'
+    })
+    stream.on('error', (err) => {
+      console.error(`日志流错误（文件输出降级为控制台）: ${err.message}`)
+      this.stream = null
+    })
+    return stream
+  }
+
   /** 懒初始化：首次写日志时才创建目录与写入流 */
   ensureStream() {
     if (!this.logDir) {
@@ -64,10 +81,7 @@ class Logger {
     if (this.currentDate !== today || !this.stream) {
       this.currentDate = today
       this.stream?.end()
-      this.stream = fs.createWriteStream(path.join(this.logDir, `modelvault-${today}.log`), {
-        flags: 'a',
-        encoding: 'utf-8'
-      })
+      this.stream = this.createStream(today)
     }
     return this.stream
   }
