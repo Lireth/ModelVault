@@ -19,7 +19,13 @@ import {
   setModelMeta,
   updateSettings
 } from '../services/store'
-import { findSidecarPreview, findSidecarText, scanModels, sidecarImportPatch } from '../services/scanner'
+import {
+  SIDECAR_PREVIEW_EXTS,
+  findSidecarPreview,
+  findSidecarText,
+  scanModels,
+  sidecarImportPatch
+} from '../services/scanner'
 import {
   deleteCoverFile,
   importCoverFromPath,
@@ -277,12 +283,13 @@ function resolveCoverSafe(cover) {
   }
 }
 
-/** 模型同名的 sidecar 文件（SD WebUI 惯例：同名预览图 + 说明文本） */
+/** 模型同名的 sidecar 文件（SD WebUI 惯例：同名预览图 + 说明文本）。
+ * 图片候选与展示侧共用 SIDECAR_PREVIEW_EXTS，保证清理集与展示集一致（B17） */
 function sidecarFilesFor(absModelPath) {
   const dir = path.dirname(absModelPath)
   const base = path.basename(absModelPath, path.extname(absModelPath))
-  const files = [path.join(dir, `${base}.txt`), path.join(dir, `${base}.preview.png`)]
-  for (const ext of ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']) {
+  const files = [path.join(dir, `${base}.txt`)]
+  for (const ext of SIDECAR_PREVIEW_EXTS) {
     files.push(path.join(dir, `${base}${ext}`))
   }
   return files

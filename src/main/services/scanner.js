@@ -165,21 +165,30 @@ export async function scanModels(root, onProgress, options = {}) {
 }
 
 /**
+ * 同名 sidecar 预览图候选（按命中优先级排序）。
+ * 展示（findSidecarPreview）与删除清理（ipc/models.js 的 sidecarFilesFor）
+ * 共用此常量，保证「能展示的都会被清理、能清理的都有机会展示」（B17）。
+ */
+export const SIDECAR_PREVIEW_EXTS = [
+  '.png',
+  '.preview.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
+  '.bmp'
+]
+
+/**
  * 查找模型文件的自动预览图（ComfyUI/WebUI 生成的同名 sidecar 图片）。
- * 命中顺序：name.png > name.preview.png > name.jpg/jpeg/webp。
+ * 命中顺序见 SIDECAR_PREVIEW_EXTS。
  * @param {string} modelPath 模型文件绝对路径
  * @returns {Promise<string>} 预览图绝对路径，未找到返回 ''
  */
 export async function findSidecarPreview(modelPath) {
   const dir = path.dirname(modelPath)
   const base = path.basename(modelPath, path.extname(modelPath))
-  const candidates = [
-    path.join(dir, `${base}.png`),
-    path.join(dir, `${base}.preview.png`),
-    path.join(dir, `${base}.jpg`),
-    path.join(dir, `${base}.jpeg`),
-    path.join(dir, `${base}.webp`)
-  ]
+  const candidates = SIDECAR_PREVIEW_EXTS.map((ext) => path.join(dir, `${base}${ext}`))
   for (const candidate of candidates) {
     try {
       const stat = await fs.stat(candidate)

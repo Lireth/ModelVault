@@ -149,6 +149,19 @@ describe('findSidecarPreview', () => {
     await fs.writeFile(modelPath, 'x')
     expect(await findSidecarPreview(modelPath)).toBe('')
   })
+
+  it('gif/bmp 同名图片可命中（B17：与删除清理集一致）', async () => {
+    const modelPath = path.join(dir, 'model3.safetensors')
+    await fs.writeFile(modelPath, 'x')
+    await fs.writeFile(path.join(dir, 'model3.gif'), 'x')
+    await fs.writeFile(path.join(dir, 'model3.bmp'), 'x')
+    expect(await findSidecarPreview(modelPath)).toBe(path.join(dir, 'model3.gif'))
+
+    const modelPath4 = path.join(dir, 'model4.safetensors')
+    await fs.writeFile(modelPath4, 'x')
+    await fs.writeFile(path.join(dir, 'model4.bmp'), 'x')
+    expect(await findSidecarPreview(modelPath4)).toBe(path.join(dir, 'model4.bmp'))
+  })
 })
 
 describe('findSidecarText', () => {
