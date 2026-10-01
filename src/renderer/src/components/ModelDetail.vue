@@ -301,6 +301,23 @@ const coverSrc = computed(() => {
   return def?.url || m.coverUrl || ''
 })
 
+/** 大图加载失败标记（封面文件被移动/删除时回退占位符，避免碎图） */
+const coverError = ref(false)
+watch(coverSrc, () => {
+  coverError.value = false
+})
+
+/** 加载失败的缩略条封面（key 为封面绝对路径），失败后显示失效占位 */
+const failedThumbs = ref(new Set())
+
+/** 封面列表变化（增删/重置）时清空失效标记 */
+watch(
+  () => covers.value.map((c) => c.path).join('|'),
+  () => {
+    failedThumbs.value = new Set()
+  }
+)
+
 /** 封面是否为默认显示（与模型当前默认封面路径比对） */
 function isDefault(c) {
   return selectedModel.value?.cover && c.path === selectedModel.value.cover
@@ -473,7 +490,13 @@ async function onUploadCover() {
               @dragleave="onDragLeave"
               @drop="onDropCover"
             >
-              <img v-if="coverSrc" :src="coverSrc" :alt="selectedModel.name" draggable="false" />
+              <img
+                v-if="coverSrc && !coverError"
+                :src="coverSrc"
+                :alt="selectedModel.name"
+                draggable="false"
+                @error="coverError = true"
+              />
               <div v-else class="cover-placeholder">
                 <span class="cover-ext">{{ selectedModel.ext }}</span>
               </div>
@@ -498,7 +521,15 @@ async function onUploadCover() {
                 :title="isDefault(c) ? '当前默认显示' : '点击设为默认显示'"
                 @click="onSetDefault(c)"
               >
-                <img :src="c.url" alt="预览图" loading="lazy" draggable="false" />
+                <img
+                  v-if="!failedThumbs.has(c.path)"
+                  :src="c.url"
+                  alt="预览图"
+                  loading="lazy"
+                  draggable="false"
+                  @error="failedThumbs.add(c.path)"
+                />
+                <span v-else class="thumb-missing">已失效</span>
                 <span v-if="isDefault(c)" class="thumb-badge">默认</span>
                 <button
                   class="thumb-delete"
@@ -934,6 +965,18 @@ async function onUploadCover() {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+/* 加载失效的缩略图占位 */
+.thumb-missing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: repeating-linear-gradient(45deg, var(--bg) 0 8px, var(--bg-card) 8px 16px);
 }
 
 .thumb-badge {

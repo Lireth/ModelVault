@@ -1,10 +1,19 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { formatSize, openDetail, showContextMenu, state, subCategoryInfo, toggleFavorite, typeInfo } from '../store/appStore'
 
 const props = defineProps({
   model: { type: Object, required: true }
 })
+
+/** 封面 URL 加载失败标记（文件被移动/删除时回退占位符，避免碎图） */
+const coverError = ref(false)
+watch(
+  () => props.model.coverUrl,
+  () => {
+    coverError.value = false
+  }
+)
 
 const info = computed(() => typeInfo(props.model.type))
 
@@ -59,12 +68,13 @@ const mtimeText = computed(() => {
   <article class="model-card" :title="model.id" @click="openDetail(model.id)" @contextmenu.prevent="onContextMenu">
     <div class="cover">
       <img
-        v-if="model.coverUrl"
+        v-if="model.coverUrl && !coverError"
         :src="model.coverUrl"
         :alt="model.name"
         loading="lazy"
         draggable="false"
         :class="{ blurred: model.nsfw }"
+        @error="coverError = true"
       />
       <div v-else class="cover-placeholder">
         <span class="cover-ext">{{ model.ext }}</span>
