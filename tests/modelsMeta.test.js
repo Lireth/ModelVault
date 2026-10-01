@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { net, protocol } from 'electron'
 import { fakeUserData } from './setup'
-
 /**
  * models:saveModelData 合并逻辑回归测试（B2）：
  * 局部保存（仅传部分字段）时不得将未传字段静默清空。
@@ -25,6 +25,7 @@ vi.mock('electron', () => ({
 import { mergeSaveModelData } from '../src/main/ipc/models'
 import { importCoverFromPath } from '../src/main/services/covers'
 import { setDataRoot } from '../src/main/services/store'
+import { registerImageProtocolHandler, toImageUrl } from '../src/main/protocol'
 
 const baseMeta = {
   alias: '旧别名',
@@ -118,5 +119,64 @@ describe('importCoverFromPath 封面导入', () => {
     await fs.writeFile(txt, 'hello')
     const res = await importCoverFromPath(txt)
     expect(res.error).toContain('不支持的图片格式')
+  })
+})
+
+describe('mvimg 协议路径白名单', () => {
+  let root
+  let handler
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-proto-'))
+    setDataRoot(root)
+    vi.mocked(protocol.handle).mockClear()
+    registerImageProtocolHandler()
+    handler = vi.mocked(protocol.handle).mock.calls[0][1]
+    vi.mocked(net.fetch).mockResolvedValue(new Response('ok'))
+  })
+
+  afterAll(async () => {
+    await fs.rm(os.tmpdir(), { recursive: true, force: false }).catch(() => {})
+  })
+
+  /** 经 toImageUrl 构造请求并调用协议 handler，返回响应 */
+  async function request(filePath) {
+    return handler({ url: toImageUrl(filePath) })
+  }
+
+  it('根目录内图片放行', async () => {
+    const img = path.join(root, 'cover.png')
+    await fs.writeFile(img, 'x')
+    const res = await request(img)
+    expect(res.status).toBe(200)
+  })
+
+  it('根目录外路径拒绝（403）', async () => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-outside-'))
+    const img = path.join(outsideDir, 'secret.png')
+    await fs.writeFile(img, 'x')
+    const res = await request(img)
+    expect(res.status).toBe(403)
+  })
+
+  it('根目录内 junction 指向外部文件被拒绝（B8 绕过）', async (ctx) => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-outside-'))
+    const img = path.join(outsideDir, 'secret.png')
+    await fs.writeFile(img, 'x')
+    const linkPath = path.join(root, 'link')
+    try {
+      // junction 创建在 Windows 普通权限下可用；受限环境跳过
+      await fs.symlink(outsideDir, linkPath, 'junction')
+    } catch {
+      ctx.skip()
+    }
+    // 字面路径在 root 内，真实路径在外 → 必须拒绝
+    const res = await request(path.join(linkPath, 'secret.png'))
+    expect(res.status).toBe(403)
+  })
+
+  it('不存在的路径返回 404', async () => {
+    const res = await request(path.join(root, 'missing.png'))
+    expect(res.status).toBe(404)
   })
 })
