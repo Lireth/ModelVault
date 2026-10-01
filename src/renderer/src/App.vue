@@ -13,6 +13,7 @@ import {
   handleMenuAction,
   initApp,
   LORA_TAGS,
+  scanModels,
   state,
   typeInfo,
   chooseFolder
@@ -92,6 +93,12 @@ onUnmounted(() => {
 
         <!-- 模型预览区 -->
         <template v-else>
+        <!-- 重扫失败但仍有上次结果：顶部错误横幅（B15） -->
+        <div v-if="state.scanError && !state.scanning && state.models.length > 0" class="scan-error-bar">
+          <span class="scan-error-text" :title="state.scanError">⚠ {{ state.scanError }}</span>
+          <button class="scan-error-retry" @click="scanModels">重试</button>
+        </div>
+
         <!-- 搜索 + 排序：位于模型清单上方（选择文件夹后显示） -->
         <div v-if="state.folder" class="search-row">
           <div class="search-box" title="搜索名称、备注名、备注与分类标签">
@@ -133,6 +140,14 @@ onUnmounted(() => {
           </p>
           <p class="scan-current">{{ state.progress.current }}</p>
           <button class="btn" @click="cancelScan">取消扫描</button>
+        </div>
+
+        <!-- 扫描失败：展示错误详情并提供重试（B15） -->
+        <div v-else-if="state.scanError" class="empty-state">
+          <div class="empty-icon">⚠️</div>
+          <h2>扫描失败</h2>
+          <p class="muted scan-error-detail">{{ state.scanError }}</p>
+          <button class="btn btn-primary btn-large" @click="scanModels">重新扫描</button>
         </div>
 
         <!-- 库中无任何模型（未应用筛选时；保留结果栏逻辑见下方，避免筛选状态死锁） -->
@@ -211,6 +226,49 @@ onUnmounted(() => {
 }
 
 /* ---------- 搜索框（模型清单上方） ---------- */
+.scan-error-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border: 1px solid rgba(245, 179, 1, 0.45);
+  background: rgba(245, 179, 1, 0.08);
+  border-radius: 8px;
+}
+
+.scan-error-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: #f5b301;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scan-error-retry {
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 3px 14px;
+  border-radius: 999px;
+  border: 1px solid #f5b301;
+  background: transparent;
+  color: #f5b301;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.scan-error-retry:hover {
+  background: #f5b301;
+  color: #10141a;
+}
+
+/* 扫描失败空态的错误详情：允许换行完整展示 */
+.scan-error-detail {
+  max-width: 70%;
+  word-break: break-all;
+}
+
 .search-row {
   display: flex;
   align-items: center;
