@@ -327,6 +327,26 @@ function appendCoverMeta(id, absCover) {
   return { coverRel, meta }
 }
 
+/**
+ * 合并详情页保存的元数据字段（纯函数，不修改入参）。
+ * 仅覆盖请求中显式传入（!== undefined）的字段，防止局部保存时将已有值静默清空。
+ * note 显式传入时视为用户编辑，清除 sidecar 自动导入来源标记。
+ * @param {object} existing 已有元数据
+ * @param {{alias?: string, params?: object|null, note?: string, subCategory?: string}} patch 本次保存的字段
+ * @returns {object} 合并后的新元数据
+ */
+export function mergeSaveModelData(existing, patch) {
+  const merged = { ...existing }
+  if (patch.alias !== undefined) merged.alias = patch.alias
+  if (patch.params !== undefined) merged.params = patch.params
+  if (patch.note !== undefined) {
+    merged.note = patch.note
+    merged.noteSource = ''
+  }
+  if (patch.subCategory !== undefined) merged.subCategory = patch.subCategory
+  return merged
+}
+
 export function registerModelIpcHandlers() {
   // 加载持久化数据（设置 + 当前模型根目录的元数据，键为绝对路径）
   ipcMain.handle('models:loadStore', async () => {
@@ -461,10 +481,7 @@ export function registerModelIpcHandlers() {
     }
     // 合并已有元数据，避免覆盖丢失封面等未随本次请求传入的字段
     const existing = getModelMeta(id) || {}
-    const merged = { ...existing, alias, params, note, subCategory }
-    // 用户经详情页保存后内容归用户管理，清除自动导入来源标记
-    //（备注随每次保存必传；触发词仅 LoRA 详情页编辑时随请求传入）
-    merged.noteSource = ''
+    const merged = mergeSaveModelData(existing, { alias, params, note, subCategory })
     // 触发词仅 LoRA 详情页编辑：请求未携带该字段时不更新，避免误清空
     if (typeof triggerWords === 'string') {
       merged.triggerWords = triggerWords
