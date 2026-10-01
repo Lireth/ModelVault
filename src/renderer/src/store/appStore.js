@@ -95,7 +95,6 @@ export const state = reactive({
   progress: { dirs: 0, found: 0, current: '' },
   lastScan: null, // { count, durationMs }
   models: [],
-  byType: {},
   // 筛选 / 排序
   typeFilter: 'all',
   subFilter: '', // LoRA 分类筛选（仅 typeFilter 为 lora 时生效）
@@ -229,7 +228,6 @@ export async function scanModels() {
       return
     }
     state.models = res.models
-    state.byType = res.byType || {}
     state.lastScan = { count: res.models.length, durationMs: res.durationMs }
     if (res.errors?.length) {
       toast('warn', `扫描完成，但有 ${res.errors.length} 个目录无法读取`)
@@ -318,9 +316,12 @@ export const filteredModels = computed(() => {
   return sorted
 })
 
-/** 各分类的数量（含全部） */
+/** 各分类的数量（含全部）：直接从模型列表派生，删除/新增后自动同步 */
 export const typeCounts = computed(() => {
-  const counts = { all: state.models.length, ...state.byType }
+  const counts = { all: state.models.length }
+  for (const m of state.models) {
+    counts[m.type] = (counts[m.type] || 0) + 1
+  }
   return counts
 })
 
