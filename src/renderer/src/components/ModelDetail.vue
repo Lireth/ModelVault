@@ -288,11 +288,17 @@ const displayName = computed(
 /** 多封面列表（{ rel, path, url }），首页卡片默认显示其中的默认封面 */
 const covers = computed(() => selectedModel.value?.covers || [])
 
-/** 大图预览：默认封面（加时间戳防缓存） */
+/**
+ * 大图预览源：优先取当前默认封面的原图 URL（covers 列表携带 path/url）。
+ * 不用 coverUrl：缩略图后台生成完成后 coverUrl 会被替换为缩略图 URL，
+ * 大图若跟随会从高清降质为 640px；原图 URL 稳定不变，也无需防缓存参数
+ *（封面文件均为时间戳命名，内容变化必伴随 URL 变化）。
+ */
 const coverSrc = computed(() => {
   const m = selectedModel.value
-  if (!m?.coverUrl) return ''
-  return `${m.coverUrl}?v=${m.cover ? Math.floor(m.mtimeMs) : 0}`
+  if (!m) return ''
+  const def = (m.covers || []).find((c) => c.path === m.cover)
+  return def?.url || m.coverUrl || ''
 })
 
 /** 封面是否为默认显示（与模型当前默认封面路径比对） */
