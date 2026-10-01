@@ -381,22 +381,26 @@ export function registerModelIpcHandlers() {
   // 扫描模型目录（耗时操作，进度通过 models:scanProgress 事件推送，
   // 可经 models:cancelScan 取消）
   ipcMain.handle('models:scan', async (event, { folder } = {}) => {
-    const root = typeof folder === 'string' && folder ? folder : (await loadSettings()).modelsFolder
-    if (!root) {
-      return { error: '尚未设置模型文件夹' }
-    }
+    // 同步先检查并置位扫描状态：任何 await 之前完成，
+    // 防止并发请求在事件循环间隙双重进入（B4）
     if (scanning) {
       return { error: '正在扫描中，请稍候' }
     }
-
-    const win = BrowserWindow.fromWebContents(event.sender)
     scanning = true
     scanAbort = new AbortController()
     const signal = scanAbort.signal
     const startedAt = Date.now()
-    logger.info(`开始扫描模型目录: ${root}`)
+    let root = ''
 
     try {
+      root = typeof folder === 'string' && folder ? folder : (await loadSettings()).modelsFolder
+      if (!root) {
+        return { error: '尚未设置模型文件夹' }
+      }
+
+      const win = BrowserWindow.fromWebContents(event.sender)
+      logger.info(`开始扫描模型目录: ${root}`)
+
       // 等待上一轮后台缩略图生成完成，避免与新扫描的缩略图清理逻辑竞争
       if (thumbDrainPromise) {
         await thumbDrainPromise.catch(() => {})
