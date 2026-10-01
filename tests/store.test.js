@@ -9,11 +9,13 @@ import {
   loadData,
   loadSettings,
   removeModelMeta,
+  resolveCover,
   setDataRoot,
   setModelHash,
   setModelMeta,
   updateSettings
 } from '../src/main/services/store'
+import { fakeUserData } from './setup'
 
 /**
  * store.js 单元测试（黑盒）：
@@ -159,5 +161,51 @@ describe('应用设置规范化', () => {
     await updateSettings({ excludeDirs: ['Loras', '  LORAS ', 'Embeds', '', '.modelvault'] })
     const { excludeDirs } = await loadSettings()
     expect(excludeDirs).toEqual(['loras', 'embeds', '.modelvault'])
+  })
+})
+
+describe('旧版存储迁移', () => {
+  it('不同模型的同名封面迁移互不覆盖（B6）', async () => {
+    const legacyFile = path.join(fakeUserData, 'store.json')
+    try {
+      // 伪造两个同名但内容不同的旧版封面（分属不同目录）
+      const oldDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-oldcovers-'))
+      const coverA = path.join(oldDir, 'a', 'preview.png')
+      const coverB = path.join(oldDir, 'b', 'preview.png')
+      await fs.mkdir(path.dirname(coverA), { recursive: true })
+      await fs.mkdir(path.dirname(coverB), { recursive: true })
+      await fs.writeFile(coverA, 'CONTENT-A')
+      await fs.writeFile(coverB, 'CONTENT-B')
+
+      // 模型文件占位 + 旧版全局存储（绝对路径键 + 绝对路径封面）
+      const m1 = await touchModel('m1.safetensors')
+      const m2 = await touchModel('m2.safetensors')
+      await fs.mkdir(fakeUserData, { recursive: true })
+      await fs.writeFile(
+        legacyFile,
+        JSON.stringify({
+          models: {
+            [m1]: { cover: coverA, alias: 'A' },
+            [m2]: { cover: coverB, alias: 'B' }
+          }
+        })
+      )
+
+      // 重新加载：新 store.json 不存在时触发旧版迁移
+      await loadData()
+
+      const metaA = getModelMeta(m1)
+      const metaB = getModelMeta(m2)
+      expect(metaA.cover).toBeTruthy()
+      expect(metaB.cover).toBeTruthy()
+      // 同名源文件必须迁移为不同目标名
+      expect(metaA.cover).not.toBe(metaB.cover)
+      // 内容未互换
+      expect(await fs.readFile(resolveCover(metaA.cover), 'utf-8')).toBe('CONTENT-A')
+      expect(await fs.readFile(resolveCover(metaB.cover), 'utf-8')).toBe('CONTENT-B')
+    } finally {
+      // 清理 legacy 文件，避免污染其他用例的 loadData
+      await fs.rm(legacyFile, { force: true })
+    }
   })
 })

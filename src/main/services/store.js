@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
@@ -417,15 +418,17 @@ async function migrateLegacyData() {
       const normalized = normalizeModelMeta(meta)
       if (!normalized) continue
 
-      // 迁移封面文件：旧版为 %APPDATA% 下的绝对路径
+      // 迁移封面文件：旧版为 %APPDATA% 下的绝对路径。
+      // 目标文件名用 md5(源绝对路径小写) 命名（与缩略图命名规则一致）：
+      // 不同模型的同名封面（如均为 preview.png）互不覆盖；迁移中断重跑幂等。
       if (normalized.cover) {
         try {
           const oldAbs = normalized.cover
           await fs.access(oldAbs)
           await fs.mkdir(getCoversDir(), { recursive: true })
-          const dest = path.join(getCoversDir(), path.basename(oldAbs))
-          await fs.copyFile(oldAbs, dest)
-          normalized.cover = `${DATA_DIR}/${COVERS_DIR}/${path.basename(oldAbs).split(path.sep).join('/')}`
+          const destName = `${createHash('md5').update(oldAbs.toLowerCase()).digest('hex')}${path.extname(oldAbs)}`
+          await fs.copyFile(oldAbs, path.join(getCoversDir(), destName))
+          normalized.cover = `${DATA_DIR}/${COVERS_DIR}/${destName}`
         } catch {
           normalized.cover = ''
         }
