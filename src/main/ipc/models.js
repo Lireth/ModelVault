@@ -13,7 +13,6 @@ import {
   relativizeCover,
   removeModelMeta,
   resolveCover,
-  saveStoreNow,
   setDataRoot,
   setModelHash,
   setModelMeta,
@@ -759,12 +758,6 @@ export function registerModelIpcHandlers() {
       return { error: '无效的路径' }
     }
     shell.showItemInFolder(targetPath)
-    return { ok: true }
-  })
-
-  // 强制立即落盘（窗口关闭前等场景）
-  ipcMain.handle('models:flushStore', async () => {
-    await saveStoreNow()
     return { ok: true }
   })
 

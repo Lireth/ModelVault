@@ -23,8 +23,7 @@ const VALID_INVOKE_CHANNELS = [
   'models:setMetaFlags',
   'models:popupMenu',
   'models:importCover',
-  'models:reveal',
-  'models:flushStore'
+  'models:reveal'
 ]
 
 const VALID_RECEIVE_CHANNELS = ['models:scanProgress', 'models:menuAction', 'models:thumbsReady']
@@ -109,8 +108,6 @@ const api = {
     importCover: (id, sourcePath) => invokeValidated('models:importCover', { id, path: sourcePath }),
     /** 在资源管理器中显示文件 */
     reveal: (path) => invokeValidated('models:reveal', { path }),
-    /** 立即落盘 */
-    flushStore: () => invokeValidated('models:flushStore'),
     /** 订阅扫描进度，返回取消监听函数 */
     onScanProgress: (listener) => subscribe('models:scanProgress', listener),
     /** 订阅后台缩略图生成完成事件（updates: [{ id, coverUrl }]），返回取消监听函数 */
