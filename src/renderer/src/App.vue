@@ -39,7 +39,22 @@ let unsubscribeProgress = null
 let unsubscribeMenu = null
 let unsubscribeThumbs = null
 
+/**
+ * 拖放兜底（B13）：阻止非文件拖放（文本/链接等）触发默认导航覆盖当前窗口。
+ * 文件拖入封面的业务处理在 ModelDetail 内完成（含 preventDefault），
+ * 未被业务处理消费的拖放一律在此阻止默认行为。
+ */
+function onWindowDragOver(e) {
+  e.preventDefault()
+}
+
+function onWindowDrop(e) {
+  e.preventDefault()
+}
+
 onMounted(async () => {
+  window.addEventListener('dragover', onWindowDragOver)
+  window.addEventListener('drop', onWindowDrop)
   // 订阅扫描进度事件
   unsubscribeProgress = window.api.models.onScanProgress((progress) => {
     state.progress = progress
@@ -56,6 +71,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('dragover', onWindowDragOver)
+  window.removeEventListener('drop', onWindowDrop)
   unsubscribeProgress?.()
   unsubscribeMenu?.()
   unsubscribeThumbs?.()
