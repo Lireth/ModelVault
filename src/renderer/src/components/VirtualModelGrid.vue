@@ -46,9 +46,12 @@ const totalHeight = computed(() =>
   rowCount.value > 0 ? rowCount.value * rowPitch.value - preset.value.gap : 0
 )
 
-const startRow = computed(() =>
-  Math.max(0, Math.floor(scrollTop.value / rowPitch.value) - OVERSCAN_ROWS)
-)
+const startRow = computed(() => {
+  const raw = Math.floor(scrollTop.value / rowPitch.value) - OVERSCAN_ROWS
+  // 上限钳制（B16）：scrollTop 瞬态越界（列表变短、rowPitch 变化）时
+  // 避免 startRow >= rowCount 导致渲染 0 行空白
+  return Math.min(Math.max(0, raw), Math.max(0, rowCount.value - 1))
+})
 const visibleRowCount = computed(
   () => Math.ceil(viewportHeight.value / rowPitch.value) + 1 + OVERSCAN_ROWS * 2
 )
@@ -118,8 +121,28 @@ watch(
   scheduleCalibrate
 )
 
+/**
+ * 列表身份变化（筛选/搜索/排序导致长度或首尾项变化）时复位滚动位置（B16）：
+ * 组件复用不重挂，列表变短后旧 scrollTop 会落在无效区间产生跳变。
+ * 用「长度 + 首尾项 id」作签名，避免就地更新（如缩略图替换封面 URL）
+ * 触发复位打断用户滚动。
+ */
+watch(
+  () =>
+    `${props.models.length}|${props.models[0]?.id}|${props.models[props.models.length - 1]?.id}`,
+  () => {
+    if (!scroller) return
+    scroller.scrollTop = 0
+    scrollTop.value = 0
+  }
+)
+
 onMounted(() => {
   scroller = findScrollParent(rootEl.value)
+  // 重新挂载（空态/筛选空结果切换回网格）时旧滚动位置已无意义，复位到顶部（B16）
+  if (scroller && scroller.scrollTop !== 0) {
+    scroller.scrollTop = 0
+  }
   measure()
   scroller?.addEventListener('scroll', onScroll, { passive: true })
   resizeObserver = new ResizeObserver(measure)
