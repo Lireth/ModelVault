@@ -7,10 +7,12 @@ import {
   getModelMeta,
   isInRoot,
   loadData,
+  loadSettings,
   removeModelMeta,
   setDataRoot,
   setModelHash,
-  setModelMeta
+  setModelMeta,
+  updateSettings
 } from '../src/main/services/store'
 
 /**
@@ -149,5 +151,13 @@ describe('atomicWriteFile', () => {
     expect(await fs.readFile(file, 'utf-8')).toBe('{"ok":true}')
     const siblings = await fs.readdir(path.dirname(file))
     expect(siblings.every((n) => !n.includes('.tmp'))).toBe(true)
+  })
+})
+
+describe('应用设置规范化', () => {
+  it('excludeDirs 统一小写并大小写不敏感去重（与 scanner 匹配约定一致）', async () => {
+    await updateSettings({ excludeDirs: ['Loras', '  LORAS ', 'Embeds', '', '.modelvault'] })
+    const { excludeDirs } = await loadSettings()
+    expect(excludeDirs).toEqual(['loras', 'embeds', '.modelvault'])
   })
 })

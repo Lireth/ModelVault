@@ -78,7 +78,8 @@ function normalizeSettings(raw) {
     ? [...new Set(
         raw.excludeDirs
           .filter((d) => typeof d === 'string')
-          .map((d) => d.trim())
+          // 统一小写：scanner 以小写目录名匹配（Windows 不区分大小写），去重亦随之不区分大小写
+          .map((d) => d.trim().toLowerCase())
           .filter((d) => d && d.length <= 100)
       )].slice(0, 100)
     : base.excludeDirs
