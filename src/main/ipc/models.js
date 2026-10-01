@@ -48,9 +48,17 @@ let scanAbort = null
 /** 后台缩略图生成任务（扫描响应返回后异步执行，新扫描启动前需等待其完成） */
 let thumbDrainPromise = null
 
-/** 确保指定根目录的关联存储已加载 */
+/**
+ * 确保指定根目录的关联存储已加载。
+ * 切换根目录前必须等待上一轮后台缩略图生成完成（B10）：
+ * drain 过程中 getThumbsDir() 依赖 currentRoot，中途切换会把缩略图
+ * 写进切换后的目录，且文件不被新根目录 keepNames 命中而被 pruneThumbs 清理。
+ */
 async function ensureRootStore(root) {
   if (getCurrentRoot() !== root) {
+    if (thumbDrainPromise) {
+      await thumbDrainPromise.catch(() => {})
+    }
     setDataRoot(root)
     await loadData()
   }
