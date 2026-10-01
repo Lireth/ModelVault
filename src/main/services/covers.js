@@ -16,6 +16,41 @@ function sanitizeBaseName(name) {
   return name.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || 'cover'
 }
 
+/** 各图片格式的文件头魔数（防伪装扩展名，判定所需字节均在文件头 12 字节内） */
+const IMAGE_MAGIC = [
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47,
+  // JPEG: FF D8 FF
+  (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  // GIF: 'GIF87a' / 'GIF89a'
+  (b) => b.toString('latin1', 0, 6) === 'GIF87a' || b.toString('latin1', 0, 6) === 'GIF89a',
+  // BMP: 'BM'
+  (b) => b.toString('latin1', 0, 2) === 'BM',
+  // WEBP: 'RIFF' + 偏移 8-11 'WEBP'
+  (b) => b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP'
+]
+
+/**
+ * 读取文件头校验内容是否为真实图片。
+ * 安全作用：importCover 是唯一允许从模型根目录之外复制文件的 IPC 入口，
+ * 仅凭扩展名校验可被用于将任意文件复制进封面目录再经 mvimg 协议读出（文件外泄链），
+ * 魔数校验将可导入的内容收窄为真实图片。
+ * @param {string} filePath 待校验文件路径
+ * @returns {Promise<boolean>} 文件头匹配已知图片格式时为 true
+ */
+export async function hasImageMagic(filePath) {
+  const fh = await fs.open(filePath, 'r')
+  try {
+    const buf = Buffer.alloc(12)
+    const { bytesRead } = await fh.read(buf, 0, 12, 0)
+    if (bytesRead === 0) return false
+    // 未读满 12 字节时剩余字节保持 0，不会误匹配任何魔数
+    return IMAGE_MAGIC.some((test) => test(buf))
+  } finally {
+    await fh.close()
+  }
+}
+
 /**
  * 校验并将外部图片文件复制到关联存储的封面目录（对话框选择与拖拽导入共用）。
  * @param {string} source 源图片绝对路径
@@ -31,6 +66,10 @@ export async function importCoverFromPath(source) {
   }
   try {
     await fs.access(source)
+    // 内容校验：伪装成图片扩展名的非图片文件拒绝导入
+    if (!(await hasImageMagic(source))) {
+      return { error: '文件内容不是有效的图片，已拒绝导入' }
+    }
     await fs.mkdir(getCoversDir(), { recursive: true })
     const baseName = sanitizeBaseName(path.basename(source, ext))
     const fileName = `${Date.now()}-${baseName}${ext}`

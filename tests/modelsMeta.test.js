@@ -1,4 +1,7 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { fakeUserData } from './setup'
 
 /**
@@ -20,6 +23,8 @@ vi.mock('electron', () => ({
 }))
 
 import { mergeSaveModelData } from '../src/main/ipc/models'
+import { importCoverFromPath } from '../src/main/services/covers'
+import { setDataRoot } from '../src/main/services/store'
 
 const baseMeta = {
   alias: '旧别名',
@@ -72,5 +77,46 @@ describe('mergeSaveModelData', () => {
     const snapshot = { ...baseMeta }
     mergeSaveModelData(baseMeta, { note: '改', alias: '改' })
     expect(baseMeta).toEqual(snapshot)
+  })
+})
+
+describe('importCoverFromPath 封面导入', () => {
+  let root
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-covers-'))
+    setDataRoot(root)
+  })
+
+  afterAll(async () => {
+    await fs.rm(os.tmpdir(), { recursive: true, force: false }).catch(() => {})
+  })
+
+  /** 最小 PNG 文件头（魔数校验所需 8 字节 + 补足数据） */
+  const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
+
+  it('伪装图片扩展名的文本文件拒绝导入（B7 外泄链）', async () => {
+    const fake = path.join(root, 'secret.png')
+    await fs.writeFile(fake, '敏感文本内容，非图片')
+    const res = await importCoverFromPath(fake)
+    expect(res.error).toBeTruthy()
+    // covers 目录不应被创建/写入
+    await expect(fs.access(path.join(root, '.modelvault', 'covers'))).rejects.toThrow()
+  })
+
+  it('真实 PNG 内容导入成功并复制到封面目录', async () => {
+    const real = path.join(root, 'real.png')
+    await fs.writeFile(real, PNG_MAGIC)
+    const res = await importCoverFromPath(real)
+    expect(res.error).toBeUndefined()
+    expect(res.cover).toBeTruthy()
+    expect(await fs.readFile(res.cover)).toEqual(PNG_MAGIC)
+  })
+
+  it('非图片扩展名直接拒绝', async () => {
+    const txt = path.join(root, 'note.txt')
+    await fs.writeFile(txt, 'hello')
+    const res = await importCoverFromPath(txt)
+    expect(res.error).toContain('不支持的图片格式')
   })
 })
