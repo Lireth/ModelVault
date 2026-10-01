@@ -449,7 +449,10 @@ export async function deleteCover(id, cover) {
   return true
 }
 
-/** 在资源管理器中显示模型文件 */
+/**
+ * 在资源管理器中显示模型文件。
+ * @param {string} modelPath 模型文件绝对路径（模型对象的 id 字段即绝对路径，可直接传入）
+ */
 export async function revealModel(modelPath) {
   const res = await window.api.models.reveal(modelPath)
   if (res?.error) toast('error', res.error)
