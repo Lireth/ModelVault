@@ -14,6 +14,9 @@ const WINDOW_STATE_FILE = 'window-state.json'
 
 let mainWindow = null
 
+/** close 时发起的窗口状态保存 promise（退出路径等待其完成，防止原子写被中断） */
+let pendingStateSave = null
+
 /**
  * 加载上次保存的窗口状态（尺寸/位置/是否最大化）。
  * 数据无效或位置落在所有显示器之外（如外接显示器被拔掉）时返回 null，回退默认值。
@@ -104,9 +107,10 @@ export async function createMainWindow() {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
 
-  // 关闭时保存窗口状态（尺寸/位置/是否最大化），下次启动恢复
+  // 关闭时保存窗口状态（尺寸/位置/是否最大化），下次启动恢复。
+  // 保存 promise 记录到模块变量，退出路径经 flushWindowStateSave 等待落盘（B12）
   mainWindow.on('close', () => {
-    saveWindowState(mainWindow)
+    pendingStateSave = saveWindowState(mainWindow)
   })
 
   mainWindow.on('closed', () => {
@@ -139,4 +143,16 @@ export async function createMainWindow() {
  */
 export function getMainWindow() {
   return mainWindow
+}
+
+/**
+ * 等待待完成的窗口状态保存落盘（B12）。
+ * window-all-closed 的退出路径调用：app.quit() 会中断进行中的异步原子写，
+ * 导致 window-state.json 未写或残留临时文件。
+ */
+export async function flushWindowStateSave() {
+  if (pendingStateSave) {
+    await pendingStateSave.catch(() => {})
+    pendingStateSave = null
+  }
 }

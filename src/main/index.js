@@ -1,5 +1,5 @@
 import { app, BrowserWindow, Menu, dialog, shell } from 'electron'
-import { createMainWindow, getMainWindow } from './windows/mainWindow'
+import { createMainWindow, flushWindowStateSave, getMainWindow } from './windows/mainWindow'
 import { registerWindowShortcuts } from './menu'
 import { registerIpcHandlers } from './ipc'
 import { registerImageScheme, registerImageProtocolHandler } from './protocol'
@@ -71,11 +71,13 @@ if (!gotSingleInstanceLock) {
 
 // Windows 平台惯例：所有窗口关闭后退出应用
 app.on('window-all-closed', () => {
-  // 退出前确保持久化数据完整落盘
-  saveStoreNow().finally(() => {
-    logger.info('所有窗口已关闭，应用退出')
-    app.quit()
-  })
+  // 退出前确保持久化数据完整落盘：元数据（store.json）+ 窗口状态（window-state.json）
+  Promise.all([saveStoreNow(), flushWindowStateSave()])
+    .catch(() => {})
+    .finally(() => {
+      logger.info('所有窗口已关闭，应用退出')
+      app.quit()
+    })
 })
 
 // macOS 平台：点击 Dock 图标时重新创建窗口（兼容性保留）
