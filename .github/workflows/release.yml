@@ -32,7 +32,7 @@ jobs:
       # ---------- 1. 环境准备 ----------
 
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 Node.js 22
         uses: actions/setup-node@v4
