@@ -1,10 +1,11 @@
 <script setup>
-import { state } from '../store/appStore'
+import { dismissToast, state } from '../store/appStore'
 </script>
 
 <template>
   <Teleport to="body">
-    <div class="toast-host">
+    <!-- role+aria-live：读屏器可感知通知（U6） -->
+    <div class="toast-host" role="status" aria-live="polite">
       <TransitionGroup name="toast">
         <div
           v-for="t in state.toasts"
@@ -16,6 +17,7 @@ import { state } from '../store/appStore'
             {{ t.type === 'success' ? '✓' : t.type === 'error' ? '✕' : t.type === 'warn' ? '!' : 'ℹ' }}
           </span>
           <span>{{ t.text }}</span>
+          <button class="toast-close" title="关闭" aria-label="关闭通知" @click="dismissToast(t.id)">✕</button>
         </div>
       </TransitionGroup>
     </div>
@@ -47,6 +49,24 @@ import { state } from '../store/appStore'
   font-size: 13px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   max-width: 70vw;
+  /* host 容器为 pointer-events:none 防挡点击，toast 自身恢复以支持关闭按钮（U6） */
+  pointer-events: auto;
+}
+
+.toast-close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+  margin-left: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.toast-close:hover {
+  color: var(--text);
 }
 
 .toast-icon {

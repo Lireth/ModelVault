@@ -7,18 +7,20 @@ import SettingsPage from './components/SettingsPage.vue'
 import ToastHost from './components/ToastHost.vue'
 import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import {
+  acceptConfirm,
   applyThumbUpdates,
   cancelScan,
+  chooseFolder,
   filteredModels,
   handleMenuAction,
   initApp,
   LORA_TAGS,
+  rejectConfirm,
   saveSettings,
   scanModels,
   state,
   toast,
-  typeInfo,
-  chooseFolder
+  typeInfo
 } from './store/appStore'
 
 const searchInput = ref(state.search)
@@ -65,7 +67,11 @@ function onWindowDragOver(e) {
 }
 
 function onWindowDrop(e) {
-  e.preventDefault()
+  // 仅拦截文件类拖放（封面导入业务自行处理 preventDefault）；
+  // 纯文本/链接拖放放行给目标控件（如排除目录 textarea）的默认插入行为（U7）
+  if (Array.from(e.dataTransfer?.types || []).includes('Files')) {
+    e.preventDefault()
+  }
 }
 
 onMounted(async () => {
@@ -231,6 +237,19 @@ onUnmounted(() => {
 
     <ModelDetail />
     <ToastHost />
+
+    <!-- 自定义确认层（U4）：替代 window.confirm，覆盖区不包含标题栏（保持窗口控制可达） -->
+    <Teleport to="body">
+      <div v-if="state.confirm.visible" class="confirm-overlay" @click.self="rejectConfirm">
+        <div class="confirm-dialog" role="dialog" aria-modal="true" aria-label="操作确认">
+          <p class="confirm-text">{{ state.confirm.text }}</p>
+          <div class="confirm-actions">
+            <button class="btn" @click="rejectConfirm">取消</button>
+            <button class="btn btn-primary confirm-ok" @click="acceptConfirm">确定</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -501,5 +520,43 @@ onUnmounted(() => {
 .btn-large {
   padding: 10px 22px;
   font-size: 14px;
+}
+
+/* ---------- 自定义确认层（U4） ---------- */
+.confirm-overlay {
+  position: fixed;
+  /* 不遮标题栏：保留原生标题栏叠加层控件的可达性（项目约定） */
+  top: var(--titlebar-height);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 210;
+}
+
+.confirm-dialog {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 24px;
+  min-width: 320px;
+  max-width: 480px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.confirm-text {
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
 }
 </style>

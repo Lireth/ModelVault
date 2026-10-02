@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   closeDetail,
+  confirmDialog,
   deleteCover,
   formatSize,
   importCoverFromDrop,
@@ -15,7 +16,6 @@ import {
   setRating,
   showContextMenu,
   state,
-  subCategoryInfo,
   tagsForType,
   toast,
   toggleFavorite,
@@ -380,7 +380,7 @@ async function onSetDefault(c) {
 async function onDeleteCover(c) {
   const model = selectedModel.value
   if (!model) return
-  if (!window.confirm('确定删除这张预览图吗？该操作不可恢复。')) return
+  if (!(await confirmDialog('确定删除这张预览图吗？该操作不可恢复。'))) return
   busy.value = true
   try {
     await deleteCover(model.id, c.rel)

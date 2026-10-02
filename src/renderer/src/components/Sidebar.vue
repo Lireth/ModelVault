@@ -1,8 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { MODEL_TYPES, state, typeCounts, formatSize, chooseFolder, scanModels, openSettings } from '../store/appStore'
-
-const emit = defineEmits(['select-type'])
+import { MODEL_TYPES, state, typeCounts, chooseFolder, scanModels, openSettings } from '../store/appStore'
 
 const folderName = computed(() => {
   if (!state.folder) return '未选择文件夹'
@@ -12,7 +10,6 @@ const folderName = computed(() => {
 
 function selectType(key) {
   state.typeFilter = key
-  emit('select-type', key)
 }
 
 function onScanClick() {

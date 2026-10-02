@@ -147,6 +147,9 @@ onMounted(() => {
   scroller?.addEventListener('scroll', onScroll, { passive: true })
   resizeObserver = new ResizeObserver(measure)
   resizeObserver.observe(rootEl.value)
+  // U5：rootEl 高度恒等于 totalHeight，窗口纵向缩放不会触发其回调；
+  // 须同时观察滚动容器，使 viewportHeight 随窗口缩放即时刷新（此前仅滚动时同步）
+  if (scroller) resizeObserver.observe(scroller)
   scheduleCalibrate()
 })
 

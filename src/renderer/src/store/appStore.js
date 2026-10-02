@@ -89,7 +89,6 @@ export function defaultSettings() {
 }
 
 export const state = reactive({
-  ready: false,
   folder: '',
   scanning: false,
   scanError: '',
@@ -110,7 +109,9 @@ export const state = reactive({
   settings: defaultSettings(),
   settingsOpen: false,
   // Toast
-  toasts: []
+  toasts: [],
+  // 自定义确认层（U4：替代阻塞且脱离主题的 window.confirm）
+  confirm: { visible: false, text: '', resolve: null }
 })
 
 let toastSeq = 0
@@ -120,9 +121,42 @@ export function toast(type, text, duration = 3200) {
   const id = ++toastSeq
   state.toasts.push({ id, type, text })
   setTimeout(() => {
-    const idx = state.toasts.findIndex((t) => t.id === id)
-    if (idx >= 0) state.toasts.splice(idx, 1)
+    dismissToast(id)
   }, duration)
+}
+
+/** 手动关闭轻提示（U6：Toast 关闭按钮） */
+export function dismissToast(id) {
+  const idx = state.toasts.findIndex((t) => t.id === id)
+  if (idx >= 0) state.toasts.splice(idx, 1)
+}
+
+/**
+ * 弹出自定义确认层（U4），resolve(true) 确认 / resolve(false) 取消。
+ * 同时仅允许一个确认（后者覆盖前者的 resolve，前一个静默取消）。
+ * @param {string} text 确认提示文案
+ * @returns {Promise<boolean>}
+ */
+export function confirmDialog(text) {
+  return new Promise((resolve) => {
+    state.confirm.resolve?.(false)
+    state.confirm.visible = true
+    state.confirm.text = text
+    state.confirm.resolve = resolve
+  })
+}
+
+/** 确认层按钮回调（U4） */
+export function acceptConfirm() {
+  const resolve = state.confirm.resolve
+  state.confirm = { visible: false, text: '', resolve: null }
+  resolve?.(true)
+}
+
+export function rejectConfirm() {
+  const resolve = state.confirm.resolve
+  state.confirm = { visible: false, text: '', resolve: null }
+  resolve?.(false)
 }
 
 /** 获取类型显示信息 */
@@ -163,8 +197,6 @@ export async function initApp() {
     }
   } catch (err) {
     toast('error', `初始化失败: ${err.message}`)
-  } finally {
-    state.ready = true
   }
 }
 
@@ -367,16 +399,18 @@ watch(
  * 重复点击当前已选卡片不触发确认。
  * @param {string} id 模型 id（文件绝对路径）
  */
-export function openDetail(id) {
+export async function openDetail(id) {
   if (state.detailDirty && state.selectedId !== id) {
-    if (!window.confirm('当前模型有未保存的修改，放弃修改并切换？')) return
+    if (!(await confirmDialog('当前模型有未保存的修改，放弃修改并切换？'))) return
   }
   state.selectedId = id
 }
 
-/** 关闭模型详情。表单有未保存的修改时先确认放弃（C8） */
-export function closeDetail() {
-  if (state.detailDirty && !window.confirm('当前模型有未保存的修改，放弃修改并关闭？')) return
+/** 关闭模型详情。表单有未保存的修改时先确认放弃（C8/U4） */
+export async function closeDetail() {
+  if (state.detailDirty && !(await confirmDialog('当前模型有未保存的修改，放弃修改并关闭？'))) {
+    return
+  }
   state.selectedId = null
 }
 
@@ -603,7 +637,7 @@ export async function handleMenuAction(id, action) {
     case 'deleteModel': {
       const m = state.models.find((x) => x.id === id)
       if (!m) break
-      if (!window.confirm(`确定将「${m.alias || m.name}」移入系统回收站吗？`)) break
+      if (!(await confirmDialog(`确定将「${m.alias || m.name}」移入系统回收站吗？`))) break
       await deleteModel(id)
       break
     }
