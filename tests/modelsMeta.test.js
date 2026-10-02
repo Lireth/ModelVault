@@ -90,7 +90,9 @@ describe('importCoverFromPath 封面导入', () => {
   })
 
   afterAll(async () => {
-    await fs.rm(os.tmpdir(), { recursive: true, force: false }).catch(() => {})
+    if (root) {
+      await fs.rm(root, { recursive: true, force: true }).catch(() => {})
+    }
   })
 
   /** 最小 PNG 文件头（魔数校验所需 8 字节 + 补足数据） */
@@ -125,9 +127,11 @@ describe('importCoverFromPath 封面导入', () => {
 describe('mvimg 协议路径白名单', () => {
   let root
   let handler
+  const trackedDirs = new Set()
 
   beforeEach(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-proto-'))
+    trackedDirs.add(root)
     setDataRoot(root)
     vi.mocked(protocol.handle).mockClear()
     registerImageProtocolHandler()
@@ -136,7 +140,11 @@ describe('mvimg 协议路径白名单', () => {
   })
 
   afterAll(async () => {
-    await fs.rm(os.tmpdir(), { recursive: true, force: false }).catch(() => {})
+    await Promise.all(
+      [...trackedDirs].map((dir) =>
+        fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+      )
+    )
   })
 
   /** 经 toImageUrl 构造请求并调用协议 handler，返回响应 */
@@ -153,6 +161,7 @@ describe('mvimg 协议路径白名单', () => {
 
   it('根目录外路径拒绝（403）', async () => {
     const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-outside-'))
+    trackedDirs.add(outsideDir)
     const img = path.join(outsideDir, 'secret.png')
     await fs.writeFile(img, 'x')
     const res = await request(img)
@@ -161,6 +170,7 @@ describe('mvimg 协议路径白名单', () => {
 
   it('根目录内 junction 指向外部文件被拒绝（B8 绕过）', async (ctx) => {
     const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-outside-'))
+    trackedDirs.add(outsideDir)
     const img = path.join(outsideDir, 'secret.png')
     await fs.writeFile(img, 'x')
     const linkPath = path.join(root, 'link')
