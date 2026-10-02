@@ -433,7 +433,8 @@ async function onSave() {
       alias: form.alias.trim(),
       params,
       note: form.note,
-      subCategory: model.type === 'other' ? form.subCategory : ''
+      // LoRA 与其他模型的分类标签随保存落盘；checkpoint 由主进程自动标注为基底模型
+      subCategory: ['other', 'lora'].includes(model.type) ? form.subCategory : ''
     }
     // 触发词仅 LoRA 详情页提供编辑
     if (model.type === 'lora') payload.triggerWords = form.triggerWords
