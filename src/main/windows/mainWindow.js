@@ -95,9 +95,11 @@ export async function createMainWindow() {
   mainWindow = new BrowserWindow(options)
   if (state?.maximized) mainWindow.maximize()
 
-  // 避免窗口尺寸变化时出现白屏闪烁
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show()
+  // 避免窗口尺寸变化时出现白屏闪烁。
+  // 回调引用局部实例而非模块变量（A10）：模块变量可能在窗口销毁时已被置 null
+  const win = mainWindow
+  win.once('ready-to-show', () => {
+    if (!win.isDestroyed()) win.show()
   })
 
   if (process.env['ELECTRON_RENDERER_URL']) {

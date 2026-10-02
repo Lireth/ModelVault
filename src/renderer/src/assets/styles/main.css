@@ -14,6 +14,16 @@
   --favorite: #f5b301;
   /* 深色半透明覆盖层（图片角标等） */
   --overlay: rgba(16, 20, 26, 0.75);
+  /* 固定亮色底（类型色/成功/警告角标，不随主题变化）上的深色文字 */
+  --on-bright: #10141a;
+  /* 主题强调色（accent/favorite）之上的文字：浅色主题强调色变深，改用白字 */
+  --on-accent: #10141a;
+  /* 等宽字体栈（路径/数值展示统一） */
+  --font-mono: Consolas, monospace;
+  /* 弹层层级：详情 < Toast < 确认层 */
+  --z-detail: 100;
+  --z-toast: 200;
+  --z-confirm: 210;
   color-scheme: dark;
 }
 
@@ -31,6 +41,7 @@ html.light {
   /* 浅色主题用更深的金色保证在白色背景上的可读性 */
   --favorite: #b98200;
   --overlay: rgba(255, 255, 255, 0.85);
+  --on-accent: #ffffff;
   color-scheme: light;
 }
 
@@ -113,11 +124,6 @@ body {
 .wc-btn:hover {
   background: var(--bg-hover);
   color: var(--text);
-}
-
-.wc-close:hover {
-  background: var(--danger);
-  color: #fff;
 }
 
 /* ---------- 通用按钮 ---------- */

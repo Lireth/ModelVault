@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { abortError } from '../utils'
 
 /**
  * 模型扫描模块：递归遍历用户选择的模型根目录，
@@ -60,18 +61,6 @@ export function classifyModel(relSegments, fileName) {
     if (rule.re.test(fileName)) return rule.type
   }
   return 'other'
-}
-
-/** 判断是否为有效的模型类型 */
-export function isValidType(type) {
-  return FOLDER_RULES.some((r) => r.type === type) || type === 'other'
-}
-
-/** 构造取消异常（与 AbortController 的 AbortError 同名，便于调用方识别） */
-function abortError() {
-  const err = new Error('扫描已取消')
-  err.name = 'AbortError'
-  return err
 }
 
 /**

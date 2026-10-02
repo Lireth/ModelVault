@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import { net } from 'electron'
 import logger from '../logger'
+import { boundedMapSet } from '../utils'
 
 /**
  * Civitai 匹配服务：
@@ -23,21 +24,39 @@ const matchCache = new Map()
  *  匹配结果（含版本信息/触发词/示例参数）随大库全量匹配持续累积，须限容防内存膨胀 */
 const MATCH_CACHE_MAX = 1000
 
-/** 写入匹配缓存（容量超限时按插入顺序淘汰最旧条目） */
+/** 写入匹配缓存（容量超限时按插入顺序淘汰最旧条目，C4 共享工具） */
 function cacheMatchResult(key, result) {
-  matchCache.set(key, result)
-  if (matchCache.size > MATCH_CACHE_MAX) {
-    matchCache.delete(matchCache.keys().next().value)
-  }
+  boundedMapSet(matchCache, key, result, MATCH_CACHE_MAX)
 }
 
-/** 流式计算文件 SHA256（大文件友好，内存占用恒定） */
-function sha256File(absPath) {
+/**
+ * 流式计算文件 SHA256（大文件友好，内存占用恒定）。
+ * @param {string} absPath 模型文件绝对路径
+ * @param {{signal?: AbortSignal, onProgress?: (loaded: number) => void}} [options]
+ *   signal 中止信号（abort 后读取流销毁并以 AbortError 拒绝，E9）；
+ *   onProgress 已处理字节数回调（节流由调用方负责）
+ */
+function sha256File(absPath, { signal, onProgress } = {}) {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash('sha256')
     const stream = fs.createReadStream(absPath, { highWaterMark: 8 * 1024 * 1024 })
-    stream.on('data', (chunk) => hash.update(chunk))
+    let loaded = 0
+    stream.on('data', (chunk) => {
+      hash.update(chunk)
+      loaded += chunk.length
+      if (onProgress) onProgress(loaded)
+    })
     stream.on('error', reject)
+    if (signal) {
+      const onAbort = () => {
+        stream.destroy(Object.assign(new Error('哈希计算已取消'), { name: 'AbortError' }))
+      }
+      if (signal.aborted) {
+        onAbort()
+        return
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+    }
     stream.on('end', () => resolve(hash.digest('hex')))
   })
 }
@@ -87,17 +106,21 @@ function mapVersion(v) {
  * 匹配 Civitai 模型版本。
  * @param {string} absPath 模型文件绝对路径
  * @param {string} [knownHash] 已持久化的哈希（文件未变化时直接复用，跳过耗时计算）
+ * @param {{signal?: AbortSignal, onProgress?: (loaded: number, total: number) => void}} [options]
+ *   signal 取消哈希计算与网络请求（E9）；onProgress 哈希进度回调（loaded/total 字节）
  * @returns {Promise<{matched: false, hash: string} | {matched: true, hash: string, info: object}>}
  */
-export async function matchCivitai(absPath, knownHash = '') {
+export async function matchCivitai(absPath, knownHash = '', { signal, onProgress } = {}) {
   const stat = await fs.promises.stat(absPath)
+  const total = stat.size
+  const reportProgress = typeof onProgress === 'function' ? (loaded) => onProgress(loaded, total) : null
   const cacheKey = `${absPath}:${Math.round(stat.mtimeMs)}`
   const cached = matchCache.get(cacheKey)
   if (cached) return cached
 
   const hash = typeof knownHash === 'string' && /^[0-9a-f]{64}$/i.test(knownHash)
     ? knownHash.toLowerCase()
-    : await sha256File(absPath)
+    : await sha256File(absPath, { signal, onProgress: reportProgress })
   const useKnownHash = hash === knownHash?.toLowerCase()
   if (!useKnownHash) {
     logger.info(`Civitai 匹配：开始计算文件哈希 ${absPath}`)
@@ -106,12 +129,19 @@ export async function matchCivitai(absPath, knownHash = '') {
   let response
   try {
     // net.fetch 走 Chromium 网络栈，自动继承系统代理（含 PAC），
-    // 解决 Node 原生 fetch 不支持代理导致国内网络环境无法访问 Civitai 的问题
+    // 解决 Node 原生 fetch 不支持代理导致国内网络环境无法访问 Civitai 的问题；
+    // 超时信号与外部取消信号合并（E9）
+    const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    const fetchSignal = signal ? AbortSignal.any([timeoutSignal, signal]) : timeoutSignal
     response = await net.fetch(`${API_BASE}/model-versions/by-hash/${hash}`, {
       headers: { 'User-Agent': 'ModelVault/0.1.0' },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+      signal: fetchSignal
     })
   } catch (err) {
+    // 外部取消（E9）：原样上抛 AbortError 供 IPC 层识别，与超时场景区分
+    if (signal?.aborted) {
+      throw Object.assign(new Error('匹配已取消'), { name: 'AbortError', cause: err })
+    }
     if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
       throw new Error('请求 Civitai 超时，请检查网络后重试', { cause: err })
     }

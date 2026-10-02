@@ -22,9 +22,14 @@ concurrency:
 
 jobs:
   test-and-build:
-    name: Test & Build
+    name: Test & Build (Node ${{ matrix.node }})
     runs-on: windows-latest
     timeout-minutes: 20
+    # D6：engines 声明 >=20.19，矩阵覆盖 20/22 双版本验证（避免纸面承诺）
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22"]
 
     steps:
       # ---------- 环境准备 ----------
@@ -32,13 +37,13 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 安装 Node.js 22
+      - name: 安装 Node.js ${{ matrix.node }}
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ matrix.node }}
           cache: npm # 缓存 npm 依赖包
 
-      # 缓存 Electron / electron-builder 二进制（.npmrc 指向 npmmirror，
+      # 缓存 Electron / electron-builder 二进制（.npmrc 指向 npmmirror 镜像，
       # 首次下载约 100MB+，缓存后大幅加速）。键随 lock 文件变化自动失效。
       - name: 缓存 Electron 二进制
         uses: actions/cache@v4
@@ -59,8 +64,8 @@ jobs:
       - name: ESLint 代码检查
         run: npm run lint
 
-      - name: 运行单元测试
-        run: npm test
+      - name: 运行单元测试（含覆盖率统计，D6）
+        run: npm run test:coverage
 
       - name: 编译主进程 / preload / 渲染进程
         run: npm run build

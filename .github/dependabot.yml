@@ -1,0 +1,21 @@
+# 依赖更新自动化（D6）：
+# - npm 依赖每周一检查（lock 镜像与 electron 大版本升级需人工确认后再合入）
+# - GitHub Actions 工作流版本每周一检查
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies

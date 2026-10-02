@@ -20,6 +20,7 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "preview": "electron-vite preview",
     "dist": "npm run build && electron-builder --win",
     "dist:dir": "npm run build && electron-builder --dir"
@@ -30,6 +31,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@vitejs/plugin-vue": "^6.0.8",
+    "@vitest/coverage-v8": "^5.0.3",
     "electron": "^44.5.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",

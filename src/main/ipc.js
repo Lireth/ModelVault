@@ -2,6 +2,7 @@ import { BrowserWindow, app, ipcMain } from 'electron'
 import logger from './logger'
 import { registerModelIpcHandlers } from './ipc/models/index.js'
 import { themeColors } from './theme'
+import { checkForUpdate } from './services/updater'
 
 /**
  * 注册所有主进程 IPC 处理器。
@@ -27,6 +28,9 @@ export function registerIpcHandlers() {
     node: process.versions.node,
     platform: process.platform
   }))
+
+  // 应用内检查更新（E1）：查询 GitHub Releases 最新版本并与当前版本比对
+  ipcMain.handle('app:checkUpdate', () => checkForUpdate())
 
   // 主题切换时同步原生窗口颜色（标题栏叠加层 + 窗口背景）
   ipcMain.handle('window:setTheme', (event, { theme } = {}) => {

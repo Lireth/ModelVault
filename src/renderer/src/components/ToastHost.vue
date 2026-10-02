@@ -34,7 +34,7 @@ import { dismissToast, state } from '../store/appStore'
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  z-index: 200;
+  z-index: var(--z-toast);
   pointer-events: none;
 }
 
@@ -79,7 +79,7 @@ import { dismissToast, state } from '../store/appStore'
   font-size: 11px;
   font-weight: 700;
   flex-shrink: 0;
-  color: #10141a;
+  color: var(--on-bright);
 }
 
 .toast-success .toast-icon { background: #3ddc97; }

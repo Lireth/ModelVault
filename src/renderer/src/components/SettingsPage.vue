@@ -133,6 +133,22 @@ async function loadAppInfo() {
   }
 }
 
+/* ---------------- 应用内检查更新（E1） ---------------- */
+
+const updateInfo = ref(null)
+const checkingUpdate = ref(false)
+
+async function onCheckUpdate() {
+  checkingUpdate.value = true
+  try {
+    updateInfo.value = await window.api.app.checkUpdate()
+  } catch (err) {
+    updateInfo.value = { error: err.message }
+  } finally {
+    checkingUpdate.value = false
+  }
+}
+
 /** 将排除目录文本解析为去重后的目录名数组 */
 function parseExcludeDirs() {
   return [...new Set(
@@ -355,6 +371,18 @@ async function onSave() {
           <dd>{{ appInfo.node }}</dd>
         </dl>
         <p v-else class="setting-desc">版本信息加载中…</p>
+        <!-- 应用内检查更新（E1）：portable 分发无自动更新，引导前往 Release 页下载 -->
+        <div class="update-row">
+          <button class="btn" :disabled="checkingUpdate" @click="onCheckUpdate">
+            {{ checkingUpdate ? '检查中…' : '检查更新' }}
+          </button>
+          <span v-if="updateInfo?.error" class="update-msg error">{{ updateInfo.error }}</span>
+          <span v-else-if="updateInfo?.hasUpdate" class="update-msg has-update">
+            发现新版本 v{{ updateInfo.latest }}（当前 v{{ updateInfo.current }}）
+            <a v-if="updateInfo.releaseUrl" :href="updateInfo.releaseUrl" target="_blank">前往下载 ↗</a>
+          </span>
+          <span v-else-if="updateInfo" class="update-msg">已是最新版本（v{{ updateInfo.current }}）</span>
+        </div>
       </div>
     </div>
 
@@ -474,7 +502,7 @@ async function onSave() {
   background: var(--bg-card);
   color: var(--text);
   font-size: 12px;
-  font-family: Consolas, monospace;
+  font-family: var(--font-mono);
   resize: vertical;
   outline: none;
 }
@@ -500,7 +528,7 @@ async function onSave() {
   border-radius: 999px;
   background: var(--bg-card);
   font-size: 12px;
-  font-family: Consolas, monospace;
+  font-family: var(--font-mono);
   color: var(--text-muted);
   cursor: pointer;
   user-select: none;
@@ -594,7 +622,40 @@ async function onSave() {
 }
 
 .about-list dd {
-  font-family: Consolas, monospace;
+  font-family: var(--font-mono);
+}
+
+/* 检查更新行 */
+.update-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  flex-wrap: wrap;
+}
+
+.update-msg {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.update-msg.error {
+  color: var(--danger);
+}
+
+.update-msg.has-update {
+  color: var(--favorite);
+  font-weight: 600;
+}
+
+.update-msg a {
+  color: var(--accent);
+  text-decoration: none;
+  margin-left: 4px;
+}
+
+.update-msg a:hover {
+  text-decoration: underline;
 }
 
 .settings-footer {

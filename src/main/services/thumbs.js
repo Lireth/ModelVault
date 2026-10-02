@@ -21,6 +21,12 @@ const THUMB_WIDTH = 640
 /** 仅当原图宽度超过该值时才生成缩略图，小图直接使用原图 */
 const MIN_SOURCE_WIDTH = 720
 const JPEG_QUALITY = 82
+/**
+ * 源图字节数上限（B2）：超过则跳过缩略图生成（回退原图显示）。
+ * generateThumb 需整图读入内存再解码，批量处理数十 MB 的超大型 PNG 时
+ * 瞬时内存峰值可达数百 MB 并挤占主进程事件循环；这类超大图直接用原图。
+ */
+const MAX_SOURCE_BYTES = 64 * 1024 * 1024
 
 /** 缩略图缓存目录（位于模型根目录内） */
 function getThumbsDir() {
@@ -41,6 +47,9 @@ function thumbFileName(absCover, mtimeMs) {
  * @returns {Promise<string>} 成功返回缩略图路径；源图过小/损坏返回 ''（回退原图）
  */
 async function generateThumb(absCover, mtimeMs, thumbPath) {
+  // 大文件跳过（B2）：先 stat 校验字节数，避免超大图整读入内存
+  const sourceStat = await fs.stat(absCover)
+  if (sourceStat.size > MAX_SOURCE_BYTES) return ''
   const buffer = await fs.readFile(absCover)
   const image = nativeImage.createFromBuffer(buffer)
   if (image.isEmpty()) return ''
@@ -50,30 +59,6 @@ async function generateThumb(absCover, mtimeMs, thumbPath) {
   await fs.mkdir(getThumbsDir(), { recursive: true })
   await fs.writeFile(thumbPath, resized.toJPEG(JPEG_QUALITY))
   return thumbPath
-}
-
-/**
- * 获取封面缩略图的绝对路径；缓存未命中时同步生成后返回。
- * 生成失败或无需缩放时返回空字符串，调用方应回退使用原图路径。
- * @param {string} absCover 封面图片绝对路径
- * @returns {Promise<string>} 缩略图绝对路径，失败返回 ''
- */
-export async function getThumbPath(absCover) {
-  if (!absCover || typeof absCover !== 'string' || !getCurrentRoot()) return ''
-  try {
-    const stat = await fs.stat(absCover)
-    const thumbPath = path.join(getThumbsDir(), thumbFileName(absCover, stat.mtimeMs))
-    try {
-      await fs.access(thumbPath)
-      return thumbPath
-    } catch {
-      /* 缓存未命中，继续生成 */
-    }
-    return await generateThumb(absCover, stat.mtimeMs, thumbPath)
-  } catch (err) {
-    logger.warn(`缩略图生成失败（回退原图）: ${err.message}`)
-    return ''
-  }
 }
 
 /* ---------------- 后台延迟生成（扫描装饰阶段专用） ---------------- */

@@ -22,8 +22,17 @@ const rootEl = ref(null)
 const containerWidth = ref(0)
 const viewportHeight = ref(600)
 const scrollTop = ref(0)
-/** 行间距（卡片高 + 行 gap），初始为估计值，挂载后按实际卡片高度校准 */
-const rowPitch = ref(260)
+/**
+ * 行间距（卡片高 + 行 gap），挂载后按实际卡片高度校准（B6）。
+ * 初始估算值按当前档位推算：封面为 2:3 纵横比（宽取档位最小列宽）+ 信息区约 72px，
+ * 比固定估计值更贴近真实高度，减少首帧行高突变造成的滚动条跳动。
+ */
+const CARD_INFO_HEIGHT = 72
+function estimateRowPitch() {
+  const p = CARD_SIZE_PRESETS[state.settings.cardSize] || CARD_SIZE_PRESETS.normal
+  return Math.round(p.min * 1.5 + CARD_INFO_HEIGHT + p.gap)
+}
+const rowPitch = ref(estimateRowPitch())
 
 const preset = computed(() => CARD_SIZE_PRESETS[state.settings.cardSize] || CARD_SIZE_PRESETS.normal)
 const gapCss = computed(() => `${preset.value.gap}px`)
@@ -59,6 +68,63 @@ const visibleRows = computed(() => {
   return rows
 })
 
+/* ---------------- 键盘网格导航（E10） ---------------- */
+
+/** id → 索引映射（导航定位用） */
+const indexById = computed(() => new Map(props.models.map((m, i) => [m.id, i])))
+
+/** 聚焦指定模型卡片（等待渲染后聚焦） */
+function focusModel(id) {
+  nextTick(() => {
+    rootEl.value?.querySelector(`[data-model-id="${CSS.escape(id)}"]`)?.focus()
+  })
+}
+
+/**
+ * 方向键在卡片间移动焦点并联动滚动。
+ * 此前键盘用户 Tab 到视口末尾后无法到达未渲染卡片（DOM 中不存在），
+ * 数千模型时键盘浏览形同虚设；方向键导航 + 滚动联动解决该问题。
+ */
+function onGridKeydown(e) {
+  const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
+  if (!keys.includes(e.key)) return
+  const total = props.models.length
+  if (total === 0) return
+  const card = document.activeElement?.closest?.('[data-model-id]')
+  let idx = card ? indexById.value.get(card.dataset.modelId) : undefined
+  const cols = columns.value
+  if (idx === undefined) {
+    idx = 0
+  } else {
+    switch (e.key) {
+      case 'ArrowLeft': idx = Math.max(0, idx - 1); break
+      case 'ArrowRight': idx = Math.min(total - 1, idx + 1); break
+      case 'ArrowUp': idx = Math.max(0, idx - cols); break
+      case 'ArrowDown': idx = Math.min(total - 1, idx + cols); break
+      case 'Home': idx = idx - (idx % cols); break
+      case 'End': idx = Math.min(total - 1, idx - (idx % cols) + cols - 1); break
+    }
+  }
+  const id = props.models[idx]?.id
+  if (!id) return
+  e.preventDefault()
+  // 目标行不在渲染窗口内时先滚动（OVERSCAN 缓冲行内可视，无需精确对齐）
+  const targetRow = Math.floor(idx / cols)
+  const firstVisible = startRow.value + OVERSCAN_ROWS
+  const lastVisible = endRow.value - 1 - OVERSCAN_ROWS
+  if (scroller) {
+    let next = scroller.scrollTop
+    if (targetRow < firstVisible) next -= (firstVisible - targetRow) * rowPitch.value
+    else if (targetRow > lastVisible) next += (targetRow - lastVisible) * rowPitch.value
+    if (next !== scroller.scrollTop) {
+      next = Math.max(0, next)
+      scroller.scrollTop = next
+      scrollTop.value = next
+    }
+  }
+  focusModel(id)
+}
+
 /* ---------------- 滚动与尺寸测量 ---------------- */
 
 let scroller = null
@@ -90,12 +156,30 @@ function measure() {
   }
 }
 
+/** 等高假设告警只发一次（开发期断言） */
+let equalHeightWarned = false
+
 /** 用已渲染卡片的真实高度校准行距（卡片高度仅随列宽与显示设置变化） */
 function calibrateRowPitch() {
-  const card = rootEl.value?.querySelector('.grid-row .model-card')
-  if (!card) return
-  const h = card.getBoundingClientRect().height
-  if (h > 0) rowPitch.value = h + preset.value.gap
+  const cards = rootEl.value?.querySelectorAll('.grid-row .model-card')
+  if (!cards || cards.length === 0) return
+  const h = cards[0].getBoundingClientRect().height
+  if (h <= 0) return
+  // 开发期断言（B6）：虚拟滚动的行定位隐含「同行卡片等高」假设，当前由
+  // ModelCard 的单行省略布局保证；未来改动（名称换行/新增可变高度内容）
+  // 会静默破坏定位产生重叠/空隙，此处提前告警
+  if (import.meta.env.DEV && !equalHeightWarned && cards.length > 1) {
+    const last = cards[cards.length - 1].getBoundingClientRect().height
+    if (Math.abs(last - h) > 2) {
+      equalHeightWarned = true
+      console.warn(
+        '[VirtualModelGrid] 同行卡片高度不一致，虚拟滚动行定位将失准:',
+        h,
+        last
+      )
+    }
+  }
+  rowPitch.value = h + preset.value.gap
 }
 
 function scheduleCalibrate() {
@@ -153,7 +237,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="rootEl" class="virtual-grid" :style="{ height: `${totalHeight}px` }">
+  <div ref="rootEl" class="virtual-grid" :style="{ height: `${totalHeight}px` }" @keydown="onGridKeydown">
     <div
       v-for="row in visibleRows"
       :key="row.index"
@@ -164,7 +248,7 @@ onBeforeUnmount(() => {
         gap: gapCss
       }"
     >
-      <ModelCard v-for="m in row.models" :key="m.id" :model="m" />
+      <ModelCard v-for="m in row.models" :key="m.id" :model="m" :data-model-id="m.id" />
     </div>
   </div>
 </template>

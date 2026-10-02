@@ -1,13 +1,13 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import fs from 'node:fs/promises'
 import logger from '../../logger'
-import { getSettings, loadSettings, updateSettings } from '../../services/store'
+import { getSettings, updateSettings } from '../../services/store'
 import { scanModels } from '../../services/scanner'
 import { pruneOrphanCovers } from '../../services/covers'
 import { clearDeferredJobs } from '../../services/thumbs'
 import { clearDeferredOwners, decorateModels, startThumbDrain } from './decorate'
 import { ensureRootStore } from './store'
-import { getDecorateCacheRoot, getThumbDrainPromise, resetDecorateCache } from './model-state'
+import { getDecorateCacheRoot, awaitThumbDrain, resetDecorateCache } from './model-state'
 
 /**
  * 扫描链路：全量扫描模型目录（进度推送、可取消）与取消入口。
@@ -38,7 +38,9 @@ export function registerScanHandlers() {
     let root = ''
 
     try {
-      root = typeof folder === 'string' && folder ? folder : (await loadSettings()).modelsFolder
+      // 复用内存中的设置（B3）：应用启动时已 loadSettings，热路径无需重读磁盘，
+      // 也避免 loadSettings 的损坏重置副作用在扫描路径被意外触发
+      root = typeof folder === 'string' && folder ? folder : getSettings().modelsFolder
       if (!root) {
         return { error: '尚未设置模型文件夹' }
       }
@@ -56,11 +58,8 @@ export function registerScanHandlers() {
       const win = BrowserWindow.fromWebContents(event.sender)
       logger.info(`开始扫描模型目录: ${root}`)
 
-      // 等待上一轮后台缩略图生成完成，避免与新扫描的缩略图清理逻辑竞争
-      const thumbDrainPromise = getThumbDrainPromise()
-      if (thumbDrainPromise) {
-        await thumbDrainPromise.catch(() => {})
-      }
+      // 等待上一轮后台缩略图生成完成，避免与新扫描的缩略图清理逻辑竞争（C4 单一入口）
+      await awaitThumbDrain()
       // 切换/加载该根目录的关联存储，并清理孤儿封面文件
       await ensureRootStore(root)
       await pruneOrphanCovers()

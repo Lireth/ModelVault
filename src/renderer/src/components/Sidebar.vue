@@ -1,6 +1,14 @@
 <script setup>
 import { computed } from 'vue'
-import { MODEL_TYPES, state, typeCounts, chooseFolder, scanModels, openSettings } from '../store/appStore'
+import {
+  MODEL_TYPES,
+  state,
+  typeCounts,
+  chooseFolder,
+  exportModels,
+  scanModels,
+  openSettings
+} from '../store/appStore'
 
 const folderName = computed(() => {
   if (!state.folder) return '未选择文件夹'
@@ -35,6 +43,13 @@ function onScanClick() {
         {{ state.scanning ? '扫描中…' : '重新扫描' }}
       </button>
       <button class="btn action-btn" title="选择模型文件夹" @click="chooseFolder">选择文件夹</button>
+      <!-- 导出当前筛选后的模型列表（E2） -->
+      <button class="btn action-btn" title="将当前列表导出为 CSV 文件（可被 Excel 打开）" :disabled="!state.models.length" @click="exportModels('csv')">
+        导出 CSV
+      </button>
+      <button class="btn action-btn" title="将当前列表导出为 JSON 文件" :disabled="!state.models.length" @click="exportModels('json')">
+        导出 JSON
+      </button>
     </div>
 
     <div class="side-section">

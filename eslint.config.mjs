@@ -23,7 +23,7 @@ export default [
     }
   },
   {
-    files: ['src/main/**/*.js', 'src/preload/**/*.js', 'tests/**/*.js', '*.mjs'],
+    files: ['src/main/**/*.js', 'src/preload/**/*.js', 'tests/**/*.js', 'scripts/**/*.mjs', '*.mjs'],
     languageOptions: {
       globals: { ...globals.node }
     }

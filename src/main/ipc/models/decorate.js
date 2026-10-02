@@ -6,6 +6,7 @@ import { drainDeferredThumbs, getThumbPathDeferred, pruneThumbs } from '../../se
 import { readSafetensorsInfo } from '../../services/safetensors'
 import { toImageUrl } from '../../protocol'
 import { decorateCache, setThumbDrainPromise } from './model-state'
+import { abortError, boundedMapSet } from '../../utils'
 
 /**
  * 扫描结果装饰管线：为扫描出的模型列表补齐封面、缩略图、元数据标注、
@@ -37,15 +38,6 @@ function metaSignature(meta) {
     meta.triggerWords, meta.favorite, meta.nsfw, meta.rating, meta.params, meta.hash,
     meta.noteSource, meta.triggerWordsSource
   ])
-}
-
-/**
- * 构造取消异常（与 AbortController 的 AbortError 同名，便于统一识别）。
- */
-function abortError() {
-  const err = new Error('扫描已取消')
-  err.name = 'AbortError'
-  return err
 }
 
 /** 登记一条延迟缩略图的模型归属 */
@@ -146,14 +138,17 @@ async function decorateOne(model, usedThumbs) {
   const meta = await importSidecarMeta(model, meta0)
   const signature = metaSignature(meta)
 
-  // 校验多封面列表，过滤已丢失的文件
-  const covers = []
-  for (const rel of meta.covers || []) {
-    const resolved = resolveCoverSafe(rel)
-    if (resolved && (await isValidImageFile(resolved))) {
-      covers.push({ rel, path: resolved, url: toImageUrl(resolved) })
-    }
-  }
+  // 校验多封面列表，过滤已丢失的文件。
+  // 批内并行校验（B4）：逐张串行 await 会让多封面模型成为 64 路批并行的串行瓶颈
+  const coverChecks = await Promise.all(
+    (meta.covers || []).map(async (rel) => {
+      const resolved = resolveCoverSafe(rel)
+      return resolved && (await isValidImageFile(resolved))
+        ? { rel, path: resolved, url: toImageUrl(resolved) }
+        : null
+    })
+  )
+  const covers = coverChecks.filter(Boolean)
   // 默认封面：优先显式设置值，缺省取第一张；再缺省回退 sidecar 预览图
   const defaultEntry = covers.find((c) => c.rel === meta.cover) || covers[0] || null
   let cover = defaultEntry ? defaultEntry.path : ''
@@ -203,12 +198,8 @@ async function decorateOne(model, usedThumbs) {
     triggerWords: meta.triggerWords || '',
     autoInfo
   }
-  // 写入装饰缓存（容量超限时按插入顺序淘汰最旧条目）
-  decorateCache.set(model.id, { mtimeMs: model.mtimeMs, signature, thumbPath, deferredCover, decorated })
-  if (decorateCache.size > DECORATE_CACHE_MAX) {
-    const oldest = decorateCache.keys().next().value
-    decorateCache.delete(oldest)
-  }
+  // 写入装饰缓存（容量超限时按插入顺序淘汰最旧条目，C4 共享工具）
+  boundedMapSet(decorateCache, model.id, { mtimeMs: model.mtimeMs, signature, thumbPath, deferredCover, decorated }, DECORATE_CACHE_MAX)
   return decorated
 }
 

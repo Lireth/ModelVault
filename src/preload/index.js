@@ -7,6 +7,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 const VALID_INVOKE_CHANNELS = [
   'app:getInfo',
   'app:reportError',
+  'app:checkUpdate',
   'window:setTheme',
   'settings:update',
   'models:loadStore',
@@ -19,18 +20,21 @@ const VALID_INVOKE_CHANNELS = [
   'models:setDefaultCover',
   'models:deleteCover',
   'models:civitaiMatch',
+  'models:cancelCivitai',
   'models:deleteModel',
   'models:setMetaFlags',
   'models:popupMenu',
   'models:importCover',
-  'models:reveal'
+  'models:reveal',
+  'models:exportList'
 ]
 
 const VALID_RECEIVE_CHANNELS = [
   'models:scanProgress',
   'models:menuAction',
   'models:thumbsReady',
-  'models:storeError'
+  'models:storeError',
+  'models:civitaiProgress'
 ]
 
 /** 带白名单校验的 invoke（所有便捷方法的统一入口） */
@@ -66,7 +70,9 @@ const api = {
     /** 应用与运行时版本信息 */
     getInfo: () => invokeValidated('app:getInfo'),
     /** 上报渲染进程异常（写入主进程日志） */
-    reportError: (message, stack) => invokeValidated('app:reportError', { message, stack })
+    reportError: (message, stack) => invokeValidated('app:reportError', { message, stack }),
+    /** 应用内检查更新（E1）：返回 { current, latest?, hasUpdate, releaseUrl? } 或 { error } */
+    checkUpdate: () => invokeValidated('app:checkUpdate')
   },
 
   /** 窗口相关（最小化/最大化/关闭由原生标题栏叠加层控件处理） */
@@ -101,8 +107,12 @@ const api = {
     setDefaultCover: (id, cover) => invokeValidated('models:setDefaultCover', { id, cover }),
     /** 删除单张封面（cover 为封面相对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */
     deleteCover: (id, cover) => invokeValidated('models:deleteCover', { id, cover }),
-    /** Civitai 匹配：返回 { matched, hash, info } 或 { error }（大文件哈希耗时较长） */
+    /** Civitai 匹配：返回 { matched, hash, info } / { canceled } / { error }（大文件哈希耗时较长） */
     civitaiMatch: (id) => invokeValidated('models:civitaiMatch', { id }),
+    /** 取消进行中的 Civitai 匹配（E9），返回 { ok } */
+    cancelCivitai: (id) => invokeValidated('models:cancelCivitai', { id }),
+    /** 导出模型列表（E2），rows 为当前列表行，返回 { path, count } / { canceled } / { error } */
+    exportList: (payload) => invokeValidated('models:exportList', payload),
     /** 删除模型文件（移入回收站并清理元数据），返回 { ok } 或 { error } */
     deleteModel: (id) => invokeValidated('models:deleteModel', { id }),
     /** 更新快捷标记（收藏/NSFW/评分，仅传需更新的字段），返回 { meta } 或 { error } */
@@ -115,6 +125,8 @@ const api = {
     reveal: (path) => invokeValidated('models:reveal', { path }),
     /** 订阅扫描进度，返回取消监听函数 */
     onScanProgress: (listener) => subscribe('models:scanProgress', listener),
+    /** 订阅 Civitai 哈希进度事件（E9：{ id, loaded, total, percent }），返回取消监听函数 */
+    onCivitaiProgress: (listener) => subscribe('models:civitaiProgress', listener),
     /** 订阅元数据落盘失败事件（message: 错误信息），返回取消监听函数 */
     onStoreError: (listener) => subscribe('models:storeError', listener),
     /** 订阅后台缩略图生成完成事件（updates: [{ id, coverUrl }]），返回取消监听函数 */

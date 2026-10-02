@@ -21,7 +21,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-import { getThumbPath, getThumbPathDeferred, drainDeferredThumbs, clearDeferredJobs } from '../src/main/services/thumbs'
+import { getThumbPathDeferred, drainDeferredThumbs, clearDeferredJobs } from '../src/main/services/thumbs'
 import { setDataRoot } from '../src/main/services/store'
 
 const roots = []
@@ -37,6 +37,18 @@ function mockDecodedImage({ width = 1200, empty = false } = {}) {
     toJPEG: vi.fn(() => Buffer.from('fake-jpeg'))
   }
   return image
+}
+
+/**
+ * 经延迟队列同步触发一次生成（getThumbPath 已删除，C5：
+ * 生产链路只走 deferred，测试入口随之统一）。
+ * @returns {Promise<string>} 生成的缩略图路径（无生成时为 ''）
+ */
+async function generateNow(src) {
+  expect(await getThumbPathDeferred(src)).toBe('')
+  const out = []
+  await drainDeferredThumbs((absCover, thumbPath) => out.push(thumbPath))
+  return out[0] || ''
 }
 
 beforeEach(async () => {
@@ -58,7 +70,7 @@ afterAll(async () => {
 describe('缩略图生成（B5：异步解码）', () => {
   it('宽图生成缩略图：经 createFromBuffer 解码，不使用同步 createFromPath', async () => {
     vi.mocked(nativeImage.createFromBuffer).mockReturnValue(mockDecodedImage({ width: 1200 }))
-    const thumbPath = await getThumbPath(source)
+    const thumbPath = await generateNow(source)
     expect(thumbPath).toContain(path.join('.modelvault', 'thumbs'))
     expect(thumbPath.endsWith('.jpg')).toBe(true)
     // B5 核心：同步 createFromPath 阻塞主进程，必须走异步读盘 + buffer 解码
@@ -71,22 +83,23 @@ describe('缩略图生成（B5：异步解码）', () => {
     expect(image.resize).toHaveBeenCalledWith({ width: 640 })
   })
 
-  it('小图（宽度未超阈值）返回空串回退原图，不写缓存', async () => {
+  it('小图（宽度未超阈值）不生成缩略图，不写缓存', async () => {
     vi.mocked(nativeImage.createFromBuffer).mockReturnValue(mockDecodedImage({ width: 600 }))
-    expect(await getThumbPath(source)).toBe('')
+    expect(await generateNow(source)).toBe('')
     const thumbsDir = path.join(root, '.modelvault', 'thumbs')
     await expect(fs.readdir(thumbsDir)).rejects.toThrow()
   })
 
-  it('解码失败（空图）返回空串回退原图', async () => {
+  it('解码失败（空图）不生成缩略图', async () => {
     vi.mocked(nativeImage.createFromBuffer).mockReturnValue(mockDecodedImage({ empty: true }))
-    expect(await getThumbPath(source)).toBe('')
+    expect(await generateNow(source)).toBe('')
   })
 
-  it('缓存命中时不重复解码', async () => {
+  it('缓存命中时不再重复解码', async () => {
     vi.mocked(nativeImage.createFromBuffer).mockReturnValue(mockDecodedImage({ width: 1200 }))
-    const first = await getThumbPath(source)
-    const second = await getThumbPath(source)
+    const first = await generateNow(source)
+    // 已有缓存文件：deferred 直接返回路径，不再登记任务/解码
+    const second = await getThumbPathDeferred(source)
     expect(second).toBe(first)
     expect(nativeImage.createFromBuffer).toHaveBeenCalledTimes(1)
   })
@@ -110,7 +123,7 @@ describe('延迟生成队列（扫描装饰阶段专用）', () => {
 
   it('缓存命中直接返回缩略图路径，不登记队列', async () => {
     vi.mocked(nativeImage.createFromBuffer).mockReturnValue(mockDecodedImage({ width: 1200 }))
-    const thumbPath = await getThumbPath(source) // 先同步生成
+    const thumbPath = await generateNow(source) // 先触发一次生成建立缓存
     expect(await getThumbPathDeferred(source)).toBe(thumbPath)
   })
 

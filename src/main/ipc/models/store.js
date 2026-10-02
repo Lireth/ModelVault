@@ -12,7 +12,7 @@ import {
   updateSettings
 } from '../../services/store'
 import { pruneOrphanCovers } from '../../services/covers'
-import { getThumbDrainPromise } from './model-state'
+import { awaitThumbDrain } from './model-state'
 
 /**
  * 存储与设置链路：持久化数据加载、模型根目录选择、应用设置更新。
@@ -42,10 +42,8 @@ async function isExistingDirectory(p) {
  */
 export async function ensureRootStore(root) {
   if (getCurrentRoot() !== root) {
-    const thumbDrainPromise = getThumbDrainPromise()
-    if (thumbDrainPromise) {
-      await thumbDrainPromise.catch(() => {})
-    }
+    // 切换根目录前必须等待上一轮后台缩略图生成完成（B10，等待入口收敛于 model-state）
+    await awaitThumbDrain()
     setDataRoot(root)
     await loadData()
   }

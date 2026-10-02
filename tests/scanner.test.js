@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { classifyModel, findSidecarPreview, findSidecarText, isValidType, scanModels, sidecarImportPatch } from '../src/main/services/scanner'
+import { classifyModel, findSidecarPreview, findSidecarText, scanModels, sidecarImportPatch } from '../src/main/services/scanner'
 
 /**
  * scanner.js 单元测试：
@@ -36,12 +36,6 @@ describe('classifyModel', () => {
     expect(classifyModel(['downloads'], 'text-encoder.bin')).toBe('text_encoder')
     expect(classifyModel(['downloads'], 'sdxl-base.safetensors')).toBe('checkpoint')
     expect(classifyModel(['downloads'], 'just-a-model.safetensors')).toBe('other')
-  })
-
-  it('无效类型校验', () => {
-    expect(isValidType('lora')).toBe(true)
-    expect(isValidType('other')).toBe(true)
-    expect(isValidType('nonexistent')).toBe(false)
   })
 })
 

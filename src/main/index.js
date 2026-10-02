@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, dialog, shell } from 'electron'
+import { app, Menu, dialog, shell } from 'electron'
 import { createMainWindow, flushWindowStateSave, getMainWindow } from './windows/mainWindow'
 import { registerWindowShortcuts } from './menu'
 import { registerIpcHandlers } from './ipc'
@@ -92,11 +92,4 @@ app.on('window-all-closed', () => {
       logger.info('所有窗口已关闭，应用退出')
       app.quit()
     })
-})
-
-// macOS 平台：点击 Dock 图标时重新创建窗口（兼容性保留）
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createMainWindow()
-  }
 })

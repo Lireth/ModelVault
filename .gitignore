@@ -21,13 +21,13 @@ logs/
 Thumbs.db
 $RECYCLE.BIN/
 
-# npm 配置文件
-.npmrc
-
 # 其他
 .trae/
 docs/
 tmp/
 test/
-# 注意：build/（应用图标）与 electron-builder.yml（打包配置）必须入库，
-# 否则干净环境下 release.yml 打包会退回默认配置，发布流水线不可复现
+coverage/
+
+# 注意：build/（应用图标）、electron-builder.yml（打包配置）与 .npmrc
+# （registry 与 Electron 二进制镜像，lock resolved 与其一致）必须入库，
+# 否则干净环境下构建/发布流水线不可复现

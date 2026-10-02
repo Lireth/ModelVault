@@ -341,7 +341,7 @@ onUnmounted(() => {
 
 .scan-error-retry:hover {
   background: var(--favorite);
-  color: #10141a;
+  color: var(--on-accent);
 }
 
 /* 扫描失败空态的错误详情：允许换行完整展示 */
@@ -527,7 +527,7 @@ onUnmounted(() => {
 }
 
 .scan-current {
-  font-family: Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   opacity: 0.7;
   max-width: 60%;
@@ -568,7 +568,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 210;
+  z-index: var(--z-confirm);
 }
 
 .confirm-dialog {

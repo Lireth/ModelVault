@@ -1,48 +1,23 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import AutoInfoPanel from './detail/AutoInfoPanel.vue'
+import CivitaiPanel from './detail/CivitaiPanel.vue'
+import CoverPanel from './detail/CoverPanel.vue'
+import { PARAM_LIMITS, SAMPLERS, SCHEDULERS, PRECISIONS } from '../constants/modelParams'
 import {
   closeDetail,
-  confirmDialog,
-  deleteCover,
   formatSize,
-  importCoverFromDrop,
-  matchCivitai,
-  pasteCover,
   revealModel,
   saveModelData,
   selectedModel,
-  setDefaultCover,
   setNsfw,
   setRating,
   showContextMenu,
   state,
   tagsForType,
   toast,
-  toggleFavorite,
-  typeInfo,
-  uploadCover
+  toggleFavorite
 } from '../store/appStore'
-
-/** 常用采样器选项（可直接输入自定义值） */
-const SAMPLERS = [
-  'euler', 'euler_ancestral', 'heun', 'dpm_2', 'dpm_2_ancestral',
-  'dpm++ 2m', 'dpm++ 2m sde', 'dpm++ 3m sde', 'dpm++ sde', 'ddim', 'uni_pc', 'lcm', 'restart'
-]
-
-/** 常用调度器选项 */
-const SCHEDULERS = [
-  'normal', 'karras', 'exponential', 'sgm_uniform', 'simple', 'ddim_uniform', 'beta'
-]
-
-/** 常用模型精度选项（可直接输入自定义值） */
-const PRECISIONS = ['FP8', 'FP16', 'BF16', 'FP32']
-
-/** 推荐参数校验范围（C3）：保存校验与输入框 min/max 属性共用，避免双份维护漂移 */
-const PARAM_LIMITS = {
-  steps: { min: 1, max: 200 },
-  cfg: { min: 0, max: 100 },
-  res: { min: 16, max: 16384 }
-}
 
 const busy = ref(false)
 
@@ -110,42 +85,14 @@ watch(formDirty, (d) => {
   state.detailDirty = d
 }, { immediate: true })
 
-/* ---------------- Civitai 匹配 ---------------- */
+/* ---------------- Civitai 匹配（面板组件，C1） ---------------- */
 
-/** 匹配结果（{ matched, hash, info }），切换模型时清空 */
-const civitaiResult = ref(null)
-/** 匹配请求进行中（大文件哈希需数秒） */
-const civitaiBusy = ref(false)
-
-/** 请求 Civitai 匹配当前模型 */
-async function onCivitaiMatch() {
-  const model = selectedModel.value
-  if (!model || civitaiBusy.value) return
-  civitaiBusy.value = true
-  try {
-    const res = await matchCivitai(model.id)
-    // 请求期间（大文件哈希需数秒）用户可能已切换模型：晚到的响应若无条件写入，
-    // A 模型的匹配结果会挂到 B 模型的详情面板下，误导用户错用推荐参数与触发词
-    if (selectedModel.value?.id !== model.id) return
-    if (res.error) {
-      toast('error', res.error)
-      return
-    }
-    civitaiResult.value = res
-    if (!res.matched) {
-      toast('warn', '未在 Civitai 找到与该文件哈希匹配的模型版本')
-    }
-  } catch (err) {
-    toast('error', `Civitai 匹配失败: ${err.message}`)
-  } finally {
-    civitaiBusy.value = false
-  }
-}
+/** CivitaiPanel 模板 ref：面板自持匹配状态，父组件仅触发与接收表单填入事件 */
+const civitaiPanel = ref(null)
 
 /** 将匹配到的示例图生成参数填入推荐参数表单（保存后生效） */
-function applyCivitaiParams() {
-  const { info } = civitaiResult.value || {}
-  const ex = info?.exampleParams
+function onCivitaiApplyParams({ exampleParams, precision }) {
+  const ex = exampleParams
   if (!ex) return
   if (Number.isFinite(ex.steps)) form.steps = String(ex.steps)
   if (Number.isFinite(ex.cfgMin)) form.cfgMin = String(ex.cfgMin)
@@ -154,54 +101,37 @@ function applyCivitaiParams() {
   if (ex.scheduler) form.scheduler = ex.scheduler
   if (Number.isFinite(ex.resMin)) form.resMin = String(ex.resMin)
   if (Number.isFinite(ex.resMax)) form.resMax = String(ex.resMax)
-  if (info.precision) form.precision = info.precision
+  if (precision) form.precision = precision
   toast('success', '推荐参数已填入表单，点击「保存参数」生效')
 }
 
 /** 将匹配到的触发词追加到备注文本框 */
-function appendCivitaiWords() {
-  const words = civitaiResult.value?.info?.trainedWords || []
-  if (words.length === 0) return
-  const text = words.join(', ')
+function onCivitaiAppendWords(words) {
+  const list = words || []
+  if (list.length === 0) return
+  const text = list.join(', ')
   form.note = form.note ? `${form.note}\n触发词: ${text}` : `触发词: ${text}`
   toast('success', '触发词已追加到备注，点击「保存参数」生效')
 }
 
-// 切换模型时清空 Civitai 匹配结果（独立 watch，避免在 fillForm watch 的 immediate 回调中提前引用）
-watch(
-  () => selectedModel.value?.id,
-  () => {
-    civitaiResult.value = null
-  }
-)
-
-/* ---------------- 文件元数据自动解析（safetensors 头部） ---------------- */
-
-/** safetensors 头部自动解析信息（仅 .safetensors 且含有效元信息时非空） */
-const autoInfo = computed(() => selectedModel.value?.autoInfo || null)
-
-/** 触发词候选（来自训练集高频标签，仅 LoRA 提供填入，需用户确认后保存） */
-const autoTriggerCandidates = computed(() =>
-  selectedModel.value?.type === 'lora' ? autoInfo.value?.triggerCandidates || [] : []
-)
+/* ---------------- 文件元数据自动解析（AutoInfoPanel 事件，C1） ---------------- */
 
 /** 将训练分辨率填入推荐分辨率表单 */
-function applyAutoResolution() {
-  const a = autoInfo.value
-  if (!a || !Number.isFinite(a.resMin)) return
-  form.resMin = String(a.resMin)
-  form.resMax = String(Number.isFinite(a.resMax) ? a.resMax : a.resMin)
+function onAutoApplyResolution(resMin, resMax) {
+  if (!Number.isFinite(resMin)) return
+  form.resMin = String(resMin)
+  form.resMax = String(Number.isFinite(resMax) ? resMax : resMin)
   toast('success', '训练分辨率已填入表单，点击「保存参数」生效')
 }
 
 /** 将触发词候选填入触发词字段（已有内容时不覆盖，避免丢失用户标注） */
-function applyAutoTriggers() {
-  if (autoTriggerCandidates.value.length === 0) return
+function onAutoApplyTriggers(words) {
+  if (!words || words.length === 0) return
   if (form.triggerWords.trim()) {
     toast('warn', '触发词字段已有内容，为避免覆盖请手动合并')
     return
   }
-  form.triggerWords = autoTriggerCandidates.value.join(', ')
+  form.triggerWords = words.join(', ')
   toast('success', '触发词已填入表单，点击「保存参数」生效')
 }
 
@@ -260,155 +190,9 @@ async function copyTriggerWords() {
   }
 }
 
-/* ---------------- 拖拽导入封面 ---------------- */
-
-/** 拖拽悬停高亮 */
-const dropActive = ref(false)
-
-/** 拖拽悬停：仅当包含文件时高亮 */
-function onDragOver(e) {
-  if (Array.from(e.dataTransfer?.types || []).includes('Files')) {
-    e.preventDefault()
-    dropActive.value = true
-  }
-}
-
-function onDragLeave() {
-  dropActive.value = false
-}
-
-/** 放下文件：逐个导入为预览图（多个文件依次追加） */
-async function onDropCover(e) {
-  dropActive.value = false
-  const model = selectedModel.value
-  if (!model) return
-  const files = Array.from(e.dataTransfer?.files || [])
-  if (files.length === 0) return
-  e.preventDefault()
-  busy.value = true
-  try {
-    for (const file of files) {
-      const sourcePath = window.api.getPathForFile(file)
-      if (!sourcePath) continue
-      await importCoverFromDrop(model.id, sourcePath)
-    }
-  } catch (err) {
-    // 导入被拒（非图片内容/越界路径等）时向用户提示，而非静默进全局日志（S1）
-    toast('error', `封面导入失败: ${err.message}`)
-  } finally {
-    busy.value = false
-  }
-}
-
 /** 详情面板右键菜单 */
 function onPanelContextMenu() {
   if (selectedModel.value) showContextMenu(selectedModel.value.id)
-}
-
-const info = computed(() => (selectedModel.value ? typeInfo(selectedModel.value.type) : null))
-
-/** 当前模型类型可用的分类标签列表（无标签的类型返回 null） */
-const typeTags = computed(() => (selectedModel.value ? tagsForType(selectedModel.value.type) : null))
-
-/** 分类标签区标题：其他模型沿用「二级分类标签」，其余为「分类标签」 */
-const typeTagsTitle = computed(() =>
-  selectedModel.value?.type === 'other' ? '二级分类标签' : '分类标签'
-)
-
-/** 显示名称：备注名优先，为空时回退文件名 */
-const displayName = computed(
-  () => selectedModel.value?.alias || selectedModel.value?.name || ''
-)
-
-/** 多封面列表（{ rel, path, url }），首页卡片默认显示其中的默认封面 */
-const covers = computed(() => selectedModel.value?.covers || [])
-
-/**
- * 大图预览源：优先取当前默认封面的原图 URL（covers 列表携带 path/url）。
- * 不用 coverUrl：缩略图后台生成完成后 coverUrl 会被替换为缩略图 URL，
- * 大图若跟随会从高清降质为 640px；原图 URL 稳定不变，也无需防缓存参数
- *（封面文件均为时间戳命名，内容变化必伴随 URL 变化）。
- */
-const coverSrc = computed(() => {
-  const m = selectedModel.value
-  if (!m) return ''
-  const def = (m.covers || []).find((c) => c.path === m.cover)
-  return def?.url || m.coverUrl || ''
-})
-
-/** 大图加载失败标记（封面文件被移动/删除时回退占位符，避免碎图） */
-const coverError = ref(false)
-watch(coverSrc, () => {
-  coverError.value = false
-})
-
-/** 加载失败的缩略条封面（key 为封面绝对路径），失败后显示失效占位 */
-const failedThumbs = ref(new Set())
-
-/** 封面列表变化（增删/重置）时清空失效标记 */
-watch(
-  () => covers.value.map((c) => c.path).join('|'),
-  () => {
-    failedThumbs.value = new Set()
-  }
-)
-
-/** 封面是否为默认显示（与模型当前默认封面路径比对） */
-function isDefault(c) {
-  return selectedModel.value?.cover && c.path === selectedModel.value.cover
-}
-
-/** 粘贴剪贴板图片为预览图 */
-async function onPasteCover() {
-  const model = selectedModel.value
-  if (!model) return
-  busy.value = true
-  try {
-    await pasteCover(model.id)
-  } catch (err) {
-    toast('error', `粘贴失败: ${err.message}`)
-  } finally {
-    busy.value = false
-  }
-}
-
-/** 将指定封面设为默认显示 */
-async function onSetDefault(c) {
-  const model = selectedModel.value
-  if (!model || isDefault(c)) return
-  busy.value = true
-  try {
-    await setDefaultCover(model.id, c.rel)
-  } catch (err) {
-    toast('error', `设置默认封面失败: ${err.message}`)
-  } finally {
-    busy.value = false
-  }
-}
-
-/** 删除指定封面（需确认；默认封面被删时自动回退到下一张） */
-async function onDeleteCover(c) {
-  const model = selectedModel.value
-  if (!model) return
-  if (!(await confirmDialog('确定删除这张预览图吗？该操作不可恢复。'))) return
-  busy.value = true
-  try {
-    await deleteCover(model.id, c.rel)
-  } catch (err) {
-    toast('error', `删除封面失败: ${err.message}`)
-  } finally {
-    busy.value = false
-  }
-}
-
-/** 全局粘贴事件：详情页打开且剪贴板内容为图片时，走添加预览图流程 */
-function onWindowPaste(e) {
-  if (!selectedModel.value) return
-  const items = Array.from(e.clipboardData?.items || [])
-  if (items.some((it) => it.type.startsWith('image/'))) {
-    e.preventDefault()
-    onPasteCover()
-  }
 }
 
 /** ESC 关闭详情页（U1）：设置页打开时让位给设置页的 ESC 处理；
@@ -418,11 +202,9 @@ function onWindowKeydown(e) {
 }
 
 onMounted(() => {
-  window.addEventListener('paste', onWindowPaste)
   window.addEventListener('keydown', onWindowKeydown)
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('paste', onWindowPaste)
   window.removeEventListener('keydown', onWindowKeydown)
 })
 
@@ -495,19 +277,6 @@ async function onSave() {
     busy.value = false
   }
 }
-
-async function onUploadCover() {
-  const model = selectedModel.value
-  if (!model) return
-  busy.value = true
-  try {
-    await uploadCover(model.id)
-  } catch (err) {
-    toast('error', `封面上传失败: ${err.message}`)
-  } finally {
-    busy.value = false
-  }
-}
 </script>
 
 <template>
@@ -515,15 +284,15 @@ async function onUploadCover() {
     <div v-if="selectedModel" class="detail-mask" @click.self="closeDetail">
       <section class="detail-panel" @contextmenu.prevent="onPanelContextMenu">
         <header class="detail-header">
-          <h2 :title="selectedModel.name">{{ displayName }}</h2>
+          <h2 :title="selectedModel.name">{{ selectedModel.alias || selectedModel.name }}</h2>
           <div class="detail-header-actions">
             <button
               class="btn"
-              :disabled="civitaiBusy"
+              :disabled="civitaiPanel?.busy"
               title="计算文件哈希并匹配 Civitai 模型信息（大文件需数秒）"
-              @click="onCivitaiMatch"
+              @click="civitaiPanel?.match()"
             >
-              {{ civitaiBusy ? '匹配中…' : 'Civitai 匹配' }}
+              {{ civitaiPanel?.busy ? '匹配中…' : 'Civitai 匹配' }}
             </button>
             <button class="btn" @click="revealModel(selectedModel.id)">打开所在文件夹</button>
             <button class="wc-btn" title="关闭" @click="closeDetail">✕</button>
@@ -531,160 +300,20 @@ async function onUploadCover() {
         </header>
 
         <div class="detail-body">
-          <!-- 左侧：封面 -->
-          <div class="detail-cover-col">
-            <div
-              class="detail-cover"
-              :class="{ 'drop-active': dropActive }"
-              title="可直接拖入图片文件作为预览图"
-              @dragover="onDragOver"
-              @dragleave="onDragLeave"
-              @drop="onDropCover"
-            >
-              <img
-                v-if="coverSrc && !coverError"
-                :src="coverSrc"
-                :alt="selectedModel.name"
-                draggable="false"
-                @error="coverError = true"
-              />
-              <div v-else class="cover-placeholder">
-                <span class="cover-ext">{{ selectedModel.ext }}</span>
-              </div>
-              <span class="type-badge" :style="{ background: info.color }">{{ info.label }}</span>
-              <span v-if="dropActive" class="drop-hint">松开导入</span>
-            </div>
-            <button class="btn btn-primary" :disabled="busy" @click="onUploadCover">
-              {{ covers.length ? '上传图片' : '上传封面图片' }}
-            </button>
-            <button class="btn" :disabled="busy" @click="onPasteCover">粘贴图片 (Ctrl+V)</button>
-            <p class="cover-hint">
-              支持 png / jpg / webp / gif / bmp，可添加多张预览图（上传 / Ctrl+V / 直接拖入图片文件），
-              点击缩略图将其设为首页默认显示
-            </p>
-
-            <div v-if="covers.length" class="cover-thumbs">
-              <div
-                v-for="c in covers"
-                :key="c.path"
-                class="cover-thumb"
-                :class="{ active: isDefault(c) }"
-                :title="isDefault(c) ? '当前默认显示' : '点击设为默认显示'"
-                @click="onSetDefault(c)"
-              >
-                <img
-                  v-if="!failedThumbs.has(c.path)"
-                  :src="c.url"
-                  alt="预览图"
-                  loading="lazy"
-                  draggable="false"
-                  @error="failedThumbs.add(c.path)"
-                />
-                <span v-else class="thumb-missing">已失效</span>
-                <span v-if="isDefault(c)" class="thumb-badge">默认</span>
-                <button
-                  class="thumb-delete"
-                  title="删除这张预览图"
-                  type="button"
-                  @click.stop="onDeleteCover(c)"
-                >✕</button>
-              </div>
-            </div>
-          </div>
+          <!-- 左侧：封面管理（CoverPanel，C1） -->
+          <CoverPanel />
 
           <!-- 右侧：推荐参数 -->
           <div class="detail-form-col">
-            <!-- Civitai 匹配结果面板 -->
-            <div v-if="civitaiResult?.matched" class="civitai-panel">
-              <div class="civitai-head">
-                <span class="civitai-title">Civitai 匹配结果</span>
-                <button class="civitai-close" title="关闭" type="button" @click="civitaiResult = null">✕</button>
-              </div>
-              <p class="civitai-name" :title="civitaiResult.info.modelName">
-                {{ civitaiResult.info.modelName || '未知模型' }}
-                <span v-if="civitaiResult.info.versionName"> · {{ civitaiResult.info.versionName }}</span>
-              </p>
-              <p class="civitai-meta">
-                <span v-if="civitaiResult.info.creator">作者 {{ civitaiResult.info.creator }}</span>
-                <span v-if="civitaiResult.info.baseModel">基底 {{ civitaiResult.info.baseModel }}</span>
-                <span v-if="civitaiResult.info.precision">{{ civitaiResult.info.precision }}</span>
-              </p>
-              <div v-if="civitaiResult.info.trainedWords.length" class="civitai-words">
-                <span v-for="w in civitaiResult.info.trainedWords" :key="w" class="civitai-word" :title="w">{{ w }}</span>
-              </div>
-              <div class="civitai-actions">
-                <button
-                  v-if="civitaiResult.info.trainedWords.length"
-                  class="btn"
-                  type="button"
-                  @click="appendCivitaiWords"
-                >触发词追加到备注</button>
-                <button
-                  v-if="civitaiResult.info.exampleParams"
-                  class="btn btn-primary"
-                  type="button"
-                  @click="applyCivitaiParams"
-                >应用推荐参数</button>
-                <a
-                  v-if="civitaiResult.info.pageUrl"
-                  class="civitai-link"
-                  :href="civitaiResult.info.pageUrl"
-                  target="_blank"
-                >打开模型页面 ↗</a>
-              </div>
-            </div>
+            <!-- Civitai 匹配结果面板（CivitaiPanel，C1/E9） -->
+            <CivitaiPanel
+              ref="civitaiPanel"
+              @apply-params="onCivitaiApplyParams"
+              @append-words="onCivitaiAppendWords"
+            />
 
-            <!-- 文件元数据（safetensors 头部自动解析）：仅展示 + 一键填入表单，不覆盖已有内容 -->
-            <div v-if="autoInfo" class="autoinfo-panel">
-              <div class="autoinfo-head">
-                <span class="autoinfo-title">文件元数据（自动解析）</span>
-              </div>
-              <dl class="autoinfo-list">
-                <template v-if="autoInfo.title">
-                  <dt>标题</dt>
-                  <dd :title="autoInfo.title">{{ autoInfo.title }}</dd>
-                </template>
-                <template v-if="autoInfo.author">
-                  <dt>作者</dt>
-                  <dd>{{ autoInfo.author }}</dd>
-                </template>
-                <template v-if="autoInfo.baseModel">
-                  <dt>基底模型</dt>
-                  <dd>{{ autoInfo.baseModel }}</dd>
-                </template>
-                <template v-if="autoInfo.networkModule">
-                  <dt>网络结构</dt>
-                  <dd>
-                    {{ autoInfo.networkModule }}<template v-if="autoInfo.networkAlpha !== null">（α={{ autoInfo.networkAlpha }}）</template>
-                  </dd>
-                </template>
-                <template v-if="autoInfo.precision">
-                  <dt>训练精度</dt>
-                  <dd>{{ autoInfo.precision }}</dd>
-                </template>
-                <template v-if="Number.isFinite(autoInfo.resMin)">
-                  <dt>训练分辨率</dt>
-                  <dd>{{ autoInfo.resMin }} × {{ autoInfo.resMax }}</dd>
-                </template>
-              </dl>
-              <div v-if="autoTriggerCandidates.length" class="civitai-words">
-                <span v-for="w in autoTriggerCandidates" :key="w" class="civitai-word" :title="w">{{ w }}</span>
-              </div>
-              <div v-if="Number.isFinite(autoInfo.resMin) || autoTriggerCandidates.length" class="civitai-actions">
-                <button
-                  v-if="Number.isFinite(autoInfo.resMin)"
-                  class="btn"
-                  type="button"
-                  @click="applyAutoResolution"
-                >填入推荐分辨率</button>
-                <button
-                  v-if="autoTriggerCandidates.length"
-                  class="btn btn-primary"
-                  type="button"
-                  @click="applyAutoTriggers"
-                >填入触发词</button>
-              </div>
-            </div>
+            <!-- 文件元数据（safetensors 头部自动解析）：仅展示 + 一键填入表单（AutoInfoPanel，C1） -->
+            <AutoInfoPanel @apply-resolution="onAutoApplyResolution" @apply-triggers="onAutoApplyTriggers" />
 
             <!-- 收藏 / 评分 -->
             <div class="flags-row">
@@ -716,11 +345,11 @@ async function onUploadCover() {
             </div>
 
             <!-- 分类标签：LoRA / Checkpoint / 其他模型可标注 -->
-            <template v-if="typeTags">
-              <h3>{{ typeTagsTitle }}</h3>
+            <template v-if="tagsForType(selectedModel.type)">
+              <h3>{{ selectedModel.type === 'other' ? '二级分类标签' : '分类标签' }}</h3>
               <div class="subcat-group">
                 <button
-                  v-for="sc in typeTags"
+                  v-for="sc in tagsForType(selectedModel.type)"
                   :key="sc.key"
                   class="subcat-chip"
                   :class="{ active: form.subCategory === sc.key, locked: selectedModel.type === 'checkpoint' }"
@@ -861,7 +490,7 @@ async function onUploadCover() {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: var(--z-detail);
   padding: 24px;
 }
 
@@ -908,169 +537,6 @@ async function onUploadCover() {
   overflow-y: auto;
 }
 
-/* 左侧封面列 */
-.detail-cover-col {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-}
-
-.detail-cover {
-  position: relative;
-  aspect-ratio: 1;
-  border-radius: 10px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  background: var(--bg);
-}
-
-.detail-cover img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.cover-placeholder {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: repeating-linear-gradient(45deg, var(--bg) 0 12px, var(--bg-card) 12px 24px);
-}
-
-.cover-ext {
-  font-family: Consolas, monospace;
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 4px 12px;
-}
-
-.type-badge {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #10141a;
-  padding: 3px 10px;
-  border-radius: 999px;
-}
-
-/* 拖拽导入封面：悬停高亮 + 提示 */
-.detail-cover.drop-active {
-  border: 2px dashed var(--accent);
-}
-
-.drop-hint {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(6, 9, 12, 0.55);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 600;
-  pointer-events: none;
-}
-
-.cover-hint {
-  font-size: 11px;
-  color: var(--text-muted);
-  line-height: 1.6;
-}
-
-/* 多封面缩略图网格 */
-.cover-thumbs {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
-  gap: 8px;
-}
-
-.cover-thumb {
-  position: relative;
-  aspect-ratio: 1;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  cursor: pointer;
-  transition: border-color 0.12s ease, transform 0.12s ease;
-}
-
-.cover-thumb:hover {
-  border-color: var(--accent);
-  transform: translateY(-1px);
-}
-
-.cover-thumb.active {
-  border: 2px solid var(--accent);
-}
-
-.cover-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-/* 加载失效的缩略图占位 */
-.thumb-missing {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  color: var(--text-muted);
-  background: repeating-linear-gradient(45deg, var(--bg) 0 8px, var(--bg-card) 8px 16px);
-}
-
-.thumb-badge {
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  font-size: 10px;
-  font-weight: 600;
-  color: #10141a;
-  background: var(--accent);
-  border-radius: 999px;
-  padding: 1px 7px;
-  opacity: 0.95;
-}
-
-/* 封面删除按钮：悬停缩略图时显示在左上角 */
-.thumb-delete {
-  position: absolute;
-  top: 4px;
-  left: 4px;
-  width: 18px;
-  height: 18px;
-  border: none;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
-  font-size: 10px;
-  line-height: 1;
-  padding: 0;
-  cursor: pointer;
-  display: none;
-  align-items: center;
-  justify-content: center;
-}
-
-.cover-thumb:hover .thumb-delete {
-  display: flex;
-}
-
-.thumb-delete:hover {
-  background: var(--danger);
-}
-
 .file-info {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -1090,7 +556,7 @@ async function onUploadCover() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 /* 右侧表单列 */
@@ -1106,140 +572,6 @@ async function onUploadCover() {
   color: var(--accent);
   letter-spacing: 1px;
   margin-top: 4px;
-}
-
-/* ---------- Civitai 匹配结果面板 ---------- */
-.civitai-panel {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg);
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.civitai-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.civitai-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent);
-  letter-spacing: 1px;
-}
-
-.civitai-close {
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 6px;
-}
-
-.civitai-close:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-.civitai-name {
-  font-size: 14px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.civitai-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.civitai-words {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.civitai-word {
-  font-size: 11px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-card);
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.civitai-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 2px;
-}
-
-.civitai-link {
-  font-size: 12px;
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.civitai-link:hover {
-  text-decoration: underline;
-}
-
-/* ---------- 文件元数据自动解析面板 ---------- */
-.autoinfo-panel {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg);
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.autoinfo-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.autoinfo-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent);
-  letter-spacing: 1px;
-}
-
-.autoinfo-list {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 4px 12px;
-  font-size: 12px;
-}
-
-.autoinfo-list dt {
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.autoinfo-list dd {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: Consolas, monospace;
 }
 
 /* ---------- 收藏 / 评分 ---------- */
@@ -1482,15 +814,5 @@ async function onUploadCover() {
   display: flex;
   gap: 10px;
   margin-top: 8px;
-}
-
-/* 窄屏适配：单列布局 */
-@media (max-width: 760px) {
-  .detail-body {
-    grid-template-columns: 1fr;
-  }
-  .detail-cover-col {
-    max-width: 320px;
-  }
 }
 </style>

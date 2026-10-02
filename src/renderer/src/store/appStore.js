@@ -342,11 +342,14 @@ export function cancelScan() {
  */
 export function applyThumbUpdates(updates) {
   if (!Array.isArray(updates)) return
+  // 建 id→索引 Map（B5）：批量更新避免逐条 O(n) findIndex 的 O(n×m) 开销；
+  // 就地合并（Object.assign）不替换数组元素引用，避免触发 selectedModel
+  // 重算进而引发详情页 watch 无谓重填
+  const indexById = new Map(state.models.map((m, i) => [m.id, i]))
   for (const { id, coverUrl } of updates) {
-    const idx = state.models.findIndex((m) => m.id === id)
-    if (idx >= 0 && coverUrl) {
-      state.models[idx] = { ...state.models[idx], coverUrl }
-    }
+    if (!coverUrl) continue
+    const idx = indexById.get(id)
+    if (idx !== undefined) Object.assign(state.models[idx], { coverUrl })
   }
 }
 
@@ -618,6 +621,44 @@ function applyMetaFlags(id, meta) {
       nsfw: meta.nsfw === true,
       rating: meta.rating || 0
     }
+  }
+}
+
+/**
+ * 导出当前（筛选后）模型列表到文件（E2）。
+ * @param {'csv'|'json'} format 导出格式
+ */
+export async function exportModels(format) {
+  const list = filteredModels.value
+  if (list.length === 0) {
+    toast('warn', '当前列表为空，无可导出的模型')
+    return
+  }
+  const rows = list.map((m) => ({
+    id: m.id,
+    name: m.name,
+    alias: m.alias || '',
+    type: m.type,
+    subCategory: m.subCategory || '',
+    favorite: m.favorite === true,
+    nsfw: m.nsfw === true,
+    rating: m.rating || 0,
+    triggerWords: m.triggerWords || '',
+    note: m.note || '',
+    size: m.size,
+    mtimeMs: m.mtimeMs,
+    params: m.params || null
+  }))
+  try {
+    const res = await window.api.models.exportList({ format, rows })
+    if (res.canceled) return
+    if (res.error) {
+      toast('error', res.error)
+      return
+    }
+    toast('success', `已导出 ${res.count} 个模型：${res.path}`)
+  } catch (err) {
+    toast('error', `导出失败: ${err.message}`)
   }
 }
 

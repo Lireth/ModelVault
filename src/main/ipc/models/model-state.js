@@ -20,6 +20,17 @@ export function getThumbDrainPromise() {
   return thumbDrainPromise
 }
 
+/**
+ * 等待进行中的后台缩略图生成完成（无任务时立即返回）。
+ * 此前「取 promise + await + catch」逻辑在 scan.js 与 store.js 重复实现
+ * （C4 去重），时序约束收敛为本模块上的单一入口。
+ */
+export async function awaitThumbDrain() {
+  if (thumbDrainPromise) {
+    await thumbDrainPromise.catch(() => {})
+  }
+}
+
 /** 设置/清除后台缩略图生成任务 Promise */
 export function setThumbDrainPromise(p) {
   thumbDrainPromise = p

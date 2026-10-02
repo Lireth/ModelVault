@@ -27,6 +27,33 @@ export function registerImageScheme() {
 }
 
 /**
+ * 放行目录 realpath 缓存（B1）：首页网格数百张封面时，每张图片请求
+ * 省去 2 次 realpath 系统调用。键为目录字面量，容量有界；
+ * 根目录切换时整体失效（见 isAllowedPath 中的 lastSeenRoot 检查）。
+ */
+const realpathCache = new Map()
+const REALPATH_CACHE_MAX = 8
+/** 上一次所见根目录（检测切换以失效 realpath 缓存） */
+let lastSeenRoot
+
+/** realpath 带缓存：不存在/不可达的目录缓存为 null（放行时跳过） */
+async function realpathCached(dir) {
+  let real = realpathCache.get(dir)
+  if (real === undefined) {
+    try {
+      real = await fs.promises.realpath(dir)
+    } catch {
+      real = null
+    }
+    if (realpathCache.size >= REALPATH_CACHE_MAX) {
+      realpathCache.delete(realpathCache.keys().next().value)
+    }
+    realpathCache.set(dir, real)
+  }
+  return real
+}
+
+/**
  * 校验请求的真实路径是否允许访问：仅限当前模型根目录（含关联存储）与旧版封面目录。
  * 入参必须是已 fs.realpath 解析后的路径：根目录内的符号链接/junction
  * 若指向根目录外，字面前缀校验可被绕过，必须以解析后的真实路径判断（B8）。
@@ -34,21 +61,22 @@ export function registerImageScheme() {
  * Windows 上按大小写不敏感比较（与路径关联存储的兜底策略一致）。
  */
 async function isAllowedPath(realPath) {
-  const allowed = []
   const root = getCurrentRoot()
+  // 根目录切换时缓存整体失效：旧根的 realpath 不再适用于新根的归属判断
+  if (root !== lastSeenRoot) {
+    realpathCache.clear()
+    lastSeenRoot = root
+  }
+  const allowed = []
   if (root) allowed.push(path.normalize(root))
   // 旧版全局封面目录（迁移前的历史数据兼容）
   allowed.push(path.join(app.getPath('userData'), 'covers'))
   const lower = process.platform === 'win32'
+  const target = lower ? realPath.toLowerCase() : realPath
   for (const dir of allowed) {
-    let resolved
-    try {
-      resolved = await fs.promises.realpath(dir)
-    } catch {
-      continue // 放行目录不存在时跳过
-    }
+    const resolved = await realpathCached(dir)
+    if (!resolved) continue
     const base = lower ? resolved.toLowerCase() : resolved
-    const target = lower ? realPath.toLowerCase() : realPath
     const rel = path.relative(base, target)
     if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) {
       return true
@@ -66,7 +94,13 @@ export function registerImageProtocolHandler() {
         return new Response('Bad Request', { status: 400 })
       }
       // pathname 为 encodeURIComponent 后的绝对路径
-      const filePath = decodeURIComponent(url.pathname.replace(/^\/+/, ''))
+      // 畸形编码序列按 400 语义返回（A10），而非落入外层 500
+      let filePath
+      try {
+        filePath = decodeURIComponent(url.pathname.replace(/^\/+/, ''))
+      } catch {
+        return new Response('Bad Request', { status: 400 })
+      }
       // 先解析符号链接/junction 得到真实路径，再校验归属（B8）
       let realPath
       try {

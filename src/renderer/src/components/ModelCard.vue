@@ -200,7 +200,7 @@ const mtimeText = computed(() => {
 }
 
 .cover-ext {
-  font-family: Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   color: var(--text-muted);
   background: var(--bg);
@@ -215,7 +215,7 @@ const mtimeText = computed(() => {
   left: 8px;
   font-size: 11px;
   font-weight: 600;
-  color: #10141a;
+  color: var(--on-bright);
   padding: 3px 9px;
   border-radius: 999px;
   opacity: 0.95;
