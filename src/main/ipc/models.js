@@ -450,7 +450,10 @@ export function registerModelIpcHandlers() {
           const now = Date.now()
           if (now - lastSent >= PROGRESS_INTERVAL) {
             lastSent = now
-            win?.webContents.send('models:scanProgress', progress)
+            // 窗口可能已在扫描期间关闭：?. 只防 null 不防已销毁（访问 webContents 抛错），须判 isDestroyed
+            if (win && !win.isDestroyed()) {
+              win.webContents.send('models:scanProgress', progress)
+            }
           }
         },
         {
@@ -736,7 +739,12 @@ export function registerModelIpcHandlers() {
     }
     const win = BrowserWindow.fromWebContents(event.sender)
     const meta = getModelMeta(id) || {}
-    const send = (action) => win?.webContents.send('models:menuAction', { id, action })
+    // 菜单项点击时窗口可能已关闭（打开菜单后按 Alt+F4），须判销毁防 webContents 抛错
+    const send = (action) => {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('models:menuAction', { id, action })
+      }
+    }
     const items = [
       { label: '打开详情', click: () => send('openDetail') },
       { label: '打开所在文件夹', click: () => shell.showItemInFolder(id) },
