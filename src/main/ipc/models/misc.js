@@ -104,9 +104,10 @@ export function registerMiscHandlers() {
     return { ok: true }
   })
 
-  // 在资源管理器中显示模型文件
+  // 在资源管理器中显示模型文件（仅限当前模型根目录内的路径，C6：
+  // 与 deleteModel/popupMenu 的越界校验一致，防止任意路径探测）
   ipcMain.handle('models:reveal', (event, { path: targetPath } = {}) => {
-    if (typeof targetPath !== 'string' || !targetPath) {
+    if (typeof targetPath !== 'string' || !targetPath || !isInRoot(targetPath)) {
       return { error: '无效的路径' }
     }
     shell.showItemInFolder(targetPath)

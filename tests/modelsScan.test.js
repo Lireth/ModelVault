@@ -196,6 +196,31 @@ describe('models:scan 进度推送（B4 守卫）', () => {
   })
 })
 
+describe('models:scan 目录校验与回写（C6）', () => {
+  it('不存在的目录拒绝扫描', async () => {
+    const scan = getRegisteredHandler('models:scan')
+    const res = await scan(makeEvent(), { folder: path.join(root, 'no-such-dir') })
+    expect(res).toEqual({ error: '模型文件夹不存在或不是目录' })
+  })
+
+  it('路径为文件时拒绝扫描', async () => {
+    const file = path.join(root, 'a-file.safetensors')
+    await fs.writeFile(file, 'x')
+    const scan = getRegisteredHandler('models:scan')
+    const res = await scan(makeEvent(), { folder: file })
+    expect(res).toEqual({ error: '模型文件夹不存在或不是目录' })
+  })
+
+  it('显式传入目录扫描成功后回写 settings.modelsFolder', async () => {
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 0 })
+    const scan = getRegisteredHandler('models:scan')
+    const res = await scan(makeEvent(), { folder: root })
+    expect(res.root).toBe(root)
+    const { modelsFolder } = await loadSettings()
+    expect(modelsFolder).toBe(root)
+  })
+})
+
 describe('models:loadStore', () => {
   it('返回设置与元数据映射；连续调用结果一致（ensureRootStore 不重复加载）', async () => {
     await updateSettings({ modelsFolder: root })

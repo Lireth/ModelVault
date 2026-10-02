@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
+import fs from 'node:fs/promises'
 import logger from '../../logger'
-import { getSettings, loadSettings } from '../../services/store'
+import { getSettings, loadSettings, updateSettings } from '../../services/store'
 import { scanModels } from '../../services/scanner'
 import { pruneOrphanCovers } from '../../services/covers'
 import { clearDeferredJobs } from '../../services/thumbs'
@@ -40,6 +41,16 @@ export function registerScanHandlers() {
       root = typeof folder === 'string' && folder ? folder : (await loadSettings()).modelsFolder
       if (!root) {
         return { error: '尚未设置模型文件夹' }
+      }
+      // 扫描目录必须是已存在的目录（C6）：防止任意字符串路径（如已删除目录、
+      // 或误传文件/系统根）在 ensureRootStore 中创建 .modelvault 写入元数据
+      try {
+        const stat = await fs.stat(root)
+        if (!stat.isDirectory()) {
+          return { error: '模型文件夹不存在或不是目录' }
+        }
+      } catch {
+        return { error: '模型文件夹不存在或不是目录' }
       }
 
       const win = BrowserWindow.fromWebContents(event.sender)
@@ -99,6 +110,10 @@ export function registerScanHandlers() {
 
       // 响应先返回，缺失的缩略图由后台队列补齐（完成后推送 thumbsReady 更新）
       startThumbDrain(win)
+
+      // 扫描成功后与 settings.modelsFolder 保持一致（C6）：
+      // 显式传入 folder 的扫描也持久化根目录，与 models:chooseFolder 行为闭环
+      await updateSettings({ modelsFolder: root })
 
       return {
         root,

@@ -106,3 +106,19 @@ describe('models:deleteModel', () => {
     expect(getModelMeta(abs)?.alias).toBe('保留')
   })
 })
+
+describe('models:reveal 越界校验（C6）', () => {
+  it('根目录外的路径拒绝', async () => {
+    const handler = getRegisteredHandler('models:reveal')
+    const outside = path.join(os.tmpdir(), 'modelvault-reveal-outside.safetensors')
+    expect(await handler(makeEvent(), { path: outside })).toEqual({ error: '无效的路径' })
+    expect(shell.showItemInFolder).not.toHaveBeenCalled()
+  })
+
+  it('根目录内的路径放行', async () => {
+    const handler = getRegisteredHandler('models:reveal')
+    const inside = path.join(root, 'm.safetensors')
+    expect(await handler(makeEvent(), { path: inside })).toEqual({ ok: true })
+    expect(shell.showItemInFolder).toHaveBeenCalledWith(inside)
+  })
+})

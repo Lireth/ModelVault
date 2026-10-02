@@ -346,7 +346,9 @@ export async function updateSettings(patch) {
   try {
     await atomicWriteFile(getSettingsFilePath(), JSON.stringify(settings, null, 2))
   } catch (err) {
-    logger.error(`设置写入失败: ${err.message}`)
+    // 设置落盘失败与元数据同样经监听器通知渲染进程（C7）：
+    // 否则磁盘满/权限错误时用户无感知，重启后设置静默丢失
+    notifyStoreSaveError(Object.assign(new Error(`设置保存失败: ${err.message}`)))
   }
 }
 
@@ -512,11 +514,11 @@ export function setStoreSaveErrorListener(fn) {
 }
 
 /**
- * 统一处理落盘失败：写日志并通知监听器。
- * 监听器自身异常不影响保存流程（仅降级为日志）。
+ * 统一处理持久化失败（元数据 store.json 与应用设置 settings.json 共用）：
+ * 写日志并通知监听器。监听器自身异常不影响保存流程（仅降级为日志）。
  */
 function notifyStoreSaveError(err) {
-  logger.error(`关联存储写入失败: ${err.message}`)
+  logger.error(`持久化写入失败: ${err.message}`)
   if (storeSaveErrorListener) {
     try {
       storeSaveErrorListener(err)

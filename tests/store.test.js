@@ -5,6 +5,7 @@ import path from 'node:path'
 import {
   atomicWriteFile,
   getModelMeta,
+  getSettings,
   isInRoot,
   loadData,
   loadSettings,
@@ -246,6 +247,25 @@ describe('应用设置文件损坏恢复（B2）', () => {
     expect(s.theme).toBe('dark')
     expect(await fs.readFile(backupFile, 'utf-8')).toBe('123')
     await expect(fs.access(settingsFile)).rejects.toThrow()
+  })
+
+  it('设置落盘失败经监听器通知（C7），内存值运行时仍生效', async () => {
+    // 占位 settings.json 为目录：原子写 rename 到目录必然失败
+    await fs.rm(settingsFile, { force: true }).catch(() => {})
+    await fs.mkdir(settingsFile, { recursive: true })
+    const errors = []
+    setStoreSaveErrorListener((err) => errors.push(err))
+    try {
+      await updateSettings({ sortBy: 'mtime' })
+      // 失败已上报且信息可辨识
+      expect(errors).toHaveLength(1)
+      expect(errors[0].message).toContain('设置保存失败')
+      // 内存 settings 已更新：本次运行内排序切换仍然生效（重启后才会丢失并经 Toast 提示）
+      expect(getSettings().sortBy).toBe('mtime')
+    } finally {
+      setStoreSaveErrorListener(null)
+      await fs.rm(settingsFile, { recursive: true, force: true }).catch(() => {})
+    }
   })
 })
 

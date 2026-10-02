@@ -77,9 +77,10 @@ onMounted(async () => {
   unsubscribeThumbs = window.api.models.onThumbsReady(({ updates }) => {
     applyThumbUpdates(updates)
   })
-  // 订阅元数据落盘失败事件（B1）：防抖落盘在保存响应之后异步发生，失败须提示用户重试
+  // 订阅持久化落盘失败事件（B1/C7）：元数据与设置的落盘都在保存响应之后异步发生，
+  // 失败须提示用户重试，否则磁盘错误时静默丢失
   unsubscribeStoreError = window.api.models.onStoreError(({ message }) => {
-    toast('error', `元数据保存失败: ${message}，请检查磁盘后重新保存`)
+    toast('error', `数据保存失败: ${message}，请检查磁盘后重新保存`)
   })
   await initApp()
 })
