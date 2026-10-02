@@ -401,8 +401,20 @@ function onWindowPaste(e) {
   }
 }
 
-onMounted(() => window.addEventListener('paste', onWindowPaste))
-onBeforeUnmount(() => window.removeEventListener('paste', onWindowPaste))
+/** ESC 关闭详情页（U1）：设置页打开时让位给设置页的 ESC 处理；
+ *  表单有未保存修改时经 closeDetail 内的确认拦截（C8） */
+function onWindowKeydown(e) {
+  if (e.key === 'Escape' && selectedModel.value && !state.settingsOpen) closeDetail()
+}
+
+onMounted(() => {
+  window.addEventListener('paste', onWindowPaste)
+  window.addEventListener('keydown', onWindowKeydown)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('paste', onWindowPaste)
+  window.removeEventListener('keydown', onWindowKeydown)
+})
 
 /** 将表单收集为可校验的参数对象 */
 function collectParams() {

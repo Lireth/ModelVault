@@ -65,7 +65,17 @@ const mtimeText = computed(() => {
 </script>
 
 <template>
-  <article class="model-card" :title="model.id" @click="openDetail(model.id)" @contextmenu.prevent="onContextMenu">
+  <article
+    class="model-card"
+    :title="model.id"
+    tabindex="0"
+    role="button"
+    :aria-label="`查看模型 ${displayName} 的详情`"
+    @click="openDetail(model.id)"
+    @keydown.enter.prevent="openDetail(model.id)"
+    @keydown.space.prevent="openDetail(model.id)"
+    @contextmenu.prevent="onContextMenu"
+  >
     <div class="cover">
       <img
         v-if="model.coverUrl && !coverError"
@@ -152,6 +162,12 @@ const mtimeText = computed(() => {
 .model-card:hover {
   transform: translateY(-2px);
   border-color: var(--accent);
+}
+
+/* 键盘焦点可见性（U1）：Tab 聚焦卡片时的轮廓反馈 */
+.model-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .cover {
