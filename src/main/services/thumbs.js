@@ -109,6 +109,15 @@ export async function getThumbPathDeferred(absCover) {
 }
 
 /**
+ * 清空延迟生成队列（切换模型根目录时调用）。
+ * 残留的旧根条目会被下一轮 drain 以「新根」的 thumbs 目录生成缩略图，
+ * 造成跨根目录写文件并向渲染进程推送无效更新（C5，与 B10 同类）。
+ */
+export function clearDeferredJobs() {
+  deferredJobs.clear()
+}
+
+/**
  * 依次处理后台延迟生成队列（批内并发、批间串行）。
  * 每成功生成一个缩略图，调用 onGenerated(源图路径, 缩略图路径)
  * 通知调用方（用于推送渲染进程更新卡片封面）。

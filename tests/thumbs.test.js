@@ -21,7 +21,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-import { getThumbPath, getThumbPathDeferred, drainDeferredThumbs } from '../src/main/services/thumbs'
+import { getThumbPath, getThumbPathDeferred, drainDeferredThumbs, clearDeferredJobs } from '../src/main/services/thumbs'
 import { setDataRoot } from '../src/main/services/store'
 
 const roots = []
@@ -124,5 +124,22 @@ describe('延迟生成队列（扫描装饰阶段专用）', () => {
     const generated = []
     await drainDeferredThumbs((absCover, thumbPath) => generated.push({ absCover, thumbPath }))
     expect(generated).toHaveLength(0)
+  })
+
+  it('clearDeferredJobs 清空队列后 drain 无输出（C5 切根清理）', async () => {
+    vi.mocked(nativeImage.createFromBuffer).mockReturnValue(mockDecodedImage({ width: 1200 }))
+    // 登记后清空：drain 不再生成
+    expect(await getThumbPathDeferred(source)).toBe('')
+    clearDeferredJobs()
+    const cleared = []
+    await drainDeferredThumbs((absCover, thumbPath) => cleared.push({ absCover, thumbPath }))
+    expect(cleared).toHaveLength(0)
+
+    // 对照：未清空时同场景 drain 正常生成并回调
+    expect(await getThumbPathDeferred(source)).toBe('')
+    const kept = []
+    await drainDeferredThumbs((absCover, thumbPath) => kept.push({ absCover, thumbPath }))
+    expect(kept).toHaveLength(1)
+    expect(kept[0].absCover).toBe(source)
   })
 })

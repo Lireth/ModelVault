@@ -59,6 +59,15 @@ function trackDeferredThumb(absCover, modelId) {
 }
 
 /**
+ * 清空延迟缩略图归属表（切换模型根目录时调用，C5）。
+ * 残留的旧根条目会在下一轮 startThumbDrain 中把新根生成的缩略图
+ * 推送给旧根的模型卡片（无效更新）。
+ */
+export function clearDeferredOwners() {
+  deferredOwners.clear()
+}
+
+/**
  * 扫描响应返回后，后台补齐缺失的缩略图（批内并发、批间串行），
  * 完成后经 models:thumbsReady 事件推送受影响模型的封面 URL 更新。
  */

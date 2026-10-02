@@ -3,7 +3,8 @@ import logger from '../../logger'
 import { getSettings, loadSettings } from '../../services/store'
 import { scanModels } from '../../services/scanner'
 import { pruneOrphanCovers } from '../../services/covers'
-import { decorateModels, startThumbDrain } from './decorate'
+import { clearDeferredJobs } from '../../services/thumbs'
+import { clearDeferredOwners, decorateModels, startThumbDrain } from './decorate'
 import { ensureRootStore } from './store'
 import { getDecorateCacheRoot, getThumbDrainPromise, resetDecorateCache } from './model-state'
 
@@ -52,9 +53,13 @@ export function registerScanHandlers() {
       // 切换/加载该根目录的关联存储，并清理孤儿封面文件
       await ensureRootStore(root)
       await pruneOrphanCovers()
-      // 切换根目录后装饰缓存全部失效
+      // 切换根目录后装饰缓存全部失效；延迟缩略图队列同步清空——
+      // 残留的旧根条目会被下一轮 drain 以「新根」的 thumbs 目录生成（跨根写文件），
+      // 并把无效的封面更新推送回渲染进程（C5，与 B10 同类竞态）
       if (getDecorateCacheRoot() !== root) {
         resetDecorateCache(root)
+        clearDeferredOwners()
+        clearDeferredJobs()
       }
 
       let lastSent = 0

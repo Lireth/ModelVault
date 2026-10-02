@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vites
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { BrowserWindow, dialog } from 'electron'
+import { BrowserWindow, dialog, nativeImage } from 'electron'
 import { fakeUserData } from './setup'
 import { getRegisteredHandler, makeEvent, makeWindow } from './helpers/modelsIpc'
 
@@ -28,7 +28,7 @@ vi.mock('electron', () => ({
   Menu: { buildFromTemplate: vi.fn() },
   shell: { trashItem: vi.fn(), showItemInFolder: vi.fn() },
   net: { fetch: vi.fn() },
-  nativeImage: { createFromPath: vi.fn() },
+  nativeImage: { createFromBuffer: vi.fn(), createFromPath: vi.fn() },
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() }
 }))
 
@@ -43,6 +43,7 @@ vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([])
 import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
 import { scanModels } from '../src/main/services/scanner'
 import { loadSettings, setDataRoot, updateSettings } from '../src/main/services/store'
+import { drainDeferredThumbs, getThumbPathDeferred } from '../src/main/services/thumbs'
 
 const settingsFile = path.join(fakeUserData, 'settings.json')
 const roots = []
@@ -129,6 +130,37 @@ describe('models:scan 取消', () => {
   it('空闲时 cancelScan 返回 { ok: false }，无副作用', async () => {
     const cancel = getRegisteredHandler('models:cancelScan')
     expect(await cancel(makeEvent(), {})).toEqual({ ok: false })
+  })
+})
+
+describe('切根扫描清空延迟缩略图队列（C5）', () => {
+  it('旧根登记的缩略图任务在切换根目录扫描后不再跨根生成', async () => {
+    // 旧根：真实封面文件登记延迟缩略图任务（getThumbPathDeferred 未命中缓存即登记）
+    const coverA = path.join(root, 'cover-a.png')
+    await fs.writeFile(coverA, 'png-bytes')
+    expect(await getThumbPathDeferred(coverA)).toBe('')
+
+    // 解码桩：若清理失效，旧根条目会在新根目录下生成成功并触发回调
+    vi.mocked(nativeImage.createFromBuffer).mockReturnValue({
+      isEmpty: () => false,
+      getSize: () => ({ width: 1200, height: 800 }),
+      resize() { return this },
+      toJPEG: () => Buffer.from('fake-jpeg')
+    })
+
+    // 切换到新根目录扫描：切根分支应同步清空 deferredJobs/deferredOwners
+    const rootB = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-b-'))
+    roots.push(rootB)
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 0 })
+    const scan = getRegisteredHandler('models:scan')
+    const res = await scan(makeEvent(), { folder: rootB })
+    expect(res.root).toBe(rootB)
+
+    // 队列已清空：手动 drain 不为旧根封面生成，新根 thumbs 目录不被写入
+    const generated = []
+    await drainDeferredThumbs((absCover, thumbPath) => generated.push({ absCover, thumbPath }))
+    expect(generated).toHaveLength(0)
+    await expect(fs.readdir(path.join(rootB, '.modelvault', 'thumbs'))).rejects.toThrow()
   })
 })
 
