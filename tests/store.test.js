@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   atomicWriteFile,
+  flushStoreSave,
   getModelMeta,
   getSettings,
   isInRoot,
@@ -208,6 +209,31 @@ describe('落盘失败通知（B1）', () => {
     } finally {
       setStoreSaveErrorListener(null)
     }
+  })
+})
+
+describe('退出落盘 flushStoreSave', () => {
+  it('取消未触发的防抖定时器，最新数据立即落盘', async () => {
+    const abs = await touchModel('flush-idle.safetensors')
+    setModelMeta(abs, { alias: '防抖中' })
+    // saveTimer 尚未触发（SAVE_DELAY 500ms）：flush 应取消定时器并发起写入
+    await flushStoreSave()
+    const text = await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
+    const key = path.relative(root, abs).split(path.sep).join('/')
+    expect(JSON.parse(text).models[key].alias).toBe('防抖中')
+  })
+
+  it('与进行中的写入并发时等待写盘链静止，返回后磁盘必为最新数据', async () => {
+    const abs = await touchModel('flush-race.safetensors')
+    setModelMeta(abs, { alias: '第一版' })
+    const first = saveStoreNow() // 有意不 await：构造写盘进行中的场景
+    setModelMeta(abs, { alias: '第二版' })
+    // 无论首次写入是否已结束（在途则 flush 登记补写并等待），
+    // flush 返回后磁盘都必须包含最后一次修改——退出路径不丢数据的语义保证
+    await Promise.all([first, flushStoreSave()])
+    const text = await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
+    const key = path.relative(root, abs).split(path.sep).join('/')
+    expect(JSON.parse(text).models[key].alias).toBe('第二版')
   })
 })
 

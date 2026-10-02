@@ -29,5 +29,5 @@ $RECYCLE.BIN/
 docs/
 tmp/
 test/
-build/
-electron-builder.yml
+# 注意：build/（应用图标）与 electron-builder.yml（打包配置）必须入库，
+# 否则干净环境下 release.yml 打包会退回默认配置，发布流水线不可复现

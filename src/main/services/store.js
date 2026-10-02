@@ -552,3 +552,21 @@ export async function saveStoreNow() {
     }
   }
 }
+
+/**
+ * 等待元数据写盘链完全静止（退出路径专用，替代直接 await saveStoreNow）：
+ * saveStoreNow 在写盘进行中仅登记 pendingSave 立即返回，退出流程若直接 await
+ * 会过早 quit 中断在途写入，且 finally 中的补写永无机会执行，导致最后一批
+ * 元数据修改丢失。本函数先取消未触发的防抖定时器、触发一次落盘请求
+ * （空闲则立即写入，写盘中则登记补写），随后等待写盘与补写全部完成。
+ */
+export async function flushStoreSave() {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  await saveStoreNow()
+  while (saving || pendingSave) {
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+}

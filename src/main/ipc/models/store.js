@@ -1,4 +1,5 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
+import fs from 'node:fs/promises'
 import logger from '../../logger'
 import {
   getMetaMapByAbsPath,
@@ -17,6 +18,21 @@ import { getThumbDrainPromise } from './model-state'
  * 存储与设置链路：持久化数据加载、模型根目录选择、应用设置更新。
  * ensureRootStore 是全域切换关联存储的唯一入口（扫描与 loadStore 共用）。
  */
+
+/**
+ * 校验路径是已存在的目录（与 models:scan 的目录校验同规则）。
+ * 用于拦截渲染进程经 settings:update 写入的任意字符串路径：
+ * 若不做校验，后续任意一次元数据写入即在该目录创建 .modelvault/，
+ * 形成「任意目录写入」原语。
+ */
+async function isExistingDirectory(p) {
+  try {
+    const stat = await fs.stat(p)
+    return stat.isDirectory()
+  } catch {
+    return false
+  }
+}
 
 /**
  * 确保指定根目录的关联存储已加载。
@@ -58,10 +74,16 @@ export function registerStoreHandlers() {
     const settings = await loadSettings()
     let metaMap = {}
     if (settings.modelsFolder) {
-      await ensureRootStore(settings.modelsFolder)
-      // 清理不再被元数据引用的孤儿封面文件
-      await pruneOrphanCovers()
-      metaMap = getMetaMapByAbsPath()
+      // 已设置目录不存在（如磁盘离线/被移动）时不切换关联存储，
+      // 防止后续元数据写入在不存在的路径下重建目录树
+      if (await isExistingDirectory(settings.modelsFolder)) {
+        await ensureRootStore(settings.modelsFolder)
+        // 清理不再被元数据引用的孤儿封面文件
+        await pruneOrphanCovers()
+        metaMap = getMetaMapByAbsPath()
+      } else {
+        logger.warn(`已设置的模型目录不存在，跳过关联存储加载: ${settings.modelsFolder}`)
+      }
     }
     return {
       settings,
@@ -85,6 +107,19 @@ export function registerStoreHandlers() {
 
   // 更新应用设置（通用/扫描/外观），返回规范化后的完整设置
   ipcMain.handle('settings:update', async (event, patch = {}) => {
+    // modelsFolder 变更必须是真实存在的目录：防止渲染进程写入任意路径后，
+    // 经元数据写入在该目录创建 .modelvault（任意目录写入原语）。
+    // 与当前值相同的路径不重复校验：模型目录所在磁盘暂时离线时仍可保存其他设置
+    const nextFolder =
+      typeof patch?.modelsFolder === 'string' ? patch.modelsFolder.trim() : ''
+    if (
+      nextFolder &&
+      nextFolder !== getSettings().modelsFolder &&
+      !(await isExistingDirectory(nextFolder))
+    ) {
+      logger.warn(`拒绝设置不存在的模型目录: ${nextFolder}`)
+      return { error: `模型文件夹不存在或不是目录: ${nextFolder}` }
+    }
     await updateSettings(patch)
     const settings = getSettings()
     logger.info(`应用设置已更新: ${JSON.stringify(patch).slice(0, 200)}`)

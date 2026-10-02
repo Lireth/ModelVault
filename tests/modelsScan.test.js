@@ -232,6 +232,15 @@ describe('models:loadStore', () => {
     expect(second.models).toEqual(first.models)
     expect(second.settings.modelsFolder).toBe(root)
   })
+
+  it('已设置的目录不存在时跳过关联存储加载，返回空元数据映射（C6 任意目录写入防护）', async () => {
+    await updateSettings({ modelsFolder: root })
+    await fs.rm(root, { recursive: true, force: true })
+    const loadStore = getRegisteredHandler('models:loadStore')
+    const res = await loadStore(makeEvent(), {})
+    expect(res.settings.modelsFolder).toBe(root)
+    expect(res.models).toEqual({})
+  })
 })
 
 describe('models:chooseFolder', () => {
@@ -258,5 +267,29 @@ describe('settings:update', () => {
     expect(res.settings.sortBy).toBe('type')
     // 增量合并：其余字段保留默认值
     expect(res.settings.theme).toBe('dark')
+  })
+
+  it('变更 modelsFolder 为不存在的路径时拒绝且不落盘（任意目录写入防护）', async () => {
+    const update = getRegisteredHandler('settings:update')
+    const res = await update(makeEvent(), { modelsFolder: path.join(root, 'no-such-dir') })
+    expect(res.error).toContain('模型文件夹不存在或不是目录')
+    const { modelsFolder } = await loadSettings()
+    expect(modelsFolder).toBe('')
+  })
+
+  it('变更 modelsFolder 为真实存在的目录时接受', async () => {
+    const update = getRegisteredHandler('settings:update')
+    const res = await update(makeEvent(), { modelsFolder: root })
+    expect(res.error).toBeUndefined()
+    expect(res.settings.modelsFolder).toBe(root)
+  })
+
+  it('modelsFolder 与当前值相同时跳过存在性校验（目录暂时离线仍可保存其他设置）', async () => {
+    const update = getRegisteredHandler('settings:update')
+    await updateSettings({ modelsFolder: root })
+    await fs.rm(root, { recursive: true, force: true })
+    const res = await update(makeEvent(), { sortBy: 'mtime', modelsFolder: root })
+    expect(res.error).toBeUndefined()
+    expect(res.settings.sortBy).toBe('mtime')
   })
 })

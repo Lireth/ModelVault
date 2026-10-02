@@ -117,6 +117,9 @@ async function onCivitaiMatch() {
   civitaiBusy.value = true
   try {
     const res = await matchCivitai(model.id)
+    // 请求期间（大文件哈希需数秒）用户可能已切换模型：晚到的响应若无条件写入，
+    // A 模型的匹配结果会挂到 B 模型的详情面板下，误导用户错用推荐参数与触发词
+    if (selectedModel.value?.id !== model.id) return
     if (res.error) {
       toast('error', res.error)
       return
