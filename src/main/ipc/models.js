@@ -49,6 +49,8 @@ import { toImageUrl } from '../protocol'
 const PROGRESS_INTERVAL = 120
 
 let scanning = false
+/** Civitai 匹配进行中标记（同步置位防重入：重复点击会并发跑多个 GB 级文件的 SHA256） */
+let matching = false
 /** 当前扫描的取消控制器（null 表示无进行中的扫描） */
 let scanAbort = null
 /** 后台缩略图生成任务（扫描响应返回后异步执行，新扫描启动前需等待其完成） */
@@ -632,28 +634,36 @@ export function registerModelIpcHandlers() {
   // Civitai 匹配：计算模型文件 SHA256 并查询 Civitai API（耗时操作，大文件需数秒）。
   // 已计算的哈希持久化在元数据中（hash/hashMtime），文件未变化时直接复用，重启后无需重算
   ipcMain.handle('models:civitaiMatch', async (event, { id } = {}) => {
-    if (typeof id !== 'string' || !id) {
-      return { error: '无效的模型标识' }
+    // 同步先检查并置位匹配状态：任何 await 之前完成，与 models:scan 的防重入模式一致，
+    // 防止并发请求对同一文件重复计算全量 SHA256（耗时操作会阻塞磁盘）
+    if (matching) {
+      return { error: '正在匹配中，请稍候' }
     }
-    if (!isInRoot(id)) {
-      return { error: '模型不在当前根目录内，无法匹配' }
-    }
-    let mtimeMs = 0
+    matching = true
     try {
-      mtimeMs = (await fs.stat(id)).mtimeMs
-    } catch {
-      return { error: '模型文件不存在' }
-    }
-    // mtime 一致时复用持久化哈希，跳过耗时的全文件 SHA256 计算
-    const meta = getModelMeta(id) || {}
-    const knownHash = meta.hash && meta.hashMtime === mtimeMs ? meta.hash : ''
-    try {
+      if (typeof id !== 'string' || !id) {
+        return { error: '无效的模型标识' }
+      }
+      if (!isInRoot(id)) {
+        return { error: '模型不在当前根目录内，无法匹配' }
+      }
+      let mtimeMs = 0
+      try {
+        mtimeMs = (await fs.stat(id)).mtimeMs
+      } catch {
+        return { error: '模型文件不存在' }
+      }
+      // mtime 一致时复用持久化哈希，跳过耗时的全文件 SHA256 计算
+      const meta = getModelMeta(id) || {}
+      const knownHash = meta.hash && meta.hashMtime === mtimeMs ? meta.hash : ''
       const result = await matchCivitai(id, knownHash)
       if (result.hash) setModelHash(id, result.hash, mtimeMs)
       return result
     } catch (err) {
       logger.warn(`Civitai 匹配失败: ${err.message}`)
       return { error: `Civitai 匹配失败: ${err.message}` }
+    } finally {
+      matching = false
     }
   })
 
