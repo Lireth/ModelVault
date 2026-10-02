@@ -43,7 +43,9 @@ const SORT_OPTIONS = [
   { key: 'name', label: '按名称' },
   { key: 'type', label: '按分类' },
   { key: 'size', label: '按大小' },
-  { key: 'mtime', label: '按修改时间' }
+  { key: 'mtime', label: '按修改时间' },
+  { key: 'favorite', label: '收藏优先' },
+  { key: 'rating', label: '按评分' }
 ]
 
 /** 可勾选的扫描文件类型（ext 与主进程 scanner.js 保持一致） */

@@ -44,6 +44,12 @@ async function onSortChange(e) {
   await saveSettings({ sortBy: state.sortBy })
 }
 
+/** 切换排序方向（U2）：翻转当前排序结果并持久化 */
+async function onSortDirChange() {
+  state.sortAsc = !state.sortAsc
+  await saveSettings({ sortAsc: state.sortAsc })
+}
+
 let unsubscribeProgress = null
 let unsubscribeMenu = null
 let unsubscribeThumbs = null
@@ -127,15 +133,22 @@ onUnmounted(() => {
             <button v-if="searchInput" class="search-clear" title="清空搜索" @click="clearSearch">✕</button>
           </div>
 
-          <label class="sort-select" title="排序方式">
+          <div class="sort-select" title="排序方式">
             <span class="sort-label">排序</span>
             <select :value="state.sortBy" @change="onSortChange">
               <option value="name">按名称</option>
               <option value="type">按分类</option>
               <option value="size">按大小</option>
               <option value="mtime">按修改时间</option>
+              <option value="favorite">收藏优先</option>
+              <option value="rating">按评分</option>
             </select>
-          </label>
+            <button
+              class="sort-dir"
+              :title="state.sortAsc ? '当前升序，点击切换为降序' : '当前降序，点击切换为升序'"
+              @click="onSortDirChange"
+            >{{ state.sortAsc ? '↑' : '↓' }}</button>
+          </div>
         </div>
 
         <!-- 未选择文件夹 -->
@@ -255,7 +268,7 @@ onUnmounted(() => {
   flex: 1;
   min-width: 0;
   font-size: 12px;
-  color: #f5b301;
+  color: var(--favorite);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -266,15 +279,15 @@ onUnmounted(() => {
   font-size: 12px;
   padding: 3px 14px;
   border-radius: 999px;
-  border: 1px solid #f5b301;
+  border: 1px solid var(--favorite);
   background: transparent;
-  color: #f5b301;
+  color: var(--favorite);
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 }
 
 .scan-error-retry:hover {
-  background: #f5b301;
+  background: var(--favorite);
   color: #10141a;
 }
 
@@ -373,6 +386,26 @@ onUnmounted(() => {
   border-color: var(--accent);
 }
 
+/* 排序方向切换按钮（U2） */
+.sort-dir {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.sort-dir:hover,
+.sort-dir:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+
 .result-bar {
   display: flex;
   align-items: center;
@@ -405,13 +438,13 @@ onUnmounted(() => {
 }
 
 .fav-filter:hover {
-  color: #f5b301;
-  border-color: #f5b301;
+  color: var(--favorite);
+  border-color: var(--favorite);
 }
 
 .fav-filter.active {
-  border-color: #f5b301;
-  color: #f5b301;
+  border-color: var(--favorite);
+  color: var(--favorite);
   font-weight: 600;
 }
 

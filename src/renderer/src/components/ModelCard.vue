@@ -137,11 +137,11 @@ const mtimeText = computed(() => {
 }
 
 .fav-btn:hover {
-  color: #f5b301;
+  color: var(--favorite);
 }
 
 .fav-btn.active {
-  color: #f5b301;
+  color: var(--favorite);
 }
 
 .name-row .model-name {
@@ -243,7 +243,7 @@ const mtimeText = computed(() => {
   font-weight: 700;
   letter-spacing: 1px;
   color: #fff;
-  background: rgba(229, 72, 77, 0.85);
+  background: var(--danger);
   padding: 2px 8px;
   border-radius: 999px;
 }

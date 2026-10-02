@@ -1058,7 +1058,7 @@ async function onUploadCover() {
 }
 
 .thumb-delete:hover {
-  background: #e5484d;
+  background: var(--danger);
 }
 
 .file-info {
@@ -1252,13 +1252,13 @@ async function onUploadCover() {
 }
 
 .fav-toggle:hover {
-  border-color: #f5b301;
-  color: #f5b301;
+  border-color: var(--favorite);
+  color: var(--favorite);
 }
 
 .fav-toggle.active {
-  border-color: #f5b301;
-  color: #f5b301;
+  border-color: var(--favorite);
+  color: var(--favorite);
   font-weight: 600;
 }
 
@@ -1275,15 +1275,15 @@ async function onUploadCover() {
 }
 
 .nsfw-toggle:hover {
-  border-color: #e5484d;
-  color: #e5484d;
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .nsfw-toggle.active {
-  border-color: #e5484d;
-  color: #e5484d;
+  border-color: var(--danger);
+  color: var(--danger);
   font-weight: 600;
-  background: rgba(229, 72, 77, 0.08);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 
 .rating {
@@ -1314,7 +1314,7 @@ async function onUploadCover() {
 }
 
 .star.on {
-  color: #f5b301;
+  color: var(--favorite);
 }
 
 /* 触发词行：文本框占满剩余宽度，复制按钮固定在右侧 */

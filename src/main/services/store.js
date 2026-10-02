@@ -39,7 +39,7 @@ const VALID_THEMES = new Set(['dark', 'light'])
 /** 应用设置允许的卡片尺寸取值 */
 const VALID_CARD_SIZES = new Set(['compact', 'normal', 'large'])
 /** 应用设置允许的默认排序方式 */
-const VALID_SORT_BY = new Set(['name', 'type', 'size', 'mtime'])
+const VALID_SORT_BY = new Set(['name', 'type', 'size', 'mtime', 'favorite', 'rating'])
 /** 应用设置允许的扫描文件扩展名（与 scanner.js 的 MODEL_EXTENSIONS 保持一致） */
 const VALID_SCAN_EXTENSIONS = new Set(['.safetensors', '.ckpt', '.pt', '.pth', '.bin'])
 
@@ -52,6 +52,7 @@ function defaultSettings() {
     theme: 'dark',
     cardSize: 'normal',
     sortBy: 'name',
+    sortAsc: true,
     scanExtensions: [...VALID_SCAN_EXTENSIONS],
     showSize: true,
     showMtime: true,
@@ -91,6 +92,7 @@ function normalizeSettings(raw) {
     theme: VALID_THEMES.has(raw.theme) ? raw.theme : base.theme,
     cardSize: VALID_CARD_SIZES.has(raw.cardSize) ? raw.cardSize : base.cardSize,
     sortBy: VALID_SORT_BY.has(raw.sortBy) ? raw.sortBy : base.sortBy,
+    sortAsc: typeof raw.sortAsc === 'boolean' ? raw.sortAsc : base.sortAsc,
     scanExtensions: normalizeExtensions(raw.scanExtensions),
     showSize: typeof raw.showSize === 'boolean' ? raw.showSize : base.showSize,
     showMtime: typeof raw.showMtime === 'boolean' ? raw.showMtime : base.showMtime,

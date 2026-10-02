@@ -80,6 +80,7 @@ export function defaultSettings() {
     theme: 'dark',
     cardSize: 'normal',
     sortBy: 'name',
+    sortAsc: true,
     scanExtensions: ['.safetensors', '.ckpt', '.pt', '.pth', '.bin'],
     showSize: true,
     showMtime: true,
@@ -100,7 +101,8 @@ export const state = reactive({
   subFilter: '', // LoRA 分类筛选（仅 typeFilter 为 lora 时生效）
   showFavoritesOnly: false, // 仅显示收藏的模型
   search: '',
-  sortBy: 'name', // name | size | mtime
+  sortBy: 'name', // name | type | size | mtime | favorite | rating
+  sortAsc: true, // 排序方向：true 升序 / false 降序（翻转当前排序结果）
   // 详情
   selectedId: null,
   detailDirty: false, // 详情页表单有未保存的修改（由 ModelDetail 同步，切换/关闭前确认）
@@ -153,8 +155,9 @@ export async function initApp() {
     state.folder = data.settings?.modelsFolder || ''
     state.settings = { ...defaultSettings(), ...data.settings }
     applyTheme(state.settings.theme)
-    // 应用默认排序方式
+    // 应用默认排序方式与方向
     if (state.settings.sortBy) state.sortBy = state.settings.sortBy
+    state.sortAsc = state.settings.sortAsc !== false
     if (state.folder && state.settings.autoScan !== false) {
       await scanModels()
     }
@@ -310,6 +313,16 @@ export const filteredModels = computed(() => {
     case 'mtime':
       sorted.sort((a, b) => b.mtimeMs - a.mtimeMs)
       break
+    case 'favorite':
+      // 收藏优先，同组内按名称（U2）
+      sorted.sort(
+        (a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0) || a.name.localeCompare(b.name, 'zh-CN')
+      )
+      break
+    case 'rating':
+      // 评分高优先，同分按名称（U2）
+      sorted.sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name, 'zh-CN'))
+      break
     case 'type':
       // 按分类排序：遵循固定分类顺序（Checkpoint → TextEncoders → VAE → LoRA → 其他），同分类内按名称
       {
@@ -322,6 +335,8 @@ export const filteredModels = computed(() => {
     default:
       sorted.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
   }
+  // 排序方向（U2）：sortAsc=false 时翻转当前结果
+  if (!state.sortAsc) sorted.reverse()
   return sorted
 })
 

@@ -217,6 +217,17 @@ describe('应用设置规范化', () => {
     const { excludeDirs } = await loadSettings()
     expect(excludeDirs).toEqual(['loras', 'embeds', '.modelvault'])
   })
+
+  it('收藏/评分排序合法（U2 白名单扩展），未知排序回退 name，sortAsc 仅接受布尔', async () => {
+    await updateSettings({ sortBy: 'favorite', sortAsc: false })
+    let s = await loadSettings()
+    expect(s.sortBy).toBe('favorite')
+    expect(s.sortAsc).toBe(false)
+    // sortAsc 非布尔回退默认 true
+    await updateSettings({ sortAsc: 'yes' })
+    s = await loadSettings()
+    expect(s.sortAsc).toBe(true)
+  })
 })
 
 describe('应用设置文件损坏恢复（B2）', () => {
