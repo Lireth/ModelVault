@@ -14,6 +14,7 @@ import {
   setNsfw,
   setRating,
   showContextMenu,
+  state,
   subCategoryInfo,
   tagsForType,
   toast,
@@ -71,6 +72,8 @@ function fillForm(model) {
   form.triggerWords = model?.triggerWords || ''
   // 大模型自动标注为「基底模型」分类
   if (model?.type === 'checkpoint') form.subCategory = 'base'
+  // 脏检测基线快照（C8）：填充后与表单当前值对比
+  formSnapshot = JSON.stringify(form)
 }
 
 /** 切换二级分类标签（再次点击取消标注）；基底模型为自动分类，不可手动更改 */
@@ -79,7 +82,26 @@ function toggleSubCategory(key) {
   form.subCategory = form.subCategory === key ? '' : key
 }
 
-watch(selectedModel, (m) => fillForm(m), { immediate: true })
+/* ---------------- 表单脏数据保护（C8） ---------------- */
+
+/** 填充后的表单快照（序列化值），用于脏检测 */
+let formSnapshot = ''
+
+/** 表单是否有未保存的修改（与最近一次填充/保存的值不一致） */
+const formDirty = computed(() => JSON.stringify(form) !== formSnapshot)
+
+watch(selectedModel, (m, old) => {
+  // 同一模型的引用替换（收藏/评分、后台缩略图补齐）且表单有未保存编辑时
+  // 保留编辑不重填：这类更新不经过用户操作，静默覆盖会造成标注丢失
+  if (m && old && m.id === old.id && formDirty.value) return
+  fillForm(m)
+}, { immediate: true })
+
+// 同步到全局状态（须在首次 fillForm 之后注册，快照已建立，避免初始误报为脏）：
+// openDetail/closeDetail 据此在切换/关闭前向用户确认
+watch(formDirty, (d) => {
+  state.detailDirty = d
+}, { immediate: true })
 
 /* ---------------- Civitai 匹配 ---------------- */
 
@@ -439,6 +461,9 @@ async function onSave() {
     // 触发词仅 LoRA 详情页提供编辑
     if (model.type === 'lora') payload.triggerWords = form.triggerWords
     await saveModelData(model.id, payload)
+    // 保存成功后以当前表单为新基线（C8）：立即清除脏标记；
+    // 随后 selectedModel 引用替换触发重填时会再按服务端值刷新快照
+    formSnapshot = JSON.stringify(form)
   } catch (err) {
     toast('error', `保存失败: ${err.message}`)
   } finally {

@@ -103,6 +103,7 @@ export const state = reactive({
   sortBy: 'name', // name | size | mtime
   // 详情
   selectedId: null,
+  detailDirty: false, // 详情页表单有未保存的修改（由 ModelDetail 同步，切换/关闭前确认）
   // 设置
   settings: defaultSettings(),
   settingsOpen: false,
@@ -339,11 +340,21 @@ watch(
   }
 )
 
+/**
+ * 打开模型详情。表单有未保存的修改时先确认放弃（C8）；
+ * 重复点击当前已选卡片不触发确认。
+ * @param {string} id 模型 id（文件绝对路径）
+ */
 export function openDetail(id) {
+  if (state.detailDirty && state.selectedId !== id) {
+    if (!window.confirm('当前模型有未保存的修改，放弃修改并切换？')) return
+  }
   state.selectedId = id
 }
 
+/** 关闭模型详情。表单有未保存的修改时先确认放弃（C8） */
 export function closeDetail() {
+  if (state.detailDirty && !window.confirm('当前模型有未保存的修改，放弃修改并关闭？')) return
   state.selectedId = null
 }
 
