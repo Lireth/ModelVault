@@ -19,6 +19,17 @@ const API_BASE = 'https://civitai.com/api/v1'
 const REQUEST_TIMEOUT_MS = 15000
 /** 进程内匹配结果缓存：key 为「绝对路径:mtime」 */
 const matchCache = new Map()
+/** 缓存容量上限：超出后按插入顺序淘汰最旧条目（S3，与装饰缓存的治理策略一致）。
+ *  匹配结果（含版本信息/触发词/示例参数）随大库全量匹配持续累积，须限容防内存膨胀 */
+const MATCH_CACHE_MAX = 1000
+
+/** 写入匹配缓存（容量超限时按插入顺序淘汰最旧条目） */
+function cacheMatchResult(key, result) {
+  matchCache.set(key, result)
+  if (matchCache.size > MATCH_CACHE_MAX) {
+    matchCache.delete(matchCache.keys().next().value)
+  }
+}
 
 /** 流式计算文件 SHA256（大文件友好，内存占用恒定） */
 function sha256File(absPath) {
@@ -110,7 +121,7 @@ export async function matchCivitai(absPath, knownHash = '') {
   if (response.status === 404) {
     logger.info(`Civitai 匹配：未找到匹配的模型版本 (${hash.slice(0, 12)}…)` )
     const result = { matched: false, hash }
-    matchCache.set(cacheKey, result)
+    cacheMatchResult(cacheKey, result)
     return result
   }
   if (!response.ok) {
@@ -119,7 +130,7 @@ export async function matchCivitai(absPath, knownHash = '') {
 
   const version = await response.json()
   const result = { matched: true, hash, info: mapVersion(version) }
-  matchCache.set(cacheKey, result)
+  cacheMatchResult(cacheKey, result)
   logger.info(`Civitai 匹配成功：${result.info.modelName} / ${result.info.versionName}`)
   return result
 }
