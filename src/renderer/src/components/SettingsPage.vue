@@ -197,7 +197,7 @@ async function onSave() {
           </div>
           <div class="setting-actions">
             <button class="btn" @click="revealModel(state.folder)" :disabled="!state.folder">打开</button>
-            <button class="btn btn-primary" @click="onChangeFolder">更改文件夹</button>
+            <button class="btn btn-primary" :disabled="state.scanning" @click="onChangeFolder">更改文件夹</button>
           </div>
         </div>
 

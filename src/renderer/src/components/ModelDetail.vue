@@ -282,6 +282,9 @@ async function onDropCover(e) {
       if (!sourcePath) continue
       await importCoverFromDrop(model.id, sourcePath)
     }
+  } catch (err) {
+    // 导入被拒（非图片内容/越界路径等）时向用户提示，而非静默进全局日志（S1）
+    toast('error', `封面导入失败: ${err.message}`)
   } finally {
     busy.value = false
   }
