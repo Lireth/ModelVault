@@ -13,6 +13,7 @@ import {
   handleMenuAction,
   initApp,
   LORA_TAGS,
+  saveSettings,
   scanModels,
   state,
   typeInfo,
@@ -34,6 +35,12 @@ function clearSearch() {
   clearTimeout(searchTimer)
   searchInput.value = ''
   state.search = ''
+}
+
+/** 切换排序方式：立即生效并静默持久化，重启后保持用户选择 */
+async function onSortChange(e) {
+  state.sortBy = e.target.value
+  await saveSettings({ sortBy: state.sortBy })
 }
 
 let unsubscribeProgress = null
@@ -114,7 +121,7 @@ onUnmounted(() => {
 
           <label class="sort-select" title="排序方式">
             <span class="sort-label">排序</span>
-            <select v-model="state.sortBy">
+            <select :value="state.sortBy" @change="onSortChange">
               <option value="name">按名称</option>
               <option value="type">按分类</option>
               <option value="size">按大小</option>
