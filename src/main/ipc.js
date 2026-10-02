@@ -1,6 +1,6 @@
 import { BrowserWindow, app, ipcMain } from 'electron'
 import logger from './logger'
-import { registerModelIpcHandlers } from './ipc/models'
+import { registerModelIpcHandlers } from './ipc/models/index.js'
 import { themeColors } from './theme'
 
 /**

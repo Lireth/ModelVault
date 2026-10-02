@@ -6,6 +6,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.js'],
-    setupFiles: ['./tests/setup.js']
+    setupFiles: ['./tests/setup.js'],
+    // 测试文件共享 fakeUserData 磁盘目录（settings.json/legacy store.json），
+    // 并行运行会跨文件竞态读写；单文件本身亚秒级，串行总成本可忽略
+    fileParallelism: false
   }
 })

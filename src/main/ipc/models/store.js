@@ -1,0 +1,93 @@
+import { BrowserWindow, dialog, ipcMain } from 'electron'
+import logger from '../../logger'
+import {
+  getMetaMapByAbsPath,
+  getCurrentRoot,
+  getSettings,
+  loadSettings,
+  loadData,
+  setDataRoot,
+  setStoreSaveErrorListener,
+  updateSettings
+} from '../../services/store'
+import { pruneOrphanCovers } from '../../services/covers'
+import { getThumbDrainPromise } from './model-state'
+
+/**
+ * 存储与设置链路：持久化数据加载、模型根目录选择、应用设置更新。
+ * ensureRootStore 是全域切换关联存储的唯一入口（扫描与 loadStore 共用）。
+ */
+
+/**
+ * 确保指定根目录的关联存储已加载。
+ * 切换根目录前必须等待上一轮后台缩略图生成完成（B10）：
+ * drain 过程中 getThumbsDir() 依赖 currentRoot，中途切换会把缩略图
+ * 写进切换后的目录，且文件不被新根目录 keepNames 命中而被 pruneThumbs 清理。
+ */
+export async function ensureRootStore(root) {
+  if (getCurrentRoot() !== root) {
+    const thumbDrainPromise = getThumbDrainPromise()
+    if (thumbDrainPromise) {
+      await thumbDrainPromise.catch(() => {})
+    }
+    setDataRoot(root)
+    await loadData()
+  }
+}
+
+/**
+ * 注册元数据落盘失败的跨窗口广播（B1）。
+ * 防抖落盘在 IPC 响应之后异步发生，渲染进程已收到成功返回，
+ * 必须经事件通知，否则用户标注会静默丢失。
+ * 副作用注册：仅可由 registerModelIpcHandlers 调用时触发，严禁漂移到模块 import 时。
+ */
+export function setupStoreErrorForwarding() {
+  setStoreSaveErrorListener((err) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('models:storeError', { message: err.message })
+      }
+    }
+  })
+}
+
+/** 注册存储与设置链路的 IPC 处理器 */
+export function registerStoreHandlers() {
+  // 加载持久化数据（设置 + 当前模型根目录的元数据，键为绝对路径）
+  ipcMain.handle('models:loadStore', async () => {
+    const settings = await loadSettings()
+    let metaMap = {}
+    if (settings.modelsFolder) {
+      await ensureRootStore(settings.modelsFolder)
+      // 清理不再被元数据引用的孤儿封面文件
+      await pruneOrphanCovers()
+      metaMap = getMetaMapByAbsPath()
+    }
+    return {
+      settings,
+      models: metaMap
+    }
+  })
+
+  // 选择模型根目录
+  ipcMain.handle('models:chooseFolder', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择模型文件夹',
+      properties: ['openDirectory']
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    const folder = result.filePaths[0]
+    await updateSettings({ modelsFolder: folder })
+    logger.info(`模型目录已设置为: ${folder}`)
+    return folder
+  })
+
+  // 更新应用设置（通用/扫描/外观），返回规范化后的完整设置
+  ipcMain.handle('settings:update', async (event, patch = {}) => {
+    await updateSettings(patch)
+    const settings = getSettings()
+    logger.info(`应用设置已更新: ${JSON.stringify(patch).slice(0, 200)}`)
+    return { settings }
+  })
+}

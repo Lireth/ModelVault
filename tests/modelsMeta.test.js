@@ -22,10 +22,12 @@ vi.mock('electron', () => ({
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() }
 }))
 
-import { mergeSaveModelData, registerModelIpcHandlers } from '../src/main/ipc/models'
+import { mergeSaveModelData } from '../src/main/ipc/models/meta'
+import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
 import { importCoverFromPath } from '../src/main/services/covers'
-import { setDataRoot } from '../src/main/services/store'
+import { getModelMeta, loadData, setModelMeta, setDataRoot } from '../src/main/services/store'
 import { registerImageProtocolHandler, toImageUrl } from '../src/main/protocol'
+import { getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
 
 const baseMeta = {
   alias: '旧别名',
@@ -249,5 +251,84 @@ describe('civitaiMatch 并发防重入（B3）', () => {
     // 互斥标记已释放：第二次请求正常进入（命中 matchCache 直接返回）
     const second = await handler({}, { id: modelFile })
     expect(second.matched).toBe(false)
+  })
+})
+
+describe('models:saveModelData / models:setMetaFlags 集成（D1）', () => {
+  let root
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-meta-'))
+    roots.push(root)
+    setDataRoot(root)
+    await loadData()
+    registerModelIpcHandlers()
+  })
+
+  /** 在当前根目录内创建模型并预置完整元数据，返回模型绝对路径 */
+  async function setupModel() {
+    const abs = path.join(root, 'm.safetensors')
+    await fs.writeFile(abs, 'x')
+    setModelMeta(abs, {
+      alias: '旧别名',
+      note: '旧备注',
+      params: { steps: 20 },
+      covers: ['covers/a.png'],
+      cover: 'covers/a.png'
+    })
+    return abs
+  }
+
+  it('saveModelData 局部更新仅覆盖显式传入字段（B2 集成）', async () => {
+    const abs = await setupModel()
+    const handler = getRegisteredHandler('models:saveModelData')
+    const res = await handler(makeEvent(), { id: abs, note: '新备注' })
+    expect(res.error).toBeUndefined()
+    expect(res.meta.note).toBe('新备注')
+    // 未传字段原样保留（别名/参数/封面均不受影响）
+    expect(res.meta.alias).toBe('旧别名')
+    expect(res.meta.params.steps).toBe(20)
+    expect(res.meta.covers).toEqual(['covers/a.png'])
+    expect(getModelMeta(abs).alias).toBe('旧别名')
+  })
+
+  it('saveModelData 触发词仅随显式字符串更新', async () => {
+    const abs = await setupModel()
+    // setModelMeta 为整条替换：带上已有字段预置触发词
+    setModelMeta(abs, { ...getModelMeta(abs), triggerWords: 'masterpiece, best quality' })
+    const handler = getRegisteredHandler('models:saveModelData')
+    // 未传 triggerWords：不更新不清空
+    await handler(makeEvent(), { id: abs, note: 'x' })
+    expect(getModelMeta(abs).triggerWords).toBe('masterpiece, best quality')
+    // 显式传入空串：允许主动清空
+    const res = await handler(makeEvent(), { id: abs, triggerWords: '' })
+    expect(res.meta.triggerWords).toBe('')
+  })
+
+  it('saveModelData 无效标识拒绝', async () => {
+    const handler = getRegisteredHandler('models:saveModelData')
+    expect(await handler(makeEvent(), { id: '' })).toEqual({ error: '无效的模型标识' })
+  })
+
+  it('setMetaFlags 更新传入字段并即时落盘', async () => {
+    const abs = await setupModel()
+    const handler = getRegisteredHandler('models:setMetaFlags')
+    const res = await handler(makeEvent(), { id: abs, favorite: true, nsfw: true, rating: 4 })
+    expect(res.error).toBeUndefined()
+    expect(res.meta.favorite).toBe(true)
+    expect(res.meta.nsfw).toBe(true)
+    expect(res.meta.rating).toBe(4)
+    const persisted = getModelMeta(abs)
+    expect(persisted.favorite).toBe(true)
+    expect(persisted.nsfw).toBe(true)
+    expect(persisted.rating).toBe(4)
+  })
+
+  it('setMetaFlags 非法值与空更新拒绝', async () => {
+    const abs = await setupModel()
+    const handler = getRegisteredHandler('models:setMetaFlags')
+    expect(await handler(makeEvent(), { id: abs, favorite: 'yes' })).toEqual({ error: '无效的收藏状态' })
+    expect(await handler(makeEvent(), { id: abs, rating: 6 })).toEqual({ error: '评分需为 0-5 的整数' })
+    expect(await handler(makeEvent(), { id: abs })).toEqual({ error: '无有效的更新字段' })
   })
 })

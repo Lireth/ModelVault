@@ -166,7 +166,7 @@ export async function scanModels(root, onProgress, options = {}) {
 
 /**
  * 同名 sidecar 预览图候选（按命中优先级排序）。
- * 展示（findSidecarPreview）与删除清理（ipc/models.js 的 sidecarFilesFor）
+ * 展示（findSidecarPreview）与删除清理（ipc/models/misc.js 的 sidecarFilesFor）
  * 共用此常量，保证「能展示的都会被清理、能清理的都有机会展示」（B17）。
  */
 export const SIDECAR_PREVIEW_EXTS = [
