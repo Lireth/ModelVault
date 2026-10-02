@@ -35,10 +35,14 @@ function thumbFileName(absCover, mtimeMs) {
 
 /**
  * 生成缩略图核心逻辑：读取源图、按需缩放并写入缓存文件。
+ * 经异步 readFile + createFromBuffer 解码：createFromPath 为同步 API，
+ * 同步读盘+解码大封面图会阻塞主进程事件循环（B5），扫描后台补齐
+ * 缩略图期间所有 IPC 处理会随之停摆。
  * @returns {Promise<string>} 成功返回缩略图路径；源图过小/损坏返回 ''（回退原图）
  */
 async function generateThumb(absCover, mtimeMs, thumbPath) {
-  const image = nativeImage.createFromPath(absCover)
+  const buffer = await fs.readFile(absCover)
+  const image = nativeImage.createFromBuffer(buffer)
   if (image.isEmpty()) return ''
   const { width } = image.getSize()
   if (width <= MIN_SOURCE_WIDTH) return ''
