@@ -174,6 +174,7 @@ describe('mvimg 协议路径白名单', () => {
 
   it('根目录内 junction 指向外部文件被拒绝（B8 绕过）', async (ctx) => {
     const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-outside-'))
+    roots.push(outsideDir)
     const img = path.join(outsideDir, 'secret.png')
     await fs.writeFile(img, 'x')
     const linkPath = path.join(root, 'link')
