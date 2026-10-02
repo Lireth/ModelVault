@@ -6,11 +6,8 @@ import { matchCivitai } from '../../services/civitai'
 
 /**
  * 元数据链路：详情页标注保存、快捷标记（收藏/NSFW/评分）、Civitai 匹配。
- * matching 为本模块私有状态，仅 models:civitaiMatch 使用（B3 防重入）。
+ * matchingIds 为本模块私有状态，仅 models:civitaiMatch 使用（B3/S5 按 id 防重入）。
  */
-
-/** Civitai 匹配进行中标记（同步置位防重入：重复点击会并发跑多个 GB 级文件的 SHA256） */
-let matching = false
 
 /**
  * 合并详情页保存的元数据字段（纯函数，不修改入参）。
@@ -31,6 +28,10 @@ export function mergeSaveModelData(existing, patch) {
   if (patch.subCategory !== undefined) merged.subCategory = patch.subCategory
   return merged
 }
+
+/** 进行中匹配的模型 id 集合（按 id 互斥，S5）：全局单例会连带拒绝
+ *  不同模型的匹配请求，大库逐个匹配体验割裂；同一模型仍须防并发重复哈希 */
+const matchingIds = new Set()
 
 /** 注册元数据链路的 IPC 处理器 */
 export function registerMetaHandlers() {
@@ -89,16 +90,16 @@ export function registerMetaHandlers() {
   // Civitai 匹配：计算模型文件 SHA256 并查询 Civitai API（耗时操作，大文件需数秒）。
   // 已计算的哈希持久化在元数据中（hash/hashMtime），文件未变化时直接复用，重启后无需重算
   ipcMain.handle('models:civitaiMatch', async (event, { id } = {}) => {
-    // 同步先检查并置位匹配状态：任何 await 之前完成，与 models:scan 的防重入模式一致，
-    // 防止并发请求对同一文件重复计算全量 SHA256（耗时操作会阻塞磁盘）
-    if (matching) {
-      return { error: '正在匹配中，请稍候' }
+    if (typeof id !== 'string' || !id) {
+      return { error: '无效的模型标识' }
     }
-    matching = true
+    // 同步先检查并置位：任何 await 之前完成（B4 惯例）。按 id 互斥（S5）：
+    // 同一模型防并发重复哈希（GB 级文件占用磁盘），不同模型可并行匹配
+    if (matchingIds.has(id)) {
+      return { error: '该模型正在匹配中，请稍候' }
+    }
+    matchingIds.add(id)
     try {
-      if (typeof id !== 'string' || !id) {
-        return { error: '无效的模型标识' }
-      }
       if (!isInRoot(id)) {
         return { error: '模型不在当前根目录内，无法匹配' }
       }
@@ -118,7 +119,7 @@ export function registerMetaHandlers() {
       logger.warn(`Civitai 匹配失败: ${err.message}`)
       return { error: `Civitai 匹配失败: ${err.message}` }
     } finally {
-      matching = false
+      matchingIds.delete(id)
     }
   })
 }

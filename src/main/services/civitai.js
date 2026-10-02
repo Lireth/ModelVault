@@ -128,7 +128,14 @@ export async function matchCivitai(absPath, knownHash = '') {
     throw new Error(`Civitai API 返回 ${response.status}`)
   }
 
-  const version = await response.json()
+  let version
+  try {
+    version = await response.json()
+  } catch (err) {
+    // 响应体非 JSON（如网关返回 HTML 错误页）时转为友好错误（S6），
+    // 避免原始 SyntaxError 直接透给用户
+    throw new Error(`Civitai 响应解析失败（响应体损坏）: ${err.message}`)
+  }
   const result = { matched: true, hash, info: mapVersion(version) }
   cacheMatchResult(cacheKey, result)
   logger.info(`Civitai 匹配成功：${result.info.modelName} / ${result.info.versionName}`)
