@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -20,10 +20,6 @@ import {
  * - __metadata__ 字段提取（kohya ss_* / modelspec.*）
  * - 真实文件读取（临时目录构造合法/损坏文件）
  */
-
-afterAll(async () => {
-  await fs.rm(os.tmpdir(), { recursive: true, force: false }).catch(() => {})
-})
 
 describe('readHeaderLength', () => {
   it('小端 u64 正确读取，非法缓冲返回 0', () => {

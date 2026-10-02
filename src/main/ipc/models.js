@@ -16,6 +16,7 @@ import {
   setDataRoot,
   setModelHash,
   setModelMeta,
+  setStoreSaveErrorListener,
   updateSettings
 } from '../services/store'
 import {
@@ -362,6 +363,16 @@ export function mergeSaveModelData(existing, patch) {
 }
 
 export function registerModelIpcHandlers() {
+  // 元数据落盘失败时广播到所有窗口（B1）：防抖落盘在 IPC 响应之后异步发生，
+  // 渲染进程已收到成功返回，必须经事件通知，否则用户标注会静默丢失
+  setStoreSaveErrorListener((err) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('models:storeError', { message: err.message })
+      }
+    }
+  })
+
   // 加载持久化数据（设置 + 当前模型根目录的元数据，键为绝对路径）
   ipcMain.handle('models:loadStore', async () => {
     const settings = await loadSettings()

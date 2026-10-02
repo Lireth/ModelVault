@@ -484,8 +484,34 @@ export function scheduleSave() {
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     saveTimer = null
-    saveStoreNow().catch((err) => logger.error(`保存关联存储失败: ${err.message}`))
+    saveStoreNow().catch(notifyStoreSaveError)
   }, SAVE_DELAY)
+}
+
+/** 元数据落盘失败监听器（IPC 层注册，用于向渲染进程推送异常，防止用户标注静默丢失） */
+let storeSaveErrorListener = null
+
+/**
+ * 注册元数据落盘失败监听器（传 null 可清除）。
+ * @param {((err: Error) => void) | null} fn
+ */
+export function setStoreSaveErrorListener(fn) {
+  storeSaveErrorListener = typeof fn === 'function' ? fn : null
+}
+
+/**
+ * 统一处理落盘失败：写日志并通知监听器。
+ * 监听器自身异常不影响保存流程（仅降级为日志）。
+ */
+function notifyStoreSaveError(err) {
+  logger.error(`关联存储写入失败: ${err.message}`)
+  if (storeSaveErrorListener) {
+    try {
+      storeSaveErrorListener(err)
+    } catch (listenErr) {
+      logger.warn(`落盘失败监听器异常: ${listenErr.message}`)
+    }
+  }
 }
 
 /** 立即落盘（原子写入：临时文件 -> 重命名；并发请求排队补写，不会丢失） */
@@ -500,13 +526,13 @@ export async function saveStoreNow() {
   try {
     await atomicWriteFile(getDataFilePath(), JSON.stringify(data, null, 2))
   } catch (err) {
-    logger.error(`关联存储写入失败: ${err.message}`)
+    notifyStoreSaveError(err)
   } finally {
     saving = false
     if (pendingSave) {
       pendingSave = false
       // 补写读取的是当前最新 data，覆盖写盘期间的任何后续修改
-      saveStoreNow().catch((err) => logger.error(`保存关联存储失败: ${err.message}`))
+      saveStoreNow().catch(notifyStoreSaveError)
     }
   }
 }

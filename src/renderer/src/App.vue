@@ -16,6 +16,7 @@ import {
   saveSettings,
   scanModels,
   state,
+  toast,
   typeInfo,
   chooseFolder
 } from './store/appStore'
@@ -46,6 +47,7 @@ async function onSortChange(e) {
 let unsubscribeProgress = null
 let unsubscribeMenu = null
 let unsubscribeThumbs = null
+let unsubscribeStoreError = null
 
 /**
  * 拖放兜底（B13）：阻止非文件拖放（文本/链接等）触发默认导航覆盖当前窗口。
@@ -75,6 +77,10 @@ onMounted(async () => {
   unsubscribeThumbs = window.api.models.onThumbsReady(({ updates }) => {
     applyThumbUpdates(updates)
   })
+  // 订阅元数据落盘失败事件（B1）：防抖落盘在保存响应之后异步发生，失败须提示用户重试
+  unsubscribeStoreError = window.api.models.onStoreError(({ message }) => {
+    toast('error', `元数据保存失败: ${message}，请检查磁盘后重新保存`)
+  })
   await initApp()
 })
 
@@ -84,6 +90,7 @@ onUnmounted(() => {
   unsubscribeProgress?.()
   unsubscribeMenu?.()
   unsubscribeThumbs?.()
+  unsubscribeStoreError?.()
 })
 </script>
 

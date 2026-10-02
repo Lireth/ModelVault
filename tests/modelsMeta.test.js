@@ -37,6 +37,9 @@ const baseMeta = {
   cover: 'covers/a.png'
 }
 
+/** 本文件创建的全部临时目录（afterAll 只清理这些，不动系统临时目录） */
+const roots = []
+
 describe('mergeSaveModelData', () => {
   it('全字段显式传入时正常覆盖', () => {
     const merged = mergeSaveModelData(baseMeta, {
@@ -86,11 +89,15 @@ describe('importCoverFromPath 封面导入', () => {
 
   beforeEach(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-covers-'))
+    roots.push(root)
     setDataRoot(root)
   })
 
+  // 只清理自建临时目录：删除整个系统临时目录会连带摧毁并行测试的目录与 vite 缓存
   afterAll(async () => {
-    await fs.rm(os.tmpdir(), { recursive: true, force: false }).catch(() => {})
+    for (const dir of roots) {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+    }
   })
 
   /** 最小 PNG 文件头（魔数校验所需 8 字节 + 补足数据） */
@@ -128,6 +135,7 @@ describe('mvimg 协议路径白名单', () => {
 
   beforeEach(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-proto-'))
+    roots.push(root)
     setDataRoot(root)
     vi.mocked(protocol.handle).mockClear()
     registerImageProtocolHandler()
@@ -136,7 +144,9 @@ describe('mvimg 协议路径白名单', () => {
   })
 
   afterAll(async () => {
-    await fs.rm(os.tmpdir(), { recursive: true, force: false }).catch(() => {})
+    for (const dir of roots) {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+    }
   })
 
   /** 经 toImageUrl 构造请求并调用协议 handler，返回响应 */
@@ -153,6 +163,7 @@ describe('mvimg 协议路径白名单', () => {
 
   it('根目录外路径拒绝（403）', async () => {
     const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-outside-'))
+    roots.push(outsideDir)
     const img = path.join(outsideDir, 'secret.png')
     await fs.writeFile(img, 'x')
     const res = await request(img)

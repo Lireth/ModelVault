@@ -10,9 +10,11 @@ import {
   loadSettings,
   removeModelMeta,
   resolveCover,
+  saveStoreNow,
   setDataRoot,
   setModelHash,
   setModelMeta,
+  setStoreSaveErrorListener,
   updateSettings
 } from '../src/main/services/store'
 import { fakeUserData } from './setup'
@@ -27,6 +29,7 @@ import { fakeUserData } from './setup'
  */
 
 let root
+const roots = []
 
 /** 写入一个模型文件占位（仅为路径关联，不要求真实模型内容） */
 async function touchModel(rel) {
@@ -38,12 +41,17 @@ async function touchModel(rel) {
 
 beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-store-'))
+  roots.push(root)
   setDataRoot(root)
   await loadData()
 })
 
+// 只清理本文件创建的临时目录：删除整个系统临时目录会连带摧毁
+// 并行运行的其他测试文件临时目录与 vite 转换缓存，造成偶发 ENOENT 失败
 afterAll(async () => {
-  await fs.rm(os.tmpdir(), { recursive: true, force: false }).catch(() => {})
+  for (const dir of roots) {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+  }
 })
 
 describe('元数据规范化', () => {
@@ -153,6 +161,52 @@ describe('atomicWriteFile', () => {
     expect(await fs.readFile(file, 'utf-8')).toBe('{"ok":true}')
     const siblings = await fs.readdir(path.dirname(file))
     expect(siblings.every((n) => !n.includes('.tmp'))).toBe(true)
+  })
+})
+
+describe('落盘失败通知（B1）', () => {
+  // 说明：直接调用 saveStoreNow 触发落盘而非依赖 scheduleSave 的防抖 timer——
+  // 全量并行跑测试时事件循环积压会无限推迟 timer 回调，轮询等待会产生竞态
+  it('写入失败时经监听器上报错误', async () => {
+    const abs = await touchModel('save-fail.safetensors')
+    // 用同名普通文件占位 .modelvault 目录，使原子写临时文件必然失败（EEXIST/ENOTDIR）
+    const dataDir = path.join(root, '.modelvault')
+    await fs.rm(dataDir, { recursive: true, force: true })
+    await fs.writeFile(dataDir, 'x')
+
+    const errors = []
+    setStoreSaveErrorListener((err) => errors.push(err))
+    try {
+      setModelMeta(abs, { alias: '测试' })
+      await saveStoreNow()
+      expect(errors.length).toBeGreaterThanOrEqual(1)
+      expect(errors[0]).toBeInstanceOf(Error)
+      expect(errors[0].message).toBeTruthy()
+    } finally {
+      setStoreSaveErrorListener(null)
+    }
+  })
+
+  it('监听器自身抛异常时仅降级为日志，不中断保存流程', async () => {
+    const abs = await touchModel('listener-throw.safetensors')
+    const dataDir = path.join(root, '.modelvault')
+    await fs.rm(dataDir, { recursive: true, force: true })
+    await fs.writeFile(dataDir, 'x')
+
+    let notified = 0
+    setStoreSaveErrorListener(() => {
+      notified += 1
+      throw new Error('监听器内部错误')
+    })
+    try {
+      setModelMeta(abs, { alias: '测试' })
+      await saveStoreNow()
+      // 失败已上报且保存流程未被监听器异常中断：内存态已更新，无未捕获异常
+      expect(notified).toBeGreaterThanOrEqual(1)
+      expect(getModelMeta(abs).alias).toBe('测试')
+    } finally {
+      setStoreSaveErrorListener(null)
+    }
   })
 })
 

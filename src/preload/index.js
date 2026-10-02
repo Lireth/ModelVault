@@ -26,7 +26,12 @@ const VALID_INVOKE_CHANNELS = [
   'models:reveal'
 ]
 
-const VALID_RECEIVE_CHANNELS = ['models:scanProgress', 'models:menuAction', 'models:thumbsReady']
+const VALID_RECEIVE_CHANNELS = [
+  'models:scanProgress',
+  'models:menuAction',
+  'models:thumbsReady',
+  'models:storeError'
+]
 
 /** 带白名单校验的 invoke（所有便捷方法的统一入口） */
 function invokeValidated(channel, payload) {
@@ -110,6 +115,8 @@ const api = {
     reveal: (path) => invokeValidated('models:reveal', { path }),
     /** 订阅扫描进度，返回取消监听函数 */
     onScanProgress: (listener) => subscribe('models:scanProgress', listener),
+    /** 订阅元数据落盘失败事件（message: 错误信息），返回取消监听函数 */
+    onStoreError: (listener) => subscribe('models:storeError', listener),
     /** 订阅后台缩略图生成完成事件（updates: [{ id, coverUrl }]），返回取消监听函数 */
     onThumbsReady: (listener) => subscribe('models:thumbsReady', listener),
     /** 订阅右键菜单动作事件，返回取消监听函数 */
