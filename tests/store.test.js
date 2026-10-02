@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -215,6 +215,37 @@ describe('应用设置规范化', () => {
     await updateSettings({ excludeDirs: ['Loras', '  LORAS ', 'Embeds', '', '.modelvault'] })
     const { excludeDirs } = await loadSettings()
     expect(excludeDirs).toEqual(['loras', 'embeds', '.modelvault'])
+  })
+})
+
+describe('应用设置文件损坏恢复（B2）', () => {
+  const settingsFile = path.join(fakeUserData, 'settings.json')
+  const backupFile = `${settingsFile}.bak`
+
+  afterEach(async () => {
+    await fs.rm(settingsFile, { force: true }).catch(() => {})
+    await fs.rm(backupFile, { force: true }).catch(() => {})
+  })
+
+  it('settings.json 损坏时备份为 .bak 后重置，不直接覆盖原文件', async () => {
+    await fs.mkdir(fakeUserData, { recursive: true })
+    await fs.writeFile(settingsFile, '{corrupted!!')
+    const s = await loadSettings()
+    // 返回默认设置（modelsFolder 丢失但可手动从备份恢复）
+    expect(s.modelsFolder).toBe('')
+    // 原文件被备份，损坏内容原样保留，供用户手动抢救
+    expect(await fs.readFile(backupFile, 'utf-8')).toBe('{corrupted!!')
+    // settings.json 已被 rename 移走，待下次 updateSettings 重写新文件
+    await expect(fs.access(settingsFile)).rejects.toThrow()
+  })
+
+  it('合法 JSON 但根节点非对象时同样备份重置', async () => {
+    await fs.mkdir(fakeUserData, { recursive: true })
+    await fs.writeFile(settingsFile, '123')
+    const s = await loadSettings()
+    expect(s.theme).toBe('dark')
+    expect(await fs.readFile(backupFile, 'utf-8')).toBe('123')
+    await expect(fs.access(settingsFile)).rejects.toThrow()
   })
 })
 

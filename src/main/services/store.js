@@ -299,24 +299,36 @@ export async function loadSettings() {
   try {
     const text = await fs.readFile(getSettingsFilePath(), 'utf-8')
     const parsed = JSON.parse(text)
-    if (parsed && typeof parsed === 'object') {
-      settings = normalizeSettings(parsed)
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('根节点不是 JSON 对象')
     }
-  } catch {
-    // settings.json 不存在：尝试从旧版 store.json 恢复设置
-    try {
-      const legacyText = await fs.readFile(
-        path.join(app.getPath('userData'), LEGACY_STORE_FILE),
-        'utf-8'
-      )
-      const legacy = JSON.parse(legacyText)
-      if (typeof legacy?.settings?.modelsFolder === 'string') {
-        settings = normalizeSettings(legacy.settings)
-        await updateSettings(settings)
-        logger.info(`已从旧版存储恢复应用设置: ${settings.modelsFolder}`)
+    settings = normalizeSettings(parsed)
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      // settings.json 不存在：尝试从旧版 store.json 恢复设置
+      try {
+        const legacyText = await fs.readFile(
+          path.join(app.getPath('userData'), LEGACY_STORE_FILE),
+          'utf-8'
+        )
+        const legacy = JSON.parse(legacyText)
+        if (typeof legacy?.settings?.modelsFolder === 'string') {
+          settings = normalizeSettings(legacy.settings)
+          await updateSettings(settings)
+          logger.info(`已从旧版存储恢复应用设置: ${settings.modelsFolder}`)
+        }
+      } catch {
+        settings = defaultSettings()
       }
-    } catch {
+    } else {
+      // settings.json 损坏（如写入中断电、磁盘错误）：备份原文件后重置，保留手动恢复机会
       settings = defaultSettings()
+      try {
+        await fs.rename(getSettingsFilePath(), `${getSettingsFilePath()}.bak`)
+        logger.error(`应用设置文件损坏，原文件已备份为 ${SETTINGS_FILE}.bak 后重置: ${err.message}`)
+      } catch (backupErr) {
+        logger.error(`应用设置加载失败，已重置（备份失败: ${backupErr.message}）: ${err.message}`)
+      }
     }
   }
   return settings
