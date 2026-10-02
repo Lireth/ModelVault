@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ModelCard from './ModelCard.vue'
-import { state } from '../store/appStore'
+import { CARD_SIZE_PRESETS, state } from '../store/appStore'
 
 /**
  * 模型卡片虚拟滚动网格：
@@ -15,13 +15,6 @@ const props = defineProps({
   models: { type: Array, required: true }
 })
 
-/** 各卡片尺寸对应的最小列宽与网格间距（与原 .model-grid CSS 保持一致） */
-const GRID_PRESETS = {
-  compact: { min: 150, gap: 10 },
-  normal: { min: 190, gap: 14 },
-  large: { min: 240, gap: 18 }
-}
-
 /** 上下各多渲染的缓冲行数，保证快速滚动时不露白 */
 const OVERSCAN_ROWS = 3
 
@@ -32,7 +25,7 @@ const scrollTop = ref(0)
 /** 行间距（卡片高 + 行 gap），初始为估计值，挂载后按实际卡片高度校准 */
 const rowPitch = ref(260)
 
-const preset = computed(() => GRID_PRESETS[state.settings.cardSize] || GRID_PRESETS.normal)
+const preset = computed(() => CARD_SIZE_PRESETS[state.settings.cardSize] || CARD_SIZE_PRESETS.normal)
 const gapCss = computed(() => `${preset.value.gap}px`)
 
 const columns = computed(() => {

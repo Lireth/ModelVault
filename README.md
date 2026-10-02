@@ -70,7 +70,15 @@ ModelVault/
 │   │   ├── menu.js               # 窗口级快捷键（无原生菜单栏模式）
 │   │   ├── ipc.js                # IPC 处理器注册入口（应用信息/主题/异常上报）
 │   │   ├── ipc/
-│   │   │   └── models.js         # 模型管理 IPC 处理器（扫描/封面/文件管理/右键菜单）
+│   │   │   └── models/           # 模型管理 IPC 处理器（按域拆分模块）
+│   │   │       ├── index.js      #   注册入口
+│   │   │       ├── scan.js       #   扫描（进度推送/取消/防重入）
+│   │   │       ├── decorate.js   #   扫描结果装饰（封面/缩略图/元数据/sidecar/safetensors）
+│   │   │       ├── covers.js     #   封面链路（上传/粘贴/拖拽/设默认/删除）
+│   │   │       ├── meta.js       #   元数据与 Civitai 匹配
+│   │   │       ├── misc.js       #   文件管理/右键菜单/复制参数
+│   │   │       ├── store.js      #   存储与设置链路（loadStore/chooseFolder/settings:update）
+│   │   │       └── model-state.js#   跨模块状态（装饰缓存/缩略图后台任务）
 │   │   ├── protocol.js           # mvimg:// 自定义图片协议（路径白名单校验）
 │   │   ├── theme.js              # 主题颜色常量（主进程共用）
 │   │   ├── logger.js             # 日志模块（按天分文件，保留 14 天）
@@ -79,6 +87,7 @@ ModelVault/
 │   │       ├── store.js          # 关联存储（元数据存于模型根目录 .modelvault/，原子写入）
 │   │       ├── covers.js         # 封面图片选择/粘贴/拖拽保存与孤儿清理
 │   │       ├── thumbs.js         # 封面缩略图缓存（扫描后异步生成）
+│   │       ├── safetensors.js    # safetensors 头部解析（kohya/modelspec 训练元信息）
 │   │       └── civitai.js        # Civitai 哈希匹配（net.fetch，继承系统代理）
 │   ├── preload/
 │   │   └── index.js              # 预加载脚本：contextBridge + IPC 通道白名单
@@ -98,7 +107,7 @@ ModelVault/
 │           │   ├── SettingsPage.vue      # 设置页（占据模型预览区）
 │           │   └── ToastHost.vue         # 轻提示通知
 │           └── assets/styles/    # 全局样式
-├── tests/                        # vitest 单元测试（scanner / store 纯逻辑）
+├── tests/                        # vitest 单元测试（主进程纯逻辑 + IPC handler + 渲染层 store）
 ├── electron.vite.config.mjs      # electron-vite 配置
 ├── electron-builder.yml          # 打包配置（portable 单文件）
 └── package.json
@@ -121,7 +130,7 @@ ModelVault/
 
 渲染进程**没有**裸 `invoke` 入口，所有通道必须经白名单注册：
 
-1. 在 `src/main/ipc.js` 或 `src/main/ipc/models.js` 中注册处理器：
+1. 在 `src/main/ipc.js` 或 `src/main/ipc/models/` 对应域模块中注册处理器：
 
 ```js
 ipcMain.handle("my:channel", (event, payload) => {

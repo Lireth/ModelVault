@@ -3,6 +3,9 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
+// 扫描扩展名单一来源：直接复用 scanner.js 的 MODEL_EXTENSIONS，
+// 避免双份常量人工同步漂移导致「设置校验」与「实际扫描」不一致（C3）
+import { MODEL_EXTENSIONS } from './scanner'
 
 /**
  * 关联存储模块：
@@ -40,8 +43,8 @@ const VALID_THEMES = new Set(['dark', 'light'])
 const VALID_CARD_SIZES = new Set(['compact', 'normal', 'large'])
 /** 应用设置允许的默认排序方式 */
 const VALID_SORT_BY = new Set(['name', 'type', 'size', 'mtime', 'favorite', 'rating'])
-/** 应用设置允许的扫描文件扩展名（与 scanner.js 的 MODEL_EXTENSIONS 保持一致） */
-const VALID_SCAN_EXTENSIONS = new Set(['.safetensors', '.ckpt', '.pt', '.pth', '.bin'])
+/** 应用设置允许的扫描文件扩展名（单一来源：scanner.js 的 MODEL_EXTENSIONS，C3） */
+const VALID_SCAN_EXTENSIONS = MODEL_EXTENSIONS
 
 /** 默认应用设置 */
 function defaultSettings() {
@@ -204,20 +207,38 @@ export function relativizeCover(absCover) {
 
 /* ---------------- 元数据规范化 ---------------- */
 
+/**
+ * 规范化单条封面引用（A7 绝对路径自愈）：
+ * - 相对路径原样保留（规范存储格式）；
+ * - 绝对路径是历史数据残留（如根目录移动前的旧位置），协议层只放行当前根目录，
+ *   根目录外的绝对路径会恒 403，形成「有封面但永不显示」的死状态。
+ *   位于当前根目录内的绝对路径转换为相对引用（自愈）；根目录外的视为失效，剔除。
+ * @param {string} c 封面引用（相对路径或历史绝对路径）
+ * @returns {string} 规范化的相对路径（失效时为空串）
+ */
+function normalizeCoverRef(c) {
+  if (typeof c !== 'string' || !c) return ''
+  if (!path.isAbsolute(c)) return c
+  return toRelKey(c) || ''
+}
+
 /** 规范化单条模型元数据，剔除未知字段 */
 function normalizeModelMeta(raw) {
   if (!raw || typeof raw !== 'object') return null
   const params = raw.params && typeof raw.params === 'object' ? raw.params : {}
-  // 多封面列表（相对路径，顺序即添加顺序），兼容旧版单封面字段
+  // 多封面列表（相对路径，顺序即添加顺序），兼容旧版单封面字段；
+  // 逐条做绝对路径自愈后过滤失效项（A7）
   let covers = Array.isArray(raw.covers)
     ? raw.covers
-        .filter((c) => typeof c === 'string' && c && c.length <= 500)
+        .map(normalizeCoverRef)
+        .filter((c) => c && c.length <= 500)
         .slice(0, 50)
     : []
   if (covers.length === 0 && typeof raw.cover === 'string' && raw.cover) {
-    covers = [raw.cover]
+    const healed = normalizeCoverRef(raw.cover)
+    if (healed) covers = [healed]
   }
-  let cover = typeof raw.cover === 'string' ? raw.cover : ''
+  let cover = normalizeCoverRef(raw.cover)
   if (!cover && covers.length > 0) cover = covers[0]
   return {
     cover,
@@ -431,20 +452,30 @@ async function migrateLegacyData() {
     for (const [absId, meta] of Object.entries(parsed?.models || {})) {
       const relKey = toRelKey(absId)
       if (!relKey) continue
+      // 旧版封面是 %APPDATA% 下的绝对路径，A7 的规范化会将其剔除，
+      // 必须在规范化之前先取出原始引用，供下方迁移复制使用
+      const legacyCover =
+        typeof meta.cover === 'string' && meta.cover
+          ? meta.cover
+          : typeof meta.covers?.[0] === 'string'
+            ? meta.covers[0]
+            : ''
       const normalized = normalizeModelMeta(meta)
       if (!normalized) continue
 
       // 迁移封面文件：旧版为 %APPDATA% 下的绝对路径。
       // 目标文件名用 md5(源绝对路径小写) 命名（与缩略图命名规则一致）：
       // 不同模型的同名封面（如均为 preview.png）互不覆盖；迁移中断重跑幂等。
-      if (normalized.cover) {
+      if (legacyCover) {
         try {
-          const oldAbs = normalized.cover
-          await fs.access(oldAbs)
+          await fs.access(legacyCover)
           await fs.mkdir(getCoversDir(), { recursive: true })
-          const destName = `${createHash('md5').update(oldAbs.toLowerCase()).digest('hex')}${path.extname(oldAbs)}`
-          await fs.copyFile(oldAbs, path.join(getCoversDir(), destName))
-          normalized.cover = `${DATA_DIR}/${COVERS_DIR}/${destName}`
+          const destName = `${createHash('md5').update(legacyCover.toLowerCase()).digest('hex')}${path.extname(legacyCover)}`
+          const newRel = `${DATA_DIR}/${COVERS_DIR}/${destName}`
+          await fs.copyFile(legacyCover, path.join(getCoversDir(), destName))
+          normalized.cover = newRel
+          // 迁移后的封面同步进封面列表首位（规范化可能已剔除旧绝对路径条目）
+          normalized.covers = [newRel, ...normalized.covers.filter((c) => c !== newRel)]
         } catch {
           normalized.cover = ''
         }

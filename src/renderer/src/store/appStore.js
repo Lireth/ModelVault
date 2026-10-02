@@ -43,6 +43,42 @@ export const LORA_TAGS = [
 /** Checkpoint 模型的自动分类标签（无需手动标注） */
 export const CHECKPOINT_TAGS = [{ key: 'base', label: '基底模型', color: '#4f9cf9' }]
 
+/** 排序方式选项：key 与主进程 store.js 的 VALID_SORT_BY 保持一致，顶栏与设置页共用（C3） */
+export const SORT_OPTIONS = [
+  { key: 'name', label: '按名称' },
+  { key: 'type', label: '按分类' },
+  { key: 'size', label: '按大小' },
+  { key: 'mtime', label: '按修改时间' },
+  { key: 'favorite', label: '收藏优先' },
+  { key: 'rating', label: '按评分' }
+]
+
+/**
+ * 卡片尺寸档位的网格参数（最小列宽/间距）。
+ * min/gap 须与 main.css 的 .model-grid 相关约定保持视觉一致（纯约定，无编译期校验）。
+ */
+export const CARD_SIZE_PRESETS = {
+  compact: { min: 150, gap: 10 },
+  normal: { min: 190, gap: 14 },
+  large: { min: 240, gap: 18 }
+}
+
+/** 卡片尺寸档位选项（设置页展示用）：key 与主进程 VALID_CARD_SIZES 保持一致 */
+export const CARD_SIZE_OPTIONS = [
+  { key: 'compact', label: '紧凑' },
+  { key: 'normal', label: '标准' },
+  { key: 'large', label: '宽松' }
+]
+
+/** 可勾选的扫描文件类型选项（ext 与主进程 scanner.js 的 MODEL_EXTENSIONS 保持一致，C3） */
+export const SCAN_EXTENSION_OPTIONS = [
+  { ext: '.safetensors', label: 'safetensors' },
+  { ext: '.ckpt', label: 'ckpt' },
+  { ext: '.pt', label: 'pt' },
+  { ext: '.pth', label: 'pth' },
+  { ext: '.bin', label: 'bin' }
+]
+
 const SUB_MAP = Object.fromEntries(
   [...SUB_CATEGORIES, ...LORA_TAGS, ...CHECKPOINT_TAGS].map((t) => [t.key, t])
 )
@@ -71,7 +107,7 @@ export function defaultParams() {
   }
 }
 
-/** 默认应用设置（与主进程 store.js 的 defaultSettings 保持一致） */
+/** 默认应用设置（与主进程 store.js 的 defaultSettings 保持一致；扩展名选项单一来源见 SCAN_EXTENSION_OPTIONS） */
 export function defaultSettings() {
   return {
     modelsFolder: '',
@@ -81,7 +117,7 @@ export function defaultSettings() {
     cardSize: 'normal',
     sortBy: 'name',
     sortAsc: true,
-    scanExtensions: ['.safetensors', '.ckpt', '.pt', '.pth', '.bin'],
+    scanExtensions: SCAN_EXTENSION_OPTIONS.map((o) => o.ext),
     showSize: true,
     showMtime: true,
     showParams: true
@@ -216,10 +252,17 @@ export function closeSettings() {
 
 /**
  * 保存应用设置（主进程规范化后返回完整设置），并同步主题。
+ * IPC 层 reject 时统一 toast 提示（A6），避免静默失败让用户误以为已保存。
  * @param {object} patch 设置增量
  */
 export async function saveSettings(patch) {
-  const res = await window.api.settings.update(patch)
+  let res
+  try {
+    res = await window.api.settings.update(patch)
+  } catch (err) {
+    toast('error', `设置保存失败: ${err.message}`)
+    return false
+  }
   if (res?.error) {
     toast('error', res.error)
     return false
@@ -523,7 +566,13 @@ export async function deleteCover(id, cover) {
  * @param {string} modelPath 模型文件绝对路径（模型对象的 id 字段即绝对路径，可直接传入）
  */
 export async function revealModel(modelPath) {
-  const res = await window.api.models.reveal(modelPath)
+  let res
+  try {
+    res = await window.api.models.reveal(modelPath)
+  } catch (err) {
+    toast('error', `打开所在文件夹失败: ${err.message}`)
+    return
+  }
   if (res?.error) toast('error', res.error)
 }
 
@@ -541,7 +590,13 @@ export async function matchCivitai(id) {
  * @param {string} id 模型 id
  */
 export async function deleteModel(id) {
-  const res = await window.api.models.deleteModel(id)
+  let res
+  try {
+    res = await window.api.models.deleteModel(id)
+  } catch (err) {
+    toast('error', `删除模型失败: ${err.message}`)
+    return false
+  }
   if (res?.error) {
     toast('error', res.error)
     return false
@@ -568,12 +623,20 @@ function applyMetaFlags(id, meta) {
 
 /**
  * 切换收藏状态（即时落盘，不弹提示）。
+ * IPC reject 时 toast 提示（A6）：卡片上的收藏按钮无调用方捕获，
+ * 不处理会让失败仅进日志，用户误以为已收藏。
  * @param {string} id 模型 id
  */
 export async function toggleFavorite(id) {
   const m = state.models.find((x) => x.id === id)
   const next = !m?.favorite
-  const res = await window.api.models.setMetaFlags({ id, favorite: next })
+  let res
+  try {
+    res = await window.api.models.setMetaFlags({ id, favorite: next })
+  } catch (err) {
+    toast('error', `收藏操作失败: ${err.message}`)
+    return false
+  }
   if (res?.error) {
     toast('error', res.error)
     return false
@@ -617,7 +680,13 @@ export async function setRating(id, rating) {
  * @param {string} id 模型 id
  */
 export async function showContextMenu(id) {
-  const res = await window.api.models.popupMenu(id)
+  let res
+  try {
+    res = await window.api.models.popupMenu(id)
+  } catch (err) {
+    toast('error', `打开右键菜单失败: ${err.message}`)
+    return
+  }
   if (res?.error) toast('error', res.error)
 }
 

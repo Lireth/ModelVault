@@ -55,6 +55,10 @@ jobs:
 
       # ---------- 测试与构建 ----------
 
+      # D1 代码质量门禁：ESLint（flat config，错误级规则）不通过则终止 CI
+      - name: ESLint 代码检查
+        run: npm run lint
+
       - name: 运行单元测试
         run: npm test
 

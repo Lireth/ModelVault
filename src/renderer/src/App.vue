@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import TopBar from './components/TopBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import ModelDetail from './components/ModelDetail.vue'
@@ -18,6 +18,7 @@ import {
   rejectConfirm,
   saveSettings,
   scanModels,
+  SORT_OPTIONS,
   state,
   toast,
   typeInfo
@@ -73,6 +74,38 @@ function onWindowDrop(e) {
     e.preventDefault()
   }
 }
+
+/* ---------------- 确认层键盘支持（A8） ---------------- */
+
+const confirmCancelBtn = ref(null)
+const confirmOkBtn = ref(null)
+
+/** 确认层键盘交互：ESC=取消、Enter=确认（焦点在按钮上时由按钮原生处理）、
+ *  Tab 在两个按钮间循环（简单焦点陷阱），防止焦点穿透到被遮挡内容 */
+function onConfirmKeydown(e) {
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    rejectConfirm()
+  } else if (e.key === 'Tab') {
+    e.preventDefault()
+    ;(e.shiftKey ? confirmOkBtn.value : confirmCancelBtn.value)?.focus()
+  } else if (e.key === 'Enter' && e.target?.tagName !== 'BUTTON') {
+    e.preventDefault()
+    acceptConfirm()
+  }
+}
+
+// 打开确认层时把焦点移入「取消」按钮（安全默认）：此前焦点仍留在触发按钮上，
+// Enter 会再次触发原操作而非确认；Tab 可达「确定」
+watch(
+  () => state.confirm.visible,
+  async (visible) => {
+    if (visible) {
+      await nextTick()
+      confirmCancelBtn.value?.focus()
+    }
+  }
+)
 
 onMounted(async () => {
   window.addEventListener('dragover', onWindowDragOver)
@@ -142,12 +175,7 @@ onUnmounted(() => {
           <div class="sort-select" title="排序方式">
             <span class="sort-label">排序</span>
             <select :value="state.sortBy" @change="onSortChange">
-              <option value="name">按名称</option>
-              <option value="type">按分类</option>
-              <option value="size">按大小</option>
-              <option value="mtime">按修改时间</option>
-              <option value="favorite">收藏优先</option>
-              <option value="rating">按评分</option>
+              <option v-for="s in SORT_OPTIONS" :key="s.key" :value="s.key">{{ s.label }}</option>
             </select>
             <button
               class="sort-dir"
@@ -238,14 +266,20 @@ onUnmounted(() => {
     <ModelDetail />
     <ToastHost />
 
-    <!-- 自定义确认层（U4）：替代 window.confirm，覆盖区不包含标题栏（保持窗口控制可达） -->
+    <!-- 自定义确认层（U4）：替代 window.confirm，覆盖区不包含标题栏（保持窗口控制可达）；
+         键盘支持见 onConfirmKeydown（A8：ESC=取消 / Enter=确认 / Tab 焦点陷阱） -->
     <Teleport to="body">
-      <div v-if="state.confirm.visible" class="confirm-overlay" @click.self="rejectConfirm">
+      <div
+        v-if="state.confirm.visible"
+        class="confirm-overlay"
+        @click.self="rejectConfirm"
+        @keydown="onConfirmKeydown"
+      >
         <div class="confirm-dialog" role="dialog" aria-modal="true" aria-label="操作确认">
           <p class="confirm-text">{{ state.confirm.text }}</p>
           <div class="confirm-actions">
-            <button class="btn" @click="rejectConfirm">取消</button>
-            <button class="btn btn-primary confirm-ok" @click="acceptConfirm">确定</button>
+            <button ref="confirmCancelBtn" class="btn" @click="rejectConfirm">取消</button>
+            <button ref="confirmOkBtn" class="btn btn-primary confirm-ok" @click="acceptConfirm">确定</button>
           </div>
         </div>
       </div>

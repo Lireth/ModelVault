@@ -37,6 +37,13 @@ const SCHEDULERS = [
 /** 常用模型精度选项（可直接输入自定义值） */
 const PRECISIONS = ['FP8', 'FP16', 'BF16', 'FP32']
 
+/** 推荐参数校验范围（C3）：保存校验与输入框 min/max 属性共用，避免双份维护漂移 */
+const PARAM_LIMITS = {
+  steps: { min: 1, max: 200 },
+  cfg: { min: 0, max: 100 },
+  res: { min: 16, max: 16384 }
+}
+
 const busy = ref(false)
 
 /** 表单本地副本：编辑期间不直接影响全局状态，保存后才同步 */
@@ -436,13 +443,13 @@ function collectParams() {
     resMin: num(form.resMin),
     resMax: num(form.resMax)
   }
-  // 校验
+  // 校验（范围与输入框 min/max 同源：PARAM_LIMITS）
   const rangeChecks = [
-    ['采样步数', params.steps, 1, 200],
-    ['CFG 最小值', params.cfgMin, 0, 100],
-    ['CFG 最大值', params.cfgMax, 0, 100],
-    ['最小分辨率', params.resMin, 16, 16384],
-    ['最大分辨率', params.resMax, 16, 16384]
+    ['采样步数', params.steps, PARAM_LIMITS.steps.min, PARAM_LIMITS.steps.max],
+    ['CFG 最小值', params.cfgMin, PARAM_LIMITS.cfg.min, PARAM_LIMITS.cfg.max],
+    ['CFG 最大值', params.cfgMax, PARAM_LIMITS.cfg.min, PARAM_LIMITS.cfg.max],
+    ['最小分辨率', params.resMin, PARAM_LIMITS.res.min, PARAM_LIMITS.res.max],
+    ['最大分辨率', params.resMax, PARAM_LIMITS.res.min, PARAM_LIMITS.res.max]
   ]
   for (const [label, value, min, max] of rangeChecks) {
     if (Number.isNaN(value)) return { error: `${label} 请输入有效数字` }
@@ -750,13 +757,13 @@ async function onUploadCover() {
             <div class="form-grid">
               <label class="field">
                 <span>采样步数 (Sampling Steps)</span>
-                <input v-model="form.steps" type="number" min="1" max="200" placeholder="如 20 / 28 / 30" />
+                <input v-model="form.steps" type="number" :min="PARAM_LIMITS.steps.min" :max="PARAM_LIMITS.steps.max" placeholder="如 20 / 28 / 30" />
               </label>
               <label class="field range-field">
                 <span>CFG 值（范围）</span>
                 <div class="range-inputs">
-                  <input v-model="form.cfgMin" type="number" min="0" max="100" step="0.5" placeholder="最小，如 4" />
-                  <input v-model="form.cfgMax" type="number" min="0" max="100" step="0.5" placeholder="最大，如 8" />
+                  <input v-model="form.cfgMin" type="number" :min="PARAM_LIMITS.cfg.min" :max="PARAM_LIMITS.cfg.max" step="0.5" placeholder="最小，如 4" />
+                  <input v-model="form.cfgMax" type="number" :min="PARAM_LIMITS.cfg.min" :max="PARAM_LIMITS.cfg.max" step="0.5" placeholder="最大，如 8" />
                 </div>
               </label>
               <label class="field">
@@ -786,11 +793,11 @@ async function onUploadCover() {
             <div class="form-grid">
               <label class="field">
                 <span>最小分辨率（宽 = 高，px）</span>
-                <input v-model="form.resMin" type="number" min="16" max="16384" placeholder="如 512" />
+                <input v-model="form.resMin" type="number" :min="PARAM_LIMITS.res.min" :max="PARAM_LIMITS.res.max" placeholder="如 512" />
               </label>
               <label class="field">
                 <span>最大分辨率（宽 = 高，px）</span>
-                <input v-model="form.resMax" type="number" min="16" max="16384" placeholder="如 1024" />
+                <input v-model="form.resMax" type="number" :min="PARAM_LIMITS.res.min" :max="PARAM_LIMITS.res.max" placeholder="如 1024" />
               </label>
             </div>
 

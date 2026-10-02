@@ -113,9 +113,9 @@ export async function matchCivitai(absPath, knownHash = '') {
     })
   } catch (err) {
     if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-      throw new Error('请求 Civitai 超时，请检查网络后重试')
+      throw new Error('请求 Civitai 超时，请检查网络后重试', { cause: err })
     }
-    throw new Error(`网络请求失败: ${err.message}`)
+    throw new Error(`网络请求失败: ${err.message}`, { cause: err })
   }
 
   if (response.status === 404) {
@@ -134,7 +134,7 @@ export async function matchCivitai(absPath, knownHash = '') {
   } catch (err) {
     // 响应体非 JSON（如网关返回 HTML 错误页）时转为友好错误（S6），
     // 避免原始 SyntaxError 直接透给用户
-    throw new Error(`Civitai 响应解析失败（响应体损坏）: ${err.message}`)
+    throw new Error(`Civitai 响应解析失败（响应体损坏）: ${err.message}`, { cause: err })
   }
   const result = { matched: true, hash, info: mapVersion(version) }
   cacheMatchResult(cacheKey, result)

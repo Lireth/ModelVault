@@ -41,7 +41,7 @@ async function isAllowedPath(realPath) {
   allowed.push(path.join(app.getPath('userData'), 'covers'))
   const lower = process.platform === 'win32'
   for (const dir of allowed) {
-    let resolved = dir
+    let resolved
     try {
       resolved = await fs.promises.realpath(dir)
     } catch {

@@ -15,6 +15,9 @@
     "start": "electron-vite dev",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
     "preview": "electron-vite preview",
@@ -25,10 +28,16 @@
     "vue": "^3.5.42"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@vitejs/plugin-vue": "^6.0.8",
     "electron": "^44.5.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-vue": "^10.11.1",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.9",
     "vite": "^7.0.0",
     "vitest": "^5.0.0"
   }

@@ -130,20 +130,40 @@ jobs:
           "path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
           "size=$sizeMB"          >> $env:GITHUB_OUTPUT
 
+      # D3：生成 SHA256 校验和文件，供用户校验下载完整性
+      - name: 生成 SHA256 校验和
+        id: checksum
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          $exePath = "dist/$($env:VERSION)/ModelVault-$($env:VERSION).exe"
+          $hash = (Get-FileHash -Path $exePath -Algorithm SHA256).Hash.ToLower()
+          $checksumFile = "dist/$($env:VERSION)/ModelVault-$($env:VERSION).exe.sha256"
+          # 标准格式："<hash>  <文件名>"，与 sha256sum -c 兼容
+          Set-Content -Path $checksumFile -Value "$hash  ModelVault-$($env:VERSION).exe" -Encoding ascii
+          Write-Host "SHA256: $hash"
+          Write-Host "校验和文件: $checksumFile"
+          "file=$checksumFile" >> $env:GITHUB_OUTPUT
+
       # ---------- 5. 发布与产物归档 ----------
 
       - name: 上传 Workflow Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ModelVault-${{ steps.ver.outputs.version }}
-          path: dist/${{ steps.ver.outputs.version }}/ModelVault-${{ steps.ver.outputs.version }}.exe
+          path: |
+            dist/${{ steps.ver.outputs.version }}/ModelVault-${{ steps.ver.outputs.version }}.exe
+            dist/${{ steps.ver.outputs.version }}/ModelVault-${{ steps.ver.outputs.version }}.exe.sha256
           if-no-files-found: error
           retention-days: 30
 
-      - name: 创建 GitHub Release 并附加 EXE
+      - name: 创建 GitHub Release 并附加 EXE 与校验和
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/${{ steps.ver.outputs.version }}/ModelVault-${{ steps.ver.outputs.version }}.exe
+          files: |
+            dist/${{ steps.ver.outputs.version }}/ModelVault-${{ steps.ver.outputs.version }}.exe
+            dist/${{ steps.ver.outputs.version }}/ModelVault-${{ steps.ver.outputs.version }}.exe.sha256
           generate_release_notes: true # 自动根据提交生成 Release Notes
           fail_on_unmatched_files: true
 

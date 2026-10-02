@@ -1,11 +1,15 @@
 <script setup>
-import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   applyTheme,
+  CARD_SIZE_OPTIONS,
   chooseFolder,
   closeSettings,
+  confirmDialog,
   revealModel,
   saveSettings,
+  SCAN_EXTENSION_OPTIONS,
+  SORT_OPTIONS,
   scanModels,
   state,
   toast
@@ -33,30 +37,6 @@ let savedCardSize = 'normal'
 
 const saving = ref(false)
 
-const CARD_SIZES = [
-  { key: 'compact', label: '紧凑' },
-  { key: 'normal', label: '标准' },
-  { key: 'large', label: '宽松' }
-]
-
-const SORT_OPTIONS = [
-  { key: 'name', label: '按名称' },
-  { key: 'type', label: '按分类' },
-  { key: 'size', label: '按大小' },
-  { key: 'mtime', label: '按修改时间' },
-  { key: 'favorite', label: '收藏优先' },
-  { key: 'rating', label: '按评分' }
-]
-
-/** 可勾选的扫描文件类型（ext 与主进程 scanner.js 保持一致） */
-const EXT_OPTIONS = [
-  { ext: '.safetensors', label: 'safetensors' },
-  { ext: '.ckpt', label: 'ckpt' },
-  { ext: '.pt', label: 'pt' },
-  { ext: '.pth', label: 'pth' },
-  { ext: '.bin', label: 'bin' }
-]
-
 /** 从全局状态填充表单（打开设置页时调用） */
 function fillForm() {
   savedTheme = state.settings.theme || 'dark'
@@ -70,8 +50,33 @@ function fillForm() {
   form.showSize = state.settings.showSize !== false
   form.showMtime = state.settings.showMtime !== false
   form.showParams = state.settings.showParams !== false
+  // 填充完成后建立脏检测基线（A9）：此后表单值与快照不一致即为脏
+  savedSnapshot = formSnapshotValue()
   loadAppInfo()
 }
+
+/* ---------------- 脏数据保护（A9，与详情页 C8 标准一致） ---------------- */
+
+/** 打开时的表单值快照，作为脏检测基线 */
+let savedSnapshot = ''
+
+/** 当前表单值的规范化快照（保存时对 excludeDirs 做同样的解析归一） */
+function formSnapshotValue() {
+  return JSON.stringify({
+    autoScan: form.autoScan,
+    excludeDirs: parseExcludeDirs(),
+    theme: form.theme,
+    cardSize: form.cardSize,
+    sortBy: form.sortBy,
+    scanExtensions: [...form.scanExtensions].sort(),
+    showSize: form.showSize,
+    showMtime: form.showMtime,
+    showParams: form.showParams
+  })
+}
+
+/** 设置表单是否有未保存的修改 */
+const settingsDirty = computed(() => formSnapshotValue() !== savedSnapshot)
 
 /** 组件挂载时（settingsOpen 已为 true，watch 不会触发）以及后续打开时填充表单 */
 onMounted(() => {
@@ -100,14 +105,18 @@ watch(
   }
 )
 
-/** 关闭设置页面：还原预览，回到已保存的设置 */
-function onCancel() {
+/** 关闭设置页面：还原预览，回到已保存的设置。
+ *  有未保存修改时先经确认层确认放弃（A9：修复 ESC 静默丢弃全部修改的问题） */
+async function onCancel() {
+  if (settingsDirty.value && !(await confirmDialog('设置有未保存的修改，放弃修改并关闭？'))) {
+    return
+  }
   applyTheme(savedTheme)
   state.settings.cardSize = savedCardSize
   closeSettings()
 }
 
-/** ESC 键关闭设置页面（还原预览） */
+/** ESC 键关闭设置页面（与关闭按钮走同一脏保护入口，A9） */
 function onKeydown(e) {
   if (e.key === 'Escape' && state.settingsOpen) onCancel()
 }
@@ -220,7 +229,7 @@ async function onSave() {
           <span class="setting-desc">仅扫描勾选的扩展名，保存后自动重新扫描</span>
           <div class="ext-group">
             <label
-              v-for="e in EXT_OPTIONS"
+              v-for="e in SCAN_EXTENSION_OPTIONS"
               :key="e.ext"
               class="ext-check"
               :class="{ checked: form.scanExtensions.includes(e.ext) }"
@@ -278,7 +287,7 @@ async function onSave() {
           </div>
           <div class="seg-group">
             <button
-              v-for="c in CARD_SIZES"
+              v-for="c in CARD_SIZE_OPTIONS"
               :key="c.key"
               type="button"
               class="seg-btn"
