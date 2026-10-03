@@ -8,7 +8,13 @@ export const THEME_COLORS = {
   light: { backgroundColor: '#f5f7fa', overlayColor: '#f5f7fa', symbolColor: '#24292f' }
 }
 
-/** 按主题名取颜色（未知主题回退深色） */
+/**
+ * 按主题名取颜色（未知主题回退深色）。
+ * 必须用 Object.hasOwn 限定自有属性（B2）：直接下标索引会命中原型链，
+ * 'constructor'/'toString'/'__proto__' 等键会拿到函数或原型对象，
+ * 其颜色字段全为 undefined，令原生标题栏/背景 API 行为不可预期。
+ * 本函数是主进程取主题色的唯一收口（窗口创建与 window:setTheme 均经此）。
+ */
 export function themeColors(theme) {
-  return THEME_COLORS[theme] || THEME_COLORS.dark
+  return Object.hasOwn(THEME_COLORS, theme) ? THEME_COLORS[theme] : THEME_COLORS.dark
 }
