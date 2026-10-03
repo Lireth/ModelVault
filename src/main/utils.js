@@ -26,3 +26,29 @@ export function boundedMapSet(map, key, value, max) {
     map.delete(map.keys().next().value)
   }
 }
+
+/**
+ * 允许 shell.openExternal 拉起的域名白名单（B3）：
+ * 应用唯一的外链出口是设置页的 GitHub 下载页，新增外链场景时
+ * 在此显式登记具体域名——禁止通配、禁止子域放行（用户信息段
+ * 伪装 github.com@evil.com 与外形相似域名 github.com.evil.com
+ * 均会因真实主机不匹配而被拒绝）。
+ */
+const ALLOWED_EXTERNAL_HOSTS = new Set(['github.com'])
+
+/**
+ * 校验外部 URL 是否允许经 shell.openExternal 拉起（B3）：
+ * 必须是 https 协议且主机名（含端口）命中白名单。
+ * 主进程两个拉起入口共用本收口：setWindowOpenHandler（渲染进程
+ * 可控的 window.open）与 updater 的下载页地址（上游 API 响应）。
+ * @param {unknown} url 待校验 URL
+ * @returns {boolean} 允许拉起返回 true
+ */
+export function isAllowedExternalUrl(url) {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'https:' && ALLOWED_EXTERNAL_HOSTS.has(parsed.host)
+  } catch {
+    return false
+  }
+}

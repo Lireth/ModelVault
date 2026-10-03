@@ -1,5 +1,6 @@
 import { app, net } from 'electron'
 import logger from '../logger'
+import { isAllowedExternalUrl } from '../utils'
 
 /**
  * 应用内检查更新（E1）：
@@ -63,7 +64,14 @@ export async function checkForUpdate() {
       return { error: `更新信息解析失败: ${err.message}`, current }
     }
     const latest = typeof data?.tag_name === 'string' ? data.tag_name.replace(/^v/, '') : ''
-    const releaseUrl = typeof data?.html_url === 'string' ? data.html_url : ''
+    // 下载页地址必须命中外链白名单（B3）：API 响应不可信时不得把用户
+    // 引向白名单外站点（渲染层据空串隐藏「前往下载」入口）
+    let releaseUrl = ''
+    if (isAllowedExternalUrl(data?.html_url)) {
+      releaseUrl = data.html_url
+    } else if (typeof data?.html_url === 'string' && data.html_url) {
+      logger.warn(`更新检查返回的下载页地址不在白名单，已忽略: ${data.html_url.slice(0, 200)}`)
+    }
     const releaseNotes =
       typeof data?.body === 'string' && data.body ? data.body.slice(0, 500) : ''
     if (!latest) {

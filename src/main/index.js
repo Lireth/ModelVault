@@ -6,6 +6,7 @@ import { registerImageScheme, registerImageProtocolHandler } from './protocol'
 import { loadSettings } from './services/store'
 import { quitAfterFlush } from './quit'
 import { handleUncaughtException } from './fatal-error'
+import { isAllowedExternalUrl } from './utils'
 import logger from './logger'
 
 // 自定义协议必须在 app ready 之前注册
@@ -70,16 +71,13 @@ if (!gotSingleInstanceLock) {
     // 其余协议（file:/smb:/自定义协议等）一律拒绝并记日志，防止渲染进程
     // 被注入后构造任意协议 URL 唤起系统处理程序
     win.webContents.setWindowOpenHandler(({ url }) => {
-      let protocol = ''
-      try {
-        protocol = new URL(url).protocol
-      } catch {
-        /* 非法 URL 按拒绝处理 */
-      }
-      if (protocol === 'http:' || protocol === 'https:') {
+      // 外链拉起收敛到域名白名单（B3）：渲染进程可控的 window.open
+      // 不得打开任意 https 站点；URL 来自渲染进程，日志截断防止
+      // 不可信长串写入
+      if (isAllowedExternalUrl(url)) {
         shell.openExternal(url)
       } else {
-        logger.warn(`已拦截非 http(s) 协议的外链打开请求: ${url}`)
+        logger.warn(`已拦截非白名单外链打开请求: ${String(url).slice(0, 200)}`)
       }
       return { action: 'deny' }
     })
