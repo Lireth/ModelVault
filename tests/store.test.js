@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -164,6 +164,33 @@ describe('atomicWriteFile', () => {
     const siblings = await fs.readdir(path.dirname(file))
     expect(siblings.every((n) => !n.includes('.tmp'))).toBe(true)
   })
+
+  it('并发写入同一文件使用互不相同的临时文件，内容不交错（A1）', async () => {
+    const file = path.join(root, 'concurrent.json')
+    const realRename = fs.rename.bind(fs)
+    const renameSources = []
+    vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
+      renameSources.push(src)
+      return realRename(src, dst)
+    })
+    try {
+      await Promise.all([
+        atomicWriteFile(file, '{"who":"first"}'),
+        atomicWriteFile(file, '{"who":"second"}')
+      ])
+    } finally {
+      vi.restoreAllMocks()
+    }
+    // 若共享同一临时文件：后写方的 writeFile 会截断前写方内容、
+    // 先行方的 rename 又会移走临时文件使后行方 ENOENT——两次写的临时路径必须不同
+    // （rename 重试不改变临时路径，故按去重后集合断言）；
+    // 此外 Windows 上并发替换同一目标会确定性 EPERM，atomicWriteFile 须退避重试使两次写均成功
+    expect(new Set(renameSources).size).toBe(2)
+    // 最终内容必为其中之一的完整内容（无交错字节）
+    const final = await fs.readFile(file, 'utf-8')
+    expect(['{"who":"first"}', '{"who":"second"}']).toContain(final)
+    expect(() => JSON.parse(final)).not.toThrow()
+  })
 })
 
 describe('落盘失败通知（B1）', () => {
@@ -302,6 +329,52 @@ describe('应用设置文件损坏恢复（B2）', () => {
     } finally {
       setStoreSaveErrorListener(null)
       await fs.rm(settingsFile, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+})
+
+describe('settings.json 并发落盘串行化（A1）', () => {
+  const settingsFile = path.join(fakeUserData, 'settings.json')
+
+  afterEach(async () => {
+    await fs.rm(settingsFile, { force: true }).catch(() => {})
+  })
+
+  it('并发 updateSettings 依次落盘：最终文件为最新合并快照，且不产生失败上报', async () => {
+    const realRename = fs.rename.bind(fs)
+    let releaseFirstRename = () => {}
+    const firstRenameGate = new Promise((resolve) => {
+      releaseFirstRename = resolve
+    })
+    let gated = false
+    vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
+      // 卡住 settings.json 的第一次 rename，构造与后续并发写重叠的时间窗口
+      if (!gated && src.includes('settings.json')) {
+        gated = true
+        await firstRenameGate
+      }
+      return realRename(src, dst)
+    })
+
+    const errors = []
+    setStoreSaveErrorListener((err) => errors.push(err))
+    try {
+      const first = updateSettings({ theme: 'light' })
+      // 等第一次写进入 rename（临时文件已写好），再发起第二次并发更新
+      await vi.waitFor(() => expect(gated).toBe(true))
+      const second = updateSettings({ cardSize: 'large' })
+      releaseFirstRename()
+      await Promise.all([first, second])
+
+      // 串行化后无任何写失败（未串行化时：共享临时文件导致一方 rename ENOENT 被上报）
+      expect(errors).toEqual([])
+      // 最终落盘包含两次更新的合并结果（未串行化时可能仅剩先前的旧快照）
+      const onDisk = JSON.parse(await fs.readFile(settingsFile, 'utf-8'))
+      expect(onDisk.theme).toBe('light')
+      expect(onDisk.cardSize).toBe('large')
+    } finally {
+      setStoreSaveErrorListener(null)
+      vi.restoreAllMocks()
     }
   })
 })

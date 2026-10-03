@@ -169,12 +169,25 @@ export function getSettings() {
   return settings
 }
 
-/** 更新应用设置（规范化后立即落盘，原子写入） */
+/**
+ * 设置落盘串行队列（A1）：并发 updateSettings（如用户修改设置的瞬间，
+ * 扫描刚完成回写 modelsFolder）依次写盘，最终落盘必为最新合并快照。
+ * 单次写失败经监听器上报后队列继续服务后续写入，不被中断。
+ */
+let settingsWriteChain = Promise.resolve()
+
+/** 更新应用设置（规范化后排队落盘，原子写入） */
 export async function updateSettings(patch) {
   if (!patch) return
   settings = normalizeSettings({ ...settings, ...patch })
+  // 序列化在执行时求值：即使写盘期间又有新补丁合并进 settings，本次落盘即为最新快照
+  const task = settingsWriteChain.then(() =>
+    atomicWriteFile(getSettingsFilePath(), JSON.stringify(settings, null, 2))
+  )
+  // 链条自身吞掉本次失败，保证后续 updateSettings 仍能继续排队写盘
+  settingsWriteChain = task.catch(() => {})
   try {
-    await atomicWriteFile(getSettingsFilePath(), JSON.stringify(settings, null, 2))
+    await task
   } catch (err) {
     // 设置落盘失败与元数据同样经监听器通知渲染进程（C7）：
     // 否则磁盘满/权限错误时用户无感知，重启后设置静默丢失
