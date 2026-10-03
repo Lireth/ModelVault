@@ -7,7 +7,7 @@ import {
   getSettings,
   loadSettings,
   loadData,
-  setDataRoot,
+  switchDataRoot,
   setStoreSaveErrorListener,
   updateSettings
 } from '../../services/store'
@@ -40,12 +40,15 @@ async function isExistingDirectory(p) {
  * 切换根目录前必须等待上一轮后台缩略图生成完成（B10）：
  * drain 过程中 getThumbsDir() 依赖 currentRoot，中途切换会把缩略图
  * 写进切换后的目录，且文件不被新根目录 keepNames 命中而被 pruneThumbs 清理。
+ * 切库还必须先静止旧根写盘链（A6）：迟到防抖会把旧根数据写进新目录，
+ * 见 switchDataRoot。
  */
 export async function ensureRootStore(root) {
   if (getCurrentRoot() !== root) {
     // 切换根目录前必须等待上一轮后台缩略图生成完成（B10，等待入口收敛于 model-state）
     await awaitThumbDrain()
-    setDataRoot(root)
+    // 旧根待落盘数据先写入旧目录，再切换根目录（A6）
+    await switchDataRoot(root)
     await loadData()
   }
 }

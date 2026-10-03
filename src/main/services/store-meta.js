@@ -14,6 +14,7 @@ import {
   getCurrentRoot,
   getDataDir,
   getDataFilePath,
+  setDataRoot,
   toRelKey
 } from './store-paths'
 
@@ -299,8 +300,16 @@ export function setModelMeta(modelId, meta) {
 /** 防抖保存：短时间内多次修改只落盘一次 */
 export function scheduleSave() {
   if (saveTimer) clearTimeout(saveTimer)
+  // 记录调度时的根目录（A6）：定时器触发时若根已切换，本次防抖携带的
+  // 是旧根数据，直接落盘会写进新根目录的 store.json（跨库污染）——丢弃。
+  // 正常流程下切库前已由 switchDataRoot 静止写盘链，此处为兜底
+  const scheduledRoot = getCurrentRoot()
   saveTimer = setTimeout(() => {
     saveTimer = null
+    if (getCurrentRoot() !== scheduledRoot) {
+      logger.warn('丢弃跨根目录的迟到防抖保存（数据已在切库前落盘）')
+      return
+    }
     saveStoreNow().catch(notifyStoreSaveError)
   }, SAVE_DELAY)
 }
@@ -344,4 +353,16 @@ export async function flushStoreSave() {
   while (saving || pendingSave) {
     await new Promise((resolve) => setImmediate(resolve))
   }
+}
+
+/**
+ * 切换关联存储根目录（全域唯一入口，A6）：
+ * 先把旧根待落盘数据写入旧目录并静止写盘链，再切换根目录。
+ * 若先 setDataRoot 再等待防抖自然触发，迟到定时器会把旧根数据
+ * 写进新根目录的 store.json，造成跨库污染。加载新根数据（loadData）
+ * 由调用方在本函数返回后执行。
+ */
+export async function switchDataRoot(root) {
+  await flushStoreSave()
+  setDataRoot(root)
 }

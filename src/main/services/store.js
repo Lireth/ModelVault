@@ -61,5 +61,6 @@ export {
   setModelHash,
   scheduleSave,
   saveStoreNow,
-  flushStoreSave
+  flushStoreSave,
+  switchDataRoot
 } from './store-meta'

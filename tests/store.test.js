@@ -7,6 +7,7 @@ import {
   flushStoreSave,
   getModelMeta,
   getSettings,
+  getCurrentRoot,
   isInRoot,
   loadData,
   loadSettings,
@@ -17,6 +18,7 @@ import {
   setModelHash,
   setModelMeta,
   setStoreSaveErrorListener,
+  switchDataRoot,
   updateSettings
 } from '../src/main/services/store'
 import { fakeUserData } from './setup'
@@ -294,6 +296,59 @@ describe('退出落盘 flushStoreSave', () => {
     const text = await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
     const key = path.relative(root, abs).split(path.sep).join('/')
     expect(JSON.parse(text).models[key].alias).toBe('第二版')
+  })
+})
+
+describe('切换根目录与落盘链（A6）', () => {
+  /** 另建一个临时根目录（切库目标） */
+  async function makeOtherRoot() {
+    const other = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-otherroot-'))
+    roots.push(other)
+    return other
+  }
+
+  it('switchDataRoot 先把旧根待落盘数据写入旧目录，再切换根目录', async () => {
+    const abs = await touchModel('switch-a.safetensors')
+    const other = await makeOtherRoot()
+    setModelMeta(abs, { alias: '切库前抢救' }) // 防抖中（500ms 内不会自动落盘）
+
+    await switchDataRoot(other)
+
+    // 旧根数据已立即落盘（不必等防抖定时器）
+    const text = await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
+    const key = path.relative(root, abs).split(path.sep).join('/')
+    expect(JSON.parse(text).models[key].alias).toBe('切库前抢救')
+    // 新根已生效且未发生写盘（无迟到定时器把旧数据写进新目录）
+    expect(getCurrentRoot()).toBe(other)
+    await expect(fs.access(path.join(other, '.modelvault', 'store.json'))).rejects.toThrow()
+  })
+
+  it('切库后迟到的防抖保存被丢弃：不把旧根数据写进新根目录', async () => {
+    const abs = await touchModel('stale-timer.safetensors')
+    const other = await makeOtherRoot()
+    const otherStoreFile = path.join(other, '.modelvault', 'store.json')
+    vi.useFakeTimers()
+    try {
+      setModelMeta(abs, { alias: '旧根的修改' }) // 防抖调度于旧根
+      // 绕过 switchDataRoot 直接裸切根（兜底场景）：此刻 data 仍是旧根数据
+      setDataRoot(other)
+      // 迟到定时器在 loadData 之前触发：旧实现会把旧根数据写进新根 store.json
+      await vi.advanceTimersByTimeAsync(500)
+    } finally {
+      vi.useRealTimers()
+    }
+    // fake timers 不拦截真实 fs I/O：轮询等待在途写盘落定后再判定，
+    // 未修复时新根 store.json 会被创建且含旧根数据（跨库污染）
+    const deadline = Date.now() + 1000
+    let polluted = false
+    while (Date.now() < deadline && !polluted) {
+      try {
+        if ((await fs.readFile(otherStoreFile, 'utf-8')).includes('旧根的修改')) polluted = true
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+    }
+    expect(polluted).toBe(false)
   })
 })
 
