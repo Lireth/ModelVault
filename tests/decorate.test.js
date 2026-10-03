@@ -19,8 +19,12 @@ vi.mock('electron', () => ({
   nativeImage: { createFromPath: vi.fn(), createFromBuffer: vi.fn() }
 }))
 
-import { decorateModels, resolveCoverSafe } from '../src/main/ipc/models/decorate'
+import { decorateModels, resolveCoverSafe, startThumbDrain, clearDeferredOwners } from '../src/main/ipc/models/decorate'
+import { awaitThumbDrain } from '../src/main/ipc/models/model-state'
 import { loadData, setDataRoot, setModelMeta, DATA_DIR, COVERS_DIR } from '../src/main/services/store'
+import { clearDeferredJobs } from '../src/main/services/thumbs'
+import { nativeImage } from 'electron'
+import logger from '../src/main/logger'
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
 
@@ -148,5 +152,73 @@ describe('resolveCoverSafe', () => {
     const abs = path.join(root, DATA_DIR, COVERS_DIR, 'x.png')
     expect(resolveCoverSafe(`${DATA_DIR}/${COVERS_DIR}/x.png`)).toBe(abs)
     expect(resolveCoverSafe(null)).toBe('')
+  })
+})
+
+describe('startThumbDrain 窗口生命周期（A7）', () => {
+  // 前后用例可能往模块级队列登记了指向已删临时目录的陈旧任务，
+  // 其 fs.stat 失败会产生「合法但与本用例无关」的失败警告，先清空再测
+  beforeEach(() => {
+    clearDeferredOwners()
+    clearDeferredJobs()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** 准备一个缩略图未命中的模型：装饰阶段登记后台生成任务 */
+  async function setupDeferredThumb() {
+    const abs = path.join(root, 'with-cover.safetensors')
+    await fs.writeFile(abs, 'x')
+    const coversDir = path.join(root, DATA_DIR, COVERS_DIR)
+    await fs.mkdir(coversDir, { recursive: true })
+    await fs.writeFile(path.join(coversDir, 'cover.png'), PNG_MAGIC)
+    setModelMeta(abs, { cover: `${DATA_DIR}/${COVERS_DIR}/cover.png` })
+    // nativeImage 桩：返回可缩放图像，使缩略图生成真实走完落盘路径
+    vi.mocked(nativeImage.createFromBuffer).mockReturnValue({
+      isEmpty: () => false,
+      getSize: () => ({ width: 800, height: 600 }),
+      resize: () => ({ toJPEG: () => Buffer.from('fake-jpeg') })
+    })
+    const [decorated] = await decorateModels([makeModel(abs)])
+    return { abs, decorated }
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('扫描中窗口关闭（win 为 null）时 drain 正常完成：缓存更新且无误导性失败日志', async () => {
+    const { decorated } = await setupDeferredThumb()
+    // 未命中缓存：先用原图 URL
+    const urlBefore = decorated.coverUrl
+    expect(urlBefore).toContain('cover.png')
+    const warnSpy = vi.spyOn(logger, 'warn')
+
+    // win 为 null：模拟扫描进行中窗口被关闭（scan.js 经 fromWebContents 取得 null）
+    startThumbDrain(null)
+    await awaitThumbDrain()
+
+    // drain 正常完成且装饰缓存已更新为缩略图 URL（下一轮扫描命中即显示缩略图）。
+    // 未修复时：回调内 win.isDestroyed() 抛 TypeError，被 allSettled 吞掉并记为
+    // 「后台缩略图生成失败」误导日志，推送中断但无人知晓
+    // （toImageUrl 对路径做百分位编码，按编码中立的 'thumbs' 目录名断言）
+    expect(decorated.coverUrl).toContain('thumbs')
+    expect(decorated.coverUrl).not.toBe(urlBefore)
+    const misleading = warnSpy.mock.calls.filter((c) => String(c[0]).includes('后台缩略图生成失败'))
+    expect(misleading).toHaveLength(0)
+  })
+
+  it('窗口存活时 drain 完成推送 thumbsReady 更新（回归护栏）', async () => {
+    const { abs } = await setupDeferredThumb()
+    const win = { isDestroyed: () => false, webContents: { send: vi.fn() } }
+
+    startThumbDrain(win)
+    await awaitThumbDrain()
+
+    expect(win.webContents.send).toHaveBeenCalledWith('models:thumbsReady', {
+      updates: [{ id: abs, coverUrl: expect.stringContaining('thumbs') }]
+    })
   })
 })

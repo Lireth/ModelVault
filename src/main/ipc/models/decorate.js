@@ -80,7 +80,11 @@ export function startThumbDrain(win) {
         entry.decorated.coverUrl = coverUrl
       }
     }
-    if (!win.isDestroyed()) {
+    // win 可能为 null：扫描进行中窗口被关闭时，scan.js 经
+    // BrowserWindow.fromWebContents 取到的就是 null（A7）。
+    // 漏判会在 drain 回调里抛 TypeError，被 allSettled 吞掉并误记为
+    // 「后台缩略图生成失败」，thumbsReady 推送静默中断
+    if (win && !win.isDestroyed()) {
       win.webContents.send('models:thumbsReady', {
         updates: [...ids].map((id) => ({ id, coverUrl }))
       })
