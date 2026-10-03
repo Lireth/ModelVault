@@ -119,8 +119,11 @@ async function onCancel() {
   closeSettings()
 }
 
-/** ESC 键关闭设置页面（与关闭按钮走同一脏保护入口，A9） */
+/** ESC 键关闭设置页面（与关闭按钮走同一脏保护入口，A9）。
+ *  确认层可见时整键让位（F1）：模态确认期间底层页面不得响应 ESC，
+ *  否则会把刚被取消的确认层再次弹出 */
 function onKeydown(e) {
+  if (state.confirm.visible) return
   if (e.key === 'Escape' && state.settingsOpen) onCancel()
 }
 

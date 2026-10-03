@@ -105,16 +105,22 @@ const confirmCancelBtn = ref(null)
 const confirmOkBtn = ref(null)
 
 /** 确认层键盘交互：ESC=取消、Enter=确认（焦点在按钮上时由按钮原生处理）、
- *  Tab 在两个按钮间循环（简单焦点陷阱），防止焦点穿透到被遮挡内容 */
+ *  Tab 在两个按钮间循环（简单焦点陷阱），防止焦点穿透到被遮挡内容。
+ *  stopPropagation（F1）：确认层打开期间键盘事件由本层独占消费，
+ *  否则事件继续冒泡到 window，触发详情页/设置页的 ESC 处理器，
+ *  脏表单时 closeDetail/onCancel 会把确认层再次弹出，ESC 无法取消 */
 function onConfirmKeydown(e) {
   if (e.key === 'Escape') {
     e.preventDefault()
+    e.stopPropagation()
     rejectConfirm()
   } else if (e.key === 'Tab') {
     e.preventDefault()
+    e.stopPropagation()
     ;(e.shiftKey ? confirmOkBtn.value : confirmCancelBtn.value)?.focus()
   } else if (e.key === 'Enter' && e.target?.tagName !== 'BUTTON') {
     e.preventDefault()
+    e.stopPropagation()
     acceptConfirm()
   }
 }

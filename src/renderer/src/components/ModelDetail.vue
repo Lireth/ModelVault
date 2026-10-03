@@ -196,8 +196,11 @@ function onPanelContextMenu() {
 }
 
 /** ESC 关闭详情页（U1）：设置页打开时让位给设置页的 ESC 处理；
- *  表单有未保存修改时经 closeDetail 内的确认拦截（C8） */
+ *  表单有未保存修改时经 closeDetail 内的确认拦截（C8）。
+ *  确认层可见时整键让位（F1）：模态确认期间底层页面不得响应 ESC，
+ *  否则会把刚被取消的确认层再次弹出 */
 function onWindowKeydown(e) {
+  if (state.confirm.visible) return
   if (e.key === 'Escape' && selectedModel.value && !state.settingsOpen) closeDetail()
 }
 
