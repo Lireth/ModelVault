@@ -3,8 +3,10 @@ import path from 'node:path'
 
 /**
  * 原子写入文本文件（先写临时文件再重命名）（C2 自 store.js 拆出）。
- * 写入中断电/崩溃时不会损坏目标文件，settings.json、
- * window-state.json 与关联存储统一采用该策略。
+ * 断电安全（A2）：rename 前对临时文件 fsync 刷盘数据块——更名落盘后
+ * 目标文件必为完整的新版本（或旧版本/不存在），不会出现"已更名但内容
+ * 损坏/全零"。更名操作的目录项持久化在 Windows 上受平台限制不做
+ * 目录级 fsync，极端情况下表现为回退到旧版本而非损坏。
  * 并发安全（A1）：同一文件的并发写入各自使用独立临时文件（互不截断），
  * 并对 Windows 上并发替换目标的 rename 竞争退避重试。
  * @param {string} file 目标文件绝对路径
@@ -39,11 +41,21 @@ export async function atomicWriteFile(file, content) {
   // 扫描完成回写）各自使用不同临时文件，避免后写方截断前写方内容、
   // 或先行方 rename 移走临时文件致后行方 ENOENT
   const tmp = `${file}.${process.pid}.${++tmpSeq}.tmp`
+  let fh = null
   try {
     await fs.mkdir(path.dirname(file), { recursive: true })
-    await fs.writeFile(tmp, content, 'utf-8')
+    fh = await fs.open(tmp, 'w')
+    await fh.writeFile(content, { encoding: 'utf-8' })
+    // fsync 刷盘数据块（A2）：必须在 rename 之前完成，使更名后的目标
+    // 在断电后必为完整内容而非半写状态
+    await fh.sync()
+    await fh.close()
+    fh = null
     await renameReplacing(tmp, file)
   } catch (err) {
+    if (fh) {
+      await fh.close().catch(() => {})
+    }
     try {
       await fs.rm(tmp, { force: true })
     } catch {

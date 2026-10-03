@@ -191,6 +191,39 @@ describe('atomicWriteFile', () => {
     expect(['{"who":"first"}', '{"who":"second"}']).toContain(final)
     expect(() => JSON.parse(final)).not.toThrow()
   })
+
+  it('rename 前对临时文件 fsync，确保断电后目标为完整内容（A2）', async () => {
+    const file = path.join(root, 'durable.json')
+    // 事件时间线：记录 fsync 与 rename 的先后（当前实现无 fsync，rename 先于一切）
+    const timeline = []
+    const realOpen = fs.open.bind(fs)
+    const realRename = fs.rename.bind(fs)
+    vi.spyOn(fs, 'open').mockImplementation(async (target, ...rest) => {
+      const fh = await realOpen(target, ...rest)
+      const realSync = fh.sync.bind(fh)
+      fh.sync = async () => {
+        timeline.push('sync')
+        return realSync()
+      }
+      return fh
+    })
+    vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
+      timeline.push('rename')
+      return realRename(src, dst)
+    })
+    try {
+      await atomicWriteFile(file, '{"durable":true}')
+    } finally {
+      vi.restoreAllMocks()
+    }
+    // 数据块必须先刷盘再更名：否则断电时 rename 可能已持久化而数据块未落盘，
+    // 目标文件呈现"已更名但内容不完整/全零"
+    expect(timeline.filter((e) => e === 'sync')).toHaveLength(1)
+    expect(timeline.indexOf('sync')).toBeLessThan(timeline.indexOf('rename'))
+    expect(await fs.readFile(file, 'utf-8')).toBe('{"durable":true}')
+    const siblings = await fs.readdir(root)
+    expect(siblings.every((n) => !n.includes('.tmp'))).toBe(true)
+  })
 })
 
 describe('落盘失败通知（B1）', () => {
