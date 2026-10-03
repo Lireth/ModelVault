@@ -5,6 +5,7 @@ import { registerIpcHandlers } from './ipc'
 import { registerImageScheme, registerImageProtocolHandler } from './protocol'
 import { flushStoreSave, loadSettings } from './services/store'
 import { stopWatcher } from './services/watcher'
+import { handleUncaughtException } from './fatal-error'
 import logger from './logger'
 
 // 自定义协议必须在 app ready 之前注册
@@ -14,10 +15,19 @@ registerImageScheme()
 app.setAppUserModelId('com.modelvault.app')
 
 /**
- * 全局错误处理：捕获主进程未处理异常，写入日志，避免应用静默崩溃。
+ * 全局错误处理分级策略（A3）：
+ * - uncaughtException：异常后进程状态（防抖落盘链/目录监控/扫描任务）已不可信，
+ *   带病续跑有元数据丢失风险——记录日志 -> 尽力落盘 -> 提示用户 -> 重启；
+ *   处理函数自身异常时兜底直接重启，保证流程必然完成
+ * - unhandledRejection：维持仅记录（多数为可恢复的异步业务错误，
+ *   渲染进程异常另有 app:reportError 通道上报）
  */
 process.on('uncaughtException', (error) => {
-  logger.error(`未捕获的异常: ${error.stack || error.message}`)
+  handleUncaughtException(error).catch((err) => {
+    logger.error(`致命错误处理失败: ${err.stack || err.message}`)
+    app.relaunch()
+    app.exit(1)
+  })
 })
 
 process.on('unhandledRejection', (reason) => {
