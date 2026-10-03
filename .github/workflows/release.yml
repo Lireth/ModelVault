@@ -10,6 +10,8 @@
 #
 # 注意：标签版本号必须与 package.json 的 version 一致，否则构建提前失败，
 #       因为 electron-builder 产物路径由 package.json 的 version 决定。
+# 手动触发（workflow_dispatch）需输入版本号：完整演练「解析 → 校验 → 打包 →
+#       归档」流程，但不会创建 GitHub Release（避免基于分支引用误发版）。
 
 name: Release Build
 
@@ -17,10 +19,19 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch: # 允许手动触发，便于调试工作流本身
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "手动构建的版本号，须与 package.json 一致（如 0.2.0）"
+        required: true
+        default: "0.1.0"
 
 permissions:
   contents: write # 创建 GitHub Release 需要写权限
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false # 发布过程不可取消，避免半成品 Release 或残留产物
 
 jobs:
   build-windows:
@@ -50,26 +61,33 @@ jobs:
             ~\AppData\Local\electron-builder\Cache
           key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
-      - name: 解析标签版本号
+      - name: 解析版本号
         id: ver
         shell: pwsh
         env:
+          EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          $tag = $env:REF_NAME
+          # 手动触发时 github.ref_name 是分支名而非标签，须改用输入框的版本号
+          if ($env:EVENT_NAME -eq "workflow_dispatch") {
+            $tag = "v$($env:INPUT_VERSION)"
+          } else {
+            $tag = $env:REF_NAME
+          }
           $version = $tag -replace '^v', ''
-          Write-Host "触发标签: $tag，解析版本号: $version"
+          Write-Host "触发事件: $env:EVENT_NAME，触发 ref: $env:REF_NAME，目标版本: $version"
           "tag=$tag"         >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
 
-      - name: 校验标签版本与 package.json 一致
+      - name: 校验版本与 package.json 一致
         shell: pwsh
         env:
           TAG_VERSION: ${{ steps.ver.outputs.version }}
         run: |
           $pkg = Get-Content package.json -Raw | ConvertFrom-Json
           if ($pkg.version -ne $env:TAG_VERSION) {
-            Write-Host "::error::标签版本 v$($env:TAG_VERSION) 与 package.json version $($pkg.version) 不一致，请先更新 package.json 后重新打标签"
+            Write-Host "::error::目标版本 v$($env:TAG_VERSION) 与 package.json version $($pkg.version) 不一致，请先更新 package.json 后重新指定版本"
             exit 1
           }
           Write-Host "版本校验通过: v$($env:TAG_VERSION)"
@@ -158,7 +176,9 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # 手动触发仅调试打包流程，不创建 Release，避免在分支引用上误发版
       - name: 创建 GitHub Release 并附加 EXE 与校验和
+        if: github.event_name != 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -173,12 +193,18 @@ jobs:
         if: success()
         shell: pwsh
         env:
+          EVENT_NAME: ${{ github.event_name }}
           TAG: ${{ steps.ver.outputs.tag }}
           VERSION: ${{ steps.ver.outputs.version }}
           SIZE: ${{ steps.artifact.outputs.size }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.ver.outputs.tag }}
         run: |
+          $releaseLine = if ($env:EVENT_NAME -eq "workflow_dispatch") {
+            "手动触发调试构建：未创建 Release，产物仅可在本次运行页面下载。"
+          } else {
+            "产物已附加到 [GitHub Release]($env:RELEASE_URL)，并可在本次运行页面下载。"
+          }
           Add-Content $env:GITHUB_STEP_SUMMARY @"
           ## ✅ 构建成功：$env:TAG
 
@@ -188,14 +214,14 @@ jobs:
           | 体积 | $env:SIZE MB |
           | 运行日志 | [查看详情]($env:RUN_URL) |
 
-          产物已附加到 [GitHub Release]($env:RELEASE_URL)，并可在本次运行页面下载。
+          $releaseLine
           "@
 
       - name: 写入构建失败通知
         if: failure()
         shell: pwsh
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ steps.ver.outputs.tag || github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           $url = $env:RUN_URL
@@ -206,7 +232,7 @@ jobs:
           构建未成功，请前往 [运行日志]($url) 排查问题。
 
           常见原因：
-          - 标签版本号与 ``package.json`` 的 ``version`` 不一致
+          - 版本号与 ``package.json`` 的 ``version`` 不一致（手动触发时为输入框版本号）
           - 单元测试失败
           - electron-builder 打包报错（检查 ``build/`` 目录与图标配置）
           "@
