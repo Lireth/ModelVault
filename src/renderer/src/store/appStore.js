@@ -937,57 +937,88 @@ export async function exportModels(format) {
 }
 
 /**
- * 切换收藏状态（即时落盘，不弹提示）。
+ * 即时标注操作（收藏/NSFW/评分）按模型串行队列（A5）：
+ * toggleFavorite 需先读当前值再发 IPC，IPC 在途窗口内再次点击会读到
+ * 同一旧值、发出相同目标值，表现为「第二次点击失效」。同一模型的标注
+ * 操作经此队列依次执行——后一次必读到前一次经 applyMetaFlags 落定的
+ * 状态；不同模型的键不同，互不阻塞。前一次失败不阻塞后续操作
+ * （任务内部各自 try/catch 上报，队列仅负责排序）。
+ */
+const metaFlagChains = new Map()
+
+function enqueueMetaFlag(id, task) {
+  const prev = metaFlagChains.get(id)
+  // 空闲时任务同步执行（保持单击原有的同步 IPC 时序）；
+  // 有在途任务时才入队等它落定后执行（此时推迟一个微任务是必需的）
+  const next = prev ? prev.then(task, task) : task()
+  // 队列静止后清理条目，避免 Map 随模型数量无限增长
+  next
+    .catch(() => {})
+    .finally(() => {
+      if (metaFlagChains.get(id) === next) metaFlagChains.delete(id)
+    })
+  metaFlagChains.set(id, next)
+  return next
+}
+
+/**
+ * 切换收藏状态（即时落盘，不弹提示；同一模型的操作串行，A5）。
  * IPC reject 时 toast 提示（A6）：卡片上的收藏按钮无调用方捕获，
  * 不处理会让失败仅进日志，用户误以为已收藏。
  * @param {string} id 模型 id
  */
-export async function toggleFavorite(id) {
-  const m = state.models.find((x) => x.id === id)
-  const next = !m?.favorite
-  let res
-  try {
-    res = await window.api.models.setMetaFlags({ id, favorite: next })
-  } catch (err) {
-    toast('error', `收藏操作失败: ${err.message}`)
-    return false
-  }
-  if (res?.error) {
-    toast('error', res.error)
-    return false
-  }
-  if (res.meta) applyMetaFlags(id, res.meta)
-  return true
+export function toggleFavorite(id) {
+  return enqueueMetaFlag(id, async () => {
+    const m = state.models.find((x) => x.id === id)
+    const next = !m?.favorite
+    let res
+    try {
+      res = await window.api.models.setMetaFlags({ id, favorite: next })
+    } catch (err) {
+      toast('error', `收藏操作失败: ${err.message}`)
+      return false
+    }
+    if (res?.error) {
+      toast('error', res.error)
+      return false
+    }
+    if (res.meta) applyMetaFlags(id, res.meta)
+    return true
+  })
 }
 
 /**
- * 设置 NSFW 标记（即时落盘）：勾选后首页卡片预览图模糊展示。
+ * 设置 NSFW 标记（即时落盘，同一模型的操作串行，A5）：勾选后首页卡片预览图模糊展示。
  * @param {string} id 模型 id
  * @param {boolean} nsfw 是否 NSFW
  */
-export async function setNsfw(id, nsfw) {
-  const res = await window.api.models.setMetaFlags({ id, nsfw })
-  if (res?.error) {
-    toast('error', res.error)
-    return false
-  }
-  if (res.meta) applyMetaFlags(id, res.meta)
-  return true
+export function setNsfw(id, nsfw) {
+  return enqueueMetaFlag(id, async () => {
+    const res = await window.api.models.setMetaFlags({ id, nsfw })
+    if (res?.error) {
+      toast('error', res.error)
+      return false
+    }
+    if (res.meta) applyMetaFlags(id, res.meta)
+    return true
+  })
 }
 
 /**
- * 设置评分（0-5 整数，即时落盘）。
+ * 设置评分（0-5 整数，即时落盘，同一模型的操作串行，A5）。
  * @param {string} id 模型 id
  * @param {number} rating 评分
  */
-export async function setRating(id, rating) {
-  const res = await window.api.models.setMetaFlags({ id, rating })
-  if (res?.error) {
-    toast('error', res.error)
-    return false
-  }
-  if (res.meta) applyMetaFlags(id, res.meta)
-  return true
+export function setRating(id, rating) {
+  return enqueueMetaFlag(id, async () => {
+    const res = await window.api.models.setMetaFlags({ id, rating })
+    if (res?.error) {
+      toast('error', res.error)
+      return false
+    }
+    if (res.meta) applyMetaFlags(id, res.meta)
+    return true
+  })
 }
 
 /**

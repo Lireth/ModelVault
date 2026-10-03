@@ -229,6 +229,77 @@ describe('toggleFavorite（A6 错误可见性）', () => {
   })
 })
 
+describe('快速连点竞态（A5）', () => {
+  it('双击收藏：第二次读到第一次落定的状态，IPC 依次收到相反目标值（不丢翻）', async () => {
+    state.models = [makeModel('m1', { favorite: false })]
+    const sentPayloads = []
+    let releaseFirst = () => {}
+    api.models.setMetaFlags.mockImplementationOnce((payload) => {
+      sentPayloads.push(payload)
+      // 第一次调用挂起：模拟 IPC 在途窗口
+      return new Promise((resolve) => {
+        releaseFirst = () => resolve({ meta: { favorite: true, nsfw: false, rating: 0 } })
+      })
+    })
+    api.models.setMetaFlags.mockImplementationOnce((payload) => {
+      sentPayloads.push(payload)
+      return Promise.resolve({ meta: { favorite: payload.favorite, nsfw: false, rating: 0 } })
+    })
+
+    const first = toggleFavorite('m1') // 不 await：构造连点场景
+    const second = toggleFavorite('m1')
+    releaseFirst()
+    await Promise.all([first, second])
+
+    // 串行化后：第一次读旧值 false -> true；第二次读新值 true -> false
+    expect(sentPayloads).toEqual([
+      { id: 'm1', favorite: true },
+      { id: 'm1', favorite: false }
+    ])
+    // 净效果翻两次，回到 false（未串行化时两次都发 true，第二次点击看起来失效）
+    expect(state.models[0].favorite).toBe(false)
+  })
+
+  it('前一次失败不阻塞后续操作：报错后再次点击仍正常生效', async () => {
+    state.models = [makeModel('m1', { favorite: false })]
+    api.models.setMetaFlags.mockRejectedValueOnce(new Error('IPC 断开'))
+    api.models.setMetaFlags.mockResolvedValueOnce({
+      meta: { favorite: true, nsfw: false, rating: 0 }
+    })
+
+    const ok1 = await toggleFavorite('m1')
+    expect(ok1).toBe(false)
+    expect(state.toasts.some((t) => t.text.includes('收藏操作失败'))).toBe(true)
+    const ok2 = await toggleFavorite('m1')
+    expect(ok2).toBe(true)
+    expect(state.models[0].favorite).toBe(true)
+  })
+
+  it('队列按模型粒度：不同模型的操作互不等待（m1 在途时 m2 立即可完成）', async () => {
+    state.models = [makeModel('m1'), makeModel('m2')]
+    let m1Started = false
+    let releaseFirst = () => {}
+    api.models.setMetaFlags.mockImplementation((payload) => {
+      if (payload.id === 'm1') {
+        m1Started = true
+        return new Promise((resolve) => {
+          releaseFirst = () => resolve({ meta: { favorite: true, nsfw: false, rating: 0 } })
+        })
+      }
+      return Promise.resolve({ meta: { favorite: true, nsfw: false, rating: 0 } })
+    })
+
+    const p1 = toggleFavorite('m1')
+    const p2 = toggleFavorite('m2')
+    await expect(p2).resolves.toBe(true) // m2 未因 m1 在途而阻塞
+    expect(m1Started).toBe(true)
+    expect(state.models[1].favorite).toBe(true)
+    releaseFirst()
+    await expect(p1).resolves.toBe(true)
+    expect(state.models[0].favorite).toBe(true)
+  })
+})
+
 describe('deleteModel', () => {
   it('成功时从列表移除并清理选中态', async () => {
     state.models = [makeModel('m1'), makeModel('m2')]
