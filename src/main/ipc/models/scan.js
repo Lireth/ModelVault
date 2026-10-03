@@ -114,8 +114,9 @@ export function registerScanHandlers() {
       // 扫描成功后与 settings.modelsFolder 保持一致（C6）：
       // 显式传入 folder 的扫描也持久化根目录，与 models:chooseFolder 行为闭环
       await updateSettings({ modelsFolder: root })
-      // 同步目录监控状态（E8）：autoRescan 开启时监听当前根目录，变更触发自动重扫
-      syncWatcher(root, getSettings().autoRescan === true)
+      // 同步目录监控状态（E8）：autoRescan 开启时监听当前根目录，变更触发自动重扫。
+      // 排除名单与 scanner 同规则传入：被排除目录内的文件变化不触发无意义重扫
+      syncWatcher(root, getSettings().autoRescan === true, appSettings.excludeDirs || [])
 
       return {
         root,

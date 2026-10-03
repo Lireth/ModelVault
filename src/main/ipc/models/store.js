@@ -135,8 +135,13 @@ export function registerStoreHandlers() {
     }
     await updateSettings(patch)
     const settings = getSettings()
-    // 目录监控随设置联动（E8）：autoRescan 开关或激活根目录变更时重启/停止监听
-    syncWatcher(settings.modelsFolder, settings.autoRescan === true)
+    // 目录监控随设置联动（E8）：autoRescan 开关或激活根目录变更时重启/停止监听；
+    // 排除名单与 scanner 同规则（按目录名小写匹配），被排除目录的变更不触发重扫
+    syncWatcher(
+      settings.modelsFolder,
+      settings.autoRescan === true,
+      settings.excludeDirs || []
+    )
     logger.info(`应用设置已更新: ${JSON.stringify(patch).slice(0, 200)}`)
     return { settings }
   })
