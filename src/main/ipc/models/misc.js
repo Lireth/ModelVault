@@ -4,7 +4,7 @@ import { BrowserWindow, Menu, clipboard, dialog, ipcMain, shell } from 'electron
 import logger from '../../logger'
 import { isInRoot, getModelMeta, removeModelMeta, setModelHash } from '../../services/store'
 import { SIDECAR_PREVIEW_EXTS } from '../../services/scanner'
-import { sha256File } from '../../services/civitai'
+import { sha256File } from '../../services/hash'
 
 /**
  * 其他模型操作链路：删除模型（回收站 + sidecar 清理）、

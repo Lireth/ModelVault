@@ -106,7 +106,7 @@ function normalizeModelMeta(raw) {
     nsfw: raw.nsfw === true,
     // 评分（0-5 整数，0 为未评分）
     rating: Number.isInteger(raw.rating) && raw.rating >= 0 && raw.rating <= 5 ? raw.rating : 0,
-    // Civitai AutoV2 哈希（SHA256 hex）与计算时的文件 mtime，
+    // 文件 SHA256 哈希与计算时的文件 mtime，
     // mtime 一致则重启后无需重新计算大文件哈希
     hash: typeof raw.hash === 'string' && /^[0-9a-f]{64}$/i.test(raw.hash) ? raw.hash.toLowerCase() : '',
     hashMtime: Number.isFinite(raw.hashMtime) ? raw.hashMtime : 0,
@@ -137,8 +137,8 @@ export function removeModelMeta(modelId) {
 }
 
 /**
- * 持久化模型的 AutoV2 哈希与计算时的文件 mtime（防抖落盘）。
- * 文件被修改（mtime 变化）后哈希自动失效，下次匹配重新计算。
+ * 持久化模型的文件哈希与计算时的 mtime（防抖落盘）。
+ * 文件被修改（mtime 变化）后哈希自动失效，下次重新计算。
  * @param {string} modelId 模型绝对路径
  * @param {string} hash SHA256 hex 字符串
  * @param {number} mtimeMs 计算哈希时的文件修改时间

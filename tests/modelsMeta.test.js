@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { ipcMain, net, protocol } from 'electron'
+import { net, protocol } from 'electron'
 import { fakeUserData } from './setup'
 /**
  * models:saveModelData 合并逻辑回归测试（B2）：
@@ -192,111 +192,6 @@ describe('mvimg 协议路径白名单', () => {
   it('不存在的路径返回 404', async () => {
     const res = await request(path.join(root, 'missing.png'))
     expect(res.status).toBe(404)
-  })
-})
-
-describe('civitaiMatch 并发防重入（B3）', () => {
-  let root
-
-  beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-match-'))
-    roots.push(root)
-    setDataRoot(root)
-  })
-
-  /** 从 ipcMain.handle 的注册记录中取 civitaiMatch 的 handler（取最新一次注册） */
-  function getMatchHandler() {
-    registerModelIpcHandlers()
-    const call = vi
-      .mocked(ipcMain.handle)
-      .mock.calls.filter((c) => c[0] === 'models:civitaiMatch')
-      .pop()
-    return call[1]
-  }
-
-  it('同一模型匹配进行中时，并发请求立即拒绝，不重复计算哈希（B3/S5）', async () => {
-    const handler = getMatchHandler()
-    const modelFile = path.join(root, 'm.safetensors')
-    await fs.writeFile(modelFile, 'x')
-
-    // 让首个请求挂起在网络阶段（本地哈希已算完，等待 fetch 返回）
-    let releaseFetch
-    vi.mocked(net.fetch).mockImplementation(
-      () => new Promise((resolve) => { releaseFetch = resolve })
-    )
-
-    const first = handler({}, { id: modelFile })
-    // 第二个并发请求必须立即被互斥拒绝，而非再排一次哈希计算
-    const second = await handler({}, { id: modelFile })
-    expect(second).toEqual({ error: '该模型正在匹配中，请稍候' })
-
-    // 首个请求经 stat/流式哈希等多个 IO 宏任务后才到达网络阶段，轮询等待挂起点就绪
-    const deadline = Date.now() + 5000
-    while (typeof releaseFetch !== 'function' && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    }
-    releaseFetch(new Response(null, { status: 404 }))
-    const firstResult = await first
-    expect(firstResult.matched).toBe(false)
-    expect(firstResult.hash).toMatch(/^[0-9a-f]{64}$/)
-  })
-
-  it('不同模型的匹配请求可并行进行，互不拒绝（S5）', async () => {
-    const handler = getMatchHandler()
-    const fileA = path.join(root, 'a.safetensors')
-    const fileB = path.join(root, 'b.safetensors')
-    await fs.writeFile(fileA, 'A')
-    await fs.writeFile(fileB, 'B')
-
-    // 模型 A 挂起在网络阶段
-    let releaseFetchA
-    vi.mocked(net.fetch).mockImplementation(
-      () => new Promise((resolve) => { releaseFetchA = resolve })
-    )
-    const first = handler({}, { id: fileA })
-
-    // 模型 A 匹配进行中，模型 B 的请求不应被全局单例拒绝（S5），
-    // 而是正常进入并完成（404 => matched:false）
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    vi.mocked(net.fetch).mockResolvedValue(new Response(null, { status: 404 }))
-    const second = await handler({}, { id: fileB })
-    expect(second.error).toBeUndefined()
-    expect(second.matched).toBe(false)
-
-    // 释放模型 A 的请求并确认正常完成
-    const deadline = Date.now() + 5000
-    while (typeof releaseFetchA !== 'function' && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    }
-    releaseFetchA(new Response(null, { status: 404 }))
-    const firstResult = await first
-    expect(firstResult.error).toBeUndefined()
-    expect(firstResult.matched).toBe(false)
-  })
-
-  it('响应体非 JSON 时返回友好的解析失败错误（S6）', async () => {
-    const handler = getMatchHandler()
-    const modelFile = path.join(root, 'bad-json.safetensors')
-    await fs.writeFile(modelFile, 'x')
-    // 网关类错误页：200 状态码但响应体为 HTML
-    vi.mocked(net.fetch).mockResolvedValue(
-      new Response('<html>Bad Gateway</html>', { status: 200 })
-    )
-    const res = await handler({}, { id: modelFile })
-    expect(res.error).toContain('Civitai 匹配失败: Civitai 响应解析失败')
-  })
-
-  it('匹配结束后标记复位，后续请求可正常进入', async () => {
-    const handler = getMatchHandler()
-    vi.mocked(net.fetch).mockResolvedValue(new Response(null, { status: 404 }))
-    const modelFile = path.join(root, 'm.safetensors')
-    await fs.writeFile(modelFile, 'x')
-
-    const first = await handler({}, { id: modelFile })
-    expect(first.matched).toBe(false)
-    // 互斥标记已释放：第二次请求正常进入（命中 matchCache 直接返回）
-    const second = await handler({}, { id: modelFile })
-    expect(second.matched).toBe(false)
   })
 })
 

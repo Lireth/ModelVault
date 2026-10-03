@@ -1,7 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import AutoInfoPanel from './detail/AutoInfoPanel.vue'
-import CivitaiPanel from './detail/CivitaiPanel.vue'
 import CoverPanel from './detail/CoverPanel.vue'
 import { PARAM_LIMITS, SAMPLERS, SCHEDULERS, PRECISIONS } from '../constants/modelParams'
 import {
@@ -84,35 +83,6 @@ watch(selectedModel, (m, old) => {
 watch(formDirty, (d) => {
   state.detailDirty = d
 }, { immediate: true })
-
-/* ---------------- Civitai 匹配（面板组件，C1） ---------------- */
-
-/** CivitaiPanel 模板 ref：面板自持匹配状态，父组件仅触发与接收表单填入事件 */
-const civitaiPanel = ref(null)
-
-/** 将匹配到的示例图生成参数填入推荐参数表单（保存后生效） */
-function onCivitaiApplyParams({ exampleParams, precision }) {
-  const ex = exampleParams
-  if (!ex) return
-  if (Number.isFinite(ex.steps)) form.steps = String(ex.steps)
-  if (Number.isFinite(ex.cfgMin)) form.cfgMin = String(ex.cfgMin)
-  if (Number.isFinite(ex.cfgMax)) form.cfgMax = String(ex.cfgMax)
-  if (ex.sampler) form.sampler = ex.sampler
-  if (ex.scheduler) form.scheduler = ex.scheduler
-  if (Number.isFinite(ex.resMin)) form.resMin = String(ex.resMin)
-  if (Number.isFinite(ex.resMax)) form.resMax = String(ex.resMax)
-  if (precision) form.precision = precision
-  toast('success', '推荐参数已填入表单，点击「保存参数」生效')
-}
-
-/** 将匹配到的触发词追加到备注文本框 */
-function onCivitaiAppendWords(words) {
-  const list = words || []
-  if (list.length === 0) return
-  const text = list.join(', ')
-  form.note = form.note ? `${form.note}\n触发词: ${text}` : `触发词: ${text}`
-  toast('success', '触发词已追加到备注，点击「保存参数」生效')
-}
 
 /* ---------------- 文件元数据自动解析（AutoInfoPanel 事件，C1） ---------------- */
 
@@ -289,14 +259,6 @@ async function onSave() {
         <header class="detail-header">
           <h2 :title="selectedModel.name">{{ selectedModel.alias || selectedModel.name }}</h2>
           <div class="detail-header-actions">
-            <button
-              class="btn"
-              :disabled="civitaiPanel?.busy"
-              title="计算文件哈希并匹配 Civitai 模型信息（大文件需数秒）"
-              @click="civitaiPanel?.match()"
-            >
-              {{ civitaiPanel?.busy ? '匹配中…' : 'Civitai 匹配' }}
-            </button>
             <button class="btn" @click="revealModel(selectedModel.id)">打开所在文件夹</button>
             <button class="wc-btn" title="关闭" @click="closeDetail">✕</button>
           </div>
@@ -308,13 +270,6 @@ async function onSave() {
 
           <!-- 右侧：推荐参数 -->
           <div class="detail-form-col">
-            <!-- Civitai 匹配结果面板（CivitaiPanel，C1/E9） -->
-            <CivitaiPanel
-              ref="civitaiPanel"
-              @apply-params="onCivitaiApplyParams"
-              @append-words="onCivitaiAppendWords"
-            />
-
             <!-- 文件元数据（safetensors 头部自动解析）：仅展示 + 一键填入表单（AutoInfoPanel，C1） -->
             <AutoInfoPanel @apply-resolution="onAutoApplyResolution" @apply-triggers="onAutoApplyTriggers" />
 

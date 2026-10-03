@@ -64,10 +64,10 @@ const emit = defineEmits(['apply-resolution', 'apply-triggers'])
         <dd>{{ autoInfo.resMin }} × {{ autoInfo.resMax }}</dd>
       </template>
     </dl>
-    <div v-if="autoTriggerCandidates.length" class="civitai-words">
-      <span v-for="w in autoTriggerCandidates" :key="w" class="civitai-word" :title="w">{{ w }}</span>
+    <div v-if="autoTriggerCandidates.length" class="autoinfo-words">
+      <span v-for="w in autoTriggerCandidates" :key="w" class="autoinfo-word" :title="w">{{ w }}</span>
     </div>
-    <div v-if="Number.isFinite(autoInfo.resMin) || autoTriggerCandidates.length" class="civitai-actions">
+    <div v-if="Number.isFinite(autoInfo.resMin) || autoTriggerCandidates.length" class="autoinfo-actions">
       <button
         v-if="Number.isFinite(autoInfo.resMin)"
         class="btn"
@@ -127,14 +127,14 @@ const emit = defineEmits(['apply-resolution', 'apply-triggers'])
   font-family: var(--font-mono);
 }
 
-/* 触发词标签行与操作行：与 CivitaiPanel 共用同一套样式（各自 scoped 维护） */
-.civitai-words {
+/* 触发词标签行与操作行 */
+.autoinfo-words {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.civitai-word {
+.autoinfo-word {
   font-size: 11px;
   padding: 3px 9px;
   border-radius: 999px;
@@ -146,7 +146,7 @@ const emit = defineEmits(['apply-resolution', 'apply-triggers'])
   white-space: nowrap;
 }
 
-.civitai-actions {
+.autoinfo-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;

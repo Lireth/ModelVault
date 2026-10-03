@@ -1,17 +1,10 @@
-import fs from 'node:fs/promises'
-import { BrowserWindow, ipcMain } from 'electron'
+import { ipcMain } from 'electron'
 import logger from '../../logger'
-import { getModelMeta, isInRoot, setModelHash, setModelMeta } from '../../services/store'
-import { matchCivitai } from '../../services/civitai'
+import { getModelMeta, setModelMeta } from '../../services/store'
 
 /**
- * 元数据链路：详情页标注保存、快捷标记（收藏/NSFW/评分）、Civitai 匹配。
- * matchingIds/matchAborts 为本模块私有状态，仅 Civitai 匹配通道使用
- * （B3/S5 按 id 防重入；E9 进度推送与取消）。
+ * 元数据链路：详情页标注保存、快捷标记（收藏/NSFW/评分）。
  */
-
-/** 进度事件节流间隔（ms），避免大文件哈希回调打满 IPC（E9） */
-const CIVITAI_PROGRESS_INTERVAL = 120
 
 /**
  * 合并详情页保存的元数据字段（纯函数，不修改入参）。
@@ -32,13 +25,6 @@ export function mergeSaveModelData(existing, patch) {
   if (patch.subCategory !== undefined) merged.subCategory = patch.subCategory
   return merged
 }
-
-/** 进行中匹配的模型 id 集合（按 id 互斥，S5）：全局单例会连带拒绝
- *  不同模型的匹配请求，大库逐个匹配体验割裂；同一模型仍须防并发重复哈希 */
-const matchingIds = new Set()
-
-/** 进行中匹配的取消控制器（id -> AbortController，E9） */
-const matchAborts = new Map()
 
 /** 注册元数据链路的 IPC 处理器 */
 export function registerMetaHandlers() {
@@ -92,85 +78,5 @@ export function registerMetaHandlers() {
       return { error: '保存失败（模型需位于当前模型根目录内）' }
     }
     return { meta }
-  })
-
-  // Civitai 匹配：计算模型文件 SHA256 并查询 Civitai API（耗时操作，大文件需数秒）。
-  // 已计算的哈希持久化在元数据中（hash/hashMtime），文件未变化时直接复用，重启后无需重算
-  ipcMain.handle('models:civitaiMatch', async (event, { id } = {}) => {
-    if (typeof id !== 'string' || !id) {
-      return { error: '无效的模型标识' }
-    }
-    // 同步先检查并置位：任何 await 之前完成（B4 惯例）。按 id 互斥（S5）：
-    // 同一模型防并发重复哈希（GB 级文件占用磁盘），不同模型可并行匹配
-    if (matchingIds.has(id)) {
-      return { error: '该模型正在匹配中，请稍候' }
-    }
-    matchingIds.add(id)
-    const abort = new AbortController()
-    matchAborts.set(id, abort)
-    try {
-      if (!isInRoot(id)) {
-        return { error: '模型不在当前根目录内，无法匹配' }
-      }
-      let mtimeMs = 0
-      try {
-        mtimeMs = (await fs.stat(id)).mtimeMs
-      } catch {
-        return { error: '模型文件不存在' }
-      }
-      // mtime 一致时复用持久化哈希，跳过耗时的全文件 SHA256 计算
-      const meta = getModelMeta(id) || {}
-      const knownHash = meta.hash && meta.hashMtime === mtimeMs ? meta.hash : ''
-      // 哈希进度经 models:civitaiProgress 节流推送（E9），窗口销毁前须校验 isDestroyed
-      const win = BrowserWindow.fromWebContents?.(event.sender) || null
-      let lastSent = 0
-      const onProgress = (loaded, total) => {
-        const now = Date.now()
-        if (now - lastSent < CIVITAI_PROGRESS_INTERVAL) return
-        lastSent = now
-        if (win && !win.isDestroyed()) {
-          win.webContents.send('models:civitaiProgress', {
-            id,
-            loaded,
-            total,
-            percent: total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0
-          })
-        }
-      }
-      const result = await matchCivitai(id, knownHash, { signal: abort.signal, onProgress })
-      if (result.hash) {
-        // TOCTOU 复验（A10）：哈希计算期间文件被替换时，最初 stat 的 mtime
-        // 与当前内容不匹配，持久化将导致后续永远复用过期哈希；
-        // 复验失败时照常返回匹配结果，但跳过哈希持久化（下次重算）
-        let canPersist = false
-        try {
-          canPersist = (await fs.stat(id)).mtimeMs === mtimeMs
-        } catch {
-          canPersist = false
-        }
-        if (canPersist) setModelHash(id, result.hash, mtimeMs)
-      }
-      return result
-    } catch (err) {
-      // 用户取消（E9）：返回 { canceled: true } 而非错误提示
-      if (err?.name === 'AbortError') {
-        logger.info(`Civitai 匹配已取消: ${id}`)
-        return { canceled: true }
-      }
-      logger.warn(`Civitai 匹配失败: ${err.message}`)
-      return { error: `Civitai 匹配失败: ${err.message}` }
-    } finally {
-      matchingIds.delete(id)
-      matchAborts.delete(id)
-    }
-  })
-
-  // 取消进行中的 Civitai 匹配（E9）：中止哈希计算与网络请求
-  ipcMain.handle('models:cancelCivitai', (_event, { id } = {}) => {
-    if (typeof id === 'string' && id && matchAborts.has(id)) {
-      matchAborts.get(id).abort()
-      return { ok: true }
-    }
-    return { ok: false }
   })
 }

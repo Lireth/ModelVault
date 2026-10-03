@@ -862,15 +862,6 @@ export async function revealModel(modelPath) {
 }
 
 /**
- * 请求 Civitai 匹配（主进程计算 SHA256 并查询 API，大文件需数秒）。
- * @param {string} id 模型 id
- * @returns {Promise<{matched: boolean, hash?: string, info?: object} | {error: string}>}
- */
-export async function matchCivitai(id) {
-  return window.api.models.civitaiMatch(id)
-}
-
-/**
  * 删除模型文件（移入系统回收站）并从本地列表移除。
  * @param {string} id 模型 id
  * @param {{silent?: boolean}} [opts] silent=true 时不弹成功提示（批量删除用，E4）

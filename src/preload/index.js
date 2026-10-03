@@ -19,8 +19,6 @@ const VALID_INVOKE_CHANNELS = [
   'models:pasteCover',
   'models:setDefaultCover',
   'models:deleteCover',
-  'models:civitaiMatch',
-  'models:cancelCivitai',
   'models:deleteModel',
   'models:setMetaFlags',
   'models:popupMenu',
@@ -36,7 +34,6 @@ const VALID_RECEIVE_CHANNELS = [
   'models:menuAction',
   'models:thumbsReady',
   'models:storeError',
-  'models:civitaiProgress',
   'models:hashProgress',
   'models:fsChanged'
 ]
@@ -111,10 +108,6 @@ const api = {
     setDefaultCover: (id, cover) => invokeValidated('models:setDefaultCover', { id, cover }),
     /** 删除单张封面（cover 为封面相对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */
     deleteCover: (id, cover) => invokeValidated('models:deleteCover', { id, cover }),
-    /** Civitai 匹配：返回 { matched, hash, info } / { canceled } / { error }（大文件哈希耗时较长） */
-    civitaiMatch: (id) => invokeValidated('models:civitaiMatch', { id }),
-    /** 取消进行中的 Civitai 匹配（E9），返回 { ok } */
-    cancelCivitai: (id) => invokeValidated('models:cancelCivitai', { id }),
     /** 导出模型列表（E2），rows 为当前列表行，返回 { path, count } / { canceled } / { error } */
     exportList: (payload) => invokeValidated('models:exportList', payload),
     /** 批量计算文件哈希（E5 重复检测），返回 { hashes: {id:hash} } / { canceled } / { error } */
@@ -133,8 +126,6 @@ const api = {
     reveal: (path) => invokeValidated('models:reveal', { path }),
     /** 订阅扫描进度，返回取消监听函数 */
     onScanProgress: (listener) => subscribe('models:scanProgress', listener),
-    /** 订阅 Civitai 哈希进度事件（E9：{ id, loaded, total, percent }），返回取消监听函数 */
-    onCivitaiProgress: (listener) => subscribe('models:civitaiProgress', listener),
     /** 订阅批量哈希进度事件（E5：{ done, total, current }），返回取消监听函数 */
     onHashProgress: (listener) => subscribe('models:hashProgress', listener),
     /** 订阅目录变更事件（E8：{ root }），返回取消监听函数 */

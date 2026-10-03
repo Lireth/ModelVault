@@ -141,7 +141,7 @@ describe('路径关联', () => {
   })
 })
 
-describe('AutoV2 哈希持久化', () => {
+describe('文件哈希持久化', () => {
   it('合法哈希写入成功，非法哈希拒绝', async () => {
     const abs = await touchModel('hash-model.safetensors')
     setModelMeta(abs, { alias: 'hash' })

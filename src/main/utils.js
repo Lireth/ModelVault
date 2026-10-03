@@ -1,7 +1,7 @@
 /**
  * 主进程跨模块共享的小型工具（C4 去重）：
  * 此前的 abortError 在 scanner.js / decorate.js 各有一份逐字实现，
- * 「Map 超限按插入顺序淘汰最旧」的 LRU 逻辑在 decorate.js / civitai.js
+ * 「Map 超限按插入顺序淘汰最旧」的 LRU 逻辑在 decorate.js / hash.js
  * 两处同构，统一收敛到本模块维护。
  */
 

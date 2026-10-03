@@ -36,7 +36,6 @@ function makeApiMock() {
       deleteModel: vi.fn(),
       popupMenu: vi.fn(),
       reveal: vi.fn(),
-      civitaiMatch: vi.fn(),
       saveModelData: vi.fn(),
       uploadCover: vi.fn(),
       pasteCover: vi.fn(),
