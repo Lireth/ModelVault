@@ -1,10 +1,10 @@
 import { app, Menu, dialog, shell } from 'electron'
-import { createMainWindow, flushWindowStateSave, getMainWindow } from './windows/mainWindow'
+import { createMainWindow, getMainWindow } from './windows/mainWindow'
 import { registerWindowShortcuts } from './menu'
 import { registerIpcHandlers } from './ipc'
 import { registerImageScheme, registerImageProtocolHandler } from './protocol'
-import { flushStoreSave, loadSettings } from './services/store'
-import { stopWatcher } from './services/watcher'
+import { loadSettings } from './services/store'
+import { quitAfterFlush } from './quit'
 import { handleUncaughtException } from './fatal-error'
 import logger from './logger'
 
@@ -92,16 +92,8 @@ if (!gotSingleInstanceLock) {
   })
 }
 
-// Windows 平台惯例：所有窗口关闭后退出应用
+// Windows 平台惯例：所有窗口关闭后退出应用（退出编排见 quit.js：
+// 停监控 -> 等两路落盘 -> quit，落盘超时强制退出，A4）
 app.on('window-all-closed', () => {
-  // 退出前确保持久化数据完整落盘：元数据（store.json）+ 窗口状态（window-state.json）。
-  // 必须用 flushStoreSave 而非 saveStoreNow：后者在写盘进行中仅登记补写即返回，
-  // 直接 await 会过早 quit 中断在途写入，造成最后一批元数据修改丢失
-  stopWatcher()
-  Promise.all([flushStoreSave(), flushWindowStateSave()])
-    .catch(() => {})
-    .finally(() => {
-      logger.info('所有窗口已关闭，应用退出')
-      app.quit()
-    })
+  quitAfterFlush()
 })
