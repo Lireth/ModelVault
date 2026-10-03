@@ -49,7 +49,7 @@ jobs:
       # 缓存 Electron / electron-builder 二进制（.npmrc 指向 npmmirror 镜像，
       # 首次下载约 100MB+，缓存后大幅加速）。键随 lock 文件变化自动失效。
       - name: 缓存 Electron 二进制
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~\AppData\Local\electron\Cache
