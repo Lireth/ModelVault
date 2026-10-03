@@ -72,6 +72,15 @@ async function waitForScanStarted() {
   expect(typeof releaseScan).toBe('function')
 }
 
+/**
+ * 把目录注册为模型库（B1 后扫描的前置条件）：
+ * models:scan 只接受 settings.modelsFolders 白名单内的目录，
+ * 经 updateSettings 写入的目录自动进入白名单（并附存在性校验语义）
+ */
+async function registerLibrary(dir) {
+  await updateSettings({ modelsFolder: dir })
+}
+
 beforeEach(async () => {
   registerModelIpcHandlers()
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-'))
@@ -96,6 +105,7 @@ describe('models:scan 防重入（B4）', () => {
   it('扫描进行中时并发请求立即拒绝', async () => {
     const scan = getRegisteredHandler('models:scan')
     hangScanModels()
+    await registerLibrary(root)
     const first = scan(makeEvent(), { folder: root })
     // 第二个并发请求必须同步被拒（scanning 在任何 await 前置位）
     const second = await scan(makeEvent(), { folder: root })
@@ -114,6 +124,7 @@ describe('models:scan 取消', () => {
     const scan = getRegisteredHandler('models:scan')
     const cancel = getRegisteredHandler('models:cancelScan')
     hangScanModels()
+    await registerLibrary(root)
     const pending = scan(makeEvent(), { folder: root })
     await waitForScanStarted()
     expect(await cancel(makeEvent(), {})).toEqual({ ok: true })
@@ -151,6 +162,7 @@ describe('切根扫描清空延迟缩略图队列（C5）', () => {
     // 切换到新根目录扫描：切根分支应同步清空 deferredJobs/deferredOwners
     const rootB = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-b-'))
     roots.push(rootB)
+    await registerLibrary(rootB)
     vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 0 })
     const scan = getRegisteredHandler('models:scan')
     const res = await scan(makeEvent(), { folder: rootB })
@@ -169,6 +181,7 @@ describe('models:scan 进度推送（B4 守卫）', () => {
     const scan = getRegisteredHandler('models:scan')
     const win = makeWindow()
     vi.mocked(BrowserWindow.fromWebContents).mockReturnValue(win)
+    await registerLibrary(root)
     // 同步两次 onProgress 间隔小于 PROGRESS_INTERVAL(120ms)，仅推送一次
     vi.mocked(scanModels).mockImplementation(async (rootDir, onProgress) => {
       onProgress({ dirs: 1, found: 1, current: 'a.safetensors' })
@@ -178,7 +191,9 @@ describe('models:scan 进度推送（B4 守卫）', () => {
     await scan(makeEvent(win), { folder: root })
     expect(win.webContents.send).toHaveBeenCalledTimes(1)
     expect(win.webContents.send).toHaveBeenCalledWith('models:scanProgress', {
-      dirs: 1, found: 1, current: 'a.safetensors'
+      dirs: 1,
+      found: 1,
+      current: 'a.safetensors'
     })
   })
 
@@ -186,6 +201,7 @@ describe('models:scan 进度推送（B4 守卫）', () => {
     const scan = getRegisteredHandler('models:scan')
     const win = makeWindow({ destroyed: true })
     vi.mocked(BrowserWindow.fromWebContents).mockReturnValue(win)
+    await registerLibrary(root)
     vi.mocked(scanModels).mockImplementation(async (rootDir, onProgress) => {
       onProgress({ dirs: 1, found: 1, current: 'a.safetensors' })
       return { models: [], errors: [], dirCount: 1 }
@@ -193,6 +209,31 @@ describe('models:scan 进度推送（B4 守卫）', () => {
     const result = await scan(makeEvent(win), { folder: root })
     expect(result.root).toBe(root)
     expect(win.webContents.send).not.toHaveBeenCalled()
+  })
+})
+
+describe('models:scan 模型库白名单（B1）', () => {
+  it('拒绝扫描模型库列表之外的目录：未执行扫描、未创建 .modelvault', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-outside-'))
+    roots.push(outside)
+    // settings 为全新默认（modelsFolders 为空）：outside 是可写目录但不在白名单
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 0 })
+    const scan = getRegisteredHandler('models:scan')
+    const res = await scan(makeEvent(), { folder: outside })
+    expect(res).toEqual({ error: '该目录不在模型库列表中' })
+    // 扫描未执行，关联存储目录未被创建（渲染可控的任意目录写入面关闭）
+    expect(vi.mocked(scanModels)).not.toHaveBeenCalled()
+    await expect(fs.access(path.join(outside, '.modelvault'))).rejects.toThrow()
+  })
+
+  it('白名单内的目录正常扫描（Windows 大小写不敏感）', async () => {
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 0 })
+    await registerLibrary(root)
+    const variant = process.platform === 'win32' ? root.toUpperCase() : root
+    if (variant === root) return // 大小写不敏感平台上该用例无区分度
+    const scan = getRegisteredHandler('models:scan')
+    const res = await scan(makeEvent(), { folder: variant })
+    expect(res.root).toBe(variant)
   })
 })
 
@@ -211,13 +252,17 @@ describe('models:scan 目录校验与回写（C6）', () => {
     expect(res).toEqual({ error: '模型文件夹不存在或不是目录' })
   })
 
-  it('显式传入目录扫描成功后回写 settings.modelsFolder', async () => {
+  it('显式传入白名单内目录扫描成功后回写 settings.modelsFolder', async () => {
+    // root 为当前激活库，rootB 同在白名单但非激活：扫描 rootB 后激活根应切到 rootB
+    const rootB = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-writeback-'))
+    roots.push(rootB)
+    await updateSettings({ modelsFolder: root, modelsFolders: [root, rootB] })
     vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 0 })
     const scan = getRegisteredHandler('models:scan')
-    const res = await scan(makeEvent(), { folder: root })
-    expect(res.root).toBe(root)
+    const res = await scan(makeEvent(), { folder: rootB })
+    expect(res.root).toBe(rootB)
     const { modelsFolder } = await loadSettings()
-    expect(modelsFolder).toBe(root)
+    expect(modelsFolder).toBe(rootB)
   })
 })
 
