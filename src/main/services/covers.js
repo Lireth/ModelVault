@@ -52,6 +52,14 @@ export async function hasImageMagic(filePath) {
 }
 
 /**
+ * 封面图片大小上限（B5）：对话框/拖拽入口在复制前预检。
+ * 扩展名 + 魔数双重校验只保证「是图片」，不限「多大」——合法的大 PNG
+ * 可达数 GB，整体拷入 .modelvault 会占满磁盘，并连锁导致元数据原子写
+ * 失败（落盘链依赖同一磁盘的可用空间）。
+ */
+const MAX_COVER_BYTES = 50 * 1024 * 1024
+
+/**
  * 校验并将外部图片文件复制到关联存储的封面目录（对话框选择与拖拽导入共用）。
  * @param {string} source 源图片绝对路径
  * @returns {Promise<{cover: string} | {error: string}>} cover 为复制后的绝对路径
@@ -66,6 +74,13 @@ export async function importCoverFromPath(source) {
   }
   try {
     await fs.access(source)
+    // 大小预检（B5）：先于内容校验与复制，超限文件零写入
+    const stat = await fs.stat(source)
+    if (stat.size > MAX_COVER_BYTES) {
+      return {
+        error: `图片文件过大（上限 ${Math.floor(MAX_COVER_BYTES / 1024 / 1024)}MB），请压缩后再导入`
+      }
+    }
     // 内容校验：伪装成图片扩展名的非图片文件拒绝导入
     if (!(await hasImageMagic(source))) {
       return { error: '文件内容不是有效的图片，已拒绝导入' }

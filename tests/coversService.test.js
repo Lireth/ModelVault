@@ -98,6 +98,36 @@ describe('importCoverFromPath', () => {
     const res = await importCoverFromPath(path.join(root, 'missing.png'))
     expect(res.error).toBeTruthy()
   })
+
+  it('超大图片拒绝导入且不创建封面目录（B5 磁盘防护）', async () => {
+    // 51MB 真实文件：超限即拒，不做复制
+    const src = path.join(root, 'huge.png')
+    await fs.writeFile(src, Buffer.alloc(51 * 1024 * 1024, 0x41))
+    const res = await importCoverFromPath(src)
+    expect(res.error).toContain('图片文件过大')
+    expect(res.cover).toBeUndefined()
+    // 封面目录未创建：没有任何写入发生
+    await expect(fs.access(getCoversDir())).rejects.toThrow()
+  })
+
+  it('恰好等于上限的文件允许导入（边界放行）', async () => {
+    const src = path.join(root, 'boundary.png')
+    await fs.writeFile(src, PNG_MAGIC)
+    // stat 桩伪造边界尺寸，避免真实写 50MB；实现以 stat.size 为判据
+    const realStat = fs.stat.bind(fs)
+    vi.spyOn(fs, 'stat').mockImplementation(async (p, ...rest) =>
+      String(p).endsWith('boundary.png')
+        ? { size: 50 * 1024 * 1024, isFile: () => true, isDirectory: () => false }
+        : realStat(p, ...rest)
+    )
+    try {
+      const res = await importCoverFromPath(src)
+      expect(res.error).toBeUndefined()
+      expect(res.cover).toBeTruthy()
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
 })
 
 describe('deleteCoverFile（路径越界防护）', () => {
