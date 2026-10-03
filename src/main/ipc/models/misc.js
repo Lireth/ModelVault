@@ -2,13 +2,21 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { BrowserWindow, Menu, clipboard, dialog, ipcMain, shell } from 'electron'
 import logger from '../../logger'
-import { isInRoot, getModelMeta, removeModelMeta } from '../../services/store'
+import { isInRoot, getModelMeta, removeModelMeta, setModelHash } from '../../services/store'
 import { SIDECAR_PREVIEW_EXTS } from '../../services/scanner'
+import { sha256File } from '../../services/civitai'
 
 /**
  * 其他模型操作链路：删除模型（回收站 + sidecar 清理）、
- * 右键上下文菜单、资源管理器定位、模型列表导出（E2）。
+ * 右键上下文菜单、资源管理器定位、模型列表导出（E2）、
+ * 重复检测的批量哈希计算（E5）。
  */
+
+/** 进度事件节流间隔（ms），避免大文件哈希回调打满 IPC（E5） */
+const HASH_PROGRESS_INTERVAL = 150
+
+/** 批量哈希的取消控制器（同一时刻仅允许一个批量任务） */
+let hashBatchAbort = null
 
 /** 模型同名的 sidecar 文件（SD WebUI 惯例：同名预览图 + 说明文本）。
  * 图片候选与展示侧共用 SIDECAR_PREVIEW_EXTS，保证清理集与展示集一致（B17） */
@@ -147,6 +155,81 @@ export function registerMiscHandlers() {
       return { error: `导出失败: ${err.message}` }
     }
   })
+
+  // 批量计算文件哈希（E5 重复检测）：同尺寸候选文件逐一取 SHA256，
+  // mtime 与持久化 hashMtime 一致时复用缓存哈希（跳过 GB 级重算，项目约定）。
+  // 结果经 models:hashProgress 推进度，models:cancelHashBatch 可取消
+  ipcMain.handle('models:computeHashBatch', async (event, { ids } = {}) => {
+    if (!Array.isArray(ids) || ids.length === 0 || ids.length > 1000) {
+      return { error: '无效的哈希计算请求' }
+    }
+    if (hashBatchAbort) {
+      return { error: '已有哈希计算任务进行中，请稍候' }
+    }
+    const abort = new AbortController()
+    hashBatchAbort = abort
+    const win = BrowserWindow.fromWebContents?.(event.sender) || null
+    const total = ids.length
+    let lastSent = 0
+    const sendProgress = (done, current) => {
+      const now = Date.now()
+      if (now - lastSent < HASH_PROGRESS_INTERVAL && done < total) return
+      lastSent = now
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('models:hashProgress', { done, total, current })
+      }
+    }
+    try {
+      const hashes = {}
+      let done = 0
+      for (const id of ids) {
+        if (abort.signal.aborted) {
+          return { canceled: true, done }
+        }
+        if (typeof id !== 'string' || !isInRoot(id)) {
+          done += 1
+          continue
+        }
+        let mtimeMs = 0
+        try {
+          mtimeMs = (await fs.stat(id)).mtimeMs
+        } catch {
+          done += 1
+          sendProgress(done, path.basename(id))
+          continue
+        }
+        const meta = getModelMeta(id) || {}
+        if (meta.hash && meta.hashMtime === mtimeMs) {
+          // 缓存命中：mtime 一致复用持久化哈希，跳过重算
+          hashes[id] = meta.hash
+        } else {
+          try {
+            hashes[id] = await sha256File(id, { signal: abort.signal })
+            setModelHash(id, hashes[id], mtimeMs)
+          } catch (err) {
+            if (err?.name === 'AbortError') {
+              return { canceled: true, done }
+            }
+            logger.warn(`重复检测哈希计算失败（跳过）: ${path.basename(id)}: ${err.message}`)
+          }
+        }
+        done += 1
+        sendProgress(done, path.basename(id))
+      }
+      return { hashes }
+    } finally {
+      hashBatchAbort = null
+    }
+  })
+
+  // 取消进行中的批量哈希计算（E5）
+  ipcMain.handle('models:cancelHashBatch', () => {
+    if (hashBatchAbort) {
+      hashBatchAbort.abort()
+      return { ok: true }
+    }
+    return { ok: false }
+  })
 }
 
 /** CSV 导出的列定义（E2）：顺序即文件列顺序 */
@@ -171,9 +254,9 @@ const EXPORT_COLUMNS = [
   ['path', '文件路径']
 ]
 
-/** CSV 字段转义：含分隔符/引号/换行的字段包裹双引号，内部引号翻倍 */
+/** CSV 字段转义：含分隔符/引号/换行的字段包裹双引号，内部引号翻倍；null/undefined 输出空串 */
 function csvEscape(value) {
-  const s = String(value)
+  const s = value == null ? '' : String(value)
   if (/[",\r\n]/.test(s)) {
     return `"${s.replace(/"/g, '""')}"`
   }

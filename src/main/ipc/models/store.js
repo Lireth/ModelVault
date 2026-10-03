@@ -12,6 +12,7 @@ import {
   updateSettings
 } from '../../services/store'
 import { pruneOrphanCovers } from '../../services/covers'
+import { syncWatcher } from '../../services/watcher'
 import { awaitThumbDrain } from './model-state'
 
 /**
@@ -105,21 +106,34 @@ export function registerStoreHandlers() {
 
   // 更新应用设置（通用/扫描/外观），返回规范化后的完整设置
   ipcMain.handle('settings:update', async (event, patch = {}) => {
-    // modelsFolder 变更必须是真实存在的目录：防止渲染进程写入任意路径后，
-    // 经元数据写入在该目录创建 .modelvault（任意目录写入原语）。
-    // 与当前值相同的路径不重复校验：模型目录所在磁盘暂时离线时仍可保存其他设置
-    const nextFolder =
-      typeof patch?.modelsFolder === 'string' ? patch.modelsFolder.trim() : ''
-    if (
-      nextFolder &&
-      nextFolder !== getSettings().modelsFolder &&
-      !(await isExistingDirectory(nextFolder))
-    ) {
-      logger.warn(`拒绝设置不存在的模型目录: ${nextFolder}`)
-      return { error: `模型文件夹不存在或不是目录: ${nextFolder}` }
+    // modelsFolder / modelsFolders（E7 多根目录）的变更项必须是真实存在的目录：
+    // 防止渲染进程写入任意路径后，经元数据写入在该目录创建 .modelvault
+    // （任意目录写入原语）。与当前值相同的路径不重复校验：
+    // 模型目录所在磁盘暂时离线时仍可保存其他设置
+    const currentKeys = new Set(
+      [getSettings().modelsFolder, ...(getSettings().modelsFolders || [])]
+        .filter((f) => typeof f === 'string' && f)
+        .map((f) => f.toLowerCase())
+    )
+    const candidates = []
+    if (typeof patch?.modelsFolder === 'string' && patch.modelsFolder.trim()) {
+      candidates.push(patch.modelsFolder.trim())
+    }
+    if (Array.isArray(patch?.modelsFolders)) {
+      for (const f of patch.modelsFolders) {
+        if (typeof f === 'string' && f.trim()) candidates.push(f.trim())
+      }
+    }
+    for (const folder of candidates) {
+      if (!currentKeys.has(folder.toLowerCase()) && !(await isExistingDirectory(folder))) {
+        logger.warn(`拒绝设置不存在的模型目录: ${folder}`)
+        return { error: `模型文件夹不存在或不是目录: ${folder}` }
+      }
     }
     await updateSettings(patch)
     const settings = getSettings()
+    // 目录监控随设置联动（E8）：autoRescan 开关或激活根目录变更时重启/停止监听
+    syncWatcher(settings.modelsFolder, settings.autoRescan === true)
     logger.info(`应用设置已更新: ${JSON.stringify(patch).slice(0, 200)}`)
     return { settings }
   })

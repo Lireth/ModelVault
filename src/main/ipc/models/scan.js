@@ -5,6 +5,7 @@ import { getSettings, updateSettings } from '../../services/store'
 import { scanModels } from '../../services/scanner'
 import { pruneOrphanCovers } from '../../services/covers'
 import { clearDeferredJobs } from '../../services/thumbs'
+import { syncWatcher } from '../../services/watcher'
 import { clearDeferredOwners, decorateModels, startThumbDrain } from './decorate'
 import { ensureRootStore } from './store'
 import { getDecorateCacheRoot, awaitThumbDrain, resetDecorateCache } from './model-state'
@@ -113,6 +114,8 @@ export function registerScanHandlers() {
       // 扫描成功后与 settings.modelsFolder 保持一致（C6）：
       // 显式传入 folder 的扫描也持久化根目录，与 models:chooseFolder 行为闭环
       await updateSettings({ modelsFolder: root })
+      // 同步目录监控状态（E8）：autoRescan 开启时监听当前根目录，变更触发自动重扫
+      syncWatcher(root, getSettings().autoRescan === true)
 
       return {
         root,

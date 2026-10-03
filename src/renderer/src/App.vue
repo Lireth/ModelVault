@@ -6,21 +6,32 @@ import ModelDetail from './components/ModelDetail.vue'
 import SettingsPage from './components/SettingsPage.vue'
 import ToastHost from './components/ToastHost.vue'
 import VirtualModelGrid from './components/VirtualModelGrid.vue'
+import DedupePanel from './components/DedupePanel.vue'
 import {
   acceptConfirm,
   applyThumbUpdates,
+  batchDeleteModels,
+  batchFavorite,
+  batchNsfw,
+  batchRating,
+  batchSetSubCategory,
   cancelScan,
   chooseFolder,
+  allFilteredSelected,
+  exitMultiSelect,
   filteredModels,
   handleMenuAction,
   initApp,
   LORA_TAGS,
+  multiSelectTags,
   rejectConfirm,
   saveSettings,
   scanModels,
   SORT_OPTIONS,
   state,
   toast,
+  toggleMultiSelectMode,
+  toggleSelectAllFiltered,
   typeInfo
 } from './store/appStore'
 
@@ -57,6 +68,19 @@ let unsubscribeProgress = null
 let unsubscribeMenu = null
 let unsubscribeThumbs = null
 let unsubscribeStoreError = null
+let unsubscribeFsChanged = null
+
+/** 目录变更自动重扫的二级防抖（主进程 3s 静默期后此处再缓冲 1s，E8） */
+let fsChangedTimer = null
+
+function onFsChanged({ root }) {
+  if (root !== state.folder || state.scanning || !state.settings.autoRescan) return
+  clearTimeout(fsChangedTimer)
+  fsChangedTimer = setTimeout(() => {
+    fsChangedTimer = null
+    if (!state.scanning && state.settings.autoRescan) scanModels()
+  }, 1000)
+}
 
 /**
  * 拖放兜底（B13）：阻止非文件拖放（文本/链接等）触发默认导航覆盖当前窗口。
@@ -127,16 +151,20 @@ onMounted(async () => {
   unsubscribeStoreError = window.api.models.onStoreError(({ message }) => {
     toast('error', `数据保存失败: ${message}，请检查磁盘后重新保存`)
   })
+  // 订阅目录变更事件（E8）：autoRescan 开启时自动重扫
+  unsubscribeFsChanged = window.api.models.onFsChanged?.(onFsChanged)
   await initApp()
 })
 
 onUnmounted(() => {
   window.removeEventListener('dragover', onWindowDragOver)
   window.removeEventListener('drop', onWindowDrop)
+  clearTimeout(fsChangedTimer)
   unsubscribeProgress?.()
   unsubscribeMenu?.()
   unsubscribeThumbs?.()
   unsubscribeStoreError?.()
+  unsubscribeFsChanged?.()
 })
 </script>
 
@@ -151,12 +179,54 @@ onUnmounted(() => {
         <!-- 设置页面：占用模型预览区位置 -->
         <SettingsPage v-if="state.settingsOpen" />
 
+        <!-- 重复检测面板（E5）：占用模型预览区位置 -->
+        <DedupePanel v-else-if="state.dedupe.open" />
+
         <!-- 模型预览区 -->
         <template v-else>
         <!-- 重扫失败但仍有上次结果：顶部错误横幅（B15） -->
         <div v-if="state.scanError && !state.scanning && state.models.length > 0" class="scan-error-bar">
           <span class="scan-error-text" :title="state.scanError">⚠ {{ state.scanError }}</span>
           <button class="scan-error-retry" @click="scanModels">重试</button>
+        </div>
+
+        <!-- 多选批量操作栏（E4/E6）：位于搜索行下方 -->
+        <div v-if="state.folder && state.multiSelect.active" class="batch-bar">
+          <button
+            class="btn batch-select-all"
+            :disabled="filteredModels.length === 0"
+            @click="toggleSelectAllFiltered"
+          >{{ allFilteredSelected ? '取消全选' : '全选' }}</button>
+          <span class="batch-count">已选 {{ state.multiSelect.ids.length }}</span>
+          <span class="batch-sep"></span>
+          <button class="btn" :disabled="!state.multiSelect.ids.length" @click="batchFavorite(true)">收藏</button>
+          <button class="btn" :disabled="!state.multiSelect.ids.length" @click="batchFavorite(false)">取消收藏</button>
+          <button class="btn" :disabled="!state.multiSelect.ids.length" @click="batchNsfw(true)">标记 NSFW</button>
+          <button class="btn" :disabled="!state.multiSelect.ids.length" @click="batchNsfw(false)">取消 NSFW</button>
+          <span class="batch-label">评分</span>
+          <button
+            v-for="i in 5"
+            :key="i"
+            class="batch-star"
+            :disabled="!state.multiSelect.ids.length"
+            :title="`批量评 ${i} 星`"
+            @click="batchRating(i)"
+          >★</button>
+          <template v-if="multiSelectTags.length">
+            <span class="batch-sep"></span>
+            <span class="batch-label">标签</span>
+            <button
+              v-for="t in multiSelectTags"
+              :key="t.key"
+              class="btn"
+              :style="state.multiSelect.ids.length ? { borderColor: t.color, color: t.color } : {}"
+              :disabled="!state.multiSelect.ids.length"
+              @click="batchSetSubCategory(t.key)"
+            >{{ t.label }}</button>
+          </template>
+          <span class="batch-sep"></span>
+          <button class="btn btn-danger" :disabled="!state.multiSelect.ids.length" @click="batchDeleteModels">移入回收站</button>
+          <button class="btn" @click="exitMultiSelect">退出多选</button>
         </div>
 
         <!-- 搜索 + 排序：位于模型清单上方（选择文件夹后显示） -->
@@ -235,6 +305,13 @@ onUnmounted(() => {
               :title="state.showFavoritesOnly ? '显示全部模型' : '仅显示收藏的模型'"
               @click="state.showFavoritesOnly = !state.showFavoritesOnly"
             >★ 收藏</button>
+            <!-- 多选模式开关（E4） -->
+            <button
+              class="fav-filter"
+              :class="{ active: state.multiSelect.active }"
+              :title="state.multiSelect.active ? '退出多选模式' : '进入多选模式，批量管理模型'"
+              @click="toggleMultiSelectMode"
+            >☑ 多选</button>
             <!-- LoRA 分类筛选：仅选中 LoRA 分类时显示（即使筛选结果为空也保持可见） -->
             <label v-if="state.typeFilter === 'lora'" class="sort-select sub-filter" title="按 LoRA 分类筛选">
               <span class="sort-label">分类</span>
@@ -463,6 +540,70 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+/* ---------- 多选批量操作栏（E4/E6） ---------- */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--bg-active);
+}
+
+.batch-count {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 600;
+  min-width: 52px;
+}
+
+.batch-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.batch-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+.batch-star {
+  border: none;
+  background: transparent;
+  color: var(--border);
+  font-size: 17px;
+  line-height: 1;
+  padding: 0 1px;
+  cursor: pointer;
+  transition: color 0.12s ease, transform 0.12s ease;
+}
+
+.batch-star:hover:not(:disabled) {
+  transform: scale(1.2);
+  color: var(--favorite);
+}
+
+.batch-bar .btn {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
+/* 危险操作按钮（批量删除） */
+.btn-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
 }
 
 /* LoRA 分类筛选：靠结果栏右侧 */

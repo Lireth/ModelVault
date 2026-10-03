@@ -4,6 +4,7 @@ import { registerWindowShortcuts } from './menu'
 import { registerIpcHandlers } from './ipc'
 import { registerImageScheme, registerImageProtocolHandler } from './protocol'
 import { flushStoreSave, loadSettings } from './services/store'
+import { stopWatcher } from './services/watcher'
 import logger from './logger'
 
 // 自定义协议必须在 app ready 之前注册
@@ -86,6 +87,7 @@ app.on('window-all-closed', () => {
   // 退出前确保持久化数据完整落盘：元数据（store.json）+ 窗口状态（window-state.json）。
   // 必须用 flushStoreSave 而非 saveStoreNow：后者在写盘进行中仅登记补写即返回，
   // 直接 await 会过早 quit 中断在途写入，造成最后一批元数据修改丢失
+  stopWatcher()
   Promise.all([flushStoreSave(), flushWindowStateSave()])
     .catch(() => {})
     .finally(() => {

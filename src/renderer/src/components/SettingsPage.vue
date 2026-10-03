@@ -21,6 +21,7 @@ const appInfo = ref(null)
 /** 设置表单本地副本：保存时才提交 */
 const form = reactive({
   autoScan: true,
+  autoRescan: false,
   excludeText: '',
   theme: 'dark',
   cardSize: 'normal',
@@ -42,6 +43,7 @@ function fillForm() {
   savedTheme = state.settings.theme || 'dark'
   savedCardSize = state.settings.cardSize || 'normal'
   form.autoScan = state.settings.autoScan !== false
+  form.autoRescan = state.settings.autoRescan === true
   form.excludeText = (state.settings.excludeDirs || []).join('\n')
   form.theme = savedTheme
   form.cardSize = savedCardSize
@@ -64,6 +66,7 @@ let savedSnapshot = ''
 function formSnapshotValue() {
   return JSON.stringify({
     autoScan: form.autoScan,
+    autoRescan: form.autoRescan,
     excludeDirs: parseExcludeDirs(),
     theme: form.theme,
     cardSize: form.cardSize,
@@ -175,6 +178,7 @@ async function onSave() {
       JSON.stringify([...(state.settings.scanExtensions || [])].sort())
     const ok = await saveSettings({
       autoScan: form.autoScan,
+      autoRescan: form.autoRescan,
       excludeDirs,
       theme: form.theme,
       cardSize: form.cardSize,
@@ -234,6 +238,14 @@ async function onSave() {
             <span class="setting-desc">打开应用后自动扫描模型文件夹并刷新列表</span>
           </div>
           <input v-model="form.autoScan" type="checkbox" class="switch" />
+        </label>
+
+        <label class="setting-row switch-row">
+          <div class="setting-info">
+            <span class="setting-title">目录变更时自动重扫</span>
+            <span class="setting-desc">模型文件夹内容变化（新增/删除/修改文件）后自动重新扫描，关联存储写入不会触发</span>
+          </div>
+          <input v-model="form.autoRescan" type="checkbox" class="switch" />
         </label>
       </div>
 

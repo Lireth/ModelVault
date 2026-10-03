@@ -26,7 +26,9 @@ const VALID_INVOKE_CHANNELS = [
   'models:popupMenu',
   'models:importCover',
   'models:reveal',
-  'models:exportList'
+  'models:exportList',
+  'models:computeHashBatch',
+  'models:cancelHashBatch'
 ]
 
 const VALID_RECEIVE_CHANNELS = [
@@ -34,7 +36,9 @@ const VALID_RECEIVE_CHANNELS = [
   'models:menuAction',
   'models:thumbsReady',
   'models:storeError',
-  'models:civitaiProgress'
+  'models:civitaiProgress',
+  'models:hashProgress',
+  'models:fsChanged'
 ]
 
 /** 带白名单校验的 invoke（所有便捷方法的统一入口） */
@@ -113,6 +117,10 @@ const api = {
     cancelCivitai: (id) => invokeValidated('models:cancelCivitai', { id }),
     /** 导出模型列表（E2），rows 为当前列表行，返回 { path, count } / { canceled } / { error } */
     exportList: (payload) => invokeValidated('models:exportList', payload),
+    /** 批量计算文件哈希（E5 重复检测），返回 { hashes: {id:hash} } / { canceled } / { error } */
+    computeHashBatch: (payload) => invokeValidated('models:computeHashBatch', payload),
+    /** 取消批量哈希计算（E5），返回 { ok } */
+    cancelHashBatch: () => invokeValidated('models:cancelHashBatch'),
     /** 删除模型文件（移入回收站并清理元数据），返回 { ok } 或 { error } */
     deleteModel: (id) => invokeValidated('models:deleteModel', { id }),
     /** 更新快捷标记（收藏/NSFW/评分，仅传需更新的字段），返回 { meta } 或 { error } */
@@ -127,6 +135,10 @@ const api = {
     onScanProgress: (listener) => subscribe('models:scanProgress', listener),
     /** 订阅 Civitai 哈希进度事件（E9：{ id, loaded, total, percent }），返回取消监听函数 */
     onCivitaiProgress: (listener) => subscribe('models:civitaiProgress', listener),
+    /** 订阅批量哈希进度事件（E5：{ done, total, current }），返回取消监听函数 */
+    onHashProgress: (listener) => subscribe('models:hashProgress', listener),
+    /** 订阅目录变更事件（E8：{ root }），返回取消监听函数 */
+    onFsChanged: (listener) => subscribe('models:fsChanged', listener),
     /** 订阅元数据落盘失败事件（message: 错误信息），返回取消监听函数 */
     onStoreError: (listener) => subscribe('models:storeError', listener),
     /** 订阅后台缩略图生成完成事件（updates: [{ id, coverUrl }]），返回取消监听函数 */

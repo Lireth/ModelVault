@@ -6,8 +6,11 @@ import {
   typeCounts,
   chooseFolder,
   exportModels,
+  openDedupe,
+  removeRoot,
   scanModels,
-  openSettings
+  openSettings,
+  switchRoot
 } from '../store/appStore'
 
 const folderName = computed(() => {
@@ -15,6 +18,19 @@ const folderName = computed(() => {
   const parts = state.folder.split(/[\\/]/).filter(Boolean)
   return parts[parts.length - 1] || state.folder
 })
+
+/** 模型库列表（E7 多根目录）：剔除当前激活库后仍存在的其他库 */
+const otherRoots = computed(() =>
+  (state.settings.modelsFolders || []).filter(
+    (f) => f.toLowerCase() !== state.folder.toLowerCase()
+  )
+)
+
+/** 库显示名：取路径末段 */
+function rootName(f) {
+  const parts = f.split(/[\\/]/).filter(Boolean)
+  return parts[parts.length - 1] || f
+}
 
 function selectType(key) {
   state.typeFilter = key
@@ -50,6 +66,32 @@ function onScanClick() {
       <button class="btn action-btn" title="将当前列表导出为 JSON 文件" :disabled="!state.models.length" @click="exportModels('json')">
         导出 JSON
       </button>
+      <!-- 重复模型检测（E5） -->
+      <button class="btn action-btn" title="按文件哈希查找内容完全相同的重复模型" :disabled="!state.models.length" @click="openDedupe">
+        重复检测
+      </button>
+    </div>
+
+    <!-- 模型库切换（E7 多根目录）：存在其他库时显示 -->
+    <div v-if="otherRoots.length" class="side-section">
+      <h3>模型库</h3>
+      <ul class="root-list">
+        <li v-for="f in otherRoots" :key="f">
+          <button
+            class="root-item"
+            :title="`${f}（点击切换）`"
+            @click="switchRoot(f)"
+          >
+            <span class="root-dot"></span>
+            <span class="root-name">{{ rootName(f) }}</span>
+            <span
+              class="root-remove"
+              title="从模型库列表移除（磁盘数据不受影响）"
+              @click.stop="removeRoot(f)"
+            >✕</span>
+          </button>
+        </li>
+      </ul>
     </div>
 
     <div class="side-section">
@@ -138,6 +180,73 @@ function onScanClick() {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* ---------- 模型库切换（E7） ---------- */
+.root-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.root-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.root-item:hover {
+  background: var(--bg-hover);
+}
+
+.root-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-muted);
+  flex-shrink: 0;
+}
+
+.root-item:hover .root-dot {
+  border-color: var(--accent);
+}
+
+.root-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.root-remove {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.root-item:hover .root-remove {
+  display: flex;
+}
+
+.root-remove:hover {
+  background: var(--danger);
+  color: #fff;
 }
 
 .type-item {

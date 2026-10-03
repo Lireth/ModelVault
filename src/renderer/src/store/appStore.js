@@ -107,10 +107,11 @@ export function defaultParams() {
   }
 }
 
-/** 默认应用设置（与主进程 store.js 的 defaultSettings 保持一致；扩展名选项单一来源见 SCAN_EXTENSION_OPTIONS） */
+/** 默认应用设置（与主进程 store-settings.js 的 defaultSettings 保持一致；扩展名选项单一来源见 SCAN_EXTENSION_OPTIONS） */
 export function defaultSettings() {
   return {
     modelsFolder: '',
+    modelsFolders: [],
     autoScan: true,
     excludeDirs: [],
     theme: 'dark',
@@ -120,7 +121,8 @@ export function defaultSettings() {
     scanExtensions: SCAN_EXTENSION_OPTIONS.map((o) => o.ext),
     showSize: true,
     showMtime: true,
-    showParams: true
+    showParams: true,
+    autoRescan: false
   }
 }
 
@@ -141,6 +143,10 @@ export const state = reactive({
   // 详情
   selectedId: null,
   detailDirty: false, // 详情页表单有未保存的修改（由 ModelDetail 同步，切换/关闭前确认）
+  // 多选批量操作（E4/E6）：ids 为选中模型 id 数组
+  multiSelect: { active: false, ids: [] },
+  // 重复检测面板（E5）
+  dedupe: { open: false, running: false, progress: null, groups: [] },
   // 设置
   settings: defaultSettings(),
   settingsOpen: false,
@@ -291,6 +297,39 @@ export async function chooseFolder() {
   }
 }
 
+/**
+ * 切换到已保存的模型库（E7 多根目录）：等效重新扫描该根目录，
+ * 关联存储/装饰缓存/协议校验均随主进程根目录切换而切换。
+ * @param {string} folder 目标根目录绝对路径
+ */
+export async function switchRoot(folder) {
+  if (state.scanning) {
+    toast('warn', '正在扫描中，请稍候')
+    return
+  }
+  if (!folder || folder === state.folder) return
+  state.folder = folder
+  await scanModels()
+}
+
+/**
+ * 从模型库列表移除一个根目录（E7）：仅移出列表，不删除磁盘数据；
+ * 当前激活的库不可移除（需先切换到其他库）。
+ * @param {string} folder 要移除的根目录绝对路径
+ */
+export async function removeRoot(folder) {
+  if (!folder) return
+  if (folder.toLowerCase() === state.folder.toLowerCase()) {
+    toast('warn', '当前打开的模型库不能移除，请先切换到其他库')
+    return
+  }
+  const next = (state.settings.modelsFolders || []).filter(
+    (f) => f.toLowerCase() !== folder.toLowerCase()
+  )
+  const ok = await saveSettings({ modelsFolders: next })
+  if (ok) toast('success', '已从模型库列表移除（磁盘数据不受影响）')
+}
+
 /** 扫描当前模型目录 */
 export async function scanModels() {
   if (!state.folder) {
@@ -432,6 +471,242 @@ export const selectedModel = computed(
   () => state.models.find((m) => m.id === state.selectedId) || null
 )
 
+/* ---------------- 重复模型检测（E5） ---------------- */
+
+/**
+ * 打开重复检测面板并执行检测：
+ * 先按文件大小分组（不同文件同尺寸罕见，先粗筛缩小哈希范围），
+ * 再经主进程批量哈希（mtime 缓存复用）后按哈希精确分组。
+ */
+export async function openDedupe() {
+  state.dedupe.open = true
+  state.dedupe.groups = []
+  state.dedupe.progress = null
+  await detectDuplicates()
+}
+
+/** 关闭重复检测面板（进行中的哈希计算一并取消） */
+export function closeDedupe() {
+  state.dedupe.open = false
+  if (state.dedupe.running) {
+    window.api.models.cancelHashBatch().catch(() => {})
+  }
+  state.dedupe.running = false
+  state.dedupe.groups = []
+  state.dedupe.progress = null
+}
+
+/** 取消进行中的检测 */
+export function cancelDedupe() {
+  window.api.models.cancelHashBatch().catch(() => {})
+}
+
+async function detectDuplicates() {
+  // 第一步：按文件大小粗筛（大小唯一的不可能是完全重复）
+  const bySize = new Map()
+  for (const m of state.models) {
+    if (!bySize.has(m.size)) bySize.set(m.size, [])
+    bySize.get(m.size).push(m)
+  }
+  const candidates = [...bySize.values()].filter((g) => g.length > 1).flat()
+  if (candidates.length === 0) {
+    state.dedupe.groups = []
+    return
+  }
+  // 第二步：批量哈希（主进程，缓存复用 + 进度推送）
+  state.dedupe.running = true
+  try {
+    const res = await window.api.models.computeHashBatch({
+      ids: candidates.map((m) => m.id)
+    })
+    if (res.canceled) return
+    if (res.error) {
+      toast('error', res.error)
+      return
+    }
+    // 第三步：按哈希精确分组
+    const byHash = new Map()
+    for (const m of candidates) {
+      const hash = res.hashes[m.id]
+      if (!hash) continue // 哈希计算失败的文件无法判定，跳过
+      if (!byHash.has(hash)) byHash.set(hash, [])
+      byHash.get(hash).push(m)
+    }
+    state.dedupe.groups = [...byHash.values()]
+      .filter((g) => g.length > 1)
+      .map((items) => ({
+        size: items[0].size,
+        items: [...items].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+      }))
+    if (state.dedupe.groups.length === 0) {
+      toast('success', '未发现重复模型')
+    }
+  } catch (err) {
+    toast('error', `重复检测失败: ${err.message}`)
+  } finally {
+    state.dedupe.running = false
+    state.dedupe.progress = null
+  }
+}
+
+/** 重复项移入回收站后从分组中同步移除（组内不足 2 个时整组消失） */
+export function removeDedupeItem(groupId, id) {
+  const groups = state.dedupe.groups
+  const gi = groups.findIndex((_, i) => i === groupId)
+  if (gi < 0) return
+  groups[gi].items = groups[gi].items.filter((m) => m.id !== id)
+  if (groups[gi].items.length < 2) groups.splice(gi, 1)
+}
+
+/* ---------------- 多选批量操作（E4/E6） ---------------- */
+
+/** 多选模式下选中的模型对象列表 */
+export const multiSelectedModels = computed(() =>
+  state.models.filter((m) => state.multiSelect.ids.includes(m.id))
+)
+
+/** 选中模型的类型是否一致（批量设置分类标签仅在类型一致且可标注时提供） */
+export const multiSelectUniformType = computed(() => {
+  const sel = multiSelectedModels.value
+  if (sel.length === 0) return null
+  const type = sel[0].type
+  return sel.every((m) => m.type === type) ? type : null
+})
+
+/** 批量编辑可用的分类标签（仅 other/lora 支持手动标注；checkpoint 为自动基底分类） */
+export const multiSelectTags = computed(() => {
+  const type = multiSelectUniformType.value
+  if (type !== 'other' && type !== 'lora') return []
+  return tagsForType(type) || []
+})
+
+/** 进入/退出多选模式（退出时清空选择） */
+export function toggleMultiSelectMode() {
+  state.multiSelect.active = !state.multiSelect.active
+  state.multiSelect.ids = []
+}
+
+/** 退出多选模式 */
+export function exitMultiSelect() {
+  state.multiSelect.active = false
+  state.multiSelect.ids = []
+}
+
+/** 切换单个模型的选中态 */
+export function toggleSelect(id) {
+  const ids = state.multiSelect.ids
+  const idx = ids.indexOf(id)
+  if (idx >= 0) ids.splice(idx, 1)
+  else ids.push(id)
+}
+
+/** 当前筛选结果是否已全选 */
+export const allFilteredSelected = computed(
+  () =>
+    filteredModels.value.length > 0 &&
+    filteredModels.value.every((m) => state.multiSelect.ids.includes(m.id))
+)
+
+/** 全选/取消全选（作用范围为当前筛选结果） */
+export function toggleSelectAllFiltered() {
+  if (allFilteredSelected.value) {
+    state.multiSelect.ids = []
+  } else {
+    state.multiSelect.ids = filteredModels.value.map((m) => m.id)
+  }
+}
+
+/**
+ * 批量更新快捷标记（收藏/NSFW/评分，E6）：复用 setMetaFlags 既有校验与
+ * 持久化管线，并发逐个调用，成功者就地同步本地状态。
+ * @param {object} patch { favorite?/nsfw?/rating? }
+ * @param {string} label 完成提示文案（如「收藏」）
+ */
+async function batchApplyFlags(patch, label) {
+  const ids = [...state.multiSelect.ids]
+  if (ids.length === 0) return
+  const results = await Promise.allSettled(
+    ids.map((id) => window.api.models.setMetaFlags({ id, ...patch }))
+  )
+  let ok = 0
+  let fail = 0
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled' && r.value?.meta) {
+      applyMetaFlags(ids[i], r.value.meta)
+      ok += 1
+    } else {
+      fail += 1
+    }
+  })
+  if (fail === 0) toast('success', `已为 ${ok} 个模型${label}`)
+  else toast('warn', `${label}完成：成功 ${ok} 个，失败 ${fail} 个`)
+}
+
+/** 批量收藏/取消收藏 */
+export function batchFavorite(favorite) {
+  return batchApplyFlags({ favorite }, favorite ? '收藏' : '取消收藏')
+}
+
+/** 批量设置 NSFW 标记 */
+export function batchNsfw(nsfw) {
+  return batchApplyFlags({ nsfw }, nsfw ? '标记 NSFW' : '取消 NSFW')
+}
+
+/** 批量评分 */
+export function batchRating(rating) {
+  return batchApplyFlags({ rating }, `评分 ${rating} 星`)
+}
+
+/**
+ * 批量设置分类标签（E6）：经 saveModelData 的合并保存管线，
+ * 仅覆盖 subCategory 字段（其余字段服务端合并保留）。
+ * @param {string} subCategory 分类标签 key
+ */
+export async function batchSetSubCategory(subCategory) {
+  const ids = [...state.multiSelect.ids]
+  if (ids.length === 0) return
+  const results = await Promise.allSettled(
+    ids.map((id) => saveModelData(id, { subCategory }, { silent: true }))
+  )
+  let ok = 0
+  let fail = 0
+  results.forEach((r) => {
+    if (r.status === 'fulfilled' && r.value === true) ok += 1
+    else fail += 1
+  })
+  if (fail === 0) toast('success', `已为 ${ok} 个模型设置标签`)
+  else toast('warn', `标签设置完成：成功 ${ok} 个，失败 ${fail} 个`)
+}
+
+/**
+ * 批量移入回收站（E4）：逐个调用既有删除链路（含 sidecar 清理与元数据移除），
+ * 结束后统一提示；选区中已删除的 id 自动移除。
+ */
+export async function batchDeleteModels() {
+  const ids = [...state.multiSelect.ids]
+  if (ids.length === 0) return
+  if (
+    !(await confirmDialog(
+      `确定将选中的 ${ids.length} 个模型移入系统回收站吗？可在系统回收站恢复。`
+    ))
+  ) {
+    return
+  }
+  let ok = 0
+  let fail = 0
+  for (const id of ids) {
+    const done = await deleteModel(id, { silent: true })
+    if (done) ok += 1
+    else fail += 1
+  }
+  // 清理选区中已删除的 id
+  state.multiSelect.ids = state.multiSelect.ids.filter((id) =>
+    state.models.some((m) => m.id === id)
+  )
+  if (fail === 0) toast('success', `已将 ${ok} 个模型移入回收站，可在系统回收站恢复`)
+  else toast('warn', `删除完成：成功 ${ok} 个，失败 ${fail} 个`)
+}
+
 // 切换主分类时清空 LoRA 子分类筛选，避免残留条件
 watch(
   () => state.typeFilter,
@@ -463,10 +738,17 @@ export async function closeDetail() {
 /**
  * 保存模型详情（推荐参数 + 备注 + 二级分类标签），并同步本地列表。
  * @param {string} id 模型 id
- * @param {{params: object, note: string, subCategory?: string}} payload
+ * @param {{params?: object, note?: string, alias?: string, subCategory?: string, triggerWords?: string}} payload
+ * @param {{silent?: boolean}} [opts] silent=true 时不弹成功提示（批量编辑用，E6）
  */
-export async function saveModelData(id, payload) {
-  const res = await window.api.models.saveModelData({ id, ...payload })
+export async function saveModelData(id, payload, opts = {}) {
+  let res
+  try {
+    res = await window.api.models.saveModelData({ id, ...payload })
+  } catch (err) {
+    toast('error', `保存失败: ${err.message}`)
+    return false
+  }
   if (res.error) {
     toast('error', res.error)
     return false
@@ -482,7 +764,7 @@ export async function saveModelData(id, payload) {
       triggerWords: res.meta.triggerWords || ''
     }
   }
-  toast('success', '参数已保存')
+  if (!opts.silent) toast('success', '参数已保存')
   return true
 }
 
@@ -591,8 +873,9 @@ export async function matchCivitai(id) {
 /**
  * 删除模型文件（移入系统回收站）并从本地列表移除。
  * @param {string} id 模型 id
+ * @param {{silent?: boolean}} [opts] silent=true 时不弹成功提示（批量删除用，E4）
  */
-export async function deleteModel(id) {
+export async function deleteModel(id, opts = {}) {
   let res
   try {
     res = await window.api.models.deleteModel(id)
@@ -607,7 +890,7 @@ export async function deleteModel(id) {
   const idx = state.models.findIndex((m) => m.id === id)
   if (idx >= 0) state.models.splice(idx, 1)
   if (state.selectedId === id) state.selectedId = null
-  toast('success', '模型已移入回收站')
+  if (!opts.silent) toast('success', '模型已移入回收站')
   return true
 }
 

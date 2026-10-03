@@ -1,6 +1,15 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { formatSize, openDetail, showContextMenu, state, subCategoryInfo, toggleFavorite, typeInfo } from '../store/appStore'
+import {
+  formatSize,
+  openDetail,
+  showContextMenu,
+  state,
+  subCategoryInfo,
+  toggleFavorite,
+  toggleSelect,
+  typeInfo
+} from '../store/appStore'
 
 const props = defineProps({
   model: { type: Object, required: true }
@@ -16,6 +25,14 @@ watch(
 )
 
 const info = computed(() => typeInfo(props.model.type))
+
+/** 多选模式（E4）：点击卡片切换选中态而非打开详情 */
+const selected = computed(() => state.multiSelect.ids.includes(props.model.id))
+
+function onCardActivate() {
+  if (state.multiSelect.active) toggleSelect(props.model.id)
+  else openDetail(props.model.id)
+}
 
 /** 收藏/取消收藏（阻止冒泡，避免打开详情页） */
 function onToggleFavorite() {
@@ -67,15 +84,27 @@ const mtimeText = computed(() => {
 <template>
   <article
     class="model-card"
+    :class="{ selected }"
     :title="model.id"
     tabindex="0"
     role="button"
+    :aria-pressed="state.multiSelect.active ? selected : undefined"
     :aria-label="`查看模型 ${displayName} 的详情`"
-    @click="openDetail(model.id)"
-    @keydown.enter.prevent="openDetail(model.id)"
-    @keydown.space.prevent="openDetail(model.id)"
+    @click="onCardActivate"
+    @keydown.enter.prevent="onCardActivate"
+    @keydown.space.prevent="onCardActivate"
     @contextmenu.prevent="onContextMenu"
   >
+    <!-- 多选勾选框（E4）：仅多选模式显示 -->
+    <span
+      v-if="state.multiSelect.active"
+      class="select-check"
+      :class="{ on: selected }"
+      role="checkbox"
+      :aria-checked="selected"
+      title="选中/取消选中"
+      @click.stop="toggleSelect(model.id)"
+    >{{ selected ? '✓' : '' }}</span>
     <div class="cover">
       <img
         v-if="model.coverUrl && !coverError"
@@ -149,6 +178,7 @@ const mtimeText = computed(() => {
   min-width: 0;
 }
 .model-card {
+  position: relative;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -162,6 +192,38 @@ const mtimeText = computed(() => {
 .model-card:hover {
   transform: translateY(-2px);
   border-color: var(--accent);
+}
+
+/* 多选选中态（E4）：强调边框 + 勾选角标 */
+.model-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.select-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1.5px solid var(--border);
+  background: var(--bg-card);
+  color: var(--on-bright);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.select-check.on {
+  border-color: var(--accent);
+  background: var(--accent);
 }
 
 /* 键盘焦点可见性（U1）：Tab 聚焦卡片时的轮廓反馈 */

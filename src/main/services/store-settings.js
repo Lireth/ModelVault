@@ -31,6 +31,7 @@ let settings = null
 export function defaultSettings() {
   return {
     modelsFolder: '',
+    modelsFolders: [],
     autoScan: true,
     excludeDirs: [],
     theme: 'dark',
@@ -40,7 +41,8 @@ export function defaultSettings() {
     scanExtensions: [...VALID_SCAN_EXTENSIONS],
     showSize: true,
     showMtime: true,
-    showParams: true
+    showParams: true,
+    autoRescan: false
   }
 }
 
@@ -71,6 +73,9 @@ export function normalizeSettings(raw) {
     : base.excludeDirs
   return {
     modelsFolder: typeof raw.modelsFolder === 'string' ? raw.modelsFolder : base.modelsFolder,
+    // 多根目录库列表（E7）：与 modelsFolder 取并集（当前根恒在列，防误删激活库），
+    // Windows 大小写不敏感去重，上限 20 个
+    modelsFolders: normalizeModelsFolders(raw.modelsFolders, raw.modelsFolder),
     autoScan: typeof raw.autoScan === 'boolean' ? raw.autoScan : base.autoScan,
     excludeDirs,
     theme: VALID_THEMES.has(raw.theme) ? raw.theme : base.theme,
@@ -80,8 +85,32 @@ export function normalizeSettings(raw) {
     scanExtensions: normalizeExtensions(raw.scanExtensions),
     showSize: typeof raw.showSize === 'boolean' ? raw.showSize : base.showSize,
     showMtime: typeof raw.showMtime === 'boolean' ? raw.showMtime : base.showMtime,
-    showParams: typeof raw.showParams === 'boolean' ? raw.showParams : base.showParams
+    showParams: typeof raw.showParams === 'boolean' ? raw.showParams : base.showParams,
+    autoRescan: raw.autoRescan === true
   }
+}
+
+/**
+ * 规范化多根目录库列表（E7）：当前激活根（modelsFolder）恒保留在首位，
+ * 其余条目按传入顺序追加；大小写不敏感去重；非法条目（非字符串/超长/空）剔除。
+ */
+function normalizeModelsFolders(rawFolders, modelsFolder) {
+  const primary = typeof modelsFolder === 'string' ? modelsFolder.trim() : ''
+  const list = Array.isArray(rawFolders)
+    ? rawFolders.filter((f) => typeof f === 'string' && f.trim() && f.length <= 500)
+    : []
+  const result = []
+  const seen = new Set()
+  for (const f of [primary, ...list]) {
+    const trimmed = typeof f === 'string' ? f.trim() : ''
+    if (!trimmed) continue
+    const key = trimmed.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(trimmed)
+    if (result.length >= 20) break
+  }
+  return result
 }
 
 function getSettingsFilePath() {

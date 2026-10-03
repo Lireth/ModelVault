@@ -6,9 +6,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.js'],
-    setupFiles: ['./tests/setup.js'],
-    // 测试文件共享 fakeUserData 磁盘目录（settings.json/legacy store.json），
-    // 并行运行会跨文件竞态读写；单文件本身亚秒级，串行总成本可忽略
-    fileParallelism: false
+    setupFiles: ['./tests/setup.js']
+    // D8：setup.js 已改为每测试文件独立 fakeUserData（mkdtemp + 自动清理），
+    // 跨文件磁盘竞态消除，文件级并行恢复默认开启
   }
 })
