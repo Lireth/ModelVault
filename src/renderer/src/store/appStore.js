@@ -630,7 +630,8 @@ export function toggleSelectAllFiltered() {
 
 /**
  * 批量更新快捷标记（收藏/NSFW/评分，E6）：复用 setMetaFlags 既有校验与
- * 持久化管线，并发逐个调用，成功者就地同步本地状态。
+ * 持久化管线，并发逐个调用；结果收集为 Map 后经 applyMetaUpdates 单趟
+ * 同步本地状态（O2），避免逐个落定造成的多次响应式失效。
  * @param {object} patch { favorite?/nsfw?/rating? }
  * @param {string} label 完成提示文案（如「收藏」）
  */
@@ -640,16 +641,17 @@ async function batchApplyFlags(patch, label) {
   const results = await Promise.allSettled(
     ids.map((id) => window.api.models.setMetaFlags({ id, ...patch }))
   )
-  let ok = 0
+  const metaMap = new Map()
   let fail = 0
   results.forEach((r, i) => {
-    if (r.status === 'fulfilled' && r.value?.meta) {
-      applyMetaFlags(ids[i], r.value.meta)
-      ok += 1
-    } else {
-      fail += 1
-    }
+    if (r.status === 'fulfilled' && r.value?.meta) metaMap.set(ids[i], r.value.meta)
+    else fail += 1
   })
+  const ok = applyMetaUpdates(metaMap, (meta) => ({
+    favorite: meta.favorite === true,
+    nsfw: meta.nsfw === true,
+    rating: meta.rating || 0
+  }))
   if (fail === 0) toast('success', `已为 ${ok} 个模型${label}`)
   else toast('warn', `${label}完成：成功 ${ok} 个，失败 ${fail} 个`)
 }
@@ -670,29 +672,41 @@ export function batchRating(rating) {
 }
 
 /**
- * 批量设置分类标签（E6）：经 saveModelData 的合并保存管线，
- * 仅覆盖 subCategory 字段（其余字段服务端合并保留）。
+ * 批量设置分类标签（E6）：直连 saveModelData IPC（校验与合并保存在主进程
+ * 服务端管线，其余字段不受影响），并发逐个调用；结果收集为 Map 后经
+ * applyMetaUpdates 单趟同步本地状态（O2）。相比逐个走 saveModelData 包装器：
+ * 状态应用合并为单趟（包装器在各自 resolve 时立即替换元素），且 IPC 失败
+ * 不再逐个弹错误 toast，统一由汇总提示呈现。
  * @param {string} subCategory 分类标签 key
  */
 export async function batchSetSubCategory(subCategory) {
   const ids = [...state.multiSelect.ids]
   if (ids.length === 0) return
   const results = await Promise.allSettled(
-    ids.map((id) => saveModelData(id, { subCategory }, { silent: true }))
+    ids.map((id) => window.api.models.saveModelData({ id, subCategory }))
   )
-  let ok = 0
+  const metaMap = new Map()
   let fail = 0
-  results.forEach((r) => {
-    if (r.status === 'fulfilled' && r.value === true) ok += 1
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled' && r.value?.meta) metaMap.set(ids[i], r.value.meta)
     else fail += 1
   })
+  const ok = applyMetaUpdates(metaMap, (meta) => ({
+    params: meta.params,
+    alias: meta.alias || '',
+    note: meta.note,
+    subCategory: meta.subCategory || '',
+    triggerWords: meta.triggerWords || ''
+  }))
   if (fail === 0) toast('success', `已为 ${ok} 个模型设置标签`)
   else toast('warn', `标签设置完成：成功 ${ok} 个，失败 ${fail} 个`)
 }
 
 /**
- * 批量移入回收站（E4）：逐个调用既有删除链路（含 sidecar 清理与元数据移除），
- * 结束后统一提示；选区中已删除的 id 自动移除。
+ * 批量移入回收站（E4）：并发调用既有删除链路（含 sidecar 清理与元数据移除，
+ * 主进程按文件独立处理、元数据走防抖原子持久化，可安全并发），全部 IPC
+ * 结束后单趟移除已删除模型（O2）并统一提示——替代逐个 await + splice，
+ * 避免每个删除各触发一次 filteredModels 重算与网格重渲染。
  */
 export async function batchDeleteModels() {
   const ids = [...state.multiSelect.ids]
@@ -704,17 +718,19 @@ export async function batchDeleteModels() {
   ) {
     return
   }
-  let ok = 0
-  let fail = 0
-  for (const id of ids) {
-    const done = await deleteModel(id, { silent: true })
-    if (done) ok += 1
-    else fail += 1
+  const results = await Promise.allSettled(ids.map((id) => window.api.models.deleteModel(id)))
+  const deletedIds = new Set()
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled' && !r.value?.error) deletedIds.add(ids[i])
+  })
+  if (deletedIds.size > 0) {
+    // 单趟移除：整体替换数组，selectedId 与多选选区同步按 Set 清理
+    state.models = state.models.filter((m) => !deletedIds.has(m.id))
+    if (deletedIds.has(state.selectedId)) state.selectedId = null
+    state.multiSelect.ids = state.multiSelect.ids.filter((id) => !deletedIds.has(id))
   }
-  // 清理选区中已删除的 id
-  state.multiSelect.ids = state.multiSelect.ids.filter((id) =>
-    state.models.some((m) => m.id === id)
-  )
+  const ok = deletedIds.size
+  const fail = ids.length - ok
   if (fail === 0) toast('success', `已将 ${ok} 个模型移入回收站，可在系统回收站恢复`)
   else toast('warn', `删除完成：成功 ${ok} 个，失败 ${fail} 个`)
 }
@@ -908,6 +924,29 @@ function applyMetaFlags(id, meta) {
       rating: meta.rating || 0
     }
   }
+}
+
+/**
+ * 单趟批量同步本地模型状态（O2）：先收集全部 IPC 结果构建 id→meta Map，
+ * 再一次性遍历 state.models 就位替换。替代「逐个 findIndex + 逐个元素替换」
+ * ——后者在批量场景下造成 O(n×m) 查找，且每个元素替换都使 filteredModels
+ * 失效（大库下每次重算含 O(n log n) 排序）；单趟写入保证同一时钟周期内
+ * 完成全部变更，filteredModels 仅重算一次。
+ * @param {Map<string, object>} metaMap id → 主进程返回的最新元数据
+ * @param {(meta: object) => object} pick 从 meta 提取需合并到模型对象的字段
+ * @returns {number} 实际更新的模型数量（列表中不存在的 id 不计入）
+ */
+function applyMetaUpdates(metaMap, pick) {
+  if (metaMap.size === 0) return 0
+  let updated = 0
+  for (let i = 0; i < state.models.length; i++) {
+    const meta = metaMap.get(state.models[i].id)
+    if (!meta) continue
+    state.models[i] = { ...state.models[i], ...pick(meta) }
+    updated += 1
+    if (updated === metaMap.size) break
+  }
+  return updated
 }
 
 /**

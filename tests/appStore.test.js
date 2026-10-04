@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
-  applyThumbUpdates,
-  confirmDialog,
   acceptConfirm,
+  applyThumbUpdates,
+  batchDeleteModels,
+  batchFavorite,
+  batchSetSubCategory,
+  confirmDialog,
   deleteModel,
   dismissToast,
   filteredModels,
@@ -314,6 +317,101 @@ describe('快速连点竞态（A5）', () => {
     releaseFirst()
     await expect(p1).resolves.toBe(true)
     expect(state.models[0].favorite).toBe(true)
+  })
+})
+
+describe('批量操作单次状态合并（O2）', () => {
+  it('批量收藏：全部成功时单趟同步全部标记并提示成功', async () => {
+    state.models = [makeModel('a'), makeModel('b'), makeModel('c')]
+    state.multiSelect.ids = ['a', 'b', 'c']
+    api.models.setMetaFlags.mockResolvedValue({
+      meta: { favorite: true, nsfw: false, rating: 0 }
+    })
+    await batchFavorite(true)
+    expect(state.models.map((m) => m.favorite)).toEqual([true, true, true])
+    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已为 3 个模型收藏'))).toBe(true)
+  })
+
+  it('批量收藏：部分失败时成功者已同步、汇总提示统计', async () => {
+    state.models = [makeModel('a'), makeModel('b'), makeModel('c')]
+    state.multiSelect.ids = ['a', 'b', 'c']
+    api.models.setMetaFlags.mockImplementation(({ id }) =>
+      id === 'b'
+        ? Promise.reject(new Error('IPC 断开'))
+        : Promise.resolve({ meta: { favorite: true, nsfw: false, rating: 0 } })
+    )
+    await batchFavorite(true)
+    expect(state.models.find((m) => m.id === 'a').favorite).toBe(true)
+    expect(state.models.find((m) => m.id === 'b').favorite).toBe(false)
+    expect(state.models.find((m) => m.id === 'c').favorite).toBe(true)
+    expect(state.toasts.some((t) => t.type === 'warn' && t.text.includes('成功 2 个，失败 1 个'))).toBe(true)
+  })
+
+  it('批量设置标签：按 {id, subCategory} 调 IPC 并单趟同步标签字段', async () => {
+    state.models = [makeModel('a', { type: 'other' }), makeModel('c', { type: 'other' })]
+    state.multiSelect.ids = ['a', 'c']
+    api.models.saveModelData.mockImplementation(() =>
+      Promise.resolve({
+        meta: { subCategory: 'controlnet', params: null, alias: '', note: '', triggerWords: '' }
+      })
+    )
+    await batchSetSubCategory('controlnet')
+    expect(api.models.saveModelData).toHaveBeenCalledTimes(2)
+    expect(api.models.saveModelData).toHaveBeenCalledWith({ id: 'a', subCategory: 'controlnet' })
+    expect(api.models.saveModelData).toHaveBeenCalledWith({ id: 'c', subCategory: 'controlnet' })
+    expect(state.models.map((m) => m.subCategory)).toEqual(['controlnet', 'controlnet'])
+    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已为 2 个模型设置标签'))).toBe(true)
+  })
+
+  it('批量设置标签：失败不逐个弹错误 toast，仅汇总提示', async () => {
+    state.models = [makeModel('a', { type: 'other' }), makeModel('c', { type: 'other' })]
+    state.multiSelect.ids = ['a', 'c']
+    api.models.saveModelData.mockRejectedValue(new Error('保存失败'))
+    const toastCountBefore = state.toasts.length
+    await batchSetSubCategory('embedding')
+    expect(state.toasts.length - toastCountBefore).toBe(1)
+    expect(state.toasts[0].type).toBe('warn')
+  })
+
+  it('批量删除：确认后单趟移除并清理 selectedId 与选区', async () => {
+    state.models = [makeModel('a'), makeModel('b'), makeModel('c')]
+    state.selectedId = 'b'
+    state.multiSelect.active = true
+    state.multiSelect.ids = ['a', 'b']
+    api.models.deleteModel.mockResolvedValue({ ok: true })
+    const p = batchDeleteModels()
+    acceptConfirm()
+    await p
+    expect(state.models.map((m) => m.id)).toEqual(['c'])
+    expect(state.selectedId).toBeNull()
+    // 选区仅移除已删除 id，多选模式保持
+    expect(state.multiSelect.active).toBe(true)
+    expect(state.multiSelect.ids).toEqual([])
+    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已将 2 个模型移入回收站'))).toBe(true)
+  })
+
+  it('批量删除：部分失败时失败者保留在列表', async () => {
+    state.models = [makeModel('a'), makeModel('b')]
+    state.multiSelect.ids = ['a', 'b']
+    api.models.deleteModel.mockImplementation((id) =>
+      id === 'a' ? Promise.resolve({ ok: true }) : Promise.resolve({ error: '文件被占用' })
+    )
+    const p = batchDeleteModels()
+    acceptConfirm()
+    await p
+    expect(state.models.map((m) => m.id)).toEqual(['b'])
+    expect(state.multiSelect.ids).toEqual(['b'])
+    expect(state.toasts.some((t) => t.text.includes('成功 1 个，失败 1 个'))).toBe(true)
+  })
+
+  it('批量删除：确认取消时不调用删除 IPC', async () => {
+    state.models = [makeModel('a')]
+    state.multiSelect.ids = ['a']
+    const p = batchDeleteModels()
+    rejectConfirm()
+    await p
+    expect(api.models.deleteModel).not.toHaveBeenCalled()
+    expect(state.models).toHaveLength(1)
   })
 })
 
