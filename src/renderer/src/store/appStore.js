@@ -490,10 +490,15 @@ export const typeCounts = computed(() => {
   return counts
 })
 
+/**
+ * id → 模型对象映射（O4）：selectedModel 等按 id 查找的场景 O(1) 命中，
+ * 替代每次全表 find。模型对象引用仅在元数据更新/批量同步/重扫时替换，
+ * 缩略图回填（Object.assign 就地合并）不失效本映射。
+ */
+const modelById = computed(() => new Map(state.models.map((m) => [m.id, m])))
+
 /** 当前选中的模型对象 */
-export const selectedModel = computed(
-  () => state.models.find((m) => m.id === state.selectedId) || null
-)
+export const selectedModel = computed(() => modelById.value.get(state.selectedId) || null)
 
 /* ---------------- 重复模型检测（E5） ---------------- */
 
@@ -584,10 +589,22 @@ export function removeDedupeItem(groupId, id) {
 
 /* ---------------- 多选批量操作（E4/E6） ---------------- */
 
-/** 多选模式下选中的模型对象列表 */
-export const multiSelectedModels = computed(() =>
-  state.models.filter((m) => state.multiSelect.ids.includes(m.id))
-)
+/**
+ * 选中 id 集合（O4）：卡片选中态与全选判断 O(1) 命中，替代对 ids 数组的
+ * includes 线性扫描（全选后每张可见卡片渲染均为 O(n)，整体 O(n²)）。
+ */
+export const multiSelectIdSet = computed(() => new Set(state.multiSelect.ids))
+
+/** 多选模式下选中的模型对象列表（经 modelById O(k) 命中） */
+export const multiSelectedModels = computed(() => {
+  const byId = modelById.value
+  const out = []
+  for (const id of state.multiSelect.ids) {
+    const m = byId.get(id)
+    if (m) out.push(m)
+  }
+  return out
+})
 
 /** 选中模型的类型是否一致（批量设置分类标签仅在类型一致且可标注时提供） */
 export const multiSelectUniformType = computed(() => {
@@ -624,11 +641,11 @@ export function toggleSelect(id) {
   else ids.push(id)
 }
 
-/** 当前筛选结果是否已全选 */
+/** 当前筛选结果是否已全选（命中判断走 multiSelectIdSet，O4） */
 export const allFilteredSelected = computed(
   () =>
     filteredModels.value.length > 0 &&
-    filteredModels.value.every((m) => state.multiSelect.ids.includes(m.id))
+    filteredModels.value.every((m) => multiSelectIdSet.value.has(m.id))
 )
 
 /** 全选/取消全选（作用范围为当前筛选结果） */

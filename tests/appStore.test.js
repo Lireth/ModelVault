@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   acceptConfirm,
+  allFilteredSelected,
   applyThumbUpdates,
   batchDeleteModels,
   batchFavorite,
@@ -10,8 +11,10 @@ import {
   dismissToast,
   filteredModels,
   formatSize,
+  multiSelectIdSet,
   rejectConfirm,
   saveSettings,
+  selectedModel,
   sortDirectional,
   state,
   toast,
@@ -430,6 +433,42 @@ describe('批量操作单次状态合并（O2）', () => {
     await p
     expect(api.models.deleteModel).not.toHaveBeenCalled()
     expect(state.models).toHaveLength(1)
+  })
+})
+
+describe('派生查找优化（O4）', () => {
+  it('selectedModel 按 id O(1) 命中，未知 id 返回 null', () => {
+    state.models = [makeModel('a'), makeModel('b')]
+    state.selectedId = 'b'
+    expect(selectedModel.value?.id).toBe('b')
+    state.selectedId = 'missing'
+    expect(selectedModel.value).toBeNull()
+  })
+
+  it('selectedModel 随元素替换同步（元数据更新后读到新引用字段）', () => {
+    state.models = [makeModel('a', { alias: '' })]
+    state.selectedId = 'a'
+    state.models = [makeModel('a', { alias: '备注名' })]
+    expect(selectedModel.value?.alias).toBe('备注名')
+  })
+
+  it('multiSelectIdSet 随 ids 同步，has 判断 O(1) 语义与 includes 一致', () => {
+    state.multiSelect.ids = ['a', 'b']
+    expect(multiSelectIdSet.value.has('a')).toBe(true)
+    expect(multiSelectIdSet.value.has('c')).toBe(false)
+    state.multiSelect.ids = []
+    expect(multiSelectIdSet.value.size).toBe(0)
+  })
+
+  it('allFilteredSelected 基于选中集合：全选为 true、部分选中为 false', () => {
+    state.models = [makeModel('a'), makeModel('b')]
+    state.multiSelect.ids = ['a']
+    expect(allFilteredSelected.value).toBe(false)
+    state.multiSelect.ids = ['a', 'b']
+    expect(allFilteredSelected.value).toBe(true)
+    // 列表新增未选中项后自动变回 false
+    state.models = [makeModel('a'), makeModel('b'), makeModel('c')]
+    expect(allFilteredSelected.value).toBe(false)
   })
 })
 

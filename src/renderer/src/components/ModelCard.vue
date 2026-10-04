@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import {
   formatSize,
+  multiSelectIdSet,
   openDetail,
   showContextMenu,
   state,
@@ -26,8 +27,8 @@ watch(
 
 const info = computed(() => typeInfo(props.model.type))
 
-/** 多选模式（E4）：点击卡片切换选中态而非打开详情 */
-const selected = computed(() => state.multiSelect.ids.includes(props.model.id))
+/** 多选模式（E4）：点击卡片切换选中态而非打开详情（O4：Set 命中 O(1)） */
+const selected = computed(() => multiSelectIdSet.value.has(props.model.id))
 
 function onCardActivate() {
   if (state.multiSelect.active) toggleSelect(props.model.id)

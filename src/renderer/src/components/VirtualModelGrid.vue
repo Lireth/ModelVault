@@ -141,10 +141,20 @@ function findScrollParent(el) {
   return null
 }
 
+/**
+ * 滚动事件 rAF 合帧（O4）：高频滚动下同一帧内的多次事件只取最后一帧的
+ * 位置写入响应式 ref，减少无意义的依赖触发；clientHeight 读取也并入同一帧。
+ */
+let scrollRafId = 0
+
 function onScroll() {
-  if (!scroller) return
-  scrollTop.value = scroller.scrollTop
-  viewportHeight.value = scroller.clientHeight
+  if (!scroller || scrollRafId) return
+  scrollRafId = requestAnimationFrame(() => {
+    scrollRafId = 0
+    if (!scroller) return
+    scrollTop.value = scroller.scrollTop
+    viewportHeight.value = scroller.clientHeight
+  })
 }
 
 function measure() {
@@ -203,12 +213,20 @@ watch(
  * 组件复用不重挂，列表变短后旧 scrollTop 会落在无效区间产生跳变。
  * 用「长度 + 首尾项 id」作签名，避免就地更新（如缩略图替换封面 URL）
  * 触发复位打断用户滚动。
+ * O4 细化：首项 id 未变且用户不在顶部时（典型为 autoRescan 增删模型，
+ * 排序与筛选条件未变），保留浏览位置——大库浏览中后台重扫不再把用户
+ * 拉回顶部；内容收缩导致的越界由浏览器钳制 scrollTop 并经 scroll 事件同步。
+ * 筛选/搜索/排序变更几乎必然改变首项 id，仍复位顶部。
  */
 watch(
   () =>
     `${props.models.length}|${props.models[0]?.id}|${props.models[props.models.length - 1]?.id}`,
-  () => {
+  (sig, oldSig) => {
     if (!scroller) return
+    if (oldSig && scroller.scrollTop > 0 && sig.split('|')[1] === oldSig.split('|')[1]) {
+      scrollTop.value = scroller.scrollTop
+      return
+    }
     scroller.scrollTop = 0
     scrollTop.value = 0
   }
@@ -231,6 +249,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (scrollRafId) cancelAnimationFrame(scrollRafId)
   scroller?.removeEventListener('scroll', onScroll)
   resizeObserver?.disconnect()
 })
