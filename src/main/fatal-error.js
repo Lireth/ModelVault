@@ -46,15 +46,17 @@ export async function handleUncaughtException(error) {
       logger.warn(`致命错误处理中落盘失败: ${err.message}`)
     })
   } finally {
-    await dialog
-      .showErrorBox(
+    // showErrorBox 是同步 void API（返回 undefined），不可 await/.catch；
+    // try/catch 兜底：展示失败不阻断重启
+    try {
+      dialog.showErrorBox(
         '模匣 遇到无法恢复的错误',
         `应用将保存数据后自动重启。\n\n错误信息：\n${errorDetail(error)}\n\n` +
           '若同一问题反复出现，请查看日志目录（%APPDATA%\\modelvault\\logs）并联系开发者。'
       )
-      .catch(() => {
-        /* 错误框展示失败不阻断重启 */
-      })
+    } catch (dialogErr) {
+      logger.warn(`错误框展示失败: ${dialogErr?.message || dialogErr}`)
+    }
     app.relaunch()
     app.exit(1)
   }

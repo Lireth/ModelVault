@@ -54,9 +54,8 @@ beforeEach(() => {
   flushStoreSave.mockImplementation(async () => {
     timeline.push('flush')
   })
-  showErrorBox.mockImplementation(async () => {
+  showErrorBox.mockImplementation(() => {
     timeline.push('dialog')
-    return {}
   })
   relaunch.mockImplementation(() => timeline.push('relaunch'))
   exit.mockImplementation(() => timeline.push('exit'))
@@ -115,5 +114,17 @@ describe('handleUncaughtException', () => {
     expect(showErrorBox).toHaveBeenCalledTimes(1)
     expect(exit).toHaveBeenCalledTimes(1)
     expect(loggerWarn).toHaveBeenCalledWith(expect.stringContaining('忽略'))
+  })
+
+  it('错误框展示失败不阻断重启（showErrorBox 为同步 void API，不可 .catch）', async () => {
+    const handleUncaughtException = await freshHandler()
+    showErrorBox.mockImplementation(() => {
+      throw new Error('对话框创建失败')
+    })
+
+    await expect(handleUncaughtException(sampleError)).resolves.toBeUndefined()
+    expect(loggerWarn).toHaveBeenCalledWith(expect.stringContaining('错误框展示失败'))
+    expect(relaunch).toHaveBeenCalledTimes(1)
+    expect(exit).toHaveBeenCalledWith(1)
   })
 })
