@@ -9,6 +9,7 @@ import {
   formatSize,
   rejectConfirm,
   saveSettings,
+  sortDirectional,
   state,
   toast,
   toggleFavorite,
@@ -162,7 +163,7 @@ describe('筛选与排序（filteredModels）', () => {
     expect(filteredModels.value.map((m) => m.id)).toEqual(['c'])
   })
 
-  it('收藏优先排序：收藏在前，组内按名称；sortAsc=false 翻转结果', () => {
+  it('收藏优先排序：收藏在前，组内按名称；固定语义不响应方向翻转（O1）', () => {
     state.models = [
       makeModel('x', { name: 'a', favorite: false }),
       makeModel('y', { name: 'b', favorite: true }),
@@ -171,12 +172,28 @@ describe('筛选与排序（filteredModels）', () => {
     state.sortBy = 'favorite'
     expect(filteredModels.value.map((m) => m.id)).toEqual(['y', 'z', 'x'])
     state.sortAsc = false
-    expect(filteredModels.value.map((m) => m.id)).toEqual(['x', 'z', 'y'])
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['y', 'z', 'x'])
   })
 
-  it('按评分排序：高分在前，同分按名称', () => {
+  it('按评分排序：高分在前，同分按名称；固定语义不响应方向翻转（O1）', () => {
+    state.models = [
+      makeModel('a', { name: 'a', rating: 4 }),
+      makeModel('b', { name: 'b', rating: 5 }),
+      makeModel('c', { name: 'c', rating: 0 })
+    ]
     state.sortBy = 'rating'
     expect(filteredModels.value.map((m) => m.id)).toEqual(['b', 'a', 'c'])
+    state.sortAsc = false
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['b', 'a', 'c'])
+  })
+
+  it('sortDirectional 标记固定语义排序（O1）：favorite/rating 不支持方向切换', () => {
+    expect(sortDirectional('name')).toBe(true)
+    expect(sortDirectional('type')).toBe(true)
+    expect(sortDirectional('size')).toBe(true)
+    expect(sortDirectional('mtime')).toBe(true)
+    expect(sortDirectional('favorite')).toBe(false)
+    expect(sortDirectional('rating')).toBe(false)
   })
 
   it('按大小/修改时间排序（比较器恒为大/新在前），sortAsc=false 翻转', () => {

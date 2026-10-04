@@ -43,15 +43,28 @@ export const LORA_TAGS = [
 /** Checkpoint 模型的自动分类标签（无需手动标注） */
 export const CHECKPOINT_TAGS = [{ key: 'base', label: '基底模型', color: '#4f9cf9' }]
 
-/** 排序方式选项：key 与主进程 store.js 的 VALID_SORT_BY 保持一致，顶栏与设置页共用（C3） */
+/** 中文排序比较器（模块级缓存，O1）：避免排序热路径每次比较都走完整 Intl 构造 */
+const zhCollator = new Intl.Collator('zh-CN')
+
+/**
+ * 排序方式选项：key 与主进程 store.js 的 VALID_SORT_BY 保持一致，顶栏与设置页共用（C3）。
+ * directional: false 表示固定语义排序（收藏/高分恒在前），方向翻转会使语义反转，UI 据此禁用方向切换（O1）。
+ */
 export const SORT_OPTIONS = [
   { key: 'name', label: '按名称' },
   { key: 'type', label: '按分类' },
   { key: 'size', label: '按大小' },
   { key: 'mtime', label: '按修改时间' },
-  { key: 'favorite', label: '收藏优先' },
-  { key: 'rating', label: '按评分' }
+  { key: 'favorite', label: '收藏优先', directional: false },
+  { key: 'rating', label: '按评分', directional: false }
 ]
+
+const SORT_MAP = Object.fromEntries(SORT_OPTIONS.map((o) => [o.key, o]))
+
+/** 当前排序方式是否支持方向切换（收藏优先/按评分为固定语义排序，不支持，O1） */
+export function sortDirectional(sortBy) {
+  return SORT_MAP[sortBy]?.directional !== false
+}
 
 /**
  * 卡片尺寸档位的网格参数（最小列宽/间距）。
@@ -139,7 +152,7 @@ export const state = reactive({
   showFavoritesOnly: false, // 仅显示收藏的模型
   search: '',
   sortBy: 'name', // name | type | size | mtime | favorite | rating
-  sortAsc: true, // 排序方向：true 升序 / false 降序（翻转当前排序结果）
+  sortAsc: true, // 排序方向：true 升序 / false 降序（收藏优先/按评分为固定语义排序，忽略方向，O1）
   // 详情
   selectedId: null,
   detailDirty: false, // 详情页表单有未保存的修改（由 ModelDetail 同步，切换/关闭前确认）
@@ -431,29 +444,28 @@ export const filteredModels = computed(() => {
       sorted.sort((a, b) => b.mtimeMs - a.mtimeMs)
       break
     case 'favorite':
-      // 收藏优先，同组内按名称（U2）
+      // 收藏优先，同组内按名称（U2）；固定语义排序，不响应方向翻转（O1）
       sorted.sort(
-        (a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0) || a.name.localeCompare(b.name, 'zh-CN')
+        (a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0) || zhCollator.compare(a.name, b.name)
       )
       break
     case 'rating':
-      // 评分高优先，同分按名称（U2）
-      sorted.sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name, 'zh-CN'))
+      // 评分高优先，同分按名称（U2）；固定语义排序，不响应方向翻转（O1）
+      sorted.sort((a, b) => b.rating - a.rating || zhCollator.compare(a.name, b.name))
       break
     case 'type':
       // 按分类排序：遵循固定分类顺序（Checkpoint → TextEncoders → VAE → LoRA → 其他），同分类内按名称
       {
         const order = Object.fromEntries(MODEL_TYPES.map((t, i) => [t.key, i]))
-        sorted.sort(
-          (a, b) => order[a.type] - order[b.type] || a.name.localeCompare(b.name, 'zh-CN')
-        )
+        sorted.sort((a, b) => order[a.type] - order[b.type] || zhCollator.compare(a.name, b.name))
       }
       break
     default:
-      sorted.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+      sorted.sort((a, b) => zhCollator.compare(a.name, b.name))
   }
-  // 排序方向（U2）：sortAsc=false 时翻转当前结果
-  if (!state.sortAsc) sorted.reverse()
+  // 排序方向（U2）：sortAsc=false 时翻转当前结果；
+  // 收藏优先/按评分为固定语义排序（收藏/高分恒在前），翻转会反转语义，故不响应（O1）
+  if (!state.sortAsc && sortDirectional(state.sortBy)) sorted.reverse()
   return sorted
 })
 

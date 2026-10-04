@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import TopBar from './components/TopBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import ModelDetail from './components/ModelDetail.vue'
@@ -28,6 +28,7 @@ import {
   saveSettings,
   scanModels,
   SORT_OPTIONS,
+  sortDirectional,
   state,
   toast,
   toggleMultiSelectMode,
@@ -57,6 +58,9 @@ async function onSortChange(e) {
   state.sortBy = e.target.value
   await saveSettings({ sortBy: state.sortBy })
 }
+
+/** 收藏优先/按评分为固定语义排序，方向切换无意义（O1） */
+const sortDirEnabled = computed(() => sortDirectional(state.sortBy))
 
 /** 切换排序方向（U2）：翻转当前排序结果并持久化 */
 async function onSortDirChange() {
@@ -255,7 +259,14 @@ onUnmounted(() => {
             </select>
             <button
               class="sort-dir"
-              :title="state.sortAsc ? '当前升序，点击切换为降序' : '当前降序，点击切换为升序'"
+              :disabled="!sortDirEnabled"
+              :title="
+                !sortDirEnabled
+                  ? '该排序为固定方向（收藏/高分在前），不支持切换'
+                  : state.sortAsc
+                    ? '当前升序，点击切换为降序'
+                    : '当前降序，点击切换为升序'
+              "
               @click="onSortDirChange"
             >{{ state.sortAsc ? '↑' : '↓' }}</button>
           </div>
