@@ -109,9 +109,14 @@ async function importSidecarMeta(model, meta) {
   if (!needNote && !needTriggers) return meta
   const text = await findSidecarText(model.id)
   if (!text) return meta
-  const patch = sidecarImportPatch(model.type, meta, text)
-  if (!patch) return meta
-  return setModelMeta(model.id, { ...meta, ...patch }) || meta
+  // await 间隙后重读最新元数据：读取与写盘之间用户可能已并发保存
+  // （saveModelData/setMetaFlags 为同步读-改-写），基于旧 meta 展开写回
+  // 会覆盖刚保存的评分/收藏/备注。重读后的读-并-写均为同步调用，
+  // 在同一事件循环轮次内完成，与用户路径不再交错（E3 竞态修复）
+  const latest = getModelMeta(model.id) || meta
+  const patch = sidecarImportPatch(model.type, latest, text)
+  if (!patch) return latest
+  return setModelMeta(model.id, { ...latest, ...patch }) || latest
 }
 
 /** 容错解析相对封面路径（失败返回 ''） */

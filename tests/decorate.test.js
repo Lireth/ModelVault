@@ -19,9 +19,17 @@ vi.mock('electron', () => ({
   nativeImage: { createFromPath: vi.fn(), createFromBuffer: vi.fn() }
 }))
 
+// scanner 侧 sidecar 纯函数保持真实实现；findSidecarText 单独可控，
+// 用于在 await 间隙注入并发用户保存（E3 竞态回归）
+vi.mock('../src/main/services/scanner.js', async (importOriginal) => {
+  const actual = await importOriginal()
+  return { ...actual, findSidecarText: vi.fn() }
+})
+
 import { decorateModels, resolveCoverSafe, startThumbDrain, clearDeferredOwners } from '../src/main/ipc/models/decorate'
 import { awaitThumbDrain } from '../src/main/ipc/models/model-state'
-import { loadData, setDataRoot, setModelMeta, DATA_DIR, COVERS_DIR } from '../src/main/services/store'
+import { loadData, setDataRoot, getModelMeta, setModelMeta, DATA_DIR, COVERS_DIR } from '../src/main/services/store'
+import { findSidecarText } from '../src/main/services/scanner'
 import { clearDeferredJobs } from '../src/main/services/thumbs'
 import { nativeImage } from 'electron'
 import logger from '../src/main/logger'
@@ -144,6 +152,76 @@ describe('decorateModels 元数据装饰', () => {
     await expect(decorateModels([makeModel(abs)], controller.signal)).rejects.toMatchObject({
       name: 'AbortError'
     })
+  })
+})
+
+describe('sidecar 导入与用户并发保存的竞态（E3 回归）', () => {
+  afterEach(() => {
+    vi.mocked(findSidecarText).mockReset()
+  })
+
+  it('await 间隙内用户保存的字段不被 sidecar 写回覆盖', async () => {
+    const abs = path.join(root, 'lora-race.ckpt')
+    await fs.writeFile(abs, 'x')
+    // sidecar 读取挂起，制造 importSidecarMeta 的读-写间隙
+    let releaseSidecar
+    vi.mocked(findSidecarText).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseSidecar = () => resolve('自动导入的备注')
+        })
+    )
+
+    const pending = decorateModels([makeModel(abs, { type: 'lora', ext: '.ckpt' })])
+    const deadline = Date.now() + 5000
+    while (typeof releaseSidecar !== 'function' && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    expect(typeof releaseSidecar).toBe('function')
+
+    // 间隙内模拟用户经 setMetaFlags 并发保存（同步读-改-写，即时落盘）
+    setModelMeta(abs, { rating: 5, favorite: true })
+    releaseSidecar()
+
+    const [decorated] = await pending
+    // sidecar 导入生效（基于重读后的最新 meta 计算）
+    expect(decorated.note).toBe('自动导入的备注')
+    expect(decorated.noteSource).toBe('sidecar')
+    expect(decorated.triggerWords).toBe('自动导入的备注')
+    // 用户并发保存的字段保留（旧实现基于 await 前的空 meta 展开写回而丢失）
+    expect(decorated.rating).toBe(5)
+    expect(decorated.favorite).toBe(true)
+    const persisted = getModelMeta(abs)
+    expect(persisted.rating).toBe(5)
+    expect(persisted.favorite).toBe(true)
+    expect(persisted.note).toBe('自动导入的备注')
+    expect(persisted.noteSource).toBe('sidecar')
+  })
+
+  it('间隙内用户已填备注时，重读后不再导入 sidecar（用户编辑优先）', async () => {
+    const abs = path.join(root, 'lora-race-user-note.ckpt')
+    await fs.writeFile(abs, 'x')
+    let releaseSidecar
+    vi.mocked(findSidecarText).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseSidecar = () => resolve('sidecar 全文')
+        })
+    )
+
+    const pending = decorateModels([makeModel(abs, { type: 'lora', ext: '.ckpt' })])
+    const deadline = Date.now() + 5000
+    while (typeof releaseSidecar !== 'function' && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    // 间隙内用户保存了备注（saveModelData 语义：note + 清除来源标记）
+    setModelMeta(abs, { note: '用户手写备注', noteSource: '' })
+    releaseSidecar()
+
+    await pending
+    const persisted = getModelMeta(abs)
+    expect(persisted.note).toBe('用户手写备注')
+    expect(persisted.noteSource).toBe('')
   })
 })
 
