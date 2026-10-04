@@ -136,8 +136,9 @@ export function registerScanHandlers() {
       // 显式传入 folder 的扫描也持久化根目录，与 models:chooseFolder 行为闭环
       await updateSettings({ modelsFolder: root })
       // 同步目录监控状态（E8）：autoRescan 开启时监听当前根目录，变更触发自动重扫。
-      // 排除名单与 scanner 同规则传入：被排除目录内的文件变化不触发无意义重扫
-      syncWatcher(root, getSettings().autoRescan === true, appSettings.excludeDirs || [])
+      // 排除名单须现读内存设置而非扫描前快照：扫描期间用户经 settings:update
+      // 更新过 excludeDirs 时，旧快照会把 watcher 名单回退为扫描前的值
+      syncWatcher(root, getSettings().autoRescan === true, getSettings().excludeDirs || [])
 
       return {
         root,

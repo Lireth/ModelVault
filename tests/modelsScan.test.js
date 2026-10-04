@@ -37,11 +37,19 @@ vi.mock('../src/main/services/scanner.js', async (importOriginal) => {
   return { ...actual, scanModels: vi.fn() }
 })
 
+// watcher 监听行为由 tests/watcher.test.js 单测覆盖；此处仅收集 syncWatcher 调用参数，
+// 用于断言扫描完成时以「最新设置」而非扫描前快照同步排除名单（E8 竞态回归）
+vi.mock('../src/main/services/watcher.js', async (importOriginal) => {
+  const actual = await importOriginal()
+  return { ...actual, syncWatcher: vi.fn() }
+})
+
 // setStoreSaveErrorListener 的广播使用 getAllWindows（注册时不触发，桩需存在）
 vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([])
 
 import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
 import { scanModels } from '../src/main/services/scanner'
+import { syncWatcher } from '../src/main/services/watcher'
 import { loadSettings, setDataRoot, updateSettings } from '../src/main/services/store'
 import { drainDeferredThumbs, getThumbPathDeferred } from '../src/main/services/thumbs'
 
@@ -263,6 +271,28 @@ describe('models:scan 目录校验与回写（C6）', () => {
     expect(res.root).toBe(rootB)
     const { modelsFolder } = await loadSettings()
     expect(modelsFolder).toBe(rootB)
+  })
+})
+
+describe('扫描完成以最新设置同步目录监控（E8 竞态回归）', () => {
+  it('扫描期间 settings:update 变更 excludeDirs 后，扫描完成同步 watcher 用新名单而非扫描前快照', async () => {
+    vi.mocked(syncWatcher).mockClear()
+    const scan = getRegisteredHandler('models:scan')
+    const update = getRegisteredHandler('settings:update')
+    await registerLibrary(root)
+
+    // 扫描挂起期间，用户经 settings:update 更新排除名单
+    hangScanModels()
+    const pending = scan(makeEvent(), { folder: root })
+    await waitForScanStarted()
+    await update(makeEvent(), { excludeDirs: ['temp-out'] })
+    expect(syncWatcher).toHaveBeenCalledWith(root, false, ['temp-out'])
+
+    // 扫描完成后的同步调用必须携带最新名单（旧实现回退为扫描前的 []）
+    releaseScan()
+    await pending
+    const calls = vi.mocked(syncWatcher).mock.calls
+    expect(calls.at(-1)).toEqual([root, false, ['temp-out']])
   })
 })
 
