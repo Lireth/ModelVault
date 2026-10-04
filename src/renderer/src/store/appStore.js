@@ -46,6 +46,9 @@ export const CHECKPOINT_TAGS = [{ key: 'base', label: '基底模型', color: '#4
 /** 中文排序比较器（模块级缓存，O1）：避免排序热路径每次比较都走完整 Intl 构造 */
 const zhCollator = new Intl.Collator('zh-CN')
 
+/** 分类固定顺序映射（模块级常量，O3）：避免按分类排序时每次重算都重建 */
+const TYPE_ORDER = Object.fromEntries(MODEL_TYPES.map((t, i) => [t.key, i]))
+
 /**
  * 排序方式选项：key 与主进程 store.js 的 VALID_SORT_BY 保持一致，顶栏与设置页共用（C3）。
  * directional: false 表示固定语义排序（收藏/高分恒在前），方向翻转会使语义反转，UI 据此禁用方向切换（O1）。
@@ -405,68 +408,77 @@ export function applyThumbUpdates(updates) {
   }
 }
 
+/**
+ * 搜索域小写缓存（O3）：按模型对象引用记忆化的小写搜索域，覆盖文件名、
+ * 备注名、备注、触发词、分类标签（含中文标签），以换行连接防止跨字段
+ * 误匹配。模型对象仅在元数据更新/批量同步/重扫时被整体替换——替换后
+ * 新对象自然缓存未命中并重建，未变更模型跨多次按键复用，避免每次搜索
+ * 对全库每个模型重复调用 4~5 次 toLowerCase 与 SUB_MAP 查找。
+ */
+const searchHaystackCache = new WeakMap()
+
+/** 构建并缓存模型的合并小写搜索域 */
+function searchHaystack(m) {
+  let hay = searchHaystackCache.get(m)
+  if (hay !== undefined) return hay
+  const parts = [m.name, m.alias, m.note, m.triggerWords]
+  if (m.subCategory) {
+    parts.push(m.subCategory)
+    const info = SUB_MAP[m.subCategory]
+    if (info) parts.push(info.label)
+  }
+  hay = parts
+    .filter(Boolean)
+    .join('\n')
+    .toLowerCase()
+  searchHaystackCache.set(m, hay)
+  return hay
+}
+
 /** 筛选 + 搜索 + 排序后的模型列表 */
 export const filteredModels = computed(() => {
   const keyword = state.search.trim().toLowerCase()
-  let list = state.models
-  if (state.typeFilter !== 'all') {
-    list = list.filter((m) => m.type === state.typeFilter)
-  }
+  const { typeFilter, subFilter, showFavoritesOnly } = state
   // LoRA 分类筛选：仅选中 LoRA 分类且指定了子分类时生效
-  if (state.typeFilter === 'lora' && state.subFilter) {
-    list = list.filter((m) => m.subCategory === state.subFilter)
+  const checkSub = typeFilter === 'lora' && subFilter
+  // 单趟完成分类/子分类/收藏/关键词过滤（O3）：合并原四段 filter，
+  // 消除中间数组分配；无筛选条件时仅做一次遍历拷贝
+  const list = []
+  for (const m of state.models) {
+    if (typeFilter !== 'all' && m.type !== typeFilter) continue
+    if (checkSub && m.subCategory !== subFilter) continue
+    if (showFavoritesOnly && !m.favorite) continue
+    if (keyword && !searchHaystack(m).includes(keyword)) continue
+    list.push(m)
   }
-  // 收藏筛选
-  if (state.showFavoritesOnly) {
-    list = list.filter((m) => m.favorite)
-  }
-  if (keyword) {
-    // 搜索范围：文件名、备注名、备注、触发词（LoRA）、分类标签（含中文标签）
-    list = list.filter((m) => {
-      if (m.name.toLowerCase().includes(keyword)) return true
-      if (m.alias && m.alias.toLowerCase().includes(keyword)) return true
-      if (m.note && m.note.toLowerCase().includes(keyword)) return true
-      if (m.triggerWords && m.triggerWords.toLowerCase().includes(keyword)) return true
-      if (m.subCategory) {
-        if (m.subCategory.toLowerCase().includes(keyword)) return true
-        const info = SUB_MAP[m.subCategory]
-        if (info && info.label.toLowerCase().includes(keyword)) return true
-      }
-      return false
-    })
-  }
-  const sorted = [...list]
   switch (state.sortBy) {
     case 'size':
-      sorted.sort((a, b) => b.size - a.size)
+      list.sort((a, b) => b.size - a.size)
       break
     case 'mtime':
-      sorted.sort((a, b) => b.mtimeMs - a.mtimeMs)
+      list.sort((a, b) => b.mtimeMs - a.mtimeMs)
       break
     case 'favorite':
       // 收藏优先，同组内按名称（U2）；固定语义排序，不响应方向翻转（O1）
-      sorted.sort(
+      list.sort(
         (a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0) || zhCollator.compare(a.name, b.name)
       )
       break
     case 'rating':
       // 评分高优先，同分按名称（U2）；固定语义排序，不响应方向翻转（O1）
-      sorted.sort((a, b) => b.rating - a.rating || zhCollator.compare(a.name, b.name))
+      list.sort((a, b) => b.rating - a.rating || zhCollator.compare(a.name, b.name))
       break
     case 'type':
       // 按分类排序：遵循固定分类顺序（Checkpoint → TextEncoders → VAE → LoRA → 其他），同分类内按名称
-      {
-        const order = Object.fromEntries(MODEL_TYPES.map((t, i) => [t.key, i]))
-        sorted.sort((a, b) => order[a.type] - order[b.type] || zhCollator.compare(a.name, b.name))
-      }
+      list.sort((a, b) => TYPE_ORDER[a.type] - TYPE_ORDER[b.type] || zhCollator.compare(a.name, b.name))
       break
     default:
-      sorted.sort((a, b) => zhCollator.compare(a.name, b.name))
+      list.sort((a, b) => zhCollator.compare(a.name, b.name))
   }
   // 排序方向（U2）：sortAsc=false 时翻转当前结果；
   // 收藏优先/按评分为固定语义排序（收藏/高分恒在前），翻转会反转语义，故不响应（O1）
-  if (!state.sortAsc && sortDirectional(state.sortBy)) sorted.reverse()
-  return sorted
+  if (!state.sortAsc && sortDirectional(state.sortBy)) list.reverse()
+  return list
 })
 
 /** 各分类的数量（含全部）：直接从模型列表派生，删除/新增后自动同步 */

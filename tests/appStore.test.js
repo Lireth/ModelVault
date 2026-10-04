@@ -166,6 +166,24 @@ describe('筛选与排序（filteredModels）', () => {
     expect(filteredModels.value.map((m) => m.id)).toEqual(['c'])
   })
 
+  it('搜索命中分类标签中文标签（放大模型）', () => {
+    state.models = [makeModel('u', { type: 'other', subCategory: 'upscale' })]
+    state.search = '放大'
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['u'])
+  })
+
+  it('搜索域缓存随模型对象替换失效（O3）：新备注可命中、旧备注不再命中', () => {
+    state.models = [makeModel('m1', { note: '旧备注内容' })]
+    state.search = '旧备注'
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['m1'])
+    // 模拟标注保存路径：整体替换元素对象（note 变更）
+    state.models = [makeModel('m1', { note: '新备注内容' })]
+    state.search = '旧备注'
+    expect(filteredModels.value).toHaveLength(0)
+    state.search = '新备注'
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['m1'])
+  })
+
   it('收藏优先排序：收藏在前，组内按名称；固定语义不响应方向翻转（O1）', () => {
     state.models = [
       makeModel('x', { name: 'a', favorite: false }),
