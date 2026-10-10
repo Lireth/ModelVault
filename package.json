@@ -26,6 +26,7 @@
     "dist:dir": "npm run build && electron-builder --dir"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "vue": "^3.5.42"
   },
   "devDependencies": {

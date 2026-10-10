@@ -6,6 +6,7 @@ import {
   chooseFolder,
   closeSettings,
   confirmDialog,
+  defaultSettings,
   revealModel,
   saveSettings,
   SCAN_EXTENSION_OPTIONS,
@@ -168,6 +169,72 @@ function parseExcludeDirs() {
 /** 更改模型文件夹（复用全局逻辑：选择后自动重新扫描） */
 async function onChangeFolder() {
   await chooseFolder()
+}
+
+/* ---------------- 数据备份与恢复（FEAT-3） ---------------- */
+
+const backupBusy = ref(false)
+
+/** 导出备份：应用设置 + 当前库标注/封面 → zip（对话框与打包均在主进程） */
+async function onExportBackup() {
+  backupBusy.value = true
+  try {
+    const res = await window.api.models.exportBackup()
+    if (res.canceled) return
+    if (res.error) {
+      toast('error', res.error)
+      return
+    }
+    const scope = res.library
+      ? `${res.models} 个模型标注 / ${res.covers} 张封面`
+      : '应用设置（当前库暂无标注数据）'
+    toast('success', `备份已导出（${scope}）→ ${res.path}`)
+  } catch (err) {
+    toast('error', `备份导出失败: ${err.message}`)
+  } finally {
+    backupBusy.value = false
+  }
+}
+
+/** 从备份恢复：刷新本地状态；当前库被恢复时自动重扫使标注/封面立即生效 */
+async function onImportBackup() {
+  backupBusy.value = true
+  try {
+    const res = await window.api.models.importBackup()
+    if (res.canceled) return
+    if (res.error) {
+      toast('error', res.error)
+      return
+    }
+    // 设置可能已变更：重新拉取并应用（主题/排序等即时生效），并重填表单
+    // 避免恢复后用旧表单值保存，把刚恢复的设置覆盖回去
+    const data = await window.api.models.loadStore().catch(() => null)
+    if (data?.settings) {
+      state.settings = { ...defaultSettings(), ...data.settings }
+      applyTheme(state.settings.theme)
+      state.sortBy = state.settings.sortBy || state.sortBy
+      state.sortAsc = state.settings.sortAsc !== false
+      fillForm()
+    }
+    // 当前库的数据若被恢复，重扫使标注/封面立即生效
+    if (res.libraryRestored?.root === state.folder && !state.scanning) {
+      await scanModels()
+    }
+    const parts = []
+    if (res.settingsRestored) parts.push('应用设置')
+    if (res.libraryRestored) {
+      parts.push(`模型库数据（${res.libraryRestored.models} 个模型 / ${res.libraryRestored.covers} 张封面）`)
+    }
+    if (parts.length === 0) {
+      toast('warn', '备份中无可恢复的数据')
+      return
+    }
+    toast('success', `备份已恢复：${parts.join('、')}`)
+  } catch (err) {
+    toast('error', `备份恢复失败: ${err.message}`)
+  } finally {
+    backupBusy.value = false
+  }
 }
 
 async function onSave() {
@@ -372,6 +439,25 @@ async function onSave() {
           </div>
           <input v-model="form.showParams" type="checkbox" class="switch" />
         </label>
+      </div>
+
+      <!-- 数据备份 -->
+      <h3>数据备份</h3>
+      <div class="settings-group">
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-title">备份与恢复</span>
+            <span class="setting-desc">
+              导出：应用设置 + 当前模型库的标注（备注 / 参数 / 收藏 / 评分）与封面，打包为 zip 文件。
+              缩略图为可再生缓存，不纳入备份。恢复时选择备份文件与目标模型文件夹，
+              目标目录已有数据时会先留 .bak 再覆盖。
+            </span>
+          </div>
+          <div class="setting-actions">
+            <button class="btn" :disabled="backupBusy" @click="onExportBackup">导出备份…</button>
+            <button class="btn" :disabled="backupBusy" @click="onImportBackup">从备份恢复…</button>
+          </div>
+        </div>
       </div>
 
       <!-- 关于 -->

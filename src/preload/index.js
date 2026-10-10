@@ -26,7 +26,9 @@ const VALID_INVOKE_CHANNELS = [
   'models:reveal',
   'models:exportList',
   'models:computeHashBatch',
-  'models:cancelHashBatch'
+  'models:cancelHashBatch',
+  'models:exportBackup',
+  'models:importBackup'
 ]
 
 const VALID_RECEIVE_CHANNELS = [
@@ -114,6 +116,10 @@ const api = {
     computeHashBatch: (payload) => invokeValidated('models:computeHashBatch', payload),
     /** 取消批量哈希计算（E5），返回 { ok } */
     cancelHashBatch: () => invokeValidated('models:cancelHashBatch'),
+    /** 导出备份（FEAT-3）：设置 + 当前库标注/封面 → zip，返回 { path, sizeBytes, library, models, covers } / { canceled } / { error } */
+    exportBackup: () => invokeValidated('models:exportBackup'),
+    /** 从备份恢复（FEAT-3）：zip → 设置 + 指定库，返回 { settingsRestored, libraryRestored? } / { canceled } / { error } */
+    importBackup: () => invokeValidated('models:importBackup'),
     /** 删除模型文件（移入回收站并清理元数据），返回 { ok } 或 { error } */
     deleteModel: (id) => invokeValidated('models:deleteModel', { id }),
     /** 更新快捷标记（收藏/NSFW/评分，仅传需更新的字段），返回 { meta } 或 { error } */
