@@ -8,11 +8,14 @@ import {
   exportModels,
   openDedupe,
   openDiskUsage,
+  openOrganize,
+  moveIdsToDir,
   removeRoot,
   scanModels,
   openSettings,
   switchRoot
 } from '../store/appStore'
+import FolderTree from './FolderTree.vue'
 
 const folderName = computed(() => {
   if (!state.folder) return '未选择文件夹'
@@ -35,6 +38,16 @@ function rootName(f) {
 
 function selectType(key) {
   state.typeFilter = key
+}
+
+/** 目录筛选（B-01）：点击目录限定到其子树；点击已选目录或根节点取消筛选 */
+function selectDir(path) {
+  state.dirFilter = state.dirFilter === path || path === '' ? '' : path
+}
+
+/** 拖拽模型卡片到目录树归位（B-06） */
+function onMoveToDir({ ids, dir }) {
+  moveIdsToDir(ids, dir)
 }
 
 function onScanClick() {
@@ -75,6 +88,10 @@ function onScanClick() {
       <button class="btn action-btn" title="按分类与目录统计模型文件占用的磁盘空间" :disabled="!state.models.length" @click="openDiskUsage">
         占用分析
       </button>
+      <!-- 应用内整理（B-06）：库内移动文件 / 新建文件夹 / 失联标注绑定 -->
+      <button class="btn action-btn" title="在应用内整理模型文件：移动到其他文件夹、新建文件夹、手动绑定失联标注" :disabled="state.scanning || !state.folder" @click="openOrganize()">
+        整理
+      </button>
     </div>
 
     <!-- 模型库切换（E7 多根目录）：存在其他库时显示 -->
@@ -102,6 +119,18 @@ function onScanClick() {
           </button>
         </li>
       </ul>
+    </div>
+
+    <!-- 目录结构树（B-01）：点击按文件夹筛选，B-06 起支持拖拽归位 -->
+    <div v-if="state.folder && state.models.length" class="side-section dir-tree-section">
+      <h3>目录</h3>
+      <FolderTree
+        :models="state.models"
+        :selected="state.dirFilter"
+        droppable
+        @select="selectDir"
+        @move="onMoveToDir"
+      />
     </div>
 
     <div class="side-section">
@@ -365,6 +394,7 @@ function onScanClick() {
   .type-label,
   .type-count,
   .side-section h3,
+  .dir-tree-section,
   .action-section {
     display: none;
   }

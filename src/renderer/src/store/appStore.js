@@ -64,6 +64,22 @@ export {
 // 筛选派生
 export { filteredModels, typeCounts } from './filter'
 
+// 目录结构树（B-01）
+export { buildFolderTree, flattenTree, ancestorDirs } from './folder-tree'
+
+// 多视图标签页（B-02）
+export {
+  MAX_VIEWS,
+  activeView,
+  createView,
+  initViews,
+  switchView,
+  addView,
+  closeView,
+  viewLabel,
+  resetViews
+} from './views'
+
 // 磁盘占用分析
 export { diskUsage, largestModels, openDiskUsage, closeDiskUsage } from './disk-usage'
 
@@ -123,3 +139,18 @@ export {
   showContextMenu,
   handleMenuAction
 } from './model-actions'
+
+// 应用内整理（B-06）
+export {
+  openOrganize,
+  closeOrganize,
+  setOrganizeTargetDir,
+  refreshOrganizeDirs,
+  loadMetaGaps,
+  createOrganizeFolder,
+  renameOrganizeFolder,
+  moveModelsToDir,
+  movePendingToTarget,
+  moveIdsToDir,
+  bindGap
+} from './organize'

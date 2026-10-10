@@ -40,6 +40,7 @@ export {
   getCurrentRoot,
   getCoversDir,
   isInRoot,
+  toRelKey,
   resolveCover,
   relativizeCover
 } from './store-paths'
@@ -59,6 +60,9 @@ export {
   removeModelMeta,
   setModelHash,
   relinkScannedMeta,
+  relinkMetaKey,
+  relinkMetaPrefix,
+  getMetaGaps,
   scheduleSave,
   saveStoreNow,
   flushStoreSave,

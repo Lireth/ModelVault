@@ -22,6 +22,11 @@ let scanning = false
 /** 当前扫描的取消控制器（null 表示无进行中的扫描） */
 let scanAbort = null
 
+/** 是否有扫描（全量/局部）进行中（B-06 整理操作据此拒绝并发文件移动） */
+export function isScanRunning() {
+  return scanning
+}
+
 /**
  * 目录是否属于模型库白名单（B1）：settings.modelsFolders（上限 20）。
  * 列表条目只能经 models:chooseFolder（对话框确认）或 settings:update

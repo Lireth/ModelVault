@@ -8,6 +8,8 @@ import ToastHost from './components/ToastHost.vue'
 import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import DedupePanel from './components/DedupePanel.vue'
 import DiskUsagePanel from './components/DiskUsagePanel.vue'
+import ViewTabs from './components/ViewTabs.vue'
+import OrganizePanel from './components/OrganizePanel.vue'
 import {
   acceptConfirm,
   applyThumbUpdates,
@@ -25,6 +27,7 @@ import {
   initApp,
   LORA_TAGS,
   multiSelectTags,
+  openOrganize,
   rejectConfirm,
   saveSettings,
   scanModels,
@@ -57,6 +60,22 @@ function clearSearch() {
   searchInput.value = ''
   state.search = ''
 }
+
+// B-02：切换标签页后搜索框内容同步为目标视图的搜索词（挂起的防抖写入作废）
+watch(
+  () => state.activeViewId,
+  () => {
+    clearTimeout(searchTimer)
+    searchInput.value = state.search
+  }
+)
+
+/** 目录筛选 chip 文案：显示末段目录名（根目录直属不会出现在筛选态） */
+const dirFilterLabel = computed(() => {
+  if (!state.dirFilter) return ''
+  const segs = state.dirFilter.split('/')
+  return `📁 ${segs[segs.length - 1]}`
+})
 
 /** 切换排序方式：立即生效并静默持久化，重启后保持用户选择 */
 async function onSortChange(e) {
@@ -157,9 +176,9 @@ function isEditableTarget(e) {
   )
 }
 
-/** 设置页/占用分析/重复检测面板是否打开（这些场景搜索框不在 DOM 中） */
+/** 设置页/占用分析/重复检测/整理面板是否打开（这些场景搜索框不在 DOM 中） */
 function isOverlayPanelOpen() {
-  return state.settingsOpen || state.diskUsage.open || state.dedupe.open
+  return state.settingsOpen || state.diskUsage.open || state.dedupe.open || state.organize.open
 }
 
 /**
@@ -323,8 +342,13 @@ onUnmounted(() => {
         <!-- 重复检测面板（E5）：占用模型预览区位置 -->
         <DedupePanel v-else-if="state.dedupe.open" />
 
+        <!-- 应用内整理面板（B-06）：占用模型预览区位置 -->
+        <OrganizePanel v-else-if="state.organize.open" />
+
         <!-- 模型预览区 -->
         <template v-else>
+        <!-- 多视图标签页（B-02） -->
+        <ViewTabs />
         <!-- 重扫失败但仍有上次结果：顶部错误横幅（B15） -->
         <div v-if="state.scanError && !state.scanning && state.models.length > 0" class="scan-error-bar">
           <span class="scan-error-text" :title="state.scanError">⚠ {{ state.scanError }}</span>
@@ -366,6 +390,8 @@ onUnmounted(() => {
             >{{ t.label }}</button>
           </template>
           <span class="batch-sep"></span>
+          <!-- B-06：批量移动到库内其他文件夹（打开整理面板并带入选中模型） -->
+          <button class="btn" :disabled="!state.multiSelect.ids.length || state.scanning" @click="openOrganize([...state.multiSelect.ids])">移动到…</button>
           <button class="btn btn-danger" :disabled="!state.multiSelect.ids.length" @click="batchDeleteModels">移入回收站</button>
           <button class="btn" @click="exitMultiSelect">退出多选</button>
         </div>
@@ -447,6 +473,10 @@ onUnmounted(() => {
             <span v-if="state.typeFilter !== 'all'" class="chip">
               {{ typeInfo(state.typeFilter).label }}
             </span>
+            <!-- 目录筛选（B-01）：可点击 ✕ 取消 -->
+            <button v-if="state.dirFilter" class="chip chip-clearable" :title="state.dirFilter" @click="state.dirFilter = ''">
+              {{ dirFilterLabel }} <span class="chip-clear">✕</span>
+            </button>
             <!-- 收藏筛选：仅显示收藏的模型 -->
             <button
               class="fav-filter"
@@ -766,6 +796,24 @@ onUnmounted(() => {
   border-radius: 999px;
   background: var(--bg-active);
   color: var(--accent);
+}
+
+/* 可取消的筛选 chip（B-01 目录筛选） */
+.chip-clearable {
+  border: 1px solid var(--accent);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.chip-clear {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.chip-clearable:hover .chip-clear {
+  opacity: 1;
 }
 
 /* 收藏筛选按钮 */

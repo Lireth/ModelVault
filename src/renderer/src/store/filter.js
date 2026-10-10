@@ -1,5 +1,6 @@
 import { computed, watch } from 'vue'
 import { state, MODEL_TYPES, SUB_MAP, sortDirectional } from './state'
+import { isApplyingView } from './views'
 
 /**
  * 筛选/搜索/排序派生状态（A-04 自 appStore.js 拆出）。
@@ -41,16 +42,23 @@ function searchHaystack(m) {
 /** 筛选 + 搜索 + 排序后的模型列表 */
 export const filteredModels = computed(() => {
   const keyword = state.search.trim().toLowerCase()
-  const { typeFilter, subFilter, showFavoritesOnly } = state
+  const { typeFilter, subFilter, showFavoritesOnly, dirFilter } = state
   // LoRA 分类筛选：仅选中 LoRA 分类且指定了子分类时生效
   const checkSub = typeFilter === 'lora' && subFilter
-  // 单趟完成分类/子分类/收藏/关键词过滤（O3）：合并原四段 filter，
+  // 目录筛选（B-01）：选中目录及其全部后代
+  const inDir = (m) => {
+    if (!dirFilter) return true
+    const rel = typeof m.relDir === 'string' ? m.relDir : ''
+    return rel === dirFilter || rel.startsWith(`${dirFilter}/`)
+  }
+  // 单趟完成目录/分类/子分类/收藏/关键词过滤（O3）：合并原四段 filter，
   // 消除中间数组分配；无筛选条件时仅做一次遍历拷贝
   const list = []
   for (const m of state.models) {
     if (typeFilter !== 'all' && m.type !== typeFilter) continue
     if (checkSub && m.subCategory !== subFilter) continue
     if (showFavoritesOnly && !m.favorite) continue
+    if (!inDir(m)) continue
     if (keyword && !searchHaystack(m).includes(keyword)) continue
     list.push(m)
   }
@@ -84,19 +92,31 @@ export const filteredModels = computed(() => {
   return list
 })
 
-/** 各分类的数量（含全部）：直接从模型列表派生，删除/新增后自动同步 */
+/**
+ * 各分类的数量（含全部）：直接从模型列表派生，删除/新增后自动同步。
+ * B-01：激活目录筛选时计数限定在该目录子树内，侧栏分类计数与网格结果同口径；
+ * 收藏/搜索条件不参与（切分类时计数保持稳定，避免侧栏数字闪烁）。
+ */
 export const typeCounts = computed(() => {
-  const counts = { all: state.models.length }
+  const counts = { all: 0 }
+  const { dirFilter } = state
   for (const m of state.models) {
+    if (dirFilter) {
+      const rel = typeof m.relDir === 'string' ? m.relDir : ''
+      if (rel !== dirFilter && !rel.startsWith(`${dirFilter}/`)) continue
+    }
+    counts.all += 1
     counts[m.type] = (counts[m.type] || 0) + 1
   }
   return counts
 })
 
-// 切换主分类时清空 LoRA 子分类筛选，避免残留条件
+// 切换主分类时清空 LoRA 子分类筛选，避免残留条件。
+// B-02：标签页切换是整体换入字段（目标视图可能自带 lora 子分类），
+// 期间的 typeFilter 变化不得触发清空（isApplyingView 守卫）
 watch(
   () => state.typeFilter,
   () => {
-    state.subFilter = ''
+    if (!isApplyingView()) state.subFilter = ''
   }
 )

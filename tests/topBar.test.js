@@ -43,14 +43,15 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
     await wrapper.find('.narrow-actions-btn').trigger('click')
     expect(wrapper.find('.narrow-actions-menu').exists()).toBe(true)
     const items = wrapper.findAll('.menu-item')
-    expect(items).toHaveLength(6)
+    expect(items).toHaveLength(7)
     expect(items.map((i) => i.text())).toEqual([
       '重新扫描',
       '选择文件夹',
       '导出 CSV',
       '导出 JSON',
       '重复检测',
-      '占用分析'
+      '占用分析',
+      '整理'
     ])
   })
 

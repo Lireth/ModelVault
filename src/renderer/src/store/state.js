@@ -126,10 +126,11 @@ export const state = reactive({
   progress: { dirs: 0, found: 0, current: '' },
   lastScan: null, // { count, durationMs }
   models: [],
-  // 筛选 / 排序
+  // 筛选 / 排序（平铺字段始终为活动视图的镜像，B-02）
   typeFilter: 'all',
   subFilter: '', // LoRA 分类筛选（仅 typeFilter 为 lora 时生效）
   showFavoritesOnly: false, // 仅显示收藏的模型
+  dirFilter: '', // 目录筛选（B-01）：POSIX 相对目录，'' 为全部；选中含其后代
   search: '',
   sortBy: 'name', // name | type | size | mtime | favorite | rating
   sortAsc: true, // 排序方向：true 升序 / false 降序（收藏优先/按评分为固定语义排序，忽略方向，O1）
@@ -142,6 +143,22 @@ export const state = reactive({
   dedupe: { open: false, running: false, progress: null, groups: [], canceled: false },
   // 磁盘占用分析面板（FEAT-1）
   diskUsage: { open: false },
+  // 视图标签页（B-02）：每个视图独立持有筛选/搜索/排序；由 views.js 播种
+  // 平铺筛选字段（typeFilter 等）始终是活动视图字段的镜像
+  views: [],
+  activeViewId: '',
+  // 应用内整理面板（B-06）：dirs 为主进程返回的库内目录（含空目录），
+  // pendingIds 为待移动模型，orphans/newcomers 为失联标注绑定候选
+  organize: {
+    open: false,
+    busy: false,
+    dirs: [],
+    targetDir: '',
+    pendingIds: [],
+    gapsLoading: false,
+    orphans: [],
+    newcomers: []
+  },
   // 设置
   settings: defaultSettings(),
   settingsOpen: false,

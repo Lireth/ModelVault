@@ -51,6 +51,20 @@ const EXPECTED_EXPORTS = [
   // 派生
   'filteredModels',
   'typeCounts',
+  // B-01 目录树
+  'buildFolderTree',
+  'flattenTree',
+  'ancestorDirs',
+  // B-02 多视图标签页
+  'MAX_VIEWS',
+  'activeView',
+  'createView',
+  'initViews',
+  'switchView',
+  'addView',
+  'closeView',
+  'viewLabel',
+  'resetViews',
   // 磁盘占用
   'diskUsage',
   'largestModels',
@@ -100,7 +114,19 @@ const EXPECTED_EXPORTS = [
   'setNsfw',
   'setRating',
   'showContextMenu',
-  'handleMenuAction'
+  'handleMenuAction',
+  // B-06 应用内整理
+  'openOrganize',
+  'closeOrganize',
+  'setOrganizeTargetDir',
+  'refreshOrganizeDirs',
+  'loadMetaGaps',
+  'createOrganizeFolder',
+  'renameOrganizeFolder',
+  'moveModelsToDir',
+  'movePendingToTarget',
+  'moveIdsToDir',
+  'bindGap'
 ]
 
 describe('appStore 门面导出契约（A-04）', () => {
