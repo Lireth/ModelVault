@@ -329,6 +329,9 @@ function onScanClick() {
   border-color: var(--accent);
 }
 
+/* 窄屏图标栏（OPT-1）：断点 900px 与 TopBar.vue 的窄屏操作菜单联动——
+   此范围内操作区（重新扫描/选择文件夹/导出/重复检测）整体隐藏，
+   改由标题栏 ☰ 菜单提供同等入口；改动任一侧断点时须同步另一侧 */
 @media (max-width: 900px) {
   .sidebar {
     width: 64px;
