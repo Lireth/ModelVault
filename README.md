@@ -101,6 +101,7 @@ ModelVault/
 │       ├── index.html            # HTML 入口（含 CSP）
 │       └── src/
 │           ├── main.js           # Vue 应用入口（全局错误兜底上报）
+│           ├── error-report.js   # 渲染进程错误上报链路（四类来源收敛 + 同类节流）
 │           ├── App.vue           # 根组件（整体布局、空状态、事件订阅）
 │           ├── store/
 │           │   └── appStore.js   # 全局响应式状态仓库（筛选排序/模型操作）
@@ -176,7 +177,8 @@ const api = {
 - 日志位置：`%APPDATA%\modelvault\logs\modelvault-YYYY-MM-DD.log`（按天分文件，保留 14 天）
 - 用法：`import logger from './logger'` 后调用 `logger.info / warn / error`
 - 主进程全局异常（`uncaughtException` / `unhandledRejection`）自动记录；
-  渲染进程异常经 `app:reportError` 通道上报并写入同一日志
+  渲染进程异常（Vue 错误含上下文、窗口错误、未处理 Promise 拒绝、Vue 警告）
+  经 `app:reportError` 通道上报并写入同一日志，同类错误节流降噪
 
 ### 测试
 
