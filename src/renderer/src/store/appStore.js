@@ -12,7 +12,6 @@
  * - disk-usage.js    磁盘占用分析
  * - detail.js        详情打开/关闭与选中模型
  * - partial-scan.js  watcher 变更子树驱动的局部增量扫描
- * - dedupe.js        重复检测与智能清理
  * - multiselect.js   多选批量操作
  * - covers-store.js  详情数据保存与封面操作
  * - model-actions.js 单模型文件操作/即时标注/右键菜单/列表导出
@@ -72,17 +71,6 @@ export { selectedModel, openDetail, closeDetail } from './detail'
 
 // 局部增量扫描
 export { partialScanModels } from './partial-scan'
-
-// 重复检测与智能清理
-export {
-  openDedupe,
-  closeDedupe,
-  cancelDedupe,
-  removeDedupeItem,
-  pickDuplicateKeeper,
-  keeperReason,
-  smartCleanDuplicates
-} from './dedupe'
 
 // 多选批量操作
 export {

@@ -32,8 +32,6 @@ export function makeComponentApiMock() {
       deleteCover: vi.fn(),
       importCover: vi.fn(),
       exportList: vi.fn(() => Promise.resolve({ canceled: true })),
-      computeHashBatch: vi.fn(() => Promise.resolve({ hashes: {} })),
-      cancelHashBatch: vi.fn(() => Promise.resolve({ ok: false })),
       partialScan: vi.fn(() => Promise.resolve({ models: [], dirs: [], relinked: 0 })),
       // B-06 应用内整理
       listDirs: vi.fn(() => Promise.resolve({ dirs: [''] })),
@@ -46,7 +44,6 @@ export function makeComponentApiMock() {
       onMenuAction: vi.fn(() => () => {}),
       onThumbsReady: vi.fn(() => () => {}),
       onStoreError: vi.fn(() => () => {}),
-      onHashProgress: vi.fn(() => () => {}),
       onFsChanged: vi.fn(() => () => {})
     },
     settings: { update: vi.fn() },
@@ -75,7 +72,6 @@ function resetStoreState() {
   state.selectedId = null
   state.detailDirty = false
   state.multiSelect = { active: false, ids: [] }
-  state.dedupe = { open: false, running: false, progress: null, groups: [], canceled: false }
   state.diskUsage = { open: false }
   state.organize = {
     open: false,

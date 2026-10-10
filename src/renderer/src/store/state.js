@@ -138,8 +138,6 @@ export const state = reactive({
   detailDirty: false, // 详情页表单有未保存的修改（由 ModelDetail 同步，切换/关闭前确认）
   // 多选批量操作（E4/E6）：ids 为选中模型 id 数组
   multiSelect: { active: false, ids: [] },
-  // 重复检测面板（E5；gid 为稳定组标识 OPT-4；canceled 区分「已取消」与「未发现重复」）
-  dedupe: { open: false, running: false, progress: null, groups: [], canceled: false },
   // 磁盘占用分析面板（FEAT-1）
   diskUsage: { open: false },
   // 应用内整理面板（B-06）：dirs 为主进程返回的库内目录（含空目录），

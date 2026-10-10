@@ -15,7 +15,6 @@ import {
   resolveCover,
   saveStoreNow,
   setDataRoot,
-  setModelHash,
   setModelMeta,
   setStoreSaveErrorListener,
   switchDataRoot,
@@ -140,21 +139,6 @@ describe('路径关联', () => {
     expect(removeModelMeta(abs)).toBe(true)
     expect(getModelMeta(abs)).toBeNull()
     expect(removeModelMeta(abs)).toBe(false)
-  })
-})
-
-describe('文件哈希持久化', () => {
-  it('合法哈希写入成功，非法哈希拒绝', async () => {
-    const abs = await touchModel('hash-model.safetensors')
-    setModelMeta(abs, { alias: 'hash' })
-    const good = 'a'.repeat(64)
-    expect(setModelHash(abs, good, 12345)).toBe(true)
-    const meta = getModelMeta(abs)
-    expect(meta.hash).toBe(good)
-    expect(meta.hashMtime).toBe(12345)
-    expect(setModelHash(abs, 'not-a-hash', 1)).toBe(false)
-    expect(setModelHash(abs, 'A'.repeat(64), 1)).toBe(true) // 大写 hex 自动转小写
-    expect(getModelMeta(abs).hash).toBe('a'.repeat(64))
   })
 })
 

@@ -3,7 +3,6 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   chooseFolder,
   exportModels,
-  openDedupe,
   openDiskUsage,
   openOrganize,
   scanModels,
@@ -12,7 +11,7 @@ import {
 
 /**
  * 窄屏操作菜单（OPT-1）：
- * 侧边栏操作区（重新扫描/选择文件夹/导出/重复检测）在窗口宽度 <900px 时
+ * 侧边栏操作区（重新扫描/选择文件夹/导出/占用分析/整理）在窗口宽度 <900px 时
  * 被 Sidebar.vue 的媒体查询整体隐藏，核心操作在窄窗口下不可达。
  * 此处于标题栏提供替代入口（☰ 按钮 + 下拉菜单），仅在同样 <900px 时显示；
  * 宽屏下 display:none，桌面端布局与交互零变化。
@@ -46,12 +45,6 @@ function onChooseFolder() {
 function onExport(format) {
   closeMenu()
   exportModels(format)
-}
-
-/** 重复模型检测（E5） */
-function onDedupe() {
-  closeMenu()
-  openDedupe()
 }
 
 /** 磁盘占用分析（FEAT-1） */
@@ -148,13 +141,6 @@ onBeforeUnmount(() => {
         >
           导出 CSV
         </button>
-        <button
-          class="menu-item"
-          role="menuitem"
-          title="按文件哈希查找内容完全相同的重复模型"
-          :disabled="!state.models.length"
-          @click="onDedupe"
-        >重复检测</button>
         <button
           class="menu-item"
           role="menuitem"

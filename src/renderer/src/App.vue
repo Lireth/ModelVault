@@ -6,7 +6,6 @@ import ModelDetail from './components/ModelDetail.vue'
 import SettingsPage from './components/SettingsPage.vue'
 import ToastHost from './components/ToastHost.vue'
 import VirtualModelGrid from './components/VirtualModelGrid.vue'
-import DedupePanel from './components/DedupePanel.vue'
 import DiskUsagePanel from './components/DiskUsagePanel.vue'
 import OrganizePanel from './components/OrganizePanel.vue'
 import {
@@ -159,9 +158,9 @@ function isEditableTarget(e) {
   )
 }
 
-/** 设置页/占用分析/重复检测/整理面板是否打开（这些场景搜索框不在 DOM 中） */
+/** 设置页/占用分析/整理面板是否打开（这些场景搜索框不在 DOM 中） */
 function isOverlayPanelOpen() {
-  return state.settingsOpen || state.diskUsage.open || state.dedupe.open || state.organize.open
+  return state.settingsOpen || state.diskUsage.open || state.organize.open
 }
 
 /**
@@ -321,9 +320,6 @@ onUnmounted(() => {
 
         <!-- 磁盘占用分析面板（FEAT-1）：占用模型预览区位置 -->
         <DiskUsagePanel v-else-if="state.diskUsage.open" />
-
-        <!-- 重复检测面板（E5）：占用模型预览区位置 -->
-        <DedupePanel v-else-if="state.dedupe.open" />
 
         <!-- 应用内整理面板（B-06）：占用模型预览区位置 -->
         <OrganizePanel v-else-if="state.organize.open" />

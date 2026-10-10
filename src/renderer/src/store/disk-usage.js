@@ -47,7 +47,7 @@ export const largestModels = computed(() =>
     .slice(0, LARGEST_MODELS_LIMIT)
 )
 
-/** 打开磁盘占用分析面板（FEAT-1：占据模型预览区，与设置页/重复检测同模式） */
+/** 打开磁盘占用分析面板（FEAT-1：占据模型预览区，与设置页同模式） */
 export function openDiskUsage() {
   state.diskUsage.open = true
 }

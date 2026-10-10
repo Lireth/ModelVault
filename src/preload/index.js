@@ -27,8 +27,6 @@ const VALID_INVOKE_CHANNELS = [
   'models:importCover',
   'models:reveal',
   'models:exportList',
-  'models:computeHashBatch',
-  'models:cancelHashBatch',
   'models:exportBackup',
   'models:importBackup',
   'models:listDirs',
@@ -44,7 +42,6 @@ const VALID_RECEIVE_CHANNELS = [
   'models:menuAction',
   'models:thumbsReady',
   'models:storeError',
-  'models:hashProgress',
   'models:fsChanged'
 ]
 
@@ -127,10 +124,6 @@ const api = {
     deleteCover: (id, cover) => invokeValidated('models:deleteCover', { id, cover }),
     /** 导出模型列表（E2），rows 为当前列表行，返回 { path, count } / { canceled } / { error } */
     exportList: (payload) => invokeValidated('models:exportList', payload),
-    /** 批量计算文件哈希（E5 重复检测），返回 { hashes: {id:hash} } / { canceled } / { error } */
-    computeHashBatch: (payload) => invokeValidated('models:computeHashBatch', payload),
-    /** 取消批量哈希计算（E5），返回 { ok } */
-    cancelHashBatch: () => invokeValidated('models:cancelHashBatch'),
     /** 导出备份（FEAT-3）：设置 + 当前库标注/封面 → zip，返回 { path, sizeBytes, library, models, covers } / { canceled } / { error } */
     exportBackup: () => invokeValidated('models:exportBackup'),
     /** 从备份恢复（FEAT-3）：zip → 设置 + 指定库，返回 { settingsRestored, libraryRestored? } / { canceled } / { error } */
@@ -164,8 +157,6 @@ const api = {
     reveal: (path) => invokeValidated('models:reveal', { path }),
     /** 订阅扫描进度，返回取消监听函数 */
     onScanProgress: (listener) => subscribe('models:scanProgress', listener),
-    /** 订阅批量哈希进度事件（E5：{ done, total, current }），返回取消监听函数 */
-    onHashProgress: (listener) => subscribe('models:hashProgress', listener),
     /** 订阅目录变更事件（E8：{ root }），返回取消监听函数 */
     onFsChanged: (listener) => subscribe('models:fsChanged', listener),
     /** 订阅元数据落盘失败事件（message: 错误信息），返回取消监听函数 */

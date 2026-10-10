@@ -8,7 +8,7 @@ import { setupComponentTest } from './helpers/componentTest'
 /**
  * TopBar 窄屏操作菜单测试（OPT-16 基建；OPT-1 回归）：
  * 侧边栏操作区在 <900px 隐藏，标题栏 ☰ 菜单是替代入口——
- * 覆盖菜单开合、六个操作项派发、禁用态规则、外部点击/ESC 关闭。
+ * 覆盖菜单开合、操作项派发、禁用态规则、外部点击/ESC 关闭。
  */
 
 setupComponentTest()
@@ -43,12 +43,11 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
     await wrapper.find('.narrow-actions-btn').trigger('click')
     expect(wrapper.find('.narrow-actions-menu').exists()).toBe(true)
     const items = wrapper.findAll('.menu-item')
-    expect(items).toHaveLength(6)
+    expect(items).toHaveLength(5)
     expect(items.map((i) => i.text())).toEqual([
       '重新扫描',
       '选择文件夹',
       '导出 CSV',
-      '重复检测',
       '占用分析',
       '整理'
     ])
@@ -57,16 +56,8 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
   it('「占用分析」打开磁盘占用面板并关闭菜单（FEAT-1 入口）', async () => {
     const wrapper = mountTopBar()
     await wrapper.find('.narrow-actions-btn').trigger('click')
-    await wrapper.findAll('.menu-item')[4].trigger('click')
-    expect(state.diskUsage.open).toBe(true)
-    expect(wrapper.find('.narrow-actions-menu').exists()).toBe(false)
-  })
-
-  it('「重复检测」打开检测面板（E5 入口）', async () => {
-    const wrapper = mountTopBar()
-    await wrapper.find('.narrow-actions-btn').trigger('click')
     await wrapper.findAll('.menu-item')[3].trigger('click')
-    expect(state.dedupe.open).toBe(true)
+    expect(state.diskUsage.open).toBe(true)
     expect(wrapper.find('.narrow-actions-menu').exists()).toBe(false)
   })
 
@@ -101,8 +92,7 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
     expect(items[0].attributes('disabled')).toBeDefined() // 重新扫描（无文件夹）
     expect(items[1].attributes('disabled')).toBeUndefined() // 选择文件夹恒可用
     expect(items[2].attributes('disabled')).toBeDefined() // 导出 CSV（无模型）
-    expect(items[3].attributes('disabled')).toBeDefined() // 重复检测（无模型）
-    expect(items[4].attributes('disabled')).toBeDefined() // 占用分析（无模型）
+    expect(items[3].attributes('disabled')).toBeDefined() // 占用分析（无模型）
   })
 
   it('点击菜单外部区域关闭', async () => {

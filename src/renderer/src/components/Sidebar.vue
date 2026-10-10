@@ -6,7 +6,6 @@ import {
   typeCounts,
   chooseFolder,
   exportModels,
-  openDedupe,
   openDiskUsage,
   openOrganize,
   removeRoot,
@@ -65,10 +64,6 @@ function onScanClick() {
         <!-- 导出当前筛选后的模型列表（E2） -->
         <button class="btn action-btn" title="将当前列表导出为 CSV 文件（可被 Excel 打开）" :disabled="!state.models.length" @click="exportModels('csv')">
           导出 CSV
-        </button>
-        <!-- 重复模型检测（E5） -->
-        <button class="btn action-btn" title="按文件哈希查找内容完全相同的重复模型" :disabled="!state.models.length" @click="openDedupe">
-          重复检测
         </button>
         <!-- 磁盘占用分析（FEAT-1） -->
         <button class="btn action-btn" title="按分类与目录统计模型文件占用的磁盘空间" :disabled="!state.models.length" @click="openDiskUsage">
@@ -370,7 +365,7 @@ function onScanClick() {
 }
 
 /* 窄屏图标栏（OPT-1）：断点 900px 与 TopBar.vue 的窄屏操作菜单联动——
-   此范围内操作区（重新扫描/选择文件夹/导出/重复检测）整体隐藏，
+   此范围内操作区（重新扫描/选择文件夹/导出/占用分析）整体隐藏，
    改由标题栏 ☰ 菜单提供同等入口；改动任一侧断点时须同步另一侧 */
 @media (max-width: 900px) {
   .sidebar {

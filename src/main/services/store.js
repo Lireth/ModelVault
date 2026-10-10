@@ -58,7 +58,6 @@ export {
   getMetaMapByAbsPath,
   setModelMeta,
   removeModelMeta,
-  setModelHash,
   relinkScannedMeta,
   relinkMetaKey,
   relinkMetaPrefix,

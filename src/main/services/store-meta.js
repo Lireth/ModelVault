@@ -137,24 +137,6 @@ export function removeModelMeta(modelId) {
 }
 
 /**
- * 持久化模型的文件哈希与计算时的 mtime（防抖落盘）。
- * 文件被修改（mtime 变化）后哈希自动失效，下次重新计算。
- * @param {string} modelId 模型绝对路径
- * @param {string} hash SHA256 hex 字符串
- * @param {number} mtimeMs 计算哈希时的文件修改时间
- */
-export function setModelHash(modelId, hash, mtimeMs) {
-  if (!data) return false
-  const relKey = toRelKey(modelId)
-  if (!relKey || !data.models[relKey]) return false
-  if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/i.test(hash)) return false
-  data.models[relKey].hash = hash.toLowerCase()
-  data.models[relKey].hashMtime = Number.isFinite(mtimeMs) ? mtimeMs : 0
-  scheduleSave()
-  return true
-}
-
-/**
  * 加载当前根目录的关联存储数据。
  * store.json 不存在时创建空数据，并尝试从旧版全局存储迁移属于该目录的记录。
  */

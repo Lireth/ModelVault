@@ -62,14 +62,6 @@ const EXPECTED_EXPORTS = [
   'closeDetail',
   // 局部扫描
   'partialScanModels',
-  // 去重
-  'openDedupe',
-  'closeDedupe',
-  'cancelDedupe',
-  'removeDedupeItem',
-  'pickDuplicateKeeper',
-  'keeperReason',
-  'smartCleanDuplicates',
   // 多选
   'multiSelectIdSet',
   'multiSelectedModels',

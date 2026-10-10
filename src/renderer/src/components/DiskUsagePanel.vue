@@ -12,7 +12,7 @@ import {
 } from '../store/appStore'
 
 /**
- * 磁盘占用分析面板（FEAT-1）：占据内容区展示（与设置页/重复检测同模式）。
+ * 磁盘占用分析面板（FEAT-1）：占据内容区展示（与设置页同模式）。
  * 全部数据由 appStore 的 diskUsage / largestModels 从当前模型列表内存派生
  * （重扫/删除后自动同步，无文件 IO）：
  * - 汇总卡片：总占用 / 最大单文件 / 顶层目录数；
@@ -151,7 +151,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         </section>
 
         <p class="usage-note muted">
-          占用为扫描时获取的文件大小，不含目录项开销；内容重复的文件会分别计入（可用「重复检测」清理）。
+          占用为扫描时获取的文件大小，不含目录项开销。
         </p>
       </template>
     </div>

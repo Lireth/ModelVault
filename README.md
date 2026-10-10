@@ -9,11 +9,10 @@
 - **封面管理**：详情页上传 / Ctrl+V 粘贴 / 拖拽导入多张预览图，点击缩略图设为首页默认显示，支持删除与孤儿文件自动清理；自动识别模型同名 sidecar 预览图
 - **收藏 / 评分**：星标收藏、五星评分、NSFW 标记，即时保存，支持收藏筛选
 - **批量管理**：多选模式（卡片勾选 + 全选）批量收藏/评分/NSFW/分类标签/移入回收站，复用既有单模型校验与持久化管线
-- **重复检测**：按文件大小粗筛 + SHA256 精确比对（复用已持久化的哈希缓存，GB 级文件不重算），重复分组支持定位与清理
 - **多模型库**：保存多个模型根目录（上限 20），侧栏一键切换；每个库的元数据/封面相互独立（各自 `.modelvault/`）
 - **目录监控**：可选开启「目录变更时自动重扫」（3 秒防抖），模型文件夹增删文件后列表自动刷新，关联存储写入不会误触发
 - **模型文件管理**：删除（移入系统回收站并清理关联数据）、打开所在文件夹、复制路径/推荐参数，卡片与详情页均提供原生右键菜单
-- **列表导出**：当前筛选结果一键导出 CSV（带 BOM，Excel 直接打开）或 JSON，含备注、推荐参数、收藏/评分等全部标注
+- **列表导出**：当前筛选结果一键导出 CSV（带 BOM，Excel 直接打开），含备注、推荐参数、收藏/评分等全部标注
 - **应用内检查更新**：设置页一键查询 GitHub Releases 最新版本，有更新时提供下载页直达链接
 - **推荐参数**：为每个模型保存采样步数、CFG 区间、采样器、调度器、精度、推荐分辨率区间与备注
 - **关联存储**：模型的封面、推荐参数、备注等用户数据统一保存在所选模型根目录的 `.modelvault/` 文件夹内，按相对路径关联，随文件夹移动/复制保持关联；不同根目录数据相互独立
@@ -94,7 +93,6 @@ ModelVault/
 │   │       ├── covers.js         # 封面图片选择/粘贴/拖拽保存与孤儿清理
 │   │       ├── thumbs.js         # 封面缩略图缓存（扫描后异步生成）
 │   │       ├── safetensors.js    # safetensors 头部解析（kohya/modelspec 训练元信息）
-│   │       └── hash.js           # 文件 SHA256 流式计算（重复检测复用）
 │   ├── preload/
 │   │   └── index.js              # 预加载脚本：contextBridge + IPC 通道白名单
 │   └── renderer/                 # 渲染进程（Vue 3）
@@ -185,8 +183,8 @@ const api = {
 单元测试位于 `tests/`：
 
 - **主进程纯逻辑与 IPC handler**：扫描分类、元数据规范化、路径关联、原子写入等（node 环境）；
-- **渲染层 store**：`tests/appStore.test.js`（筛选/排序/批量操作/占用统计/智能清理等）；
-- **渲染层组件交互**：`tests/modelCard.test.js`、`topBar.test.js`、`dedupePanel.test.js`、`sidebar.test.js`，基于 `@vue/test-utils` + jsdom（文件头 `// @vitest-environment jsdom` 声明 DOM 环境，通用装配见 `tests/helpers/componentTest.js`）。
+- **渲染层 store**：`tests/appStore.test.js`（筛选/排序/批量操作/占用统计等）；
+- **渲染层组件交互**：`tests/modelCard.test.js`、`topBar.test.js`、`sidebar.test.js`，基于 `@vue/test-utils` + jsdom（文件头 `// @vitest-environment jsdom` 声明 DOM 环境，通用装配见 `tests/helpers/componentTest.js`）。
 
 Electron API 在 `tests/setup.js` 中统一 mock。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证。
 
