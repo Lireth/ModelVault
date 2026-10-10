@@ -40,6 +40,7 @@ export {
   getCurrentRoot,
   getCoversDir,
   isInRoot,
+  toRelKey,
   resolveCover,
   relativizeCover
 } from './store-paths'
@@ -53,12 +54,15 @@ export { loadSettings, getSettings, updateSettings } from './store-settings'
 export {
   loadData,
   wasDataReset,
-  getReferencedCovers,
   getModelMeta,
   getMetaMapByAbsPath,
   setModelMeta,
   removeModelMeta,
   setModelHash,
+  relinkScannedMeta,
+  relinkMetaKey,
+  relinkMetaPrefix,
+  getMetaGaps,
   scheduleSave,
   saveStoreNow,
   flushStoreSave,

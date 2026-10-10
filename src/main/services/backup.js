@@ -1,7 +1,7 @@
 import { app, dialog } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { strToU8, unzipSync, zipSync } from 'fflate'
+import { strToU8, unzip, zip } from 'fflate'
 import logger from '../logger'
 import {
   COVERS_DIR,
@@ -34,9 +34,81 @@ export const BACKUP_VERSION = 1
 /** 封面总字节上限：fflate 为内存打包，超大封面集会挤占主进程堆，超限引导手动复制 */
 const MAX_COVERS_BYTES = 1024 * 1024 * 1024
 
+/** 封面读写的有限并发数：比串行快，同时避免数百个文件句柄一次性打开 */
+const COVER_IO_CONCURRENCY = 8
+
+/** 备份压缩级别（与历史 zipSync 一致） */
+const ZIP_LEVEL = 6
+
+/**
+ * 有限并发映射（A-01）：固定数量的 worker 抢占式领取任务，
+ * 结果按输入下标归位（顺序稳定）。
+ * @template T, R
+ * @param {T[]} items 输入列表
+ * @param {number} limit 最大并发数
+ * @param {(item: T, index: number) => Promise<R>} task 单任务执行器
+ * @returns {Promise<R[]>} 与输入同序的结果
+ */
+async function mapLimit(items, limit, task) {
+  const results = new Array(items.length)
+  let cursor = 0
+  const worker = async () => {
+    while (cursor < items.length) {
+      const i = cursor++
+      results[i] = await task(items[i], i)
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker())
+  )
+  return results
+}
+
+/**
+ * 异步压缩备份包（A-01）：fflate 异步 zip 在无 Worker 环境下也按分片执行，
+ * 每个分片之间让出事件循环——封面总量可达数百 MB 时，IPC 处理与窗口交互
+ * 不再被 deflate 阻塞（同步 zipSync 会冻结整个主进程）。
+ * @param {Record<string, Uint8Array>} files 条目名 → 内容字节
+ * @returns {Promise<Uint8Array>} zip 字节
+ */
+export function zipBackupAsync(files) {
+  return new Promise((resolve, reject) => {
+    // fflate 对 null 入参容忍为空 zip（静默产出无内容备份，掩盖调用方错误），
+    // 此处显式收窄契约
+    if (!files || typeof files !== 'object') {
+      reject(new Error('备份内容无效：缺少待压缩文件'))
+      return
+    }
+    zip(files, { level: ZIP_LEVEL }, (err, data) => {
+      if (err) reject(err)
+      else resolve(data)
+    })
+  })
+}
+
+/**
+ * 异步解压备份包（A-01）：与 zipBackupAsync 同理，解压 GB 级 zip 时
+ * 分片让出事件循环，避免 importBackup 期间界面冻结。
+ * @param {Uint8Array} bytes zip 字节
+ * @returns {Promise<Record<string, Uint8Array>>} 条目名 → 内容字节
+ */
+export function unzipBackupAsync(bytes) {
+  return new Promise((resolve, reject) => {
+    unzip(bytes, (err, data) => {
+      if (err) reject(err)
+      else resolve(data)
+    })
+  })
+}
+
 /** 库数据在 zip 内的前缀 */
 const LIB_PREFIX = 'library/'
 const LIB_COVERS_PREFIX = 'library/covers/'
+
+/** 恢复临时目录前缀（解出校验用，成功即改名，残留即垃圾） */
+const RESTORE_TMP_PREFIX = `${DATA_DIR}.restore-`
+/** 覆盖恢复时旧数据的留存目录前缀 */
+const BACKUP_DIR_PREFIX = `${DATA_DIR}.bak-`
 
 /**
  * 校验并解析备份清单（纯函数）。
@@ -139,10 +211,15 @@ export async function exportBackup(win) {
       }
       files[`${LIB_PREFIX}${DATA_FILE}`] = strToU8(storeText)
       manifest.library = { root, models }
-      for (const name of coverNames) {
-        const buf = await fs.readFile(path.join(coversDir, name)).catch(() => null)
+      // 封面有限并发读取（A-01）：串行 await 数百张封面时耗时叠加，
+      // 8 路并发显著缩短备份时间，且不会一次性占满文件句柄
+      const buffers = await mapLimit(coverNames, COVER_IO_CONCURRENCY, (name) =>
+        fs.readFile(path.join(coversDir, name)).catch(() => null)
+      )
+      for (let i = 0; i < coverNames.length; i++) {
+        const buf = buffers[i]
         if (!buf) continue
-        files[`${LIB_COVERS_PREFIX}${name}`] = new Uint8Array(buf)
+        files[`${LIB_COVERS_PREFIX}${coverNames[i]}`] = new Uint8Array(buf)
         covers += 1
       }
       manifest.library.covers = covers
@@ -158,7 +235,8 @@ export async function exportBackup(win) {
   })
   if (result.canceled || !result.filePath) return { canceled: true }
   try {
-    const zipped = zipSync(files, { level: 6 })
+    // 异步分片压缩（A-01）：数百 MB 封面期间主进程事件循环保持响应
+    const zipped = await zipBackupAsync(files)
     await fs.writeFile(result.filePath, zipped)
     logger.info(`备份已导出: ${result.filePath}（${models} 模型 / ${covers} 封面）`)
     return {
@@ -175,8 +253,36 @@ export async function exportBackup(win) {
 }
 
 /**
+ * 清理恢复过程的残留目录（OPT-18）：
+ * - `.modelvault.restore-*`：解出用临时目录，正常流程结束时应已改名，存在即残留；
+ * - `.modelvault.bak-*`：覆盖恢复的旧数据留存，仅保留最新一份（keepBak），
+ *   更早的属可重复生成的陈旧副本——不清除会在用户模型目录无限累积
+ *   （每份含全部封面，可达数百 MB）。
+ * 单项删除失败仅告警，不中断恢复主流程。
+ * @param {string} root 目标模型根目录
+ * @param {string} keepBakName 本次恢复生成的 .bak 目录名（basename；无既有数据时为空串）
+ */
+async function pruneRestoreArtifacts(root, keepBakName) {
+  let entries
+  try {
+    entries = await fs.readdir(root)
+  } catch {
+    return
+  }
+  for (const name of entries) {
+    const isStaleTmp = name.startsWith(RESTORE_TMP_PREFIX)
+    const isOldBackup = name.startsWith(BACKUP_DIR_PREFIX) && name !== keepBakName
+    if (!isStaleTmp && !isOldBackup) continue
+    await fs.rm(path.join(root, name), { recursive: true, force: true }).catch((err) => {
+      logger.warn(`清理恢复残留目录失败: ${err.message}`)
+    })
+  }
+}
+
+/**
  * 将库数据还原到目标根目录：先解出到临时目录，校验无误后与既有目录交换
- * （既有数据留 .bak 而非直接删除，恢复中断可回滚）。
+ * （既有数据留 .bak 而非直接删除，恢复中断可回滚）；失败即清理本次临时目录，
+ * 成功后按「仅保留最新 .bak」治理残留（OPT-18）。
  * @returns {Promise<{root: string, models: number, covers: number, skipped: number}>}
  */
 async function restoreLibrary(root, unzipped) {
@@ -189,37 +295,50 @@ async function restoreLibrary(root, unzipped) {
   const stamp = Date.now()
   const tmpDir = `${dataDir}.restore-${stamp}`
   await fs.rm(tmpDir, { recursive: true, force: true })
-  await fs.mkdir(path.join(tmpDir, COVERS_DIR), { recursive: true })
-  await fs.writeFile(path.join(tmpDir, DATA_FILE), storeText)
+  try {
+    await fs.mkdir(path.join(tmpDir, COVERS_DIR), { recursive: true })
+    await fs.writeFile(path.join(tmpDir, DATA_FILE), storeText)
 
-  let covers = 0
-  let skipped = 0
-  for (const [entryName, data] of Object.entries(unzipped)) {
-    if (!entryName.startsWith(LIB_COVERS_PREFIX)) continue
-    const name = safeCoverName(entryName)
-    if (!name) {
-      skipped += 1
-      logger.warn(`恢复时跳过不安全的备份条目: ${entryName}`)
-      continue
-    }
-    await fs.writeFile(path.join(tmpDir, COVERS_DIR, name), data)
-    covers += 1
-  }
+    let covers = 0
+    let skipped = 0
+    // 封面有限并发写入（A-01）；JS 单线程下计数器在 await 间隙无竞态
+    const coverEntries = Object.entries(unzipped).filter(([entryName]) =>
+      entryName.startsWith(LIB_COVERS_PREFIX)
+    )
+    await mapLimit(coverEntries, COVER_IO_CONCURRENCY, async ([entryName, data]) => {
+      const name = safeCoverName(entryName)
+      if (!name) {
+        skipped += 1
+        logger.warn(`恢复时跳过不安全的备份条目: ${entryName}`)
+        return
+      }
+      await fs.writeFile(path.join(tmpDir, COVERS_DIR, name), data)
+      covers += 1
+    })
 
-  // 交换：既有目录让位到 .bak，临时目录上位；上位失败则回滚，目标目录不留半成品
-  if (await pathExists(dataDir)) {
-    const bakDir = `${dataDir}.bak-${stamp}`
-    await fs.rename(dataDir, bakDir)
-    try {
+    // 交换：既有目录让位到 .bak，临时目录上位；上位失败则回滚，目标目录不留半成品
+    let bakDir = ''
+    if (await pathExists(dataDir)) {
+      bakDir = `${dataDir}.bak-${stamp}`
+      await fs.rename(dataDir, bakDir)
+      try {
+        await fs.rename(tmpDir, dataDir)
+      } catch (err) {
+        await fs.rename(bakDir, dataDir)
+        throw err
+      }
+    } else {
       await fs.rename(tmpDir, dataDir)
-    } catch (err) {
-      await fs.rename(bakDir, dataDir)
-      throw err
     }
-  } else {
-    await fs.rename(tmpDir, dataDir)
+
+    // 残留治理（OPT-18）：更早的 .bak 仅保留本次一份；历史 .restore 临时目录清除
+    await pruneRestoreArtifacts(root, bakDir ? path.basename(bakDir) : '')
+    return { root, models: Object.keys(parsed?.models || {}).length, covers, skipped }
+  } catch (err) {
+    // 失败兜底：清理本次解出的临时目录，不在用户模型目录留垃圾
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
+    throw err
   }
-  return { root, models: Object.keys(parsed?.models || {}).length, covers, skipped }
 }
 
 /**
@@ -240,7 +359,8 @@ export async function importBackup(win) {
 
   let unzipped
   try {
-    unzipped = unzipSync(new Uint8Array(await fs.readFile(filePath)))
+    // 异步分片解压（A-01）：zip 较大时不阻塞主进程事件循环
+    unzipped = await unzipBackupAsync(new Uint8Array(await fs.readFile(filePath)))
   } catch (err) {
     return { error: `备份文件读取失败: ${err.message}` }
   }
@@ -280,7 +400,7 @@ export async function importBackup(win) {
         title: '覆盖确认',
         message: '目标文件夹已存在关联数据（.modelvault）',
         detail:
-          '恢复将覆盖其中的标注与封面。现有数据会先备份为 .modelvault.bak-<时间戳>，确认无误后可手动删除。',
+          '恢复将覆盖其中的标注与封面。现有数据会先备份为 .modelvault.bak-<时间戳>（仅保留最新一份，更早的自动清理），确认无误后可手动删除。',
         buttons: ['取消', '覆盖恢复'],
         defaultId: 0,
         cancelId: 0

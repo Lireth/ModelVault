@@ -12,6 +12,12 @@ import { app } from 'electron'
 /** 日志保留天数：超过该天数的旧日志文件在启动时删除 */
 const LOG_RETENTION_DAYS = 14
 
+/** 日志目录绝对路径（%APPDATA%/modelvault/logs；与文件写入流使用的目录一致）。
+ * 独立为导出函数：设置页「打开日志目录」经 IPC 调用，无需先触发一次写日志 */
+export function getLogDir() {
+  return path.join(app.getPath('userData'), 'logs')
+}
+
 /** 本地日期字符串（YYYY-MM-DD）：使用本地时区，避免 UTC 日期导致跨天错位 */
 function localDateString(date = new Date()) {
   const y = date.getFullYear()
@@ -69,7 +75,7 @@ class Logger {
   /** 懒初始化：首次写日志时才创建目录与写入流 */
   ensureStream() {
     if (!this.logDir) {
-      this.logDir = path.join(app.getPath('userData'), 'logs')
+      this.logDir = getLogDir()
       if (!fs.existsSync(this.logDir)) {
         fs.mkdirSync(this.logDir, { recursive: true })
       }

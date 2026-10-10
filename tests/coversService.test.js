@@ -19,11 +19,13 @@ vi.mock('electron', () => ({
   dialog: { showOpenDialog: vi.fn() }
 }))
 
+import { clipboard } from 'electron'
 import {
   deleteCoverFile,
   hasImageMagic,
   importCoverFromPath,
-  pruneOrphanCovers
+  pruneOrphanCovers,
+  saveClipboardImage
 } from '../src/main/services/covers'
 import { getCoversDir, loadData, setDataRoot, setModelMeta, wasDataReset } from '../src/main/services/store'
 import { DATA_DIR, COVERS_DIR } from '../src/main/services/store'
@@ -188,5 +190,46 @@ describe('pruneOrphanCovers（孤儿封面清理）', () => {
 
   it('封面目录不存在时静默跳过（ENOENT 容错）', async () => {
     await expect(pruneOrphanCovers()).resolves.toBeUndefined()
+  })
+})
+
+describe('saveClipboardImage（剪贴板图片大小上限）', () => {
+  beforeEach(() => {
+    vi.mocked(clipboard.read).mockReset()
+  })
+
+  it('超大剪贴板图片拒绝写入且不创建封面目录（与文件导入同一 50MB 防护）', async () => {
+    // 用 blob 替身模拟超限内容：守卫须在消费 arrayBuffer（Buffer.from）前拒绝，
+    // 真实 51MB 内存无需分配
+    const bigItem = {
+      types: ['image/png'],
+      getType: async () => ({ arrayBuffer: async () => ({ byteLength: 51 * 1024 * 1024 }) })
+    }
+    vi.mocked(clipboard.read).mockResolvedValue([bigItem])
+
+    const res = await saveClipboardImage()
+    expect(res.error).toContain('图片文件过大')
+    expect(res.cover).toBeUndefined()
+    // 零写入：封面目录未被创建
+    await expect(fs.access(getCoversDir())).rejects.toThrow()
+  })
+
+  it('合法剪贴板图片写入封面目录并返回绝对路径', async () => {
+    const item = {
+      types: ['image/png'],
+      getType: async () => new Blob([PNG_MAGIC], { type: 'image/png' })
+    }
+    vi.mocked(clipboard.read).mockResolvedValue([item])
+
+    const res = await saveClipboardImage()
+    expect(res.error).toBeUndefined()
+    expect(res.cover.startsWith(getCoversDir())).toBe(true)
+    await expect(fs.access(res.cover)).resolves.toBeUndefined()
+  })
+
+  it('剪贴板无图片内容时返回明确错误', async () => {
+    vi.mocked(clipboard.read).mockResolvedValue([{ types: ['text/plain'], getType: async () => null }])
+    const res = await saveClipboardImage()
+    expect(res.error).toContain('剪贴板中没有图片')
   })
 })

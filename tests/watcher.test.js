@@ -29,6 +29,7 @@ vi.mock('electron', () => ({
 
 import {
   collectDirSnapshot,
+  computeSnapshotDiff,
   snapshotsEqual,
   stopWatcher,
   syncWatcher
@@ -104,17 +105,76 @@ describe('collectDirSnapshot / snapshotsEqual', () => {
   })
 })
 
+describe('computeSnapshotDiff（A-03 增量扫描的变更子树定位）', () => {
+  /** 用 POSIX 相对路径构造快照（key 转平台绝对路径，value 为排序条目名） */
+  function snap(root, entries) {
+    const map = new Map()
+    for (const [relDir, names] of Object.entries(entries)) {
+      const abs = relDir === '' ? root : path.join(root, ...relDir.split('/'))
+      map.set(abs, [...names].sort())
+    }
+    return map
+  }
+
+  it('无差异返回空数组', () => {
+    const a = snap(root, { '': ['m.safetensors'], lora: ['a.safetensors'] })
+    expect(computeSnapshotDiff(root, a, new Map(a))).toEqual([])
+  })
+
+  it('条目增删定位到所在目录（根目录用空串表示）', () => {
+    const before = snap(root, { '': ['a.safetensors'], lora: ['x.safetensors'] })
+    const after = snap(root, { '': ['a.safetensors', 'b.safetensors'], lora: ['x.safetensors'] })
+    expect(computeSnapshotDiff(root, before, after)).toEqual([''])
+  })
+
+  it('子目录条目变化定位到该子目录（POSIX 相对路径）', () => {
+    const before = snap(root, { '': [], lora: ['x.safetensors'] })
+    const after = snap(root, { '': [], lora: ['x.safetensors', 'y.safetensors'] })
+    expect(computeSnapshotDiff(root, before, after)).toEqual(['lora'])
+  })
+
+  it('新增目录与删除目录都纳入变更集合（供局部重扫判定模型增删）', () => {
+    const before = snap(root, { '': [], old: ['gone.safetensors'] })
+    const after = snap(root, { '': [], fresh: ['new.safetensors'] })
+    const diff = computeSnapshotDiff(root, before, after).sort()
+    expect(diff).toEqual(['fresh', 'old'])
+  })
+
+  it('结果稳定排序且去重', () => {
+    const before = snap(root, { b: ['1'], a: ['1'] })
+    const after = snap(root, { b: ['1', '2'], a: ['1', '2'] })
+    expect(computeSnapshotDiff(root, before, after)).toEqual(['a', 'b'])
+  })
+
+  it('端到端：真实快照移动文件到新子目录后，diff 给出新旧两个目录', async () => {
+    const oldDir = path.join(root, 'old')
+    const newDir = path.join(root, 'new')
+    await fs.mkdir(oldDir, { recursive: true })
+    await fs.writeFile(path.join(oldDir, 'm.safetensors'), 'x')
+    const before = await collectDirSnapshot(root, new Set())
+
+    await fs.mkdir(newDir, { recursive: true })
+    await fs.rename(path.join(oldDir, 'm.safetensors'), path.join(newDir, 'm.safetensors'))
+    const after = await collectDirSnapshot(root, new Set())
+
+    // old/new 目录在根层增删，故根目录（''）与其自身同时进入变更集合
+    expect(computeSnapshotDiff(root, before, after).sort()).toEqual(['', 'new', 'old'])
+  })
+})
+
 describe('syncWatcher 目录监控（A8）', () => {
   it('条目变更广播 models:fsChanged（载荷为当前根目录）', async () => {
     syncWatcher(root, true, [], timing)
     await sleep(60) // 等基准快照建立
 
     await moveBundleIn(await makeBundle('new'), 'new')
-    await sleep(250) // 覆盖轮询(20ms) + 防抖(40ms) + 余量
+    await sleep(300) // 覆盖轮询(20ms) + 防抖(40ms) + 余量
 
     expect(sentEvents).toHaveLength(1)
     expect(sentEvents[0].channel).toBe('models:fsChanged')
-    expect(sentEvents[0].payload).toEqual({ root })
+    // A-03：载荷携带变更子树——根层新增 new 目录（''），new 目录为新增子树
+    expect(sentEvents[0].payload.root).toBe(root)
+    expect(sentEvents[0].payload.dirs).toEqual(['', 'new'])
   })
 
   it('防抖合并：静默期内的后续变更重置计时，最终只广播一次', async () => {
@@ -170,7 +230,7 @@ describe('syncWatcher 目录监控（A8）', () => {
     syncWatcher(root, true, [], timing) // 扫描完成后的重复同步（幂等）
     await sleep(50)
     await moveBundleIn(await makeBundle('z'), 'z')
-    await sleep(250)
+    await sleep(300)
     expect(sentEvents).toHaveLength(1)
   })
 
@@ -185,5 +245,64 @@ describe('syncWatcher 目录监控（A8）', () => {
     await moveBundleIn(await makeBundle('later'), 'later')
     await sleep(250)
     expect(sentEvents).toHaveLength(0)
+  })
+})
+
+describe('A-07b 自适应轮询', () => {
+  it('连续无变更时轮询间隔按阶梯退避，检测到变更后重置回基础间隔', async () => {
+    // 阶梯 [20, 50, 100]：基准后首次仍为基础间隔，连续空闲升到 50/100 并封顶；
+    // 变更后下一轮回到 20
+    const scheduled = []
+    syncWatcher(root, true, [], {
+      pollInterval: 20,
+      backoff: [20, 50, 100],
+      broadcastDebounce: 30,
+      onPollScheduled: (delay) => scheduled.push(delay)
+    })
+    await sleep(40) // 基准 + 第一次轮询（空闲）
+    // 基准后已调度：第一次空闲后的延迟应为阶梯第二档 50
+    expect(scheduled.at(-1)).toBe(50)
+    await sleep(110) // 跨过 50 与 100 两轮
+    expect(scheduled.at(-1)).toBe(100) // 封顶档
+
+    // 制造变更：发现变更的那一轮将退避重置，下一轮调度回到基础间隔 20
+    const beforeChange = scheduled.length
+    await moveBundleIn(await makeBundle('changed'), 'changed')
+    await sleep(300) // 等变更被发现、防抖广播、重置后的下一轮调度
+    expect(sentEvents.length).toBeGreaterThanOrEqual(1)
+    const afterChange = scheduled.slice(beforeChange)
+    expect(afterChange).toContain(20) // 变更后确实重置回基础档
+    expect(afterChange[0]).toBe(20) // 且重置发生在变更后的第一次调度
+  })
+
+  it('窗口隐藏时跳过目录快照遍历（暂停期间变更不被发现），恢复后重新发现', async () => {
+    let visible = true
+    syncWatcher(root, true, [], {
+      ...timing,
+      backoff: [20, 50, 100],
+      isVisible: () => visible
+    })
+    await sleep(60)
+
+    // 隐藏窗口后移入文件：轮询仅空转探测可见性，不读快照、不广播
+    visible = false
+    await sleep(40)
+    await moveBundleIn(await makeBundle('hidden-file'), 'hidden-file')
+    await sleep(150)
+    expect(sentEvents).toHaveLength(0)
+
+    // 恢复可见：同一变更在后续轮询被发现
+    visible = true
+    await sleep(300)
+    expect(sentEvents).toHaveLength(1)
+    expect(sentEvents[0].payload.root).toBe(root)
+  })
+
+  it('无 backoff 配置时维持固定基础间隔（旧行为兼容）', async () => {
+    const scheduled = []
+    syncWatcher(root, true, [], { ...timing, onPollScheduled: (d) => scheduled.push(d) })
+    await sleep(120)
+    expect(scheduled.length).toBeGreaterThan(1)
+    expect(scheduled.every((d) => d === timing.pollInterval)).toBe(true)
   })
 })

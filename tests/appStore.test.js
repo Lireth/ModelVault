@@ -13,14 +13,18 @@ import {
   diskUsage,
   filteredModels,
   formatSize,
+  importCoversFromDrop,
   keeperReason,
   largestModels,
   multiSelectIdSet,
   openDiskUsage,
+  partialScanModels,
   pickDuplicateKeeper,
   rejectConfirm,
   removeDedupeItem,
+  resetViews,
   saveSettings,
+  scanModels,
   selectedModel,
   smartCleanDuplicates,
   sortDirectional,
@@ -57,6 +61,7 @@ function makeApiMock() {
       setDefaultCover: vi.fn(),
       deleteCover: vi.fn(),
       importCover: vi.fn(),
+      partialScan: vi.fn(),
       onScanProgress: vi.fn(() => () => {}),
       onMenuAction: vi.fn(() => () => {}),
       onThumbsReady: vi.fn(() => () => {}),
@@ -85,12 +90,16 @@ beforeEach(() => {
   state.typeFilter = 'all'
   state.subFilter = ''
   state.showFavoritesOnly = false
+  state.dirFilter = ''
   state.search = ''
   state.sortBy = 'name'
   state.sortAsc = true
   state.selectedId = null
   state.detailDirty = false
   state.settingsOpen = false
+  state.organize.open = false
+  state.organize.pendingIds = []
+  resetViews()
   state.diskUsage.open = false
   state.dedupe.open = false
   state.dedupe.running = false
@@ -99,6 +108,144 @@ beforeEach(() => {
   state.toasts.splice(0, state.toasts.length)
   if (state.confirm.resolve) state.confirm.resolve(false)
   state.confirm = { visible: false, text: '', resolve: null }
+})
+
+describe('partialScanModels 增量合并（A-03）', () => {
+  function setGrid(models) {
+    state.folder = 'D:\\models'
+    state.models = models
+  }
+
+  it('新模型并入列表，子树外模型保持不动', async () => {
+    setGrid([
+      makeModel('D:\\models\\keep.safetensors', { name: 'keep', relDir: '' }),
+      makeModel('D:\\models\\lora\\a.safetensors', { name: 'a', relDir: 'lora' })
+    ])
+    api.models.partialScan.mockResolvedValue({
+      models: [
+        makeModel('D:\\models\\lora\\a.safetensors', { name: 'a', relDir: 'lora' }),
+        makeModel('D:\\models\\lora\\b.safetensors', { name: 'b', relDir: 'lora' })
+      ],
+      dirs: ['lora'],
+      relinked: 0
+    })
+
+    await partialScanModels(['lora'])
+
+    const ids = state.models.map((m) => m.id)
+    expect(ids).toContain('D:\\models\\keep.safetensors') // 子树外不动
+    expect(ids).toContain('D:\\models\\lora\\a.safetensors') // 子树内存量被新结果替换
+    expect(ids).toContain('D:\\models\\lora\\b.safetensors') // 新增
+    expect(state.models).toHaveLength(3)
+    // IPC 入参透传子树
+    expect(api.models.partialScan).toHaveBeenCalledWith({ folder: 'D:\\models', dirs: ['lora'] })
+  })
+
+  it('子树内消失的模型从列表移除，子树外模型保留', async () => {
+    setGrid([
+      makeModel('D:\\models\\lora\\gone.safetensors', { name: 'gone', relDir: 'lora' }),
+      makeModel('D:\\models\\keep.safetensors', { name: 'keep', relDir: '' })
+    ])
+    api.models.partialScan.mockResolvedValue({ models: [], dirs: ['lora'], relinked: 0 })
+
+    await partialScanModels(['lora'])
+
+    const ids = state.models.map((m) => m.id)
+    expect(ids).not.toContain('D:\\models\\lora\\gone.safetensors')
+    expect(ids).toContain('D:\\models\\keep.safetensors')
+  })
+
+  it('dirs 含根目录空串时影响根直属模型，但不影响子目录模型', async () => {
+    setGrid([
+      makeModel('D:\\models\\root-file.safetensors', { name: 'root-file', relDir: '' }),
+      makeModel('D:\\models\\lora\\deep.safetensors', { name: 'deep', relDir: 'lora' })
+    ])
+    api.models.partialScan.mockResolvedValue({ models: [], dirs: [''], relinked: 0 })
+
+    await partialScanModels([''])
+
+    const ids = state.models.map((m) => m.id)
+    expect(ids).not.toContain('D:\\models\\root-file.safetensors')
+    expect(ids).toContain('D:\\models\\lora\\deep.safetensors')
+  })
+
+  it('合并后同步清理多选选区中已消失的 id', async () => {
+    setGrid([
+      makeModel('D:\\models\\lora\\gone.safetensors', { name: 'gone', relDir: 'lora' }),
+      makeModel('D:\\models\\keep.safetensors', { name: 'keep', relDir: '' })
+    ])
+    state.multiSelect.active = true
+    state.multiSelect.ids = ['D:\\models\\lora\\gone.safetensors', 'D:\\models\\keep.safetensors']
+    api.models.partialScan.mockResolvedValue({ models: [], dirs: ['lora'], relinked: 0 })
+
+    await partialScanModels(['lora'])
+
+    expect(state.multiSelect.ids).toEqual(['D:\\models\\keep.safetensors'])
+  })
+
+  it('子树内当前打开详情的模型消失时关闭详情', async () => {
+    setGrid([makeModel('D:\\models\\lora\\gone.safetensors', { name: 'gone', relDir: 'lora' })])
+    state.selectedId = 'D:\\models\\lora\\gone.safetensors'
+    api.models.partialScan.mockResolvedValue({ models: [], dirs: ['lora'], relinked: 0 })
+
+    await partialScanModels(['lora'])
+
+    expect(state.selectedId).toBeNull()
+  })
+
+  it('dirs 为空/缺省时回退全量扫描（防御 watcher 载荷异常）', async () => {
+    setGrid([])
+    api.models.scan.mockResolvedValue({ models: [makeModel('m1')], errors: [] })
+    api.models.partialScan.mockResolvedValue({ models: [makeModel('m2')], dirs: [] })
+
+    await partialScanModels([])
+
+    expect(api.models.scan).toHaveBeenCalled()
+    expect(api.models.partialScan).not.toHaveBeenCalled()
+  })
+
+  it('IPC 返回错误时 toast 提示且不改动列表', async () => {
+    setGrid([makeModel('keep-id')])
+    api.models.partialScan.mockRejectedValue(new Error('局部扫描失败'))
+
+    await partialScanModels(['lora'])
+
+    expect(state.models.map((m) => m.id)).toEqual(['keep-id'])
+    expect(state.toasts.some((t) => t.type === 'error')).toBe(true)
+  })
+})
+
+describe('scanModels 重关联提示（A-02）', () => {
+  beforeEach(() => {
+    state.folder = 'D:\\models'
+  })
+
+  it('扫描响应含 relinked>0 时成功提示追加「自动重新关联 N 个」', async () => {
+    api.models.scan.mockResolvedValue({ models: [makeModel('m1')], errors: [], relinked: 2 })
+    await scanModels()
+    const notice = state.toasts.find((t) => t.type === 'success')
+    expect(notice.text).toContain('发现 1 个模型')
+    expect(notice.text).toContain('自动重新关联 2 个')
+  })
+
+  it('relinked 缺省或为 0 时维持原提示文案', async () => {
+    api.models.scan.mockResolvedValue({ models: [makeModel('m1')], errors: [] })
+    await scanModels()
+    const notice = state.toasts.find((t) => t.type === 'success')
+    expect(notice.text).toBe('扫描完成：发现 1 个模型')
+  })
+
+  it('存在读取错误时重关联计数仍在警告提示中展示', async () => {
+    api.models.scan.mockResolvedValue({
+      models: [makeModel('m1')],
+      errors: [{ dir: 'x', message: 'denied' }],
+      relinked: 1
+    })
+    await scanModels()
+    const notice = state.toasts.find((t) => t.type === 'warn')
+    expect(notice.text).toContain('1 个目录无法读取')
+    expect(notice.text).toContain('自动重新关联 1 个')
+  })
 })
 
 /** 生成测试模型对象 */
@@ -729,5 +876,84 @@ describe('重复检测分组与智能清理（OPT-4 / FEAT-2）', () => {
     expect(res.ok).toBe(false)
     expect(api.models.deleteModel).not.toHaveBeenCalled()
     expect(state.toasts.some((t) => t.text.includes('没有可清理的重复组'))).toBe(true)
+  })
+})
+
+describe('批量拖拽导入封面（OPT-9）', () => {
+  /** 构造 importCover IPC 的成功响应（covers 为最新完整列表） */
+  function coverRes(n) {
+    return {
+      cover: `abs-${n}`,
+      coverUrl: `url-${n}`,
+      covers: Array.from({ length: n }, (_, i) => ({
+        rel: `c${i + 1}`,
+        path: `p${i + 1}`,
+        url: `u${i + 1}`
+      })),
+      meta: {}
+    }
+  }
+
+  it('多文件：逐文件串行 IPC，末尾单趟应用最终封面列表', async () => {
+    state.models = [makeModel('m1', { covers: [] })]
+    let call = 0
+    api.models.importCover.mockImplementation(() => {
+      call += 1
+      return Promise.resolve(coverRes(call))
+    })
+    const res = await importCoversFromDrop('m1', ['a.png', 'b.png', 'c.png'])
+    expect(api.models.importCover).toHaveBeenCalledTimes(3)
+    expect(res).toMatchObject({ ok: true, total: 3, failed: 0 })
+    // 最后一次响应即包含全部 3 张封面
+    expect(state.models[0].covers).toHaveLength(3)
+    expect(state.models[0].coverUrl).toBe('url-3')
+    expect(state.models[0].hasManualCover).toBe(true)
+    // store 内不逐条弹 toast（汇总提示交由调用方）
+    expect(state.toasts).toHaveLength(0)
+  })
+
+  it('单张业务失败不中断其余：失败计数入 errors，成功张仍应用', async () => {
+    state.models = [makeModel('m1', { covers: [] })]
+    api.models.importCover.mockImplementation((id, path) =>
+      path === 'bad.png'
+        ? Promise.resolve({ error: '文件内容不是有效的图片，已拒绝导入' })
+        : Promise.resolve(coverRes(1))
+    )
+    const res = await importCoversFromDrop('m1', ['ok1.png', 'bad.png', 'ok2.png'])
+    expect(api.models.importCover).toHaveBeenCalledTimes(3)
+    expect(res.ok).toBe(true)
+    expect(res.total).toBe(3)
+    expect(res.failed).toBe(1)
+    expect(res.errors[0]).toContain('不是有效的图片')
+    expect(state.models[0].covers).toHaveLength(1)
+    expect(state.toasts).toHaveLength(0)
+  })
+
+  it('IPC reject 同样计入失败且不中断后续文件', async () => {
+    state.models = [makeModel('m1', { covers: [] })]
+    api.models.importCover.mockImplementation((id, path) =>
+      path === 'boom.png' ? Promise.reject(new Error('通道异常')) : Promise.resolve(coverRes(1))
+    )
+    const res = await importCoversFromDrop('m1', ['boom.png', 'ok.png'])
+    expect(res.failed).toBe(1)
+    expect(res.errors[0]).toBe('通道异常')
+    expect(state.models[0].covers).toHaveLength(1)
+  })
+
+  it('全部失败时不应用任何状态', async () => {
+    state.models = [makeModel('m1', { covers: [] })]
+    api.models.importCover.mockResolvedValue({ error: '不支持的格式' })
+    const res = await importCoversFromDrop('m1', ['a.png', 'b.png'])
+    expect(res.ok).toBe(false)
+    expect(res.failed).toBe(2)
+    expect(state.models[0].covers).toHaveLength(0)
+  })
+
+  it('空列表/非法输入：不调用 IPC，返回零值', async () => {
+    const res = await importCoversFromDrop('m1', [])
+    expect(res).toEqual({ ok: false, total: 0, failed: 0, errors: [] })
+    const res2 = await importCoversFromDrop('m1', null)
+    expect(res2.total).toBe(0)
+    expect(api.models.importCover).not.toHaveBeenCalled()
   })
 })

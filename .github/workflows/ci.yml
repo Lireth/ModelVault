@@ -28,20 +28,21 @@ jobs:
     name: Test & Build (Node ${{ matrix.node }})
     runs-on: windows-latest
     timeout-minutes: 20
-    # D6：engines 声明 >=20.19，矩阵覆盖 20/22 双版本验证（避免纸面承诺）
+    # D6：engines 声明 >=22.22.2（jsdom 30 强制要求，Node 20 已 EOL），
+    # 矩阵覆盖 22/24 双版本验证（避免纸面承诺）
     strategy:
       fail-fast: false
       matrix:
-        node: ["20", "22"]
+        node: ["22", "24"]
 
     steps:
       # ---------- 环境准备 ----------
 
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 Node.js ${{ matrix.node }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           cache: npm # 缓存 npm 依赖包
@@ -49,7 +50,7 @@ jobs:
       # 缓存 Electron / electron-builder 二进制（.npmrc 指向 npmmirror 镜像，
       # 首次下载约 100MB+，缓存后大幅加速）。键随 lock 文件变化自动失效。
       - name: 缓存 Electron 二进制
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~\AppData\Local\electron\Cache
@@ -98,7 +99,7 @@ jobs:
       # 若前置步骤（lint/测试）失败导致目录不存在，仅告警不阻断 CI
       - name: 上传覆盖率报告
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-node-${{ matrix.node }}
           path: coverage/

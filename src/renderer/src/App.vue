@@ -8,6 +8,8 @@ import ToastHost from './components/ToastHost.vue'
 import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import DedupePanel from './components/DedupePanel.vue'
 import DiskUsagePanel from './components/DiskUsagePanel.vue'
+import ViewTabs from './components/ViewTabs.vue'
+import OrganizePanel from './components/OrganizePanel.vue'
 import {
   acceptConfirm,
   applyThumbUpdates,
@@ -25,19 +27,24 @@ import {
   initApp,
   LORA_TAGS,
   multiSelectTags,
+  openOrganize,
   rejectConfirm,
   saveSettings,
   scanModels,
+  partialScanModels,
   SORT_OPTIONS,
   sortDirectional,
   state,
   toast,
+  toggleFavorite,
   toggleMultiSelectMode,
   toggleSelectAllFiltered,
   typeInfo
 } from './store/appStore'
 
 const searchInput = ref(state.search)
+/** 搜索框 DOM 引用（Ctrl+F 聚焦用） */
+const searchFieldEl = ref(null)
 let searchTimer = null
 
 // 搜索输入防抖，避免大量模型时每键触发过滤
@@ -53,6 +60,22 @@ function clearSearch() {
   searchInput.value = ''
   state.search = ''
 }
+
+// B-02：切换标签页后搜索框内容同步为目标视图的搜索词（挂起的防抖写入作废）
+watch(
+  () => state.activeViewId,
+  () => {
+    clearTimeout(searchTimer)
+    searchInput.value = state.search
+  }
+)
+
+/** 目录筛选 chip 文案：显示末段目录名（根目录直属不会出现在筛选态） */
+const dirFilterLabel = computed(() => {
+  if (!state.dirFilter) return ''
+  const segs = state.dirFilter.split('/')
+  return `📁 ${segs[segs.length - 1]}`
+})
 
 /** 切换排序方式：立即生效并静默持久化，重启后保持用户选择 */
 async function onSortChange(e) {
@@ -78,14 +101,49 @@ let unsubscribeFsChanged = null
 /** 目录变更自动重扫的二级防抖（主进程 3s 静默期后此处再缓冲 1s，E8） */
 let fsChangedTimer = null
 
-function onFsChanged({ root }) {
-  if (root !== state.folder || state.scanning || !state.settings.autoRescan) return
+/**
+ * 扫描进行中收到的变更待处理子树集合（A-07a 漏报修复 + A-03 增量）：
+ * 扫描进行中到达的 fsChanged 不丢弃，其变更子树累积到集合（多次合并），
+ * 由 state.scanning 侦听器在扫描结束后补一次防抖的局部扫描。
+ * null 表示无待处理
+ */
+let fsChangedPendingDirs = null
+
+/**
+ * 安排一次二级防抖后的刷新（A-03）：
+ * 有变更子树走局部增量扫描，空列表（旧载荷/无法定位）由 store 回退全量扫描。
+ */
+function scheduleFsRescan(dirs) {
   clearTimeout(fsChangedTimer)
   fsChangedTimer = setTimeout(() => {
     fsChangedTimer = null
-    if (!state.scanning && state.settings.autoRescan) scanModels()
+    if (!state.scanning && state.settings.autoRescan) partialScanModels(dirs || [])
   }, 1000)
 }
+
+function onFsChanged({ root, dirs }) {
+  if (root !== state.folder || !state.settings.autoRescan) return
+  const subDirs = Array.isArray(dirs) ? dirs : []
+  // 扫描进行中：累积变更子树，扫描结束后由侦听器补一次局部扫描，不丢弃事件
+  if (state.scanning) {
+    if (!fsChangedPendingDirs) fsChangedPendingDirs = new Set()
+    for (const d of subDirs) fsChangedPendingDirs.add(d)
+    return
+  }
+  scheduleFsRescan(subDirs)
+}
+
+// 扫描结束补决策（A-07a）：扫描中累积的变更子树在结束后补一次防抖局部扫描
+watch(
+  () => state.scanning,
+  (scanning, wasScanning) => {
+    if (wasScanning && !scanning && fsChangedPendingDirs) {
+      const pending = [...fsChangedPendingDirs]
+      fsChangedPendingDirs = null
+      if (state.settings.autoRescan) scheduleFsRescan(pending)
+    }
+  }
+)
 
 /**
  * 拖放兜底（B13）：阻止非文件拖放（文本/链接等）触发默认导航覆盖当前窗口。
@@ -101,6 +159,92 @@ function onWindowDrop(e) {
   // 纯文本/链接拖放放行给目标控件（如排除目录 textarea）的默认插入行为（U7）
   if (Array.from(e.dataTransfer?.types || []).includes('Files')) {
     e.preventDefault()
+  }
+}
+
+/* ---------------- 全局快捷键（B-03） ---------------- */
+
+/** 事件目标是否为可编辑控件（打字场景，除 Ctrl+F 外交由原生行为） */
+function isEditableTarget(e) {
+  const t = e.target
+  if (!t || !t.tagName) return false
+  return (
+    t.tagName === 'INPUT' ||
+    t.tagName === 'TEXTAREA' ||
+    t.tagName === 'SELECT' ||
+    t.isContentEditable === true
+  )
+}
+
+/** 设置页/占用分析/重复检测/整理面板是否打开（这些场景搜索框不在 DOM 中） */
+function isOverlayPanelOpen() {
+  return state.settingsOpen || state.diskUsage.open || state.dedupe.open || state.organize.open
+}
+
+/**
+ * 全局快捷键：
+ * - Ctrl+F 聚焦搜索（面板打开/未选文件夹时无效）；
+ * - Esc 清空搜索词（面板/详情/确认层打开时让位其自有 Esc 逻辑）；
+ * - Ctrl+A 进入多选并全选当前筛选结果；Delete 批量移入回收站（自带确认）；
+ * - Ctrl+D 多选时批量收藏，详情打开时收藏当前模型。
+ * 输入控件内除 Ctrl+F 外不拦截，避免破坏文本编辑。
+ */
+function onGlobalKeydown(e) {
+  const key = e.key.toLowerCase()
+  const ctrl = e.ctrlKey || e.metaKey
+
+  // Ctrl+F：只要网格区可用就聚焦搜索（输入态同样适用，便于随时跳转检索）
+  if (ctrl && key === 'f') {
+    if (isOverlayPanelOpen() || state.scanning || !state.folder) return
+    const el = searchFieldEl.value
+    if (el) {
+      e.preventDefault()
+      el.focus()
+      el.select?.()
+    }
+    return
+  }
+
+  // 输入态保留原生编辑行为；确认层/面板打开时整键让位（F1 独占策略）
+  if (isEditableTarget(e) || state.confirm.visible || isOverlayPanelOpen()) return
+
+  const detailOpen = state.selectedId !== null
+
+  if (e.key === 'Escape') {
+    // 详情打开时 Esc 由 ModelDetail 处理（可能涉及脏表单确认）
+    if (!detailOpen && state.search) {
+      clearSearch()
+      e.preventDefault()
+    }
+    return
+  }
+
+  // 详情打开时仅保留 Ctrl+D 收藏当前模型，其余让位详情
+  if (detailOpen) {
+    if (ctrl && key === 'd') {
+      e.preventDefault()
+      toggleFavorite(state.selectedId)
+    }
+    return
+  }
+
+  if (ctrl && key === 'a' && state.models.length > 0) {
+    e.preventDefault()
+    if (!state.multiSelect.active) toggleMultiSelectMode()
+    if (!allFilteredSelected.value) toggleSelectAllFiltered()
+    return
+  }
+
+  if (ctrl && key === 'd' && state.multiSelect.active && state.multiSelect.ids.length > 0) {
+    e.preventDefault()
+    batchFavorite(true)
+    return
+  }
+
+  // Delete 仅在多选且有选中时触发（批量删除自带确认层，不会直接删文件）
+  if (e.key === 'Delete' && state.multiSelect.active && state.multiSelect.ids.length > 0) {
+    e.preventDefault()
+    batchDeleteModels()
   }
 }
 
@@ -145,6 +289,7 @@ watch(
 onMounted(async () => {
   window.addEventListener('dragover', onWindowDragOver)
   window.addEventListener('drop', onWindowDrop)
+  window.addEventListener('keydown', onGlobalKeydown)
   // 订阅扫描进度事件
   unsubscribeProgress = window.api.models.onScanProgress((progress) => {
     state.progress = progress
@@ -170,6 +315,7 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('dragover', onWindowDragOver)
   window.removeEventListener('drop', onWindowDrop)
+  window.removeEventListener('keydown', onGlobalKeydown)
   clearTimeout(fsChangedTimer)
   unsubscribeProgress?.()
   unsubscribeMenu?.()
@@ -196,8 +342,13 @@ onUnmounted(() => {
         <!-- 重复检测面板（E5）：占用模型预览区位置 -->
         <DedupePanel v-else-if="state.dedupe.open" />
 
+        <!-- 应用内整理面板（B-06）：占用模型预览区位置 -->
+        <OrganizePanel v-else-if="state.organize.open" />
+
         <!-- 模型预览区 -->
         <template v-else>
+        <!-- 多视图标签页（B-02） -->
+        <ViewTabs />
         <!-- 重扫失败但仍有上次结果：顶部错误横幅（B15） -->
         <div v-if="state.scanError && !state.scanning && state.models.length > 0" class="scan-error-bar">
           <span class="scan-error-text" :title="state.scanError">⚠ {{ state.scanError }}</span>
@@ -239,6 +390,8 @@ onUnmounted(() => {
             >{{ t.label }}</button>
           </template>
           <span class="batch-sep"></span>
+          <!-- B-06：批量移动到库内其他文件夹（打开整理面板并带入选中模型） -->
+          <button class="btn" :disabled="!state.multiSelect.ids.length || state.scanning" @click="openOrganize([...state.multiSelect.ids])">移动到…</button>
           <button class="btn btn-danger" :disabled="!state.multiSelect.ids.length" @click="batchDeleteModels">移入回收站</button>
           <button class="btn" @click="exitMultiSelect">退出多选</button>
         </div>
@@ -248,9 +401,10 @@ onUnmounted(() => {
           <div class="search-box" title="搜索名称、备注名、备注与分类标签">
             <span class="search-icon">🔍</span>
             <input
+              ref="searchFieldEl"
               v-model="searchInput"
               type="text"
-              placeholder="搜索名称 / 备注 / 触发词…"
+              placeholder="搜索名称 / 备注 / 触发词…（Ctrl+F 聚焦）"
               spellcheck="false"
             />
             <button v-if="searchInput" class="search-clear" title="清空搜索" @click="clearSearch">✕</button>
@@ -319,6 +473,10 @@ onUnmounted(() => {
             <span v-if="state.typeFilter !== 'all'" class="chip">
               {{ typeInfo(state.typeFilter).label }}
             </span>
+            <!-- 目录筛选（B-01）：可点击 ✕ 取消 -->
+            <button v-if="state.dirFilter" class="chip chip-clearable" :title="state.dirFilter" @click="state.dirFilter = ''">
+              {{ dirFilterLabel }} <span class="chip-clear">✕</span>
+            </button>
             <!-- 收藏筛选：仅显示收藏的模型 -->
             <button
               class="fav-filter"
@@ -638,6 +796,24 @@ onUnmounted(() => {
   border-radius: 999px;
   background: var(--bg-active);
   color: var(--accent);
+}
+
+/* 可取消的筛选 chip（B-01 目录筛选） */
+.chip-clearable {
+  border: 1px solid var(--accent);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.chip-clear {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.chip-clearable:hover .chip-clear {
+  opacity: 1;
 }
 
 /* 收藏筛选按钮 */

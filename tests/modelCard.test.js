@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ModelCard from '../src/renderer/src/components/ModelCard.vue'
 import { state } from '../src/renderer/src/store/appStore'
@@ -63,6 +63,35 @@ describe('ModelCard 卡片激活', () => {
     await wrapper.find('.model-card').trigger('keydown', { key: 'Enter' })
     expect(state.multiSelect.ids).toEqual(['m1'])
     expect(state.selectedId).toBeNull()
+  })
+})
+
+describe('ModelCard 拖拽归位（B-06）', () => {
+  it('卡片可拖拽，dragstart 写入自定义 MIME 的当前模型 id', async () => {
+    const wrapper = mountCard(makeModel('m1'))
+    expect(wrapper.find('.model-card').attributes('draggable')).toBe('true')
+    const setData = vi.fn()
+    await wrapper.find('.model-card').trigger('dragstart', {
+      dataTransfer: { setData, effectAllowed: '' }
+    })
+    expect(setData).toHaveBeenCalledWith(
+      'application/x-modelvault-ids',
+      JSON.stringify(['m1'])
+    )
+  })
+
+  it('多选模式下拖动已选中卡片携带整个选区', async () => {
+    state.multiSelect.active = true
+    state.multiSelect.ids = ['m1', 'm2']
+    const wrapper = mountCard(makeModel('m1'))
+    const setData = vi.fn()
+    await wrapper.find('.model-card').trigger('dragstart', {
+      dataTransfer: { setData, effectAllowed: '' }
+    })
+    expect(setData).toHaveBeenCalledWith(
+      'application/x-modelvault-ids',
+      JSON.stringify(['m1', 'm2'])
+    )
   })
 })
 

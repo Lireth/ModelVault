@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { clipboard, dialog } from 'electron'
+import { BrowserWindow, clipboard, dialog } from 'electron'
 import { fakeUserData } from './setup'
-import { PNG_MAGIC, getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
+import { PNG_MAGIC, getRegisteredHandler, makeEvent, makeWindow } from './helpers/modelsIpc'
 
 /**
  * 封面域 5 个 handler 特征测试（D1，先测后拆基线）：
@@ -32,8 +32,16 @@ vi.mock('electron', () => ({
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() }
 }))
 
+// A-09：缩略图查询可控（命中/未命中），其余 thumbs 行为保留真实实现
+vi.mock('../src/main/services/thumbs.js', async (importOriginal) => {
+  const actual = await importOriginal()
+  return { ...actual, getThumbPathDeferred: vi.fn(async () => '') }
+})
+
 import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
+import * as decorate from '../src/main/ipc/models/decorate'
 import { getModelMeta, loadData, setModelMeta, setDataRoot } from '../src/main/services/store'
+import { getThumbPathDeferred } from '../src/main/services/thumbs'
 
 const roots = []
 let root
@@ -120,6 +128,46 @@ describe('封面响应结构锚点（项目约定：{cover,coverUrl,covers,meta}
     expect(typeof res.coverUrl).toBe('string')
     expect(Array.isArray(res.covers)).toBe(true)
     expect(res.meta && typeof res.meta).toBe('object')
+  })
+})
+
+describe('A-09 封面变更后即时生成缩略图', () => {
+  it('缩略图未生成时：封面设置成功即触发后台缩略图 drain', async () => {
+    vi.mocked(getThumbPathDeferred).mockResolvedValue('')
+    const drainSpy = vi.spyOn(decorate, 'startThumbDrain').mockImplementation(() => {})
+    const id = await touchModel()
+    presetCovers(id, 1)
+    const handler = getRegisteredHandler('models:setDefaultCover')
+
+    await handler(makeEvent(), { id, cover: 'covers/a0.png' })
+
+    expect(getThumbPathDeferred).toHaveBeenCalled()
+    expect(drainSpy).toHaveBeenCalledTimes(1)
+    drainSpy.mockRestore()
+  })
+
+  it('缩略图已缓存时：不 drain，直接向窗口推送 thumbsReady 切换卡片图', async () => {
+    vi.mocked(getThumbPathDeferred).mockResolvedValue(path.join(root, '.modelvault', 'thumbs', 't.jpg'))
+    const drainSpy = vi.spyOn(decorate, 'startThumbDrain').mockImplementation(() => {})
+    const id = await touchModel()
+    presetCovers(id, 1)
+    const win = makeWindow()
+    vi.mocked(BrowserWindow.fromWebContents).mockReturnValue(win)
+    const handler = getRegisteredHandler('models:setDefaultCover')
+
+    const thumbAbs = path.join(root, '.modelvault', 'thumbs', 't.jpg')
+    vi.mocked(getThumbPathDeferred).mockResolvedValue(thumbAbs)
+    const direct = await getThumbPathDeferred('whatever')
+    expect(direct).toBe(thumbAbs) // mock 生效性自检
+    await handler(makeEvent(win), { id, cover: 'covers/a0.png' })
+
+    expect(drainSpy).not.toHaveBeenCalled()
+    const readyCalls = win.webContents.send.mock.calls.filter((c) => c[0] === 'models:thumbsReady')
+    expect(readyCalls).toHaveLength(1)
+    expect(readyCalls[0][1].updates).toHaveLength(1)
+    expect(readyCalls[0][1].updates[0].id).toBe(id)
+    expect(readyCalls[0][1].updates[0].coverUrl).toContain('thumbs')
+    drainSpy.mockRestore()
   })
 })
 

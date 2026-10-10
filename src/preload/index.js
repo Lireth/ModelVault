@@ -8,11 +8,13 @@ const VALID_INVOKE_CHANNELS = [
   'app:getInfo',
   'app:reportError',
   'app:checkUpdate',
+  'app:openLogs',
   'window:setTheme',
   'settings:update',
   'models:loadStore',
   'models:chooseFolder',
   'models:scan',
+  'models:partialScan',
   'models:cancelScan',
   'models:saveModelData',
   'models:uploadCover',
@@ -28,7 +30,13 @@ const VALID_INVOKE_CHANNELS = [
   'models:computeHashBatch',
   'models:cancelHashBatch',
   'models:exportBackup',
-  'models:importBackup'
+  'models:importBackup',
+  'models:listDirs',
+  'models:createFolder',
+  'models:renameFolder',
+  'models:moveModels',
+  'models:metaGaps',
+  'models:bindMeta'
 ]
 
 const VALID_RECEIVE_CHANNELS = [
@@ -75,7 +83,9 @@ const api = {
     /** 上报渲染进程异常（写入主进程日志） */
     reportError: (message, stack) => invokeValidated('app:reportError', { message, stack }),
     /** 应用内检查更新（E1）：返回 { current, latest?, hasUpdate, releaseUrl? } 或 { error } */
-    checkUpdate: () => invokeValidated('app:checkUpdate')
+    checkUpdate: () => invokeValidated('app:checkUpdate'),
+    /** 在系统资源管理器中打开日志目录（B-04），返回 { ok } 或 { error } */
+    openLogs: () => invokeValidated('app:openLogs')
   },
 
   /** 窗口相关（最小化/最大化/关闭由原生标题栏叠加层控件处理） */
@@ -100,6 +110,11 @@ const api = {
     scan: (folder) => invokeValidated('models:scan', { folder }),
     /** 取消进行中的扫描，返回 { ok } */
     cancelScan: () => invokeValidated('models:cancelScan'),
+    /**
+     * 局部增量扫描（A-03）：只扫描指定变更子树，返回这些子树的模型现状。
+     * payload 为 { folder, dirs }（dirs 为 POSIX 相对目录数组，'' 为根直属）
+     */
+    partialScan: (payload) => invokeValidated('models:partialScan', payload),
     /** 保存模型推荐参数与备注 */
     saveModelData: (payload) => invokeValidated('models:saveModelData', payload),
     /** 上传模型封面，返回 { cover, coverUrl, covers, meta } 或 { canceled } / { error } */
@@ -120,6 +135,23 @@ const api = {
     exportBackup: () => invokeValidated('models:exportBackup'),
     /** 从备份恢复（FEAT-3）：zip → 设置 + 指定库，返回 { settingsRestored, libraryRestored? } / { canceled } / { error } */
     importBackup: () => invokeValidated('models:importBackup'),
+    /** 列举库内目录（B-06，含空目录），返回 { dirs: string[] }（POSIX 相对目录，'' 为根） */
+    listDirs: () => invokeValidated('models:listDirs'),
+    /** 库内新建文件夹（B-06），relDir 为 POSIX 相对目录，返回 { ok, dir, existed? } / { error } */
+    createFolder: (relDir) => invokeValidated('models:createFolder', { relDir }),
+    /** 重命名库内文件夹（B-06），返回 { ok, oldDir, newDir, moved } / { error } */
+    renameFolder: (relDir, newName) =>
+      invokeValidated('models:renameFolder', { relDir, newName }),
+    /**
+     * 移动模型文件到库内目标文件夹（B-06）：
+     * payload { ids: 绝对路径数组, destDir: POSIX 相对目录（'' 为根） }
+     * 返回 { moved: [{from,to,model}], failed: [{id,error}], destDir } / { error }
+     */
+    moveModels: (payload) => invokeValidated('models:moveModels', payload),
+    /** 元数据缺口查询（B-06）：payload { ids: 当前模型绝对路径 }，返回 { orphans, newcomers } */
+    metaGaps: (ids) => invokeValidated('models:metaGaps', { ids }),
+    /** 手动绑定失联标注（B-06）：{ oldKey, newKey } 均为 POSIX 相对键，返回 { ok, model } / { error } */
+    bindMeta: (oldKey, newKey) => invokeValidated('models:bindMeta', { oldKey, newKey }),
     /** 删除模型文件（移入回收站并清理元数据），返回 { ok } 或 { error } */
     deleteModel: (id) => invokeValidated('models:deleteModel', { id }),
     /** 更新快捷标记（收藏/NSFW/评分，仅传需更新的字段），返回 { meta } 或 { error } */

@@ -83,6 +83,14 @@ export function registerStoreHandlers() {
         // 清理不再被元数据引用的孤儿封面文件
         await pruneOrphanCovers()
         metaMap = getMetaMapByAbsPath()
+        // 目录监控启动路径闭合（OPT-19）：启动时若 autoScan 关闭则不会触发扫描，
+        // 此前 watcher 仅在扫描/设置更新时同步，导致 autoRescan 开启却静默不生效；
+        // 此处按设置补一次同步（同根同状态时为幂等刷新）
+        syncWatcher(
+          settings.modelsFolder,
+          settings.autoRescan === true,
+          settings.excludeDirs || []
+        )
       } else {
         logger.warn(`已设置的模型目录不存在，跳过关联存储加载: ${settings.modelsFolder}`)
       }

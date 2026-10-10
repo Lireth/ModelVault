@@ -9,7 +9,7 @@
   "license": "MIT",
   "private": true,
   "engines": {
-    "node": ">=20.19"
+    "node": ">=22.22.2"
   },
   "scripts": {
     "start": "electron-vite dev",

@@ -43,10 +43,10 @@ jobs:
       # ---------- 1. 环境准备 ----------
 
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm # 缓存 npm 依赖包
@@ -54,7 +54,7 @@ jobs:
       # 缓存 Electron / electron-builder 二进制（.npmrc 指向 npmmirror，
       # 首次下载约 100MB+，缓存后大幅加速）。键随 lock 文件变化自动失效。
       - name: 缓存 Electron 二进制
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~\AppData\Local\electron\Cache
@@ -167,7 +167,7 @@ jobs:
       # ---------- 5. 发布与产物归档 ----------
 
       - name: 上传 Workflow Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ModelVault-${{ steps.ver.outputs.version }}
           path: |
@@ -179,7 +179,7 @@ jobs:
       # 手动触发仅调试打包流程，不创建 Release，避免在分支引用上误发版
       - name: 创建 GitHub Release 并附加 EXE 与校验和
         if: github.event_name != 'workflow_dispatch'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/${{ steps.ver.outputs.version }}/ModelVault-${{ steps.ver.outputs.version }}.exe

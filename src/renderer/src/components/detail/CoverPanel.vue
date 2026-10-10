@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   confirmDialog,
   deleteCover,
-  importCoverFromDrop,
+  importCoversFromDrop,
   pasteCover,
   selectedModel,
   setDefaultCover,
@@ -34,7 +34,12 @@ function onDragLeave() {
   dropActive.value = false
 }
 
-/** 放下文件：逐个导入为预览图（多个文件依次追加） */
+/**
+ * 放下文件：批量导入为预览图（OPT-9）。
+ * 先解析全部拖入文件的真实路径（getPathForFile 对非文件项返回空，计数提示），
+ * 再走 store 批量导入：IPC 逐文件串行、状态单趟合并、单张失败不中断，
+ * 最后按「成功/失败/跳过」汇总提示（替代旧实现逐张 toast 与整体中断）。
+ */
 async function onDropCover(e) {
   dropActive.value = false
   const model = selectedModel.value
@@ -42,15 +47,34 @@ async function onDropCover(e) {
   const files = Array.from(e.dataTransfer?.files || [])
   if (files.length === 0) return
   e.preventDefault()
+  const sourcePaths = []
+  let skipped = 0
+  for (const file of files) {
+    const sourcePath = window.api.getPathForFile(file)
+    if (sourcePath) sourcePaths.push(sourcePath)
+    else skipped += 1
+  }
+  if (sourcePaths.length === 0) {
+    toast('warn', '未能解析拖入的文件，请重试或改用「上传图片」按钮')
+    return
+  }
   busy.value = true
   try {
-    for (const file of files) {
-      const sourcePath = window.api.getPathForFile(file)
-      if (!sourcePath) continue
-      await importCoverFromDrop(model.id, sourcePath)
+    const res = await importCoversFromDrop(model.id, sourcePaths)
+    const imported = res.total - res.failed
+    const summary =
+      `成功 ${imported} 张` +
+      (res.failed > 0 ? `，失败 ${res.failed} 张` : '') +
+      (skipped > 0 ? `，跳过 ${skipped} 个` : '')
+    if (imported > 0 && res.failed === 0 && skipped === 0) {
+      toast('success', `封面导入完成：${summary}`)
+    } else if (imported > 0) {
+      toast('warn', `封面导入完成：${summary}`)
+    } else {
+      toast('error', `封面导入失败：${summary}`)
     }
   } catch (err) {
-    // 导入被拒（非图片内容/越界路径等）时向用户提示，而非静默进全局日志（S1）
+    // 导入链路整体异常时向用户提示，而非静默进全局日志（S1）
     toast('error', `封面导入失败: ${err.message}`)
   } finally {
     busy.value = false

@@ -5,6 +5,8 @@ import path from 'node:path'
 import logger from '../logger'
 import { atomicWriteFile } from './atomic-write'
 import { notifyStoreSaveError } from './store-events'
+import { isEmptyModelMeta, planMetaRelinks, splitRelKey } from './meta-relink'
+import { ALL_CATEGORY_KEYS } from '../../shared/model-categories'
 import {
   COVERS_DIR,
   DATA_DIR,
@@ -26,14 +28,11 @@ import {
  * 首次对某根目录启用时自动从旧版全局存储迁移。
  */
 
-/** 「其他模型」允许的二级分类标签 */
-const VALID_SUB_CATEGORIES = new Set([
-  'embedding', 'controlnet', 'upscale', 'hypernetwork', 'other',
-  // LoRA 分类标签
-  'role', 'style', 'concept', 'outfit', 'background', 'pose', 'tool',
-  // Checkpoint 自动分类
-  'base'
-])
+/**
+ * 允许的二级分类标签 key 集合（A-12 单一来源：src/shared/model-categories.js，
+ * 与渲染层 SUB_CATEGORIES/LORA_TAGS/CHECKPOINT_TAGS 共用同一定义）
+ */
+const VALID_SUB_CATEGORIES = ALL_CATEGORY_KEYS
 
 /** 防抖落盘延迟（ms） */
 const SAVE_DELAY = 500
@@ -365,4 +364,195 @@ export async function flushStoreSave() {
 export async function switchDataRoot(root) {
   await flushStoreSave()
   setDataRoot(root)
+}
+
+/**
+ * 重扫后的元数据重关联（A-02）：
+ * 用户在库内移动/重命名模型后，以相对路径为键的标注会失联。本函数对比
+ * 「本次扫描消失的旧键（孤儿）」与「无元数据的新模型」，用 planMetaRelinks
+ * 的确定性规则（同名移动 / 同目录改名 / 哈希履历 mtime，且均要求唯一候选）
+ * 把元数据迁移到新键。封面引用位于 .modelvault/covers，与模型路径无关，
+ * 随键迁移后继续有效；哈希缓存一并迁移，去重时无需重算。
+ *
+ * 无法安全关联的孤儿：不含任何用户数据的空条目自动清理（其封面在下次
+ * pruneOrphanCovers 时回收）；含标注/哈希的条目保守保留——文件移回或
+ * 改名还原时，下次扫描仍可重新关联。
+ *
+ * @param {Array<{id:string, name:string, ext:string, size:number, mtimeMs:number}>} scanned
+ *   scanner 本次扫描出的模型列表
+ * @param {object} [options]
+ * @param {string[]} [options.affectedDirs] 本次扫描覆盖的相对目录（POSIX，'' 为根直属；
+ *   A-03 局部重扫）。仅这些目录（含后代）内消失的键才作为孤儿候选；
+ *   未扫描目录内的键一律保持原样——局部扫描"看不见"不等于模型被删除。
+ *   缺省为全量语义（全部键参与判定）
+ * @returns {{relinked:number, prunedEmpty:number, retainedOrphans:number}}
+ *   relinked 迁移条目数；prunedEmpty 清理的空孤儿数；retainedOrphans 保留的数据孤儿数
+ */
+export function relinkScannedMeta(scanned, options = {}) {
+  const zero = { relinked: 0, prunedEmpty: 0, retainedOrphans: 0 }
+  if (!data || !getCurrentRoot() || !Array.isArray(scanned)) return zero
+
+  const affectedDirs = Array.isArray(options.affectedDirs) ? options.affectedDirs : null
+  /** 键的相对目录是否落在受影响集合内（d 与其后代；'' 仅根直属文件） */
+  const keyInScope = (key) => {
+    if (!affectedDirs) return true
+    const slash = key.lastIndexOf('/')
+    const dir = slash < 0 ? '' : key.slice(0, slash)
+    return affectedDirs.some((d) =>
+      d === '' ? dir === '' : dir === d || dir.startsWith(`${d}/`)
+    )
+  }
+
+  const currentKeys = new Set()
+  const newcomers = []
+  for (const m of scanned) {
+    const key = toRelKey(m.id)
+    if (!key) continue
+    currentKeys.add(key)
+    if (!data.models[key]) {
+      newcomers.push({
+        key,
+        ...splitRelKey(key),
+        size: m.size,
+        mtimeMs: m.mtimeMs
+      })
+    }
+  }
+
+  const orphans = []
+  for (const [key, meta] of Object.entries(data.models)) {
+    if (currentKeys.has(key)) continue
+    // 局部重扫：范围外的键保持原样，不迁移也不清理
+    if (!keyInScope(key)) continue
+    orphans.push({
+      key,
+      ...splitRelKey(key),
+      hash: meta.hash || '',
+      hashMtime: Number.isFinite(meta.hashMtime) ? meta.hashMtime : 0
+    })
+  }
+  if (orphans.length === 0) return zero
+
+  const { relinks, unmatchedOrphanKeys } = planMetaRelinks(orphans, newcomers)
+  for (const [oldKey, newKey] of relinks) {
+    data.models[newKey] = data.models[oldKey]
+    delete data.models[oldKey]
+  }
+
+  let prunedEmpty = 0
+  for (const key of unmatchedOrphanKeys) {
+    if (isEmptyModelMeta(data.models[key])) {
+      delete data.models[key]
+      prunedEmpty += 1
+    }
+  }
+  const retainedOrphans = unmatchedOrphanKeys.length - prunedEmpty
+
+  if (relinks.length > 0) {
+    logger.info(
+      `已重新关联 ${relinks.length} 个被移动/重命名模型的标注` +
+        (retainedOrphans > 0 ? `；${retainedOrphans} 个含数据的失效条目已保守保留` : '')
+    )
+  }
+  if (relinks.length > 0 || prunedEmpty > 0) scheduleSave()
+
+  return { relinked: relinks.length, prunedEmpty, retainedOrphans }
+}
+
+/**
+ * 迁移单条元数据到新相对键（B-06 应用内移动模型文件）：
+ * 与重扫启发式重关联不同，库内整理是用户显式操作，映射确定无疑，
+ * 直接把标注对象挂到新键。封面引用位于 .modelvault/covers，与模型路径无关，
+ * 随键迁移后继续有效；目标键已有数据时拒绝（防止覆盖用户标注）。
+ * @param {string} oldRelKey 旧相对键
+ * @param {string} newRelKey 新相对键
+ * @returns {boolean} 是否迁移成功
+ */
+export function relinkMetaKey(oldRelKey, newRelKey) {
+  if (!data) return false
+  if (
+    typeof oldRelKey !== 'string' ||
+    typeof newRelKey !== 'string' ||
+    !oldRelKey ||
+    !newRelKey ||
+    oldRelKey === newRelKey
+  ) {
+    return false
+  }
+  const meta = data.models[oldRelKey]
+  if (!meta || data.models[newRelKey]) return false
+  data.models[newRelKey] = meta
+  delete data.models[oldRelKey]
+  scheduleSave()
+  return true
+}
+
+/**
+ * 批量迁移某目录前缀下的全部元数据键（B-06 重命名文件夹）：
+ * `oldDir/...` → `newDir/...`。新键已被占用（极端同名竞争）的条目跳过不迁移，
+ * 保守保留在旧键等待下次扫描判定。
+ * @param {string} oldDir 原目录 POSIX 相对路径（非空）
+ * @param {string} newDir 新目录 POSIX 相对路径（非空）
+ * @returns {number} 实际迁移的条目数
+ */
+export function relinkMetaPrefix(oldDir, newDir) {
+  if (!data || !oldDir || !newDir || oldDir === newDir) return 0
+  const prefix = `${oldDir}/`
+  const moves = []
+  for (const key of Object.keys(data.models)) {
+    if (key.startsWith(prefix)) {
+      moves.push([key, `${newDir}/${key.slice(prefix.length)}`])
+    }
+  }
+  let moved = 0
+  for (const [oldKey, newKey] of moves) {
+    const meta = data.models[oldKey]
+    if (!meta || data.models[newKey]) continue
+    data.models[newKey] = meta
+    delete data.models[oldKey]
+    moved += 1
+  }
+  if (moved > 0) {
+    scheduleSave()
+    logger.info(`目录重命名：已迁移 ${moved} 条标注（${oldDir} → ${newDir}）`)
+  }
+  return moved
+}
+
+/**
+ * 元数据缺口查询（B-06 手动确认绑定）：
+ * 对比当前扫描到的模型键与存储中的元数据键——
+ * - newcomers：扫描到但没有任何标注的模型（绑定目标候选）；
+ * - orphans：含用户数据但扫描中消失的键（A-02 启发式未能自动关联的遗留），
+ *   仅返回展示所需摘要；空骨架条目不列入（全量扫描时已自动清理）。
+ * @param {string[]} scannedAbsIds 当前扫描到的模型绝对路径
+ * @returns {{orphans: Array<object>, newcomers: Array<object>}}
+ */
+export function getMetaGaps(scannedAbsIds) {
+  const empty = { orphans: [], newcomers: [] }
+  if (!data || !Array.isArray(scannedAbsIds)) return empty
+  const scannedKeys = new Set()
+  const newcomers = []
+  for (const absId of scannedAbsIds) {
+    const key = toRelKey(absId)
+    if (!key || scannedKeys.has(key)) continue
+    scannedKeys.add(key)
+    if (!data.models[key]) newcomers.push({ key, ...splitRelKey(key) })
+  }
+  const orphans = []
+  for (const [key, meta] of Object.entries(data.models)) {
+    if (scannedKeys.has(key)) continue
+    if (isEmptyModelMeta(meta)) continue
+    orphans.push({
+      key,
+      ...splitRelKey(key),
+      alias: meta.alias || '',
+      favorite: meta.favorite === true,
+      rating: Number.isFinite(meta.rating) ? meta.rating : 0,
+      hasCover: Boolean(meta.cover) || (Array.isArray(meta.covers) && meta.covers.length > 0),
+      hasNote: Boolean(meta.note),
+      triggerWords: meta.triggerWords || ''
+    })
+  }
+  return { orphans, newcomers }
 }
