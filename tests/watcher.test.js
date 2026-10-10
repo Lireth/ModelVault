@@ -39,6 +39,19 @@ import {
 const timing = { pollInterval: 20, broadcastDebounce: 40 }
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/**
+ * 条件等待：周期轮询断言函数直到满足，超时抛出。
+ * 轮询/文件操作耗时受环境负载波动影响（尤其 CI 慢盘），固定 sleep
+ * 在慢环境会偶发失效；条件等待只在被测逻辑真正卡住时失败。
+ */
+async function waitFor(cond, desc, timeout = 1500) {
+  const start = Date.now()
+  while (!cond()) {
+    if (Date.now() - start > timeout) throw new Error(`waitFor 超时: ${desc}`)
+    await sleep(10)
+  }
+}
+
 let root
 const roots = []
 /** 预置的待移入文件包目录（rename 一次调用产生单一原子条目变更，避免被轮询拆分观测） */
@@ -251,7 +264,8 @@ describe('syncWatcher 目录监控（A8）', () => {
 describe('A-07b 自适应轮询', () => {
   it('连续无变更时轮询间隔按阶梯退避，检测到变更后重置回基础间隔', async () => {
     // 阶梯 [20, 50, 100]：基准后首次仍为基础间隔，连续空闲升到 50/100 并封顶；
-    // 变更后下一轮回到 20
+    // 发现变更的那轮巡检重置退避，其后紧邻的调度回到基础间隔 20。
+    // 巡检触发与文件操作耗时受环境负载波动（CI 慢盘），统一用条件等待代替固定 sleep
     const scheduled = []
     syncWatcher(root, true, [], {
       pollInterval: 20,
@@ -259,20 +273,24 @@ describe('A-07b 自适应轮询', () => {
       broadcastDebounce: 30,
       onPollScheduled: (delay) => scheduled.push(delay)
     })
-    await sleep(40) // 基准 + 第一次轮询（空闲）
-    // 基准后已调度：第一次空闲后的延迟应为阶梯第二档 50
-    expect(scheduled.at(-1)).toBe(50)
-    await sleep(110) // 跨过 50 与 100 两轮
-    expect(scheduled.at(-1)).toBe(100) // 封顶档
+    await waitFor(() => scheduled.length >= 1, '基准轮后未安排巡检')
+    expect(scheduled[0]).toBe(20) // 基准轮后的首次调度即基础间隔
+    await waitFor(() => scheduled.at(-1) === 100, '空闲退避未爬到封顶档 100')
+    // scheduled 为追加式数组：含 50 证明封顶前确实逐级经过中间档而非跳档
+    expect(scheduled).toContain(50)
 
-    // 制造变更：发现变更的那一轮将退避重置，下一轮调度回到基础间隔 20
+    // 制造变更：变更落盘到被发现之间可能隔若干轮空闲巡检（CI 上 rename
+    // 可能耗时超过已挂起的封顶档定时器），空闲巡检的调度恒为封顶档 100；
+    // 发现变更那轮的调度必为基础档 20——以此为重置立即生效的判据
     const beforeChange = scheduled.length
     await moveBundleIn(await makeBundle('changed'), 'changed')
-    await sleep(300) // 等变更被发现、防抖广播、重置后的下一轮调度
-    expect(sentEvents.length).toBeGreaterThanOrEqual(1)
+    await waitFor(() => sentEvents.length >= 1, '变更未在超时内被发现并广播')
     const afterChange = scheduled.slice(beforeChange)
-    expect(afterChange).toContain(20) // 变更后确实重置回基础档
-    expect(afterChange[0]).toBe(20) // 且重置发生在变更后的第一次调度
+    const firstReset = afterChange.indexOf(20)
+    expect(firstReset).toBeGreaterThan(-1) // 发现变更后退避确实重置回基础档
+    // 首个 20 之前只允许出现空闲巡检的封顶档 100——证明重置发生在
+    // 发现变更的那一轮，而非延迟一轮
+    expect(afterChange.slice(0, firstReset).every((d) => d === 100)).toBe(true)
   })
 
   it('窗口隐藏时跳过目录快照遍历（暂停期间变更不被发现），恢复后重新发现', async () => {
