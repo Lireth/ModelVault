@@ -99,7 +99,7 @@ jobs:
       # 若前置步骤（lint/测试）失败导致目录不存在，仅告警不阻断 CI
       - name: 上传覆盖率报告
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-node-${{ matrix.node }}
           path: coverage/
