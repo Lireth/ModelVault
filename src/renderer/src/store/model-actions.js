@@ -70,7 +70,9 @@ export async function exportModels(format) {
     note: m.note || '',
     size: m.size,
     mtimeMs: m.mtimeMs,
-    params: m.params || null
+    // params 来自 reactive state，是 Proxy；Electron IPC 结构化序列化不支持
+    // Proxy，直接传会抛 "An object could not be cloned"，需拷贝为普通对象
+    params: m.params ? { ...m.params } : null
   }))
   try {
     const res = await window.api.models.exportList({ format, rows })

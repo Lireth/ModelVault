@@ -26,7 +26,9 @@ function makeModel(id) {
     alias: '',
     note: '',
     subCategory: '',
-    triggerWords: ''
+    triggerWords: '',
+    // 经 reactive state 后变为 Proxy，用于回归「导出 rows 可结构化克隆」
+    params: { steps: 20, cfgMin: 7, cfgMax: 7, sampler: 'euler', scheduler: 'normal', precision: 'FP16', resMin: 512, resMax: 1024 }
   }
 }
 
@@ -69,6 +71,13 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
     await flushPromises()
     expect(window.api.models.exportList).toHaveBeenCalledWith(
       expect.objectContaining({ format: 'csv' })
+    )
+    // 回归（E2）：rows 须可被结构化克隆——state 为 reactive，params 若保留
+    // Proxy 引用，ipcRenderer.invoke 会抛 "An object could not be cloned"
+    const payload = window.api.models.exportList.mock.calls.at(-1)[0]
+    expect(() => structuredClone(payload)).not.toThrow()
+    expect(payload.rows[0].params).toEqual(
+      expect.objectContaining({ steps: expect.anything() })
     )
   })
 
