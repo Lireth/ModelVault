@@ -1324,17 +1324,38 @@ export async function handleMenuAction(id, action) {
 }
 
 /**
- * 拖拽导入封面（外部图片文件复制到封面目录并追加）。
+ * 批量拖拽导入封面（OPT-9）：多个外部图片文件依次导入为预览图。
+ * - IPC 逐文件串行：主进程按「时间戳-文件名」命名，并发导入同基名文件
+ *   存在同毫秒同名碰撞风险，串行保留既有安全性；
+ * - 状态单趟合并（O2 模式）：每次成功响应即包含最新完整封面列表，
+ *   仅在全部结束后应用最后一次——避免 N 张封面触发 N 次全列表失效重算
+ *   （旧实现逐张 applyCoverResult，且逐张弹 toast）；
+ * - 容错：单张失败（业务错误或 IPC reject）不中断其余，失败原因收集到
+ *   errors，由调用方汇总提示。
  * @param {string} id 模型 id
- * @param {string} sourcePath 外部图片绝对路径
+ * @param {string[]} sourcePaths 外部图片绝对路径列表
+ * @returns {Promise<{ok: boolean, total: number, failed: number, errors: string[]}>}
+ *   ok 表示至少一张成功；total 为有效入口文件数；errors 为失败原因列表
  */
-export async function importCoverFromDrop(id, sourcePath) {
-  const res = await window.api.models.importCover(id, sourcePath)
-  if (res?.error) {
-    toast('error', res.error)
-    return false
+export async function importCoversFromDrop(id, sourcePaths) {
+  const paths = (Array.isArray(sourcePaths) ? sourcePaths : []).filter(
+    (p) => typeof p === 'string' && p
+  )
+  if (paths.length === 0) {
+    return { ok: false, total: 0, failed: 0, errors: [] }
   }
-  applyCoverResult(id, res)
-  toast('success', '已从拖拽文件添加预览图')
-  return true
+  let lastRes = null
+  const errors = []
+  for (const sourcePath of paths) {
+    try {
+      const res = await window.api.models.importCover(id, sourcePath)
+      if (res?.error) errors.push(res.error)
+      else lastRes = res
+    } catch (err) {
+      errors.push(err.message)
+    }
+  }
+  // 单趟同步：最后一次成功响应已包含全部封面（含本次导入的所有张）
+  if (lastRes) applyCoverResult(id, lastRes)
+  return { ok: lastRes !== null, total: paths.length, failed: errors.length, errors }
 }
