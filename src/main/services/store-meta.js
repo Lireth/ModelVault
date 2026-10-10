@@ -5,6 +5,7 @@ import path from 'node:path'
 import logger from '../logger'
 import { atomicWriteFile } from './atomic-write'
 import { notifyStoreSaveError } from './store-events'
+import { isEmptyModelMeta, planMetaRelinks, splitRelKey } from './meta-relink'
 import {
   COVERS_DIR,
   DATA_DIR,
@@ -365,4 +366,79 @@ export async function flushStoreSave() {
 export async function switchDataRoot(root) {
   await flushStoreSave()
   setDataRoot(root)
+}
+
+/**
+ * 重扫后的元数据重关联（A-02）：
+ * 用户在库内移动/重命名模型后，以相对路径为键的标注会失联。本函数对比
+ * 「本次扫描消失的旧键（孤儿）」与「无元数据的新模型」，用 planMetaRelinks
+ * 的确定性规则（同名移动 / 同目录改名 / 哈希履历 mtime，且均要求唯一候选）
+ * 把元数据迁移到新键。封面引用位于 .modelvault/covers，与模型路径无关，
+ * 随键迁移后继续有效；哈希缓存一并迁移，去重时无需重算。
+ *
+ * 无法安全关联的孤儿：不含任何用户数据的空条目自动清理（其封面在下次
+ * pruneOrphanCovers 时回收）；含标注/哈希的条目保守保留——文件移回或
+ * 改名还原时，下次扫描仍可重新关联。
+ *
+ * @param {Array<{id:string, name:string, ext:string, size:number, mtimeMs:number}>} scanned
+ *   scanner 本次扫描出的模型列表
+ * @returns {{relinked:number, prunedEmpty:number, retainedOrphans:number}}
+ *   relinked 迁移条目数；prunedEmpty 清理的空孤儿数；retainedOrphans 保留的数据孤儿数
+ */
+export function relinkScannedMeta(scanned) {
+  const zero = { relinked: 0, prunedEmpty: 0, retainedOrphans: 0 }
+  if (!data || !getCurrentRoot() || !Array.isArray(scanned)) return zero
+
+  const currentKeys = new Set()
+  const newcomers = []
+  for (const m of scanned) {
+    const key = toRelKey(m.id)
+    if (!key) continue
+    currentKeys.add(key)
+    if (!data.models[key]) {
+      newcomers.push({
+        key,
+        ...splitRelKey(key),
+        size: m.size,
+        mtimeMs: m.mtimeMs
+      })
+    }
+  }
+
+  const orphans = []
+  for (const [key, meta] of Object.entries(data.models)) {
+    if (currentKeys.has(key)) continue
+    orphans.push({
+      key,
+      ...splitRelKey(key),
+      hash: meta.hash || '',
+      hashMtime: Number.isFinite(meta.hashMtime) ? meta.hashMtime : 0
+    })
+  }
+  if (orphans.length === 0) return zero
+
+  const { relinks, unmatchedOrphanKeys } = planMetaRelinks(orphans, newcomers)
+  for (const [oldKey, newKey] of relinks) {
+    data.models[newKey] = data.models[oldKey]
+    delete data.models[oldKey]
+  }
+
+  let prunedEmpty = 0
+  for (const key of unmatchedOrphanKeys) {
+    if (isEmptyModelMeta(data.models[key])) {
+      delete data.models[key]
+      prunedEmpty += 1
+    }
+  }
+  const retainedOrphans = unmatchedOrphanKeys.length - prunedEmpty
+
+  if (relinks.length > 0) {
+    logger.info(
+      `已重新关联 ${relinks.length} 个被移动/重命名模型的标注` +
+        (retainedOrphans > 0 ? `；${retainedOrphans} 个含数据的失效条目已保守保留` : '')
+    )
+  }
+  if (relinks.length > 0 || prunedEmpty > 0) scheduleSave()
+
+  return { relinked: relinks.length, prunedEmpty, retainedOrphans }
 }

@@ -372,10 +372,14 @@ export async function scanModels() {
     }
     state.models = res.models
     state.lastScan = { count: res.models.length, durationMs: res.durationMs }
+    // A-02：主进程自动重关联了被移动/重命名模型的标注时，告知用户数量
+    const relinkedSuffix = res.relinked > 0
+      ? `（已自动重新关联 ${res.relinked} 个移动/重命名模型的标注）`
+      : ''
     if (res.errors?.length) {
-      toast('warn', `扫描完成，但有 ${res.errors.length} 个目录无法读取`)
+      toast('warn', `扫描完成，但有 ${res.errors.length} 个目录无法读取${relinkedSuffix}`)
     } else {
-      toast('success', `扫描完成：发现 ${res.models.length} 个模型`)
+      toast('success', `扫描完成：发现 ${res.models.length} 个模型${relinkedSuffix}`)
     }
   } catch (err) {
     state.scanError = err.message

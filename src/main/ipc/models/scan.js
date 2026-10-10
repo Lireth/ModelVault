@@ -1,7 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import fs from 'node:fs/promises'
 import logger from '../../logger'
-import { getSettings, updateSettings } from '../../services/store'
+import { getSettings, relinkScannedMeta, updateSettings } from '../../services/store'
 import { scanModels } from '../../services/scanner'
 import { pruneOrphanCovers } from '../../services/covers'
 import { clearDeferredJobs } from '../../services/thumbs'
@@ -116,6 +116,11 @@ export function registerScanHandlers() {
         }
       )
 
+      // 重关联被移动/重命名模型的标注（A-02）：必须在装饰前执行——
+      // decorateOne 按扫描出的新路径键读取元数据，先迁移才能让标注/封面/
+      // 哈希履历在本次结果中即时生效
+      const relinkResult = relinkScannedMeta(models)
+
       const decorated = await decorateModels(models, signal)
       const byType = {}
       for (const m of decorated) {
@@ -145,7 +150,9 @@ export function registerScanHandlers() {
         models: decorated,
         byType,
         errors,
-        durationMs: Date.now() - startedAt
+        durationMs: Date.now() - startedAt,
+        // 本次扫描自动重新关联的移动/重命名模型数（A-02，渲染层据此提示）
+        relinked: relinkResult.relinked
       }
     } catch (err) {
       if (err?.name === 'AbortError') {

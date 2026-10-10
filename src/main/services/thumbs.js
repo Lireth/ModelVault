@@ -3,7 +3,9 @@ import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
-import { getCurrentRoot } from './store'
+// 直连存储叶子模块而非聚合门面（与 covers.js 同理：避免门面重导出链
+// 在模块初始化顺序变化时拿到未就绪绑定）
+import { getCurrentRoot } from './store-paths'
 
 /**
  * 封面缩略图缓存：

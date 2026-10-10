@@ -3,7 +3,11 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
 import { IMAGE_EXTENSIONS } from './scanner'
-import { COVERS_DIR, DATA_DIR, getCoversDir, getReferencedCovers, relativizeCover, wasDataReset } from './store'
+// 直接依赖存储子模块而非聚合门面（services/store.js）：门面的重导出链在
+// 模块初始化顺序变化时可能拿到尚未就绪的绑定（A-02 引入 meta-relink 后
+// vitest 曾现 getReferencedCovers is not a function）；服务层直连叶子依赖更稳
+import { COVERS_DIR, DATA_DIR, getCoversDir, relativizeCover } from './store-paths'
+import { getReferencedCovers, wasDataReset } from './store-meta'
 
 /**
  * 封面图片管理：用户在详情页上传的预览图会复制到

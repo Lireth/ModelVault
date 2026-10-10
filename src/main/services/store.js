@@ -53,12 +53,12 @@ export { loadSettings, getSettings, updateSettings } from './store-settings'
 export {
   loadData,
   wasDataReset,
-  getReferencedCovers,
   getModelMeta,
   getMetaMapByAbsPath,
   setModelMeta,
   removeModelMeta,
   setModelHash,
+  relinkScannedMeta,
   scheduleSave,
   saveStoreNow,
   flushStoreSave,

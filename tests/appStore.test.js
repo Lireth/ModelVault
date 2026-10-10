@@ -22,6 +22,7 @@ import {
   rejectConfirm,
   removeDedupeItem,
   saveSettings,
+  scanModels,
   selectedModel,
   smartCleanDuplicates,
   sortDirectional,
@@ -100,6 +101,39 @@ beforeEach(() => {
   state.toasts.splice(0, state.toasts.length)
   if (state.confirm.resolve) state.confirm.resolve(false)
   state.confirm = { visible: false, text: '', resolve: null }
+})
+
+describe('scanModels 重关联提示（A-02）', () => {
+  beforeEach(() => {
+    state.folder = 'D:\\models'
+  })
+
+  it('扫描响应含 relinked>0 时成功提示追加「自动重新关联 N 个」', async () => {
+    api.models.scan.mockResolvedValue({ models: [makeModel('m1')], errors: [], relinked: 2 })
+    await scanModels()
+    const notice = state.toasts.find((t) => t.type === 'success')
+    expect(notice.text).toContain('发现 1 个模型')
+    expect(notice.text).toContain('自动重新关联 2 个')
+  })
+
+  it('relinked 缺省或为 0 时维持原提示文案', async () => {
+    api.models.scan.mockResolvedValue({ models: [makeModel('m1')], errors: [] })
+    await scanModels()
+    const notice = state.toasts.find((t) => t.type === 'success')
+    expect(notice.text).toBe('扫描完成：发现 1 个模型')
+  })
+
+  it('存在读取错误时重关联计数仍在警告提示中展示', async () => {
+    api.models.scan.mockResolvedValue({
+      models: [makeModel('m1')],
+      errors: [{ dir: 'x', message: 'denied' }],
+      relinked: 1
+    })
+    await scanModels()
+    const notice = state.toasts.find((t) => t.type === 'warn')
+    expect(notice.text).toContain('1 个目录无法读取')
+    expect(notice.text).toContain('自动重新关联 1 个')
+  })
 })
 
 /** 生成测试模型对象 */
