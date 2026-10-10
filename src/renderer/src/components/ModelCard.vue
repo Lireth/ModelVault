@@ -35,7 +35,7 @@ function onCardActivate() {
   else openDetail(props.model.id)
 }
 
-/** 收藏/取消收藏（阻止冒泡，避免打开详情页） */
+/** 收藏/取消收藏（click 与键盘 Enter/Space 均在模板层阻断冒泡，避免打开详情页，OPT-3） */
 function onToggleFavorite() {
   toggleFavorite(props.model.id)
 }
@@ -128,11 +128,18 @@ const mtimeText = computed(() => {
     <div class="card-body">
       <div class="name-row">
         <h4 class="model-name" :title="model.name">{{ displayName }}</h4>
+        <!-- 收藏/取消收藏。click 与 Enter/Space 的 keydown 均需阻断冒泡：
+             keydown 若不阻断会冒泡到 article 的 @keydown.enter/space 触发
+             onCardActivate（打开详情），与按钮原生 click 的收藏动作叠加，
+             键盘聚焦本按钮按键时形成一次按键两个动作（OPT-3）；
+             .prevent 同时阻止 Space 的默认滚动行为（与 article 的处理一致） -->
         <button
           class="fav-btn"
           :class="{ active: model.favorite }"
           :title="model.favorite ? '取消收藏' : '收藏'"
           @click.stop="onToggleFavorite"
+          @keydown.enter.stop.prevent
+          @keydown.space.stop.prevent
         >★</button>
       </div>
       <div v-if="state.settings.showSize || state.settings.showMtime" class="model-meta">
