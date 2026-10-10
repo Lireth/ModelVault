@@ -29,15 +29,28 @@ const deferredOwners = new Map()
 
 /**
  * 计算影响装饰结果的元数据签名（任一标注变化都会使缓存失效）。
+ *
+ * A-08 记忆化：decorateOne 在比对增量缓存前必先计算签名，缓存命中路径上
+ * （autoRescan/手动重扫的大多数模型）每次 JSON.stringify 全部字段（含嵌套
+ * params）是纯浪费。元数据对象仅在 setModelMeta 规范化时整体换引用，
+ * 故以对象引用为键用 WeakMap 缓存签名——命中时零序列化成本，对象被替换后
+ * 自然未命中重建，WeakMap 不阻止垃圾回收。按值语义不变：内容相同的不同
+ * 对象仍得到相同签名（仅各自首次计算一次）。
  * @param {object} meta 模型元数据
  * @returns {string} 签名字符串
  */
-function metaSignature(meta) {
-  return JSON.stringify([
+const signatureCache = new WeakMap()
+
+export function metaSignature(meta) {
+  const cached = signatureCache.get(meta)
+  if (cached !== undefined) return cached
+  const signature = JSON.stringify([
     meta.cover, meta.covers, meta.alias, meta.note, meta.subCategory,
     meta.triggerWords, meta.favorite, meta.nsfw, meta.rating, meta.params, meta.hash,
     meta.noteSource, meta.triggerWordsSource
   ])
+  signatureCache.set(meta, signature)
+  return signature
 }
 
 /** 登记一条延迟缩略图的模型归属 */

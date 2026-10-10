@@ -8,6 +8,7 @@ const VALID_INVOKE_CHANNELS = [
   'app:getInfo',
   'app:reportError',
   'app:checkUpdate',
+  'app:openLogs',
   'window:setTheme',
   'settings:update',
   'models:loadStore',
@@ -75,7 +76,9 @@ const api = {
     /** 上报渲染进程异常（写入主进程日志） */
     reportError: (message, stack) => invokeValidated('app:reportError', { message, stack }),
     /** 应用内检查更新（E1）：返回 { current, latest?, hasUpdate, releaseUrl? } 或 { error } */
-    checkUpdate: () => invokeValidated('app:checkUpdate')
+    checkUpdate: () => invokeValidated('app:checkUpdate'),
+    /** 在系统资源管理器中打开日志目录（B-04），返回 { ok } 或 { error } */
+    openLogs: () => invokeValidated('app:openLogs')
   },
 
   /** 窗口相关（最小化/最大化/关闭由原生标题栏叠加层控件处理） */

@@ -32,12 +32,15 @@ import {
   sortDirectional,
   state,
   toast,
+  toggleFavorite,
   toggleMultiSelectMode,
   toggleSelectAllFiltered,
   typeInfo
 } from './store/appStore'
 
 const searchInput = ref(state.search)
+/** 搜索框 DOM 引用（Ctrl+F 聚焦用） */
+const searchFieldEl = ref(null)
 let searchTimer = null
 
 // 搜索输入防抖，避免大量模型时每键触发过滤
@@ -104,6 +107,92 @@ function onWindowDrop(e) {
   }
 }
 
+/* ---------------- 全局快捷键（B-03） ---------------- */
+
+/** 事件目标是否为可编辑控件（打字场景，除 Ctrl+F 外交由原生行为） */
+function isEditableTarget(e) {
+  const t = e.target
+  if (!t || !t.tagName) return false
+  return (
+    t.tagName === 'INPUT' ||
+    t.tagName === 'TEXTAREA' ||
+    t.tagName === 'SELECT' ||
+    t.isContentEditable === true
+  )
+}
+
+/** 设置页/占用分析/重复检测面板是否打开（这些场景搜索框不在 DOM 中） */
+function isOverlayPanelOpen() {
+  return state.settingsOpen || state.diskUsage.open || state.dedupe.open
+}
+
+/**
+ * 全局快捷键：
+ * - Ctrl+F 聚焦搜索（面板打开/未选文件夹时无效）；
+ * - Esc 清空搜索词（面板/详情/确认层打开时让位其自有 Esc 逻辑）；
+ * - Ctrl+A 进入多选并全选当前筛选结果；Delete 批量移入回收站（自带确认）；
+ * - Ctrl+D 多选时批量收藏，详情打开时收藏当前模型。
+ * 输入控件内除 Ctrl+F 外不拦截，避免破坏文本编辑。
+ */
+function onGlobalKeydown(e) {
+  const key = e.key.toLowerCase()
+  const ctrl = e.ctrlKey || e.metaKey
+
+  // Ctrl+F：只要网格区可用就聚焦搜索（输入态同样适用，便于随时跳转检索）
+  if (ctrl && key === 'f') {
+    if (isOverlayPanelOpen() || state.scanning || !state.folder) return
+    const el = searchFieldEl.value
+    if (el) {
+      e.preventDefault()
+      el.focus()
+      el.select?.()
+    }
+    return
+  }
+
+  // 输入态保留原生编辑行为；确认层/面板打开时整键让位（F1 独占策略）
+  if (isEditableTarget(e) || state.confirm.visible || isOverlayPanelOpen()) return
+
+  const detailOpen = state.selectedId !== null
+
+  if (e.key === 'Escape') {
+    // 详情打开时 Esc 由 ModelDetail 处理（可能涉及脏表单确认）
+    if (!detailOpen && state.search) {
+      clearSearch()
+      e.preventDefault()
+    }
+    return
+  }
+
+  // 详情打开时仅保留 Ctrl+D 收藏当前模型，其余让位详情
+  if (detailOpen) {
+    if (ctrl && key === 'd') {
+      e.preventDefault()
+      toggleFavorite(state.selectedId)
+    }
+    return
+  }
+
+  if (ctrl && key === 'a' && state.models.length > 0) {
+    e.preventDefault()
+    if (!state.multiSelect.active) toggleMultiSelectMode()
+    if (!allFilteredSelected.value) toggleSelectAllFiltered()
+    return
+  }
+
+  if (ctrl && key === 'd' && state.multiSelect.active && state.multiSelect.ids.length > 0) {
+    e.preventDefault()
+    batchFavorite(true)
+    return
+  }
+
+  // Delete 仅在多选且有选中时触发（批量删除自带确认层，不会直接删文件）
+  if (e.key === 'Delete' && state.multiSelect.active && state.multiSelect.ids.length > 0) {
+    e.preventDefault()
+    batchDeleteModels()
+  }
+}
+
 /* ---------------- 确认层键盘支持（A8） ---------------- */
 
 const confirmCancelBtn = ref(null)
@@ -145,6 +234,7 @@ watch(
 onMounted(async () => {
   window.addEventListener('dragover', onWindowDragOver)
   window.addEventListener('drop', onWindowDrop)
+  window.addEventListener('keydown', onGlobalKeydown)
   // 订阅扫描进度事件
   unsubscribeProgress = window.api.models.onScanProgress((progress) => {
     state.progress = progress
@@ -170,6 +260,7 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('dragover', onWindowDragOver)
   window.removeEventListener('drop', onWindowDrop)
+  window.removeEventListener('keydown', onGlobalKeydown)
   clearTimeout(fsChangedTimer)
   unsubscribeProgress?.()
   unsubscribeMenu?.()
@@ -248,9 +339,10 @@ onUnmounted(() => {
           <div class="search-box" title="搜索名称、备注名、备注与分类标签">
             <span class="search-icon">🔍</span>
             <input
+              ref="searchFieldEl"
               v-model="searchInput"
               type="text"
-              placeholder="搜索名称 / 备注 / 触发词…"
+              placeholder="搜索名称 / 备注 / 触发词…（Ctrl+F 聚焦）"
               spellcheck="false"
             />
             <button v-if="searchInput" class="search-clear" title="清空搜索" @click="clearSearch">✕</button>

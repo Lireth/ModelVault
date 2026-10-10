@@ -152,9 +152,18 @@ export async function saveClipboardImage() {
     }
     const mime = item.types.find((t) => t in MIME_EXT)
     const blob = await item.getType(mime)
+    // 大小预检（B5，与 importCoverFromPath 同一阈值）：剪贴板是唯一不经文件
+    // 对话框的图片入口，合法的超大位图无上限落盘会占满磁盘并连锁导致原子写失败。
+    // 先判 arrayBuffer 字节数，超限零写入（不创建封面目录）
+    const arrayBuffer = await blob.arrayBuffer()
+    if (arrayBuffer.byteLength > MAX_COVER_BYTES) {
+      return {
+        error: `图片文件过大（上限 ${Math.floor(MAX_COVER_BYTES / 1024 / 1024)}MB），请压缩后再导入`
+      }
+    }
     await fs.mkdir(getCoversDir(), { recursive: true })
     const dest = path.join(getCoversDir(), `${Date.now()}-clipboard${MIME_EXT[mime]}`)
-    await fs.writeFile(dest, Buffer.from(await blob.arrayBuffer()))
+    await fs.writeFile(dest, Buffer.from(arrayBuffer))
     logger.info(`剪贴板图片已保存: ${dest}`)
     return { cover: dest }
   } catch (err) {

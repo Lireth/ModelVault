@@ -43,7 +43,11 @@ export function makeComponentApiMock() {
     },
     settings: { update: vi.fn() },
     window: { setTheme: vi.fn(() => Promise.resolve()) },
-    app: { getInfo: vi.fn() }
+    app: {
+      getInfo: vi.fn(),
+      checkUpdate: vi.fn(() => Promise.resolve({ hasUpdate: false })),
+      openLogs: vi.fn(() => Promise.resolve({ ok: true }))
+    }
   }
 }
 

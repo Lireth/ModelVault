@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import fsp from 'node:fs/promises'
+import crypto from 'node:crypto'
 import { strToU8, zipSync, unzipSync } from 'fflate'
 import {
   BACKUP_FORMAT,
@@ -10,7 +11,9 @@ import {
   exportBackup,
   importBackup,
   parseBackupManifest,
-  safeCoverName
+  safeCoverName,
+  unzipBackupAsync,
+  zipBackupAsync
 } from '../src/main/services/backup'
 import { DATA_DIR, setDataRoot } from '../src/main/services/store'
 
@@ -115,6 +118,43 @@ afterAll(() => {
   for (const dir of tmpDirs) {
     fs.rmSync(dir, { recursive: true, force: true })
   }
+})
+
+describe('备份异步压缩/解压（A-01）', () => {
+  it('大体积高熵数据压缩期间事件循环保持响应（分片让出而非同步阻塞）', async () => {
+    // 12MB 随机数据不可压缩，纯 JS deflate(level 6) 耗时数十毫秒量级；
+    // 同步实现会在函数调用栈内一次跑完（1ms 探测时已完成），
+    // 异步分片实现则在压缩进行中仍能响应定时器
+    const files = {
+      'library/covers/big.png': new Uint8Array(crypto.randomBytes(12 * 1024 * 1024))
+    }
+
+    let done = false
+    const pending = zipBackupAsync(files).then((zipped) => {
+      done = true
+      return zipped
+    })
+    await new Promise((resolve) => setTimeout(resolve, 1))
+    expect(done).toBe(false)
+
+    const zipped = await pending
+    expect(zipped).toBeInstanceOf(Uint8Array)
+    expect(zipped.byteLength).toBeGreaterThan(0)
+  })
+
+  it('异步解压与同步实现内容一致（往返正确）', async () => {
+    const files = {
+      'a.txt': strToU8('hello-备份'),
+      'b.bin': new Uint8Array([1, 2, 3, 4])
+    }
+    const unzipped = await unzipBackupAsync(zipSync(files))
+    expect(new TextDecoder().decode(unzipped['a.txt'])).toBe('hello-备份')
+    expect(Array.from(unzipped['b.bin'])).toEqual([1, 2, 3, 4])
+  })
+
+  it('压缩入参无效时 Promise reject（不吞错）', async () => {
+    await expect(zipBackupAsync(null)).rejects.toThrow()
+  })
 })
 
 describe('parseBackupManifest', () => {

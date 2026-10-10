@@ -26,7 +26,7 @@ vi.mock('../src/main/services/scanner.js', async (importOriginal) => {
   return { ...actual, findSidecarText: vi.fn() }
 })
 
-import { decorateModels, resolveCoverSafe, startThumbDrain, clearDeferredOwners } from '../src/main/ipc/models/decorate'
+import { decorateModels, metaSignature, resolveCoverSafe, startThumbDrain, clearDeferredOwners } from '../src/main/ipc/models/decorate'
 import { awaitThumbDrain } from '../src/main/ipc/models/model-state'
 import { loadData, setDataRoot, getModelMeta, setModelMeta, DATA_DIR, COVERS_DIR } from '../src/main/services/store'
 import { findSidecarText } from '../src/main/services/scanner'
@@ -298,5 +298,55 @@ describe('startThumbDrain 窗口生命周期（A7）', () => {
     expect(win.webContents.send).toHaveBeenCalledWith('models:thumbsReady', {
       updates: [{ id: abs, coverUrl: expect.stringContaining('thumbs') }]
     })
+  })
+})
+
+describe('metaSignature（装饰缓存签名，A-08 记忆化表征）', () => {
+  function baseMeta(overrides = {}) {
+    return {
+      cover: '',
+      covers: [],
+      alias: '',
+      note: '',
+      subCategory: '',
+      triggerWords: '',
+      favorite: false,
+      nsfw: false,
+      rating: 0,
+      params: { steps: 20 },
+      hash: '',
+      noteSource: '',
+      triggerWordsSource: '',
+      ...overrides
+    }
+  }
+
+  it('内容相同的独立对象签名一致（按值语义，缓存不得按引用返回不同结果）', () => {
+    expect(metaSignature(baseMeta())).toBe(metaSignature(baseMeta()))
+  })
+
+  it('同一对象重复调用结果稳定', () => {
+    const meta = baseMeta()
+    const first = metaSignature(meta)
+    expect(typeof first).toBe('string')
+    expect(metaSignature(meta)).toBe(first)
+  })
+
+  it.each([
+    ['cover', { cover: '.modelvault/covers/a.png' }],
+    ['covers', { covers: ['a.png'] }],
+    ['alias', { alias: '别名' }],
+    ['note', { note: '备注' }],
+    ['subCategory', { subCategory: 'role' }],
+    ['triggerWords', { triggerWords: 'word' }],
+    ['favorite', { favorite: true }],
+    ['nsfw', { nsfw: true }],
+    ['rating', { rating: 5 }],
+    ['params', { params: { steps: 28 } }],
+    ['hash', { hash: 'a'.repeat(64) }],
+    ['noteSource', { noteSource: 'sidecar' }],
+    ['triggerWordsSource', { triggerWordsSource: 'sidecar' }]
+  ])('%s 变化时签名改变', (_key, overrides) => {
+    expect(metaSignature(baseMeta(overrides))).not.toBe(metaSignature(baseMeta()))
   })
 })
