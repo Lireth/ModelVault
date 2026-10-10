@@ -13,12 +13,16 @@ import {
   diskUsage,
   filteredModels,
   formatSize,
+  keeperReason,
   largestModels,
   multiSelectIdSet,
   openDiskUsage,
+  pickDuplicateKeeper,
   rejectConfirm,
+  removeDedupeItem,
   saveSettings,
   selectedModel,
+  smartCleanDuplicates,
   sortDirectional,
   state,
   toast,
@@ -88,6 +92,10 @@ beforeEach(() => {
   state.detailDirty = false
   state.settingsOpen = false
   state.diskUsage.open = false
+  state.dedupe.open = false
+  state.dedupe.running = false
+  state.dedupe.canceled = false
+  state.dedupe.groups = []
   state.toasts.splice(0, state.toasts.length)
   if (state.confirm.resolve) state.confirm.resolve(false)
   state.confirm = { visible: false, text: '', resolve: null }
@@ -591,5 +599,135 @@ describe('磁盘占用分析（FEAT-1）', () => {
     expect(state.diskUsage.open).toBe(true)
     closeDiskUsage()
     expect(state.diskUsage.open).toBe(false)
+  })
+})
+
+describe('重复检测分组与智能清理（OPT-4 / FEAT-2）', () => {
+  /** 构造重复组（gid 为内容哈希） */
+  function makeGroup(gid, items) {
+    return { gid, size: items[0]?.size || 1000, items }
+  }
+
+  it('pickDuplicateKeeper：收藏优先于评分，评分优先于备注', () => {
+    const items = [
+      makeModel('a', { name: 'a', rating: 5, note: '备注' }),
+      makeModel('b', { name: 'b', favorite: true }),
+      makeModel('c', { name: 'c', note: '也有备注', alias: '别名' })
+    ]
+    expect(pickDuplicateKeeper(items).id).toBe('b')
+    // 移除收藏项后，5 星评分胜出
+    expect(pickDuplicateKeeper([items[0], items[2]]).id).toBe('a')
+  })
+
+  it('pickDuplicateKeeper：可疑命名降分，同分时名称短者优先且顺序无关', () => {
+    const items = [makeModel('x', { name: 'model (1)' }), makeModel('y', { name: 'model' })]
+    expect(pickDuplicateKeeper(items).id).toBe('y')
+    const tie = [makeModel('long-name'), makeModel('s')]
+    expect(pickDuplicateKeeper(tie).id).toBe('s')
+    expect(pickDuplicateKeeper([...tie].reverse()).id).toBe('s')
+  })
+
+  it('pickDuplicateKeeper：空组/非法输入返回 null', () => {
+    expect(pickDuplicateKeeper([])).toBeNull()
+    expect(pickDuplicateKeeper(null)).toBeNull()
+  })
+
+  it('keeperReason 按权重顺序给出主导理由', () => {
+    expect(keeperReason(makeModel('a', { favorite: true, rating: 5 }))).toBe('已收藏')
+    expect(keeperReason(makeModel('a', { rating: 3 }))).toBe('评分 3 星')
+    expect(keeperReason(makeModel('a', { note: 'x' }))).toBe('有备注')
+    expect(keeperReason(makeModel('a', { alias: 'x' }))).toBe('有备注名')
+    expect(keeperReason(makeModel('a', { triggerWords: 'x' }))).toBe('有触发词')
+    expect(keeperReason(makeModel('a', {}))).toBe('命名/路径更规范')
+  })
+
+  it('removeDedupeItem 按 gid 定位；组内不足 2 个时整组消失（OPT-4）', () => {
+    state.dedupe.groups = [
+      makeGroup('h1', [makeModel('a'), makeModel('b')]),
+      makeGroup('h2', [makeModel('c'), makeModel('d')])
+    ]
+    removeDedupeItem('h1', 'a')
+    expect(state.dedupe.groups).toHaveLength(1)
+    expect(state.dedupe.groups[0].gid).toBe('h2')
+    // 未知 gid 静默忽略（索引漂移不再导致误删其他组）
+    removeDedupeItem('nope', 'c')
+    expect(state.dedupe.groups).toHaveLength(1)
+  })
+
+  it('smartCleanDuplicates：保留评分最高副本，其余移入回收站并同步列表/分组', async () => {
+    const items = [
+      makeModel('keep', { rating: 5 }),
+      makeModel('t1'),
+      makeModel('t2')
+    ]
+    state.models = [...items]
+    state.dedupe.groups = [makeGroup('h1', items)]
+    api.models.deleteModel.mockResolvedValue({ ok: true })
+    const p = smartCleanDuplicates()
+    acceptConfirm()
+    const res = await p
+    expect(res.ok).toBe(true)
+    expect(res.deleted).toBe(2)
+    expect(res.failed).toBe(0)
+    expect(api.models.deleteModel).toHaveBeenCalledTimes(2)
+    // 保留项未删；列表仅剩保留项
+    expect(state.models.map((m) => m.id)).toEqual(['keep'])
+    // 组内不足 2 个 → 整组消失
+    expect(state.dedupe.groups).toHaveLength(0)
+    expect(state.toasts.some((t) => t.text.includes('智能清理完成'))).toBe(true)
+  })
+
+  it('smartCleanDuplicates：部分删除失败时按成功数同步并汇总提示', async () => {
+    const items = [makeModel('k', { rating: 5 }), makeModel('t1'), makeModel('t2')]
+    state.models = [...items]
+    state.dedupe.groups = [makeGroup('h1', items)]
+    api.models.deleteModel.mockImplementation((id) =>
+      id === 't1' ? Promise.resolve({ ok: true }) : Promise.reject(new Error('回收站不可用'))
+    )
+    const p = smartCleanDuplicates()
+    acceptConfirm()
+    const res = await p
+    expect(res.deleted).toBe(1)
+    expect(res.failed).toBe(1)
+    expect(state.models.map((m) => m.id)).toEqual(['k', 't2'])
+    expect(state.dedupe.groups).toHaveLength(1)
+    expect(state.toasts.some((t) => t.text.includes('失败 1 个'))).toBe(true)
+  })
+
+  it('smartCleanDuplicates：确认取消时不删除任何文件', async () => {
+    const items = [makeModel('k', { rating: 5 }), makeModel('t1')]
+    state.models = [...items]
+    state.dedupe.groups = [makeGroup('h1', items)]
+    const p = smartCleanDuplicates()
+    rejectConfirm()
+    const res = await p
+    expect(res.ok).toBe(false)
+    expect(res.canceled).toBe(true)
+    expect(api.models.deleteModel).not.toHaveBeenCalled()
+    expect(state.models).toHaveLength(2)
+  })
+
+  it('smartCleanDuplicates：指定 gid 只清理该组', async () => {
+    const g1 = [makeModel('k1', { rating: 5 }), makeModel('t1')]
+    const g2 = [makeModel('k2', { favorite: true }), makeModel('t2')]
+    state.models = [...g1, ...g2]
+    state.dedupe.groups = [makeGroup('h1', g1), makeGroup('h2', g2)]
+    api.models.deleteModel.mockResolvedValue({ ok: true })
+    const p = smartCleanDuplicates(['h2'])
+    acceptConfirm()
+    const res = await p
+    expect(res.deleted).toBe(1)
+    expect(api.models.deleteModel).toHaveBeenCalledTimes(1)
+    expect(api.models.deleteModel).toHaveBeenCalledWith('t2')
+    expect(state.models.map((m) => m.id)).toEqual(['k1', 't1', 'k2'])
+    expect(state.dedupe.groups.map((g) => g.gid)).toEqual(['h1'])
+  })
+
+  it('smartCleanDuplicates：无组时提示且不删除', async () => {
+    state.dedupe.groups = []
+    const res = await smartCleanDuplicates()
+    expect(res.ok).toBe(false)
+    expect(api.models.deleteModel).not.toHaveBeenCalled()
+    expect(state.toasts.some((t) => t.text.includes('没有可清理的重复组'))).toBe(true)
   })
 })
