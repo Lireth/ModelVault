@@ -8,7 +8,6 @@ import ToastHost from './components/ToastHost.vue'
 import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import DedupePanel from './components/DedupePanel.vue'
 import DiskUsagePanel from './components/DiskUsagePanel.vue'
-import ViewTabs from './components/ViewTabs.vue'
 import OrganizePanel from './components/OrganizePanel.vue'
 import {
   acceptConfirm,
@@ -60,15 +59,6 @@ function clearSearch() {
   searchInput.value = ''
   state.search = ''
 }
-
-// B-02：切换标签页后搜索框内容同步为目标视图的搜索词（挂起的防抖写入作废）
-watch(
-  () => state.activeViewId,
-  () => {
-    clearTimeout(searchTimer)
-    searchInput.value = state.search
-  }
-)
 
 /** 切换排序方式：立即生效并静默持久化，重启后保持用户选择 */
 async function onSortChange(e) {
@@ -340,8 +330,6 @@ onUnmounted(() => {
 
         <!-- 模型预览区 -->
         <template v-else>
-        <!-- 多视图标签页（B-02） -->
-        <ViewTabs />
         <!-- 重扫失败但仍有上次结果：顶部错误横幅（B15） -->
         <div v-if="state.scanError && !state.scanning && state.models.length > 0" class="scan-error-bar">
           <span class="scan-error-text" :title="state.scanError">⚠ {{ state.scanError }}</span>

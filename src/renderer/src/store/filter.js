@@ -1,6 +1,5 @@
 import { computed, watch } from 'vue'
 import { state, MODEL_TYPES, SUB_MAP, sortDirectional } from './state'
-import { isApplyingView } from './views'
 
 /**
  * 筛选/搜索/排序派生状态（A-04 自 appStore.js 拆出）。
@@ -98,12 +97,10 @@ export const typeCounts = computed(() => {
   return counts
 })
 
-// 切换主分类时清空 LoRA 子分类筛选，避免残留条件。
-// B-02：标签页切换是整体换入字段（目标视图可能自带 lora 子分类），
-// 期间的 typeFilter 变化不得触发清空（isApplyingView 守卫）
+// 切换主分类时清空 LoRA 子分类筛选，避免残留条件
 watch(
   () => state.typeFilter,
   () => {
-    if (!isApplyingView()) state.subFilter = ''
+    state.subFilter = ''
   }
 )

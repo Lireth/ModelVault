@@ -7,7 +7,6 @@ import {
   moveIdsToDir,
   openOrganize,
   renameOrganizeFolder,
-  resetViews,
   setOrganizeTargetDir,
   state
 } from '../src/renderer/src/store/appStore'
@@ -55,7 +54,6 @@ beforeEach(() => {
   state.toasts.splice(0, state.toasts.length)
   if (state.confirm.resolve) state.confirm.resolve(false)
   state.confirm = { visible: false, text: '', resolve: null }
-  resetViews()
 })
 
 function makeModel(id, relDir) {

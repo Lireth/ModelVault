@@ -22,7 +22,6 @@ import {
   pickDuplicateKeeper,
   rejectConfirm,
   removeDedupeItem,
-  resetViews,
   saveSettings,
   scanModels,
   selectedModel,
@@ -98,7 +97,6 @@ beforeEach(() => {
   state.settingsOpen = false
   state.organize.open = false
   state.organize.pendingIds = []
-  resetViews()
   state.diskUsage.open = false
   state.dedupe.open = false
   state.dedupe.running = false

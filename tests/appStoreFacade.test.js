@@ -51,16 +51,6 @@ const EXPECTED_EXPORTS = [
   // 派生
   'filteredModels',
   'typeCounts',
-  // B-02 多视图标签页
-  'MAX_VIEWS',
-  'activeView',
-  'createView',
-  'initViews',
-  'switchView',
-  'addView',
-  'closeView',
-  'viewLabel',
-  'resetViews',
   // 磁盘占用
   'diskUsage',
   'largestModels',

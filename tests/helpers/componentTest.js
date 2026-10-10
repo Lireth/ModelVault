@@ -1,5 +1,5 @@
 import { beforeEach, vi } from 'vitest'
-import { defaultSettings, resetViews, state } from '../../src/renderer/src/store/appStore'
+import { defaultSettings, state } from '../../src/renderer/src/store/appStore'
 
 /**
  * 渲染层组件测试通用装配（OPT-16 测试基建）：
@@ -87,7 +87,6 @@ function resetStoreState() {
     orphans: [],
     newcomers: []
   }
-  resetViews()
   state.settingsOpen = false
   state.settings = defaultSettings()
   state.toasts.splice(0, state.toasts.length)

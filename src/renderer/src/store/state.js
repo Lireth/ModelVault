@@ -142,10 +142,6 @@ export const state = reactive({
   dedupe: { open: false, running: false, progress: null, groups: [], canceled: false },
   // 磁盘占用分析面板（FEAT-1）
   diskUsage: { open: false },
-  // 视图标签页（B-02）：每个视图独立持有筛选/搜索/排序；由 views.js 播种
-  // 平铺筛选字段（typeFilter 等）始终是活动视图字段的镜像
-  views: [],
-  activeViewId: '',
   // 应用内整理面板（B-06）：dirs 为主进程返回的库内目录（含空目录），
   // pendingIds 为待移动模型，orphans/newcomers 为失联标注绑定候选
   organize: {

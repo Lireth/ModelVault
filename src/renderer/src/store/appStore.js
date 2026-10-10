@@ -64,19 +64,6 @@ export {
 // 筛选派生
 export { filteredModels, typeCounts } from './filter'
 
-// 多视图标签页（B-02）
-export {
-  MAX_VIEWS,
-  activeView,
-  createView,
-  initViews,
-  switchView,
-  addView,
-  closeView,
-  viewLabel,
-  resetViews
-} from './views'
-
 // 磁盘占用分析
 export { diskUsage, largestModels, openDiskUsage, closeDiskUsage } from './disk-usage'
 
