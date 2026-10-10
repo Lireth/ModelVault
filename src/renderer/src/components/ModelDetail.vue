@@ -54,7 +54,7 @@ function fillForm(model) {
   // 大模型自动标注为「基底模型」分类
   if (model?.type === 'checkpoint') form.subCategory = 'base'
   // 脏检测基线快照（C8）：填充后与表单当前值对比
-  formSnapshot = JSON.stringify(form)
+  formSnapshot.value = JSON.stringify(form)
 }
 
 /** 切换二级分类标签（再次点击取消标注）；基底模型为自动分类，不可手动更改 */
@@ -65,11 +65,16 @@ function toggleSubCategory(key) {
 
 /* ---------------- 表单脏数据保护（C8） ---------------- */
 
-/** 填充后的表单快照（序列化值），用于脏检测 */
-let formSnapshot = ''
+/**
+ * 填充后的表单快照（序列化值），用于脏检测。
+ * 必须为 ref：plain 变量不参与响应式依赖追踪——保存后重置快照不会令
+ * formDirty 重算（随后同 id 的引用替换又走「保留编辑」跳分支），
+ * detailDirty 将残留 true，切换/关闭模型时误弹「有未保存修改」确认。
+ */
+const formSnapshot = ref('')
 
 /** 表单是否有未保存的修改（与最近一次填充/保存的值不一致） */
-const formDirty = computed(() => JSON.stringify(form) !== formSnapshot)
+const formDirty = computed(() => JSON.stringify(form) !== formSnapshot.value)
 
 watch(selectedModel, (m, old) => {
   // 同一模型的引用替换（收藏/评分、后台缩略图补齐）且表单有未保存编辑时
@@ -242,10 +247,10 @@ async function onSave() {
     }
     // 触发词仅 LoRA 详情页提供编辑
     if (model.type === 'lora') payload.triggerWords = form.triggerWords
-    await saveModelData(model.id, payload)
-    // 保存成功后以当前表单为新基线（C8）：立即清除脏标记；
-    // 随后 selectedModel 引用替换触发重填时会再按服务端值刷新快照
-    formSnapshot = JSON.stringify(form)
+    const saved = await saveModelData(model.id, payload)
+    // 仅保存成功才以当前表单刷新基线（C8）；失败时保留脏标记，
+    // 用户可重试，且切换/关闭模型时仍会收到未保存修改的确认
+    if (saved) formSnapshot.value = JSON.stringify(form)
   } catch (err) {
     toast('error', `保存失败: ${err.message}`)
   } finally {
