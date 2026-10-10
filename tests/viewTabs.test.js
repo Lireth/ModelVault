@@ -68,13 +68,13 @@ describe('ViewTabs 标签栏', () => {
     expect(state.views).toHaveLength(1)
   })
 
-  it('标签标题反映活动条件（目录筛选）', async () => {
+  it('标签标题反映活动条件（搜索词）', async () => {
     resetViews()
     state.folder = 'D:\\models'
-    state.dirFilter = 'lora/role'
+    state.search = 'girl'
     await flushPromises()
     const wrapper = mount(ViewTabs)
-    expect(wrapper.find('.view-tab-label').text()).toBe('📁 role')
+    expect(wrapper.find('.view-tab-label').text()).toBe('搜索：girl')
   })
 
   it('达到上限后新建按钮禁用', async () => {

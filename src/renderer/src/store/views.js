@@ -7,7 +7,7 @@ import { state, typeInfo, subCategoryInfo } from './state'
  * 便于同时保留「全部 / 某分类 / 某搜索词 / 收藏」等多个浏览视图。
  *
  * 实现方式：state 上的平铺筛选字段（typeFilter/subFilter/showFavoritesOnly/
- * dirFilter/search/sortBy/sortAsc）始终是**活动视图的镜像**——既有组件全部
+ * search/sortBy/sortAsc）始终是**活动视图的镜像**——既有组件全部
  * 继续读写 state.xxx，零改造；切换时快照旧视图、整体换入新视图，
  * 字段变更经侦听器自动回写活动视图。
  */
@@ -17,7 +17,6 @@ export const VIEW_FIELDS = [
   'typeFilter',
   'subFilter',
   'showFavoritesOnly',
-  'dirFilter',
   'search',
   'sortBy',
   'sortAsc'
@@ -36,7 +35,6 @@ export function createView(overrides = {}) {
     typeFilter: 'all',
     subFilter: '',
     showFavoritesOnly: false,
-    dirFilter: '',
     search: '',
     sortBy: state.settings.sortBy || state.sortBy || 'name',
     sortAsc: state.settings.sortAsc !== false,
@@ -120,16 +118,12 @@ export function closeView(id) {
 
 /**
  * 视图自动命名（标签标题）：按最具区分度的条件取一个。
- * 搜索词 > 目录 > 收藏 > LoRA 子分类 > 主分类 > 视图序号。
+ * 搜索词 > 收藏 > LoRA 子分类 > 主分类 > 视图序号。
  * @param {object} view 视图对象
  * @param {number} index 视图序号（从 0 开始）
  */
 export function viewLabel(view, index) {
   if (view.search) return `搜索：${view.search.slice(0, 12)}`
-  if (view.dirFilter) {
-    const segs = view.dirFilter.split('/')
-    return `📁 ${segs[segs.length - 1]}`
-  }
   if (view.showFavoritesOnly) return '★ 收藏'
   if (view.subFilter) {
     const info = subCategoryInfo(view.subFilter)

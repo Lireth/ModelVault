@@ -102,12 +102,6 @@ export async function renameOrganizeFolder({ dir, newName } = {}) {
       toast('error', res.error)
       return false
     }
-    // 活动视图的目录筛选若落在旧子树内，平移到新路径，避免网格瞬间清空
-    if (state.dirFilter === dir) {
-      state.dirFilter = res.newDir
-    } else if (state.dirFilter.startsWith(`${dir}/`)) {
-      state.dirFilter = res.newDir + state.dirFilter.slice(dir.length)
-    }
     if (state.organize.targetDir === dir) state.organize.targetDir = res.newDir
     toast('success', `文件夹已重命名${res.moved ? `，${res.moved} 条标注已随迁` : ''}`)
     await Promise.all([

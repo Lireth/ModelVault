@@ -40,7 +40,6 @@ beforeEach(() => {
   state.folder = 'D:\\models'
   state.scanning = false
   state.models = []
-  state.dirFilter = ''
   state.multiSelect = { active: false, ids: [] }
   state.selectedId = null
   state.organize = {
@@ -99,8 +98,7 @@ describe('createOrganizeFolder 新建文件夹', () => {
 })
 
 describe('renameOrganizeFolder 重命名文件夹', () => {
-  it('成功后局部扫描新旧子树、平移活动目录筛选、刷新目录', async () => {
-    state.dirFilter = 'lora/role'
+  it('成功后局部扫描新旧子树并刷新目录', async () => {
     api.models.renameFolder.mockResolvedValue({ ok: true, oldDir: 'lora', newDir: 'loras', moved: 2 })
     const ok = await renameOrganizeFolder({ dir: 'lora', newName: 'loras' })
     expect(ok).toBe(true)
@@ -109,10 +107,9 @@ describe('renameOrganizeFolder 重命名文件夹', () => {
       folder: 'D:\\models',
       dirs: ['lora', 'loras']
     })
-    expect(state.dirFilter).toBe('loras/role')
   })
 
-  it('目标正是被重命名目录本身时筛选改为新路径', async () => {
+  it('目标正是被重命名目录本身时目标平移到新路径', async () => {
     state.organize.targetDir = 'lora'
     api.models.renameFolder.mockResolvedValue({ ok: true, oldDir: 'lora', newDir: 'loras', moved: 0 })
     await renameOrganizeFolder({ dir: 'lora', newName: 'loras' })

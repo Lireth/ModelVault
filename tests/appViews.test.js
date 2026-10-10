@@ -33,7 +33,6 @@ describe('视图播种与镜像', () => {
     expect(state.views).toHaveLength(1)
     expect(state.activeViewId).toBe(activeView.value.id)
     expect(state.typeFilter).toBe('all')
-    expect(state.dirFilter).toBe('')
   })
 })
 
@@ -53,7 +52,6 @@ describe('addView / switchView 视图隔离', () => {
 
     // 新视图改成收藏筛选
     state.showFavoritesOnly = true
-    state.dirFilter = 'lora'
     await nextTick()
 
     // 切回旧视图：lora + 搜索词原样恢复
@@ -62,13 +60,11 @@ describe('addView / switchView 视图隔离', () => {
     expect(state.typeFilter).toBe('lora')
     expect(state.search).toBe('角色')
     expect(state.showFavoritesOnly).toBe(false)
-    expect(state.dirFilter).toBe('')
 
-    // 再切到新视图：收藏 + 目录条件仍在
+    // 再切到新视图：收藏条件仍在
     switchView(second)
     await nextTick()
     expect(state.showFavoritesOnly).toBe(true)
-    expect(state.dirFilter).toBe('lora')
   })
 
   it('切换到自带 lora 子分类的视图时，子分类不被「切主分类清空子分类」联动误清', async () => {
@@ -131,13 +127,12 @@ describe('closeView 关闭标签页', () => {
 })
 
 describe('viewLabel 自动命名', () => {
-  it('按搜索词 > 目录 > 收藏 > 子分类 > 主分类 > 序号 优先级', () => {
+  it('按搜索词 > 收藏 > 子分类 > 主分类 > 序号 优先级', () => {
     expect(viewLabel({ typeFilter: 'all' }, 0)).toBe('视图 1')
     expect(viewLabel({ typeFilter: 'lora' }, 1)).toContain('LoRA')
     expect(viewLabel({ typeFilter: 'lora', subFilter: 'role' }, 0)).toContain('角色')
     expect(viewLabel({ showFavoritesOnly: true, typeFilter: 'lora' }, 0)).toContain('收藏')
-    expect(viewLabel({ dirFilter: 'a/b', showFavoritesOnly: true }, 0)).toBe('📁 b')
-    expect(viewLabel({ search: 'girl', dirFilter: 'a' }, 0)).toBe('搜索：girl')
+    expect(viewLabel({ search: 'girl', showFavoritesOnly: true }, 0)).toBe('搜索：girl')
   })
 })
 

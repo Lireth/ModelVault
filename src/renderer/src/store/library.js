@@ -136,9 +136,6 @@ export async function scanModels() {
     }
     state.models = res.models
     state.lastScan = { count: res.models.length, durationMs: res.durationMs }
-    // B-01：全量扫描（选库/切库/手动重扫）后目录结构可能已变，
-    // 重置活动视图的目录筛选，避免网格停留在已不存在的目录子树
-    state.dirFilter = ''
     // A-02：主进程自动重关联了被移动/重命名模型的标注时，告知用户数量
     const relinkedSuffix = res.relinked > 0
       ? `（已自动重新关联 ${res.relinked} 个移动/重命名模型的标注）`

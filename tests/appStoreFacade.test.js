@@ -51,10 +51,6 @@ const EXPECTED_EXPORTS = [
   // 派生
   'filteredModels',
   'typeCounts',
-  // B-01 目录树
-  'buildFolderTree',
-  'flattenTree',
-  'ancestorDirs',
   // B-02 多视图标签页
   'MAX_VIEWS',
   'activeView',

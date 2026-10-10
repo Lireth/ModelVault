@@ -64,9 +64,6 @@ export {
 // 筛选派生
 export { filteredModels, typeCounts } from './filter'
 
-// 目录结构树（B-01）
-export { buildFolderTree, flattenTree, ancestorDirs } from './folder-tree'
-
 // 多视图标签页（B-02）
 export {
   MAX_VIEWS,

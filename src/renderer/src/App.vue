@@ -70,13 +70,6 @@ watch(
   }
 )
 
-/** 目录筛选 chip 文案：显示末段目录名（根目录直属不会出现在筛选态） */
-const dirFilterLabel = computed(() => {
-  if (!state.dirFilter) return ''
-  const segs = state.dirFilter.split('/')
-  return `📁 ${segs[segs.length - 1]}`
-})
-
 /** 切换排序方式：立即生效并静默持久化，重启后保持用户选择 */
 async function onSortChange(e) {
   state.sortBy = e.target.value
@@ -473,10 +466,6 @@ onUnmounted(() => {
             <span v-if="state.typeFilter !== 'all'" class="chip">
               {{ typeInfo(state.typeFilter).label }}
             </span>
-            <!-- 目录筛选（B-01）：可点击 ✕ 取消 -->
-            <button v-if="state.dirFilter" class="chip chip-clearable" :title="state.dirFilter" @click="state.dirFilter = ''">
-              {{ dirFilterLabel }} <span class="chip-clear">✕</span>
-            </button>
             <!-- 收藏筛选：仅显示收藏的模型 -->
             <button
               class="fav-filter"

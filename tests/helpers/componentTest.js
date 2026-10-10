@@ -69,7 +69,6 @@ function resetStoreState() {
   state.typeFilter = 'all'
   state.subFilter = ''
   state.showFavoritesOnly = false
-  state.dirFilter = ''
   state.search = ''
   state.sortBy = 'name'
   state.sortAsc = true

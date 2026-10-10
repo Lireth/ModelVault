@@ -9,13 +9,11 @@ import {
   openDedupe,
   openDiskUsage,
   openOrganize,
-  moveIdsToDir,
   removeRoot,
   scanModels,
   openSettings,
   switchRoot
 } from '../store/appStore'
-import FolderTree from './FolderTree.vue'
 
 const folderName = computed(() => {
   if (!state.folder) return '未选择文件夹'
@@ -38,16 +36,6 @@ function rootName(f) {
 
 function selectType(key) {
   state.typeFilter = key
-}
-
-/** 目录筛选（B-01）：点击目录限定到其子树；点击已选目录或根节点取消筛选 */
-function selectDir(path) {
-  state.dirFilter = state.dirFilter === path || path === '' ? '' : path
-}
-
-/** 拖拽模型卡片到目录树归位（B-06） */
-function onMoveToDir({ ids, dir }) {
-  moveIdsToDir(ids, dir)
 }
 
 function onScanClick() {
@@ -119,18 +107,6 @@ function onScanClick() {
           </button>
         </li>
       </ul>
-    </div>
-
-    <!-- 目录结构树（B-01）：点击按文件夹筛选，B-06 起支持拖拽归位 -->
-    <div v-if="state.folder && state.models.length" class="side-section dir-tree-section">
-      <h3>目录</h3>
-      <FolderTree
-        :models="state.models"
-        :selected="state.dirFilter"
-        droppable
-        @select="selectDir"
-        @move="onMoveToDir"
-      />
     </div>
 
     <div class="side-section">
@@ -394,7 +370,6 @@ function onScanClick() {
   .type-label,
   .type-count,
   .side-section h3,
-  .dir-tree-section,
   .action-section {
     display: none;
   }
