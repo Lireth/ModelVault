@@ -6,6 +6,7 @@ import logger from '../logger'
 import { atomicWriteFile } from './atomic-write'
 import { notifyStoreSaveError } from './store-events'
 import { isEmptyModelMeta, planMetaRelinks, splitRelKey } from './meta-relink'
+import { ALL_CATEGORY_KEYS } from '../../shared/model-categories'
 import {
   COVERS_DIR,
   DATA_DIR,
@@ -27,14 +28,11 @@ import {
  * 首次对某根目录启用时自动从旧版全局存储迁移。
  */
 
-/** 「其他模型」允许的二级分类标签 */
-const VALID_SUB_CATEGORIES = new Set([
-  'embedding', 'controlnet', 'upscale', 'hypernetwork', 'other',
-  // LoRA 分类标签
-  'role', 'style', 'concept', 'outfit', 'background', 'pose', 'tool',
-  // Checkpoint 自动分类
-  'base'
-])
+/**
+ * 允许的二级分类标签 key 集合（A-12 单一来源：src/shared/model-categories.js，
+ * 与渲染层 SUB_CATEGORIES/LORA_TAGS/CHECKPOINT_TAGS 共用同一定义）
+ */
+const VALID_SUB_CATEGORIES = ALL_CATEGORY_KEYS
 
 /** 防抖落盘延迟（ms） */
 const SAVE_DELAY = 500

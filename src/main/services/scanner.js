@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { abortError } from '../utils'
+import { MODEL_EXTENSION_SET } from '../../shared/model-extensions'
 
 /**
  * 模型扫描模块：递归遍历用户选择的模型根目录，
@@ -8,8 +9,11 @@ import { abortError } from '../utils'
  * 全程使用异步文件 API，不阻塞主进程事件循环。
  */
 
-/** 支持的模型文件扩展名 */
-export const MODEL_EXTENSIONS = new Set(['.safetensors', '.ckpt', '.pt', '.pth', '.bin'])
+/**
+ * 支持的模型文件扩展名（A-12 单一来源：src/shared/model-extensions.js）。
+ * 保留导出以兼容既有引用（store-settings 已改为直接从 shared 导入）。
+ */
+export const MODEL_EXTENSIONS = MODEL_EXTENSION_SET
 
 /** 支持的图片扩展名（用于封面/预览图识别） */
 export const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'])
