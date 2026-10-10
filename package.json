@@ -29,6 +29,10 @@
     "fflate": "^0.8.3",
     "vue": "^3.5.43"
   },
+  "overrides": {
+    "fast-uri": "3.1.8",
+    "http-cache-semantics": "4.3.0"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@vitejs/plugin-vue": "^6.0.9",
