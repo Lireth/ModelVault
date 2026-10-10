@@ -112,7 +112,7 @@ ModelVault/
 │           │   ├── SettingsPage.vue      # 设置页（占据模型预览区）
 │           │   └── ToastHost.vue         # 轻提示通知
 │           └── assets/styles/    # 全局样式
-├── tests/                        # vitest 单元测试（主进程纯逻辑 + IPC handler + 渲染层 store）
+├── tests/                        # vitest 单元测试（主进程纯逻辑 + IPC handler + 渲染层 store 与组件）
 ├── electron.vite.config.mjs      # electron-vite 配置
 ├── electron-builder.yml          # 打包配置（portable 单文件）
 └── package.json
@@ -179,9 +179,13 @@ const api = {
 
 ### 测试
 
-单元测试位于 `tests/`，仅覆盖主进程无 UI 纯逻辑（扫描分类、元数据规范化、
-路径关联等）；Electron API 在 `tests/setup.js` 中统一 mock。新增纯函数
-模块时请同步补充用例，运行 `npm test` 验证。
+单元测试位于 `tests/`：
+
+- **主进程纯逻辑与 IPC handler**：扫描分类、元数据规范化、路径关联、原子写入等（node 环境）；
+- **渲染层 store**：`tests/appStore.test.js`（筛选/排序/批量操作/占用统计/智能清理等）；
+- **渲染层组件交互**：`tests/modelCard.test.js`、`topBar.test.js`、`dedupePanel.test.js`、`sidebar.test.js`，基于 `@vue/test-utils` + jsdom（文件头 `// @vitest-environment jsdom` 声明 DOM 环境，通用装配见 `tests/helpers/componentTest.js`）。
+
+Electron API 在 `tests/setup.js` 中统一 mock。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证。
 
 ## 打包说明
 

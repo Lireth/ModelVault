@@ -23,9 +23,17 @@ export default [
     }
   },
   {
-    files: ['src/main/**/*.js', 'src/preload/**/*.js', 'tests/**/*.js', 'scripts/**/*.mjs', '*.mjs'],
+    files: ['src/main/**/*.js', 'src/preload/**/*.js', 'scripts/**/*.mjs', '*.mjs'],
     languageOptions: {
       globals: { ...globals.node }
+    }
+  },
+  {
+    // 组件测试（OPT-16）运行于 jsdom 环境（文件头 @vitest-environment jsdom），
+    // 需要 window/document/事件构造器等浏览器全局；Node 全局仍然可用
+    files: ['tests/**/*.js'],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.browser }
     }
   },
   {
