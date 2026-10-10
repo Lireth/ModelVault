@@ -6,17 +6,13 @@ import {
   batchDeleteModels,
   batchFavorite,
   batchSetSubCategory,
-  closeDiskUsage,
   confirmDialog,
   deleteModel,
   dismissToast,
-  diskUsage,
   filteredModels,
   formatSize,
   importCoversFromDrop,
-  largestModels,
   multiSelectIdSet,
-  openDiskUsage,
   partialScanModels,
   rejectConfirm,
   saveSettings,
@@ -93,7 +89,6 @@ beforeEach(() => {
   state.settingsOpen = false
   state.organize.open = false
   state.organize.pendingIds = []
-  state.diskUsage.open = false
   state.toasts.splice(0, state.toasts.length)
   if (state.confirm.resolve) state.confirm.resolve(false)
   state.confirm = { visible: false, text: '', resolve: null }
@@ -677,64 +672,6 @@ describe('applyThumbUpdates', () => {
     expect(state.models[1].coverUrl).toBe('orig2')
     applyThumbUpdates('not-an-array')
     expect(state.models).toHaveLength(2)
-  })
-})
-
-describe('磁盘占用分析（FEAT-1）', () => {
-  it('diskUsage 按分类与顶层目录聚合总大小', () => {
-    state.models = [
-      makeModel('a', { type: 'checkpoint', size: 3000, relDir: 'Checkpoints' }),
-      makeModel('b', { type: 'lora', size: 1000, relDir: 'Loras/sub' }),
-      makeModel('c', { type: 'lora', size: 500 })
-    ]
-    const usage = diskUsage.value
-    expect(usage.total).toBe(4500)
-    expect(usage.count).toBe(3)
-    // 分类顺序遵循 MODEL_TYPES，仅保留有占用的分类
-    expect(usage.byType).toEqual([
-      { key: 'checkpoint', label: 'Checkpoint/大模型', color: '#4f9cf9', size: 3000 },
-      { key: 'lora', label: 'LoRA', color: '#b18cff', size: 1500 }
-    ])
-    // 目录按 relDir 首段归类（无 relDir 归「(根目录)」），按大小降序
-    expect(usage.byDir).toEqual([
-      { name: 'Checkpoints', size: 3000 },
-      { name: 'Loras', size: 1000 },
-      { name: '(根目录)', size: 500 }
-    ])
-  })
-
-  it('diskUsage 忽略非有限 size，空库返回零值', () => {
-    state.models = [makeModel('bad', { size: undefined })]
-    expect(diskUsage.value.total).toBe(0)
-    state.models = []
-    expect(diskUsage.value).toEqual({ total: 0, count: 0, byType: [], byDir: [] })
-  })
-
-  it('largestModels 按大小降序并截取到上限', () => {
-    state.models = [
-      makeModel('small', { size: 100 }),
-      makeModel('big', { size: 9000 }),
-      makeModel('mid', { size: 5000 }),
-      makeModel('bad', { size: undefined })
-    ]
-    expect(largestModels.value.map((m) => m.id)).toEqual(['big', 'mid', 'small'])
-  })
-
-  it('largestModels 上限为 20：超出部分截断', () => {
-    state.models = Array.from({ length: 25 }, (_, i) =>
-      makeModel(`m${String(i).padStart(2, '0')}`, { size: (i + 1) * 100 })
-    )
-    const list = largestModels.value
-    expect(list).toHaveLength(20)
-    expect(list[0].id).toBe('m24')
-    expect(list[19].id).toBe('m05')
-  })
-
-  it('openDiskUsage/closeDiskUsage 切换面板开合', () => {
-    openDiskUsage()
-    expect(state.diskUsage.open).toBe(true)
-    closeDiskUsage()
-    expect(state.diskUsage.open).toBe(false)
   })
 })
 

@@ -9,7 +9,6 @@
  * - library.js       初始化/主题/设置/模型库切换/全量扫描/缩略图回填
  * - filter.js        筛选/搜索/排序派生（filteredModels/typeCounts）
  * - selectors.js     id→模型映射等跨域查找派生
- * - disk-usage.js    磁盘占用分析
  * - detail.js        详情打开/关闭与选中模型
  * - partial-scan.js  watcher 变更子树驱动的局部增量扫描
  * - multiselect.js   多选批量操作
@@ -63,10 +62,7 @@ export {
 // 筛选派生
 export { filteredModels, typeCounts } from './filter'
 
-// 磁盘占用分析
-export { diskUsage, largestModels, openDiskUsage, closeDiskUsage } from './disk-usage'
-
-// 详情
+// 局部增量扫描详情
 export { selectedModel, openDetail, closeDetail } from './detail'
 
 // 局部增量扫描

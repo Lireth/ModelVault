@@ -6,7 +6,6 @@ import {
   typeCounts,
   chooseFolder,
   exportModels,
-  openDiskUsage,
   openOrganize,
   removeRoot,
   scanModels,
@@ -64,10 +63,6 @@ function onScanClick() {
         <!-- 导出当前筛选后的模型列表（E2） -->
         <button class="btn action-btn" title="将当前列表导出为 CSV 文件（可被 Excel 打开）" :disabled="!state.models.length" @click="exportModels('csv')">
           导出 CSV
-        </button>
-        <!-- 磁盘占用分析（FEAT-1） -->
-        <button class="btn action-btn" title="按分类与目录统计模型文件占用的磁盘空间" :disabled="!state.models.length" @click="openDiskUsage">
-          占用分析
         </button>
       </div>
       <!-- 应用内整理（B-06）：库内移动文件 / 新建文件夹 / 失联标注绑定 -->
@@ -365,7 +360,7 @@ function onScanClick() {
 }
 
 /* 窄屏图标栏（OPT-1）：断点 900px 与 TopBar.vue 的窄屏操作菜单联动——
-   此范围内操作区（重新扫描/选择文件夹/导出/占用分析）整体隐藏，
+   此范围内操作区（重新扫描/选择文件夹/导出/整理）整体隐藏，
    改由标题栏 ☰ 菜单提供同等入口；改动任一侧断点时须同步另一侧 */
 @media (max-width: 900px) {
   .sidebar {

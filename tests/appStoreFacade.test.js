@@ -51,11 +51,6 @@ const EXPECTED_EXPORTS = [
   // 派生
   'filteredModels',
   'typeCounts',
-  // 磁盘占用
-  'diskUsage',
-  'largestModels',
-  'openDiskUsage',
-  'closeDiskUsage',
   // 详情
   'selectedModel',
   'openDetail',

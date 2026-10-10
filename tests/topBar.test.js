@@ -43,22 +43,13 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
     await wrapper.find('.narrow-actions-btn').trigger('click')
     expect(wrapper.find('.narrow-actions-menu').exists()).toBe(true)
     const items = wrapper.findAll('.menu-item')
-    expect(items).toHaveLength(5)
+    expect(items).toHaveLength(4)
     expect(items.map((i) => i.text())).toEqual([
       '重新扫描',
       '选择文件夹',
       '导出 CSV',
-      '占用分析',
       '整理'
     ])
-  })
-
-  it('「占用分析」打开磁盘占用面板并关闭菜单（FEAT-1 入口）', async () => {
-    const wrapper = mountTopBar()
-    await wrapper.find('.narrow-actions-btn').trigger('click')
-    await wrapper.findAll('.menu-item')[3].trigger('click')
-    expect(state.diskUsage.open).toBe(true)
-    expect(wrapper.find('.narrow-actions-menu').exists()).toBe(false)
   })
 
   it('「选择文件夹」恒可达：空库（未配置过文件夹）时仍可调用', async () => {
@@ -92,7 +83,7 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
     expect(items[0].attributes('disabled')).toBeDefined() // 重新扫描（无文件夹）
     expect(items[1].attributes('disabled')).toBeUndefined() // 选择文件夹恒可用
     expect(items[2].attributes('disabled')).toBeDefined() // 导出 CSV（无模型）
-    expect(items[3].attributes('disabled')).toBeDefined() // 占用分析（无模型）
+    expect(items[3].attributes('disabled')).toBeDefined() // 整理（无文件夹）
   })
 
   it('点击菜单外部区域关闭', async () => {

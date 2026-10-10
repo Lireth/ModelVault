@@ -72,7 +72,6 @@ function resetStoreState() {
   state.selectedId = null
   state.detailDirty = false
   state.multiSelect = { active: false, ids: [] }
-  state.diskUsage = { open: false }
   state.organize = {
     open: false,
     busy: false,
