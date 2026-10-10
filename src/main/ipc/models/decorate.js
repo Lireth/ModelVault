@@ -29,15 +29,28 @@ const deferredOwners = new Map()
 
 /**
  * 计算影响装饰结果的元数据签名（任一标注变化都会使缓存失效）。
+ *
+ * A-08 记忆化：decorateOne 在比对增量缓存前必先计算签名，缓存命中路径上
+ * （autoRescan/手动重扫的大多数模型）每次 JSON.stringify 全部字段（含嵌套
+ * params）是纯浪费。元数据对象仅在 setModelMeta 规范化时整体换引用，
+ * 故以对象引用为键用 WeakMap 缓存签名——命中时零序列化成本，对象被替换后
+ * 自然未命中重建，WeakMap 不阻止垃圾回收。按值语义不变：内容相同的不同
+ * 对象仍得到相同签名（仅各自首次计算一次）。
  * @param {object} meta 模型元数据
  * @returns {string} 签名字符串
  */
-function metaSignature(meta) {
-  return JSON.stringify([
+const signatureCache = new WeakMap()
+
+export function metaSignature(meta) {
+  const cached = signatureCache.get(meta)
+  if (cached !== undefined) return cached
+  const signature = JSON.stringify([
     meta.cover, meta.covers, meta.alias, meta.note, meta.subCategory,
     meta.triggerWords, meta.favorite, meta.nsfw, meta.rating, meta.params, meta.hash,
     meta.noteSource, meta.triggerWordsSource
   ])
+  signatureCache.set(meta, signature)
+  return signature
 }
 
 /** 登记一条延迟缩略图的模型归属 */
@@ -48,6 +61,26 @@ function trackDeferredThumb(absCover, modelId) {
     deferredOwners.set(absCover, owners)
   }
   owners.add(modelId)
+}
+
+/**
+ * 登记单个模型对某封面的缩略图归属（A-09 封面即时缩略图）：
+ * 封面 IPC 路径不经过 decorateOne，需要显式登记，drain 完成后才能推送到该卡片。
+ * @param {string} modelId 模型绝对路径
+ * @param {string} absCover 封面绝对路径
+ */
+export function trackDeferredOwner(modelId, absCover) {
+  trackDeferredThumb(absCover, modelId)
+}
+
+/**
+ * 向窗口推送若干卡片的缩略图就绪事件（载荷格式与 drain 推送一致：{updates}）。
+ * @param {object|null} win 来源窗口（null/已销毁时静默跳过）
+ * @param {Array<{id:string, coverUrl:string}>} updates
+ */
+export function sendThumbReady(win, updates) {
+  if (!win || win.isDestroyed() || !updates?.length) return
+  win.webContents.send('models:thumbsReady', { updates })
 }
 
 /**
@@ -80,15 +113,7 @@ export function startThumbDrain(win) {
         entry.decorated.coverUrl = coverUrl
       }
     }
-    // win 可能为 null：扫描进行中窗口被关闭时，scan.js 经
-    // BrowserWindow.fromWebContents 取到的就是 null（A7）。
-    // 漏判会在 drain 回调里抛 TypeError，被 allSettled 吞掉并误记为
-    // 「后台缩略图生成失败」，thumbsReady 推送静默中断
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('models:thumbsReady', {
-        updates: [...ids].map((id) => ({ id, coverUrl }))
-      })
-    }
+    sendThumbReady(win, [...ids].map((id) => ({ id, coverUrl })))
   }).finally(() => {
     setThumbDrainPromise(null)
   })
@@ -229,4 +254,16 @@ export async function decorateModels(models, signal) {
   }
   await pruneThumbs(usedThumbs)
   return result
+}
+
+/**
+ * 装饰单个模型（B-06 应用内整理）：库内移动/手动绑定标注后增量刷新该条目。
+ * 刻意不复用 decorateModels——后者末尾会 pruneThumbs 删除「本批未引用」的
+ * 全部缩略图，单条目调用会误删全库缩略图；此处传独立 Set 且不做清理。
+ * 移动不改变封面文件（封面存于 .modelvault/covers），缩略图同名复用。
+ * @param {object} model scanner 形态的单个模型
+ * @returns {Promise<object>} 装饰后的模型
+ */
+export async function decorateSingle(model) {
+  return decorateOne(model, new Set())
 }

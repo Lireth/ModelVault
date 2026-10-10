@@ -5,6 +5,7 @@ import {
   exportModels,
   openDedupe,
   openDiskUsage,
+  openOrganize,
   scanModels,
   state
 } from '../store/appStore'
@@ -57,6 +58,12 @@ function onDedupe() {
 function onDiskUsage() {
   closeMenu()
   openDiskUsage()
+}
+
+/** 应用内整理（B-06） */
+function onOrganize() {
+  closeMenu()
+  openOrganize()
 }
 
 /** 点击菜单外部区域关闭（pointerdown 先于 click，避免误触菜单项后状态残留） */
@@ -164,6 +171,13 @@ onBeforeUnmount(() => {
           :disabled="!state.models.length"
           @click="onDiskUsage"
         >占用分析</button>
+        <button
+          class="menu-item"
+          role="menuitem"
+          title="在应用内整理模型文件：移动到其他文件夹、新建文件夹、手动绑定失联标注"
+          :disabled="state.scanning || !state.folder"
+          @click="onOrganize"
+        >整理</button>
       </div>
     </div>
   </header>

@@ -2,8 +2,9 @@ import { BrowserWindow, ipcMain } from 'electron'
 import logger from '../../logger'
 import { getModelMeta, relativizeCover, setModelMeta } from '../../services/store'
 import { deleteCoverFile, importCoverFromPath, pickAndSaveCover, saveClipboardImage } from '../../services/covers'
+import { getThumbPathDeferred } from '../../services/thumbs'
 import { toImageUrl } from '../../protocol'
-import { resolveCoverSafe } from './decorate'
+import { resolveCoverSafe, sendThumbReady, startThumbDrain, trackDeferredOwner } from './decorate'
 
 /**
  * 封面链路：上传 / 粘贴 / 拖拽导入 / 设置默认 / 删除封面。
@@ -55,6 +56,31 @@ function appendCoverMeta(id, absCover) {
   return { coverRel, meta }
 }
 
+/**
+ * 封面变更后即时刷新缩略图（A-09）：
+ * 用户上传/粘贴/拖入/切换默认封面后，卡片在下次扫描前一直加载原图；
+ * 此处立即登记归属并查询缩略图——已缓存则直接推送 thumbsReady 切换卡片图，
+ * 未缓存则经后台 drain 生成后由既有链路推送。
+ * @param {object} win 来源窗口
+ * @param {string} modelId 模型绝对路径
+ * @param {string} absCover 默认封面绝对路径（空串时跳过）
+ */
+async function refreshCoverThumbnail(win, modelId, absCover) {
+  if (!absCover) return
+  try {
+    trackDeferredOwner(modelId, absCover)
+    const thumbPath = await getThumbPathDeferred(absCover)
+    if (thumbPath) {
+      sendThumbReady(win, [{ id: modelId, coverUrl: toImageUrl(thumbPath) }])
+    } else {
+      startThumbDrain(win)
+    }
+  } catch (err) {
+    // 缩略图是锦上添花：失败不影响封面设置结果，下次扫描仍会补齐
+    logger.warn(`封面即时缩略图失败: ${err.message}`)
+  }
+}
+
 /** 注册封面链路的 IPC 处理器 */
 export function registerCoverHandlers() {
   // 上传/添加模型封面图（追加到多封面列表，无默认时设为默认）
@@ -70,6 +96,7 @@ export function registerCoverHandlers() {
     const applied = appendCoverMeta(id, result.cover)
     if (applied.error) return applied
     logger.info(`模型封面已添加: ${id}`)
+    await refreshCoverThumbnail(win, id, applied.meta.cover ? resolveCoverSafe(applied.meta.cover) : '')
     return buildCoverResponse(result.cover, applied.meta)
   })
 
@@ -84,11 +111,16 @@ export function registerCoverHandlers() {
     const applied = appendCoverMeta(id, result.cover)
     if (applied.error) return applied
     logger.info(`剪贴板封面已添加: ${id}`)
+    await refreshCoverThumbnail(
+      BrowserWindow.fromWebContents(event.sender),
+      id,
+      applied.meta.cover ? resolveCoverSafe(applied.meta.cover) : ''
+    )
     return buildCoverResponse(result.cover, applied.meta)
   })
 
   // 设置默认封面（首页卡片显示的图片）
-  ipcMain.handle('models:setDefaultCover', (event, { id, cover } = {}) => {
+  ipcMain.handle('models:setDefaultCover', async (event, { id, cover } = {}) => {
     if (typeof id !== 'string' || !id || typeof cover !== 'string' || !cover) {
       return { error: '无效的参数' }
     }
@@ -102,6 +134,11 @@ export function registerCoverHandlers() {
       return { error: '默认封面设置失败' }
     }
     logger.info(`默认封面已切换: ${id} -> ${cover}`)
+    await refreshCoverThumbnail(
+      BrowserWindow.fromWebContents(event.sender),
+      id,
+      resolveCoverSafe(meta.cover)
+    )
     return buildCoverResponse(resolveCoverSafe(cover), meta)
   })
 
@@ -142,6 +179,11 @@ export function registerCoverHandlers() {
     const applied = appendCoverMeta(id, result.cover)
     if (applied.error) return applied
     logger.info(`拖拽封面已添加: ${id}`)
+    await refreshCoverThumbnail(
+      BrowserWindow.fromWebContents(event.sender),
+      id,
+      applied.meta.cover ? resolveCoverSafe(applied.meta.cover) : ''
+    )
     return buildCoverResponse(result.cover, applied.meta)
   })
 }

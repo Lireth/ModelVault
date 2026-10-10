@@ -1,5 +1,5 @@
 import { beforeEach, vi } from 'vitest'
-import { defaultSettings, state } from '../../src/renderer/src/store/appStore'
+import { defaultSettings, resetViews, state } from '../../src/renderer/src/store/appStore'
 
 /**
  * 渲染层组件测试通用装配（OPT-16 测试基建）：
@@ -34,6 +34,14 @@ export function makeComponentApiMock() {
       exportList: vi.fn(() => Promise.resolve({ canceled: true })),
       computeHashBatch: vi.fn(() => Promise.resolve({ hashes: {} })),
       cancelHashBatch: vi.fn(() => Promise.resolve({ ok: false })),
+      partialScan: vi.fn(() => Promise.resolve({ models: [], dirs: [], relinked: 0 })),
+      // B-06 应用内整理
+      listDirs: vi.fn(() => Promise.resolve({ dirs: [''] })),
+      createFolder: vi.fn(() => Promise.resolve({ ok: true, dir: '' })),
+      renameFolder: vi.fn(() => Promise.resolve({ ok: true, oldDir: '', newDir: '', moved: 0 })),
+      moveModels: vi.fn(() => Promise.resolve({ moved: [], failed: [], destDir: '' })),
+      metaGaps: vi.fn(() => Promise.resolve({ orphans: [], newcomers: [] })),
+      bindMeta: vi.fn(() => Promise.resolve({ ok: true, model: null })),
       onScanProgress: vi.fn(() => () => {}),
       onMenuAction: vi.fn(() => () => {}),
       onThumbsReady: vi.fn(() => () => {}),
@@ -43,7 +51,11 @@ export function makeComponentApiMock() {
     },
     settings: { update: vi.fn() },
     window: { setTheme: vi.fn(() => Promise.resolve()) },
-    app: { getInfo: vi.fn() }
+    app: {
+      getInfo: vi.fn(),
+      checkUpdate: vi.fn(() => Promise.resolve({ hasUpdate: false })),
+      openLogs: vi.fn(() => Promise.resolve({ ok: true }))
+    }
   }
 }
 
@@ -57,6 +69,7 @@ function resetStoreState() {
   state.typeFilter = 'all'
   state.subFilter = ''
   state.showFavoritesOnly = false
+  state.dirFilter = ''
   state.search = ''
   state.sortBy = 'name'
   state.sortAsc = true
@@ -65,6 +78,17 @@ function resetStoreState() {
   state.multiSelect = { active: false, ids: [] }
   state.dedupe = { open: false, running: false, progress: null, groups: [], canceled: false }
   state.diskUsage = { open: false }
+  state.organize = {
+    open: false,
+    busy: false,
+    dirs: [],
+    targetDir: '',
+    pendingIds: [],
+    gapsLoading: false,
+    orphans: [],
+    newcomers: []
+  }
+  resetViews()
   state.settingsOpen = false
   state.settings = defaultSettings()
   state.toasts.splice(0, state.toasts.length)

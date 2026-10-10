@@ -28,11 +28,12 @@ jobs:
     name: Test & Build (Node ${{ matrix.node }})
     runs-on: windows-latest
     timeout-minutes: 20
-    # D6：engines 声明 >=20.19，矩阵覆盖 20/22 双版本验证（避免纸面承诺）
+    # D6：engines 声明 >=22.22.2（jsdom 30 强制要求，Node 20 已 EOL），
+    # 矩阵覆盖 22/24 双版本验证（避免纸面承诺）
     strategy:
       fail-fast: false
       matrix:
-        node: ["20", "22"]
+        node: ["22", "24"]
 
     steps:
       # ---------- 环境准备 ----------

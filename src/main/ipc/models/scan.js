@@ -1,7 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import fs from 'node:fs/promises'
 import logger from '../../logger'
-import { getSettings, updateSettings } from '../../services/store'
+import { getSettings, relinkScannedMeta, updateSettings } from '../../services/store'
 import { scanModels } from '../../services/scanner'
 import { pruneOrphanCovers } from '../../services/covers'
 import { clearDeferredJobs } from '../../services/thumbs'
@@ -21,6 +21,11 @@ const PROGRESS_INTERVAL = 120
 let scanning = false
 /** 当前扫描的取消控制器（null 表示无进行中的扫描） */
 let scanAbort = null
+
+/** 是否有扫描（全量/局部）进行中（B-06 整理操作据此拒绝并发文件移动） */
+export function isScanRunning() {
+  return scanning
+}
 
 /**
  * 目录是否属于模型库白名单（B1）：settings.modelsFolders（上限 20）。
@@ -116,6 +121,11 @@ export function registerScanHandlers() {
         }
       )
 
+      // 重关联被移动/重命名模型的标注（A-02）：必须在装饰前执行——
+      // decorateOne 按扫描出的新路径键读取元数据，先迁移才能让标注/封面/
+      // 哈希履历在本次结果中即时生效
+      const relinkResult = relinkScannedMeta(models)
+
       const decorated = await decorateModels(models, signal)
       const byType = {}
       for (const m of decorated) {
@@ -145,7 +155,9 @@ export function registerScanHandlers() {
         models: decorated,
         byType,
         errors,
-        durationMs: Date.now() - startedAt
+        durationMs: Date.now() - startedAt,
+        // 本次扫描自动重新关联的移动/重命名模型数（A-02，渲染层据此提示）
+        relinked: relinkResult.relinked
       }
     } catch (err) {
       if (err?.name === 'AbortError') {
@@ -167,5 +179,91 @@ export function registerScanHandlers() {
       return { ok: true }
     }
     return { ok: false }
+  })
+
+  // 局部增量扫描（A-03）：watcher 检出变更子树后，仅重扫这些子树并装饰返回。
+  // 与全量扫描共用同一把 scanning 锁（互斥）；不做孤儿封面清理（全量扫描兜底）、
+  // 不回写设置/不重启 watcher；重关联限定在受影响子树内。
+  ipcMain.handle('models:partialScan', async (event, { folder, dirs } = {}) => {
+    if (scanning) {
+      return { error: '正在扫描中，请稍候' }
+    }
+    const root = typeof folder === 'string' && folder ? folder : getSettings().modelsFolder
+    if (!Array.isArray(dirs)) return { error: '缺少变更子树' }
+    // 子树入参清洗：POSIX 相对目录（'' 代表根直属），拒绝逃逸段/反斜杠/超长/过量
+    const MAX_DIRS = 200
+    const MAX_DIR_LEN = 1000
+    const subDirs = []
+    for (const raw of dirs.slice(0, MAX_DIRS)) {
+      if (typeof raw !== 'string') return { error: '变更子树参数无效' }
+      const item = raw.trim()
+      if (item === '') {
+        subDirs.push('')
+        continue
+      }
+      if (
+        item.length > MAX_DIR_LEN ||
+        item.includes('\\') ||
+        item.split('/').some((seg) => seg === '..' || seg === '.' )
+      ) {
+        return { error: '变更子树参数无效' }
+      }
+      subDirs.push(item)
+    }
+    if (subDirs.length === 0) return { error: '缺少变更子树' }
+
+    // 与全量扫描一致的目录前置校验（白名单 + 存在性）
+    if (!isKnownLibrary(root)) {
+      logger.warn(`拒绝局部扫描模型库列表之外的目录: ${root}`)
+      return { error: '该目录不在模型库列表中' }
+    }
+    try {
+      const stat = await fs.stat(root)
+      if (!stat.isDirectory()) return { error: '模型文件夹不存在或不是目录' }
+    } catch {
+      return { error: '模型文件夹不存在或不是目录' }
+    }
+
+    const startedAt = Date.now()
+    scanning = true
+    const abort = new AbortController()
+    scanAbort = abort
+    const signal = abort.signal
+    try {
+      await ensureRootStore(root)
+      const appSettings = getSettings()
+      const scanResult = await scanModels(root, null, {
+        excludeDirs: appSettings.excludeDirs || [],
+        extensions: undefined, // scanner 默认扩展名
+        subDirs,
+        signal
+      })
+      const models = scanResult.models
+      // 重关联限定受影响子树：范围外元数据保持原样
+      const relinkResult = relinkScannedMeta(models, { affectedDirs: subDirs })
+      const decorated = await decorateModels(models, signal)
+
+      const win = BrowserWindow.fromWebContents(event.sender)
+      // 装饰中新登记的缩略图任务经既有后台链生成并推送
+      startThumbDrain(win)
+
+      logger.info(
+        `局部扫描完成：${subDirs.length} 个子树 → ${decorated.length} 个模型 / 重关联 ${relinkResult.relinked} 个`
+      )
+
+      return {
+        models: decorated,
+        dirs: subDirs,
+        relinked: relinkResult.relinked,
+        durationMs: Date.now() - startedAt
+      }
+    } catch (err) {
+      if (err?.name === 'AbortError') return { canceled: true }
+      logger.error(`局部扫描失败: ${err.stack || err.message}`)
+      return { error: `局部扫描失败: ${err.message}` }
+    } finally {
+      scanning = false
+      scanAbort = null
+    }
   })
 }

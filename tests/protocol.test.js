@@ -115,6 +115,47 @@ describe('mvimg 协议路径白名单', () => {
     const res = await handler(makeRequest(inOldRoot))
     expect(res.status).toBe(403)
   })
+
+  it('关联存储封面（.modelvault/covers，内容不可变命名）返回 immutable 长缓存', async () => {
+    const cover = path.join(root, '.modelvault', 'covers', '1728-cover.png')
+    await fs.mkdir(path.dirname(cover), { recursive: true })
+    await fs.writeFile(cover, 'img')
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response('img', { status: 200, headers: { 'Content-Type': 'image/png' } })
+    )
+
+    const res = await handler(makeRequest(cover))
+
+    expect(res.status).toBe(200)
+    const cacheControl = res.headers.get('Cache-Control')
+    expect(cacheControl).toContain('immutable')
+    expect(cacheControl).toContain('max-age=31536000')
+    // 上游 content-type 保留
+    expect(res.headers.get('Content-Type')).toBe('image/png')
+  })
+
+  it('缩略图缓存（.modelvault/thumbs，文件名含源图 mtime）返回 immutable 长缓存', async () => {
+    const thumb = path.join(root, '.modelvault', 'thumbs', 'abc123-1700000000000.jpg')
+    await fs.mkdir(path.dirname(thumb), { recursive: true })
+    await fs.writeFile(thumb, 'thumb')
+    vi.mocked(net.fetch).mockResolvedValue(new Response('thumb', { status: 200 }))
+
+    const res = await handler(makeRequest(thumb))
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Cache-Control')).toContain('immutable')
+  })
+
+  it('模型目录内 sidecar 同名图（路径不变但内容可被替换）返回 no-cache', async () => {
+    const sidecar = path.join(root, 'model.preview.png')
+    await fs.writeFile(sidecar, 'img')
+    vi.mocked(net.fetch).mockResolvedValue(new Response('img', { status: 200 }))
+
+    const res = await handler(makeRequest(sidecar))
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Cache-Control')).toBe('no-cache')
+  })
 })
 
 describe('toImageUrl', () => {

@@ -1,5 +1,5 @@
-import { BrowserWindow, app, ipcMain } from 'electron'
-import logger from './logger'
+import { BrowserWindow, app, ipcMain, shell } from 'electron'
+import logger, { getLogDir } from './logger'
 import { registerModelIpcHandlers } from './ipc/models/index.js'
 import { themeColors } from './theme'
 import { checkForUpdate } from './services/updater'
@@ -31,6 +31,18 @@ export function registerIpcHandlers() {
 
   // 应用内检查更新（E1）：查询 GitHub Releases 最新版本并与当前版本比对
   ipcMain.handle('app:checkUpdate', () => checkForUpdate())
+
+  // 打开日志目录（B-04）：反馈问题时用户可直接定位 %APPDATA%\modelvault\logs。
+  // 目录为应用自有 userData 子目录，不接受渲染进程传入路径，无越界面。
+  // shell.openPath 成功返回空串，失败返回错误消息字符串
+  ipcMain.handle('app:openLogs', () => {
+    const failure = shell.openPath(getLogDir())
+    if (failure) {
+      logger.warn(`打开日志目录失败: ${failure}`)
+      return { error: '打开日志目录失败' }
+    }
+    return { ok: true }
+  })
 
   // 主题切换时同步原生窗口颜色（标题栏叠加层 + 窗口背景）
   ipcMain.handle('window:setTheme', (event, { theme } = {}) => {

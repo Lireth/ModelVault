@@ -2,9 +2,10 @@ import { app } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
-// 扫描扩展名单一来源：直接复用 scanner.js 的 MODEL_EXTENSIONS，
-// 避免双份常量人工同步漂移导致「设置校验」与「实际扫描」不一致（C3）
-import { MODEL_EXTENSIONS } from './scanner'
+// A-12 枚举/默认值单一来源（src/shared）：校验集合与渲染层选项共用同一常量
+import { MODEL_EXTENSION_SET } from '../../shared/model-extensions'
+import { SORT_BY_KEYS, CARD_SIZE_KEYS } from '../../shared/app-enums'
+import { DEFAULT_SETTINGS } from '../../shared/defaults'
 import { atomicWriteFile } from './atomic-write'
 import { notifyStoreSaveError } from './store-events'
 import { LEGACY_STORE_FILE, SETTINGS_FILE } from './store-paths'
@@ -15,34 +16,17 @@ import { LEGACY_STORE_FILE, SETTINGS_FILE } from './store-paths'
  * 运行期内存为准（getSettings），更新即时原子落盘。
  */
 
-/** 应用设置允许的主题取值 */
+/** 应用设置允许的主题取值（主题当前仅亮/暗，无需 shared 化） */
 const VALID_THEMES = new Set(['dark', 'light'])
-/** 应用设置允许的卡片尺寸取值 */
-const VALID_CARD_SIZES = new Set(['compact', 'normal', 'large'])
-/** 应用设置允许的默认排序方式 */
-const VALID_SORT_BY = new Set(['name', 'type', 'size', 'mtime', 'favorite', 'rating'])
-/** 应用设置允许的扫描文件扩展名（单一来源：scanner.js 的 MODEL_EXTENSIONS，C3） */
-const VALID_SCAN_EXTENSIONS = MODEL_EXTENSIONS
 
 /** 内存中的应用设置 */
 let settings = null
 
-/** 默认应用设置 */
+/** 默认应用设置（A-12 单一来源：src/shared/defaults.js；返回可变副本） */
 export function defaultSettings() {
   return {
-    modelsFolder: '',
-    modelsFolders: [],
-    autoScan: true,
-    excludeDirs: [],
-    theme: 'dark',
-    cardSize: 'normal',
-    sortBy: 'name',
-    sortAsc: true,
-    scanExtensions: [...VALID_SCAN_EXTENSIONS],
-    showSize: true,
-    showMtime: true,
-    showParams: true,
-    autoRescan: false
+    ...DEFAULT_SETTINGS,
+    scanExtensions: [...DEFAULT_SETTINGS.scanExtensions]
   }
 }
 
@@ -52,10 +36,10 @@ function normalizeExtensions(raw) {
     ? raw
         .filter((e) => typeof e === 'string')
         .map((e) => e.trim().toLowerCase())
-        .filter((e) => VALID_SCAN_EXTENSIONS.has(e))
+        .filter((e) => MODEL_EXTENSION_SET.has(e))
     : []
   const unique = [...new Set(list)]
-  return unique.length > 0 ? unique : [...VALID_SCAN_EXTENSIONS]
+  return unique.length > 0 ? unique : [...MODEL_EXTENSION_SET]
 }
 
 /** 规范化应用设置：仅接受已知字段并校验类型 */
@@ -79,8 +63,8 @@ export function normalizeSettings(raw) {
     autoScan: typeof raw.autoScan === 'boolean' ? raw.autoScan : base.autoScan,
     excludeDirs,
     theme: VALID_THEMES.has(raw.theme) ? raw.theme : base.theme,
-    cardSize: VALID_CARD_SIZES.has(raw.cardSize) ? raw.cardSize : base.cardSize,
-    sortBy: VALID_SORT_BY.has(raw.sortBy) ? raw.sortBy : base.sortBy,
+    cardSize: CARD_SIZE_KEYS.has(raw.cardSize) ? raw.cardSize : base.cardSize,
+    sortBy: SORT_BY_KEYS.has(raw.sortBy) ? raw.sortBy : base.sortBy,
     sortAsc: typeof raw.sortAsc === 'boolean' ? raw.sortAsc : base.sortAsc,
     scanExtensions: normalizeExtensions(raw.scanExtensions),
     showSize: typeof raw.showSize === 'boolean' ? raw.showSize : base.showSize,

@@ -3,7 +3,11 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
 import { IMAGE_EXTENSIONS } from './scanner'
-import { COVERS_DIR, DATA_DIR, getCoversDir, getReferencedCovers, relativizeCover, wasDataReset } from './store'
+// 直接依赖存储子模块而非聚合门面（services/store.js）：门面的重导出链在
+// 模块初始化顺序变化时可能拿到尚未就绪的绑定（A-02 引入 meta-relink 后
+// vitest 曾现 getReferencedCovers is not a function）；服务层直连叶子依赖更稳
+import { COVERS_DIR, DATA_DIR, getCoversDir, relativizeCover } from './store-paths'
+import { getReferencedCovers, wasDataReset } from './store-meta'
 
 /**
  * 封面图片管理：用户在详情页上传的预览图会复制到
@@ -152,9 +156,18 @@ export async function saveClipboardImage() {
     }
     const mime = item.types.find((t) => t in MIME_EXT)
     const blob = await item.getType(mime)
+    // 大小预检（B5，与 importCoverFromPath 同一阈值）：剪贴板是唯一不经文件
+    // 对话框的图片入口，合法的超大位图无上限落盘会占满磁盘并连锁导致原子写失败。
+    // 先判 arrayBuffer 字节数，超限零写入（不创建封面目录）
+    const arrayBuffer = await blob.arrayBuffer()
+    if (arrayBuffer.byteLength > MAX_COVER_BYTES) {
+      return {
+        error: `图片文件过大（上限 ${Math.floor(MAX_COVER_BYTES / 1024 / 1024)}MB），请压缩后再导入`
+      }
+    }
     await fs.mkdir(getCoversDir(), { recursive: true })
     const dest = path.join(getCoversDir(), `${Date.now()}-clipboard${MIME_EXT[mime]}`)
-    await fs.writeFile(dest, Buffer.from(await blob.arrayBuffer()))
+    await fs.writeFile(dest, Buffer.from(arrayBuffer))
     logger.info(`剪贴板图片已保存: ${dest}`)
     return { cover: dest }
   } catch (err) {

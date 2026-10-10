@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import Sidebar from '../src/renderer/src/components/Sidebar.vue'
-import { state } from '../src/renderer/src/store/appStore'
+import { acceptConfirm, state } from '../src/renderer/src/store/appStore'
 import { setupComponentTest } from './helpers/componentTest'
 
 /**
@@ -63,5 +63,80 @@ describe('Sidebar 模型库移除键盘可达（OPT-2 回归）', () => {
     // 未切换库：folder 不变，且未发起扫描
     expect(state.folder).toBe('D:\\libA')
     expect(window.api.models.scan).not.toHaveBeenCalled()
+  })
+})
+
+describe('B-01 目录结构树', () => {
+  function setupTree() {
+    state.folder = 'D:\\libA'
+    state.models = [
+      { id: 'D:\\libA\\root.safetensors', name: 'root', type: 'checkpoint', relDir: '', size: 1 },
+      { id: 'D:\\libA\\lora\\a.safetensors', name: 'a', type: 'lora', relDir: 'lora', size: 2 },
+      { id: 'D:\\libA\\lora\\role\\b.safetensors', name: 'b', type: 'lora', relDir: 'lora/role', size: 3 }
+    ]
+  }
+
+  /** 按目录名查找树行（根行名称为「全部目录」） */
+  function rowByPath(wrapper, name) {
+    return wrapper.findAll('.folder-tree .tree-row').find((r) => r.text().includes(name))
+  }
+
+  it('展示根与顶层目录及子树模型数，深层目录默认折叠', () => {
+    setupTree()
+    const wrapper = mount(Sidebar)
+    const rootRow = rowByPath(wrapper, '全部目录')
+    const loraRow = rowByPath(wrapper, 'lora')
+    expect(rootRow.exists()).toBe(true)
+    expect(loraRow.exists()).toBe(true)
+    expect(loraRow.find('.tree-count').text()).toBe('2')
+    // lora/role 默认不出现
+    expect(rowByPath(wrapper, 'role')).toBeUndefined()
+  })
+
+  it('展开后显示深层目录', async () => {
+    setupTree()
+    const wrapper = mount(Sidebar)
+    await rowByPath(wrapper, 'lora').find('.tree-caret').trigger('click')
+    await flushPromises()
+    expect(rowByPath(wrapper, 'role').exists()).toBe(true)
+  })
+
+  it('点击目录设置 dirFilter 筛选并高亮；再点同目录取消；点根节点取消', async () => {
+    setupTree()
+    const wrapper = mount(Sidebar)
+    const loraRow = rowByPath(wrapper, 'lora')
+    await loraRow.trigger('click')
+    expect(state.dirFilter).toBe('lora')
+    expect(rowByPath(wrapper, 'lora').classes()).toContain('active')
+
+    await rowByPath(wrapper, 'lora').trigger('click')
+    expect(state.dirFilter).toBe('')
+
+    await rowByPath(wrapper, 'lora').trigger('click')
+    await rowByPath(wrapper, '全部目录').trigger('click')
+    expect(state.dirFilter).toBe('')
+  })
+
+  it('拖拽模型卡片到目录行触发移动（B-06）：确认后调用 moveModels IPC', async () => {
+    setupTree()
+    window.api.models.moveModels.mockResolvedValue({
+      moved: [{ from: 'D:\\libA\\lora\\a.safetensors', to: 'D:\\libA\\lora\\a.safetensors', model: { id: 'x' } }],
+      failed: [],
+      destDir: 'lora'
+    })
+    const wrapper = mount(Sidebar)
+    const dataTransfer = {
+      types: ['application/x-modelvault-ids'],
+      getData: () => JSON.stringify(['D:\\libA\\lora\\a.safetensors'])
+    }
+    const loraRow = rowByPath(wrapper, 'lora')
+    await loraRow.trigger('dragover', { dataTransfer })
+    await loraRow.trigger('drop', { dataTransfer })
+    acceptConfirm()
+    await flushPromises()
+    expect(window.api.models.moveModels).toHaveBeenCalledWith({
+      ids: ['D:\\libA\\lora\\a.safetensors'],
+      destDir: 'lora'
+    })
   })
 })

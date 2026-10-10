@@ -140,6 +140,41 @@ async function loadAppInfo() {
   }
 }
 
+/* ---------------- 日志与诊断（B-04） ---------------- */
+
+/** 在系统资源管理器中打开日志目录（%APPDATA%\modelvault\logs） */
+async function onOpenLogs() {
+  try {
+    const res = await window.api.app.openLogs()
+    if (res?.error) {
+      toast('error', res.error)
+      return
+    }
+    toast('success', '已打开日志目录')
+  } catch (err) {
+    toast('error', `打开日志目录失败: ${err.message}`)
+  }
+}
+
+/** 复制诊断信息（应用/运行时版本与平台），反馈问题时随日志一并提供 */
+async function onCopyDiagnostics() {
+  if (!appInfo.value) return
+  const info = appInfo.value
+  const lines = [
+    `ModelVault v${info.version}`,
+    `Electron ${info.electron}`,
+    `Node ${info.node}`,
+    `Platform ${info.platform || 'unknown'}`,
+    `UserAgent ${navigator.userAgent}`
+  ]
+  try {
+    await navigator.clipboard.writeText(lines.join('\n'))
+    toast('success', '诊断信息已复制到剪贴板')
+  } catch (err) {
+    toast('error', `复制失败: ${err.message}`)
+  }
+}
+
 /* ---------------- 应用内检查更新（E1） ---------------- */
 
 const updateInfo = ref(null)
@@ -484,6 +519,16 @@ async function onSave() {
           </span>
           <span v-else-if="updateInfo" class="update-msg">已是最新版本（v{{ updateInfo.current }}）</span>
         </div>
+        <!-- 更新说明（A-15）：来自 GitHub Release body，主进程已截断 500 字符；
+             文本插值渲染，远程内容中的 HTML 原样显示不被解析 -->
+        <p v-if="updateInfo?.hasUpdate && updateInfo.releaseNotes" class="update-notes">{{ updateInfo.releaseNotes }}</p>
+
+        <!-- 日志与诊断（B-04）：反馈问题时可直接打开日志目录或复制版本环境信息 -->
+        <div class="update-row">
+          <span class="update-msg">日志按天保留 14 天（位于 %APPDATA%\modelvault\logs），反馈问题时可附上。</span>
+          <button class="btn" @click="onOpenLogs">打开日志目录</button>
+          <button class="btn" :disabled="!appInfo" @click="onCopyDiagnostics">复制诊断信息</button>
+        </div>
       </div>
     </div>
 
@@ -757,6 +802,23 @@ async function onSave() {
 
 .update-msg a:hover {
   text-decoration: underline;
+}
+
+/* 更新说明（A-15）：Release body 纯文本展示，保留换行、限高可滚动 */
+.update-notes {
+  flex-basis: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 160px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
 .settings-footer {

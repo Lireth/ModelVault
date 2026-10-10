@@ -85,6 +85,44 @@ async function isAllowedPath(realPath) {
   return false
 }
 
+/**
+ * 判断资源是否为「内容不可变」资产（A-05）：
+ * - .modelvault/covers/：用户导入封面以「时间戳-文件名」命名，删除即失效，
+ *   同名不会被新内容复用；
+ * - .modelvault/thumbs/：缩略图文件名含源图路径哈希与 mtime，源图变化必换新名。
+ * 两类 URL 本身即内容指纹，可安全下发 immutable 长缓存。
+ * 模型目录内的 sidecar 同名预览图（路径不变、内容可被外部替换）不在此列，
+ * 须按 no-cache 重验证，避免替换同名图后展示陈旧缓存。
+ * @param {string} realPath 已 realpath 归一的绝对路径
+ * @returns {boolean}
+ */
+export function isImmutableAssetPath(realPath) {
+  if (typeof realPath !== 'string' || !realPath) return false
+  const normalized = realPath.replace(/\\/g, '/').toLowerCase()
+  return (
+    normalized.includes('/.modelvault/covers/') ||
+    normalized.includes('/.modelvault/thumbs/')
+  )
+}
+
+/**
+ * 为上游 file:// 响应附加缓存策略头（A-05），保留响应体与其余响应头。
+ * 不可变资产长缓存一年（省重复读盘/解码）；其余（sidecar 同名图）no-cache，
+ * 每次使用前重验证，防止用户替换同名预览图后看到旧图。
+ */
+function withCacheHeaders(upstream, immutable) {
+  const headers = new Headers(upstream.headers || undefined)
+  headers.set(
+    'Cache-Control',
+    immutable ? 'public, max-age=31536000, immutable' : 'no-cache'
+  )
+  return new Response(upstream.body, {
+    status: upstream.status || 200,
+    statusText: upstream.statusText,
+    headers
+  })
+}
+
 /** 在 app ready 之后调用，注册协议处理器 */
 export function registerImageProtocolHandler() {
   protocol.handle(SCHEME, async (request) => {
@@ -115,7 +153,10 @@ export function registerImageProtocolHandler() {
       if (!(await isValidImageFile(realPath))) {
         return new Response('Not Found', { status: 404 })
       }
-      return net.fetch(pathToFileURL(realPath).toString())
+      const upstream = await net.fetch(pathToFileURL(realPath).toString())
+      // 按资产命名稳定性下发缓存策略（A-05）：关联存储封面/缩略图不可变，
+      // sidecar 同名图 no-cache
+      return withCacheHeaders(upstream, isImmutableAssetPath(realPath))
     } catch (err) {
       logger.error(`mvimg 协议处理失败: ${err.message}`)
       return new Response('Internal Error', { status: 500 })
