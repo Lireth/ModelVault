@@ -55,27 +55,29 @@ function onScanClick() {
       </div>
     </div>
 
-    <!-- 操作按钮区：位于「模型文件夹」与「分类」之间 -->
+    <!-- 操作按钮区：位于「模型文件夹」与「分类」之间；常用操作两两并排，整理独占整行 -->
     <div class="side-section action-section">
-      <button class="btn action-btn" title="重新扫描当前模型文件夹" :disabled="state.scanning || !state.folder" @click="onScanClick">
-        {{ state.scanning ? '扫描中…' : '重新扫描' }}
-      </button>
-      <button class="btn action-btn" title="选择模型文件夹" @click="chooseFolder">选择文件夹</button>
-      <!-- 导出当前筛选后的模型列表（E2） -->
-      <button class="btn action-btn" title="将当前列表导出为 CSV 文件（可被 Excel 打开）" :disabled="!state.models.length" @click="exportModels('csv')">
-        导出 CSV
-      </button>
-      <button class="btn action-btn" title="将当前列表导出为 JSON 文件" :disabled="!state.models.length" @click="exportModels('json')">
-        导出 JSON
-      </button>
-      <!-- 重复模型检测（E5） -->
-      <button class="btn action-btn" title="按文件哈希查找内容完全相同的重复模型" :disabled="!state.models.length" @click="openDedupe">
-        重复检测
-      </button>
-      <!-- 磁盘占用分析（FEAT-1） -->
-      <button class="btn action-btn" title="按分类与目录统计模型文件占用的磁盘空间" :disabled="!state.models.length" @click="openDiskUsage">
-        占用分析
-      </button>
+      <div class="action-grid">
+        <button class="btn action-btn" title="重新扫描当前模型文件夹" :disabled="state.scanning || !state.folder" @click="onScanClick">
+          {{ state.scanning ? '扫描中…' : '重新扫描' }}
+        </button>
+        <button class="btn action-btn" title="选择模型文件夹" @click="chooseFolder">选择文件夹</button>
+        <!-- 导出当前筛选后的模型列表（E2） -->
+        <button class="btn action-btn" title="将当前列表导出为 CSV 文件（可被 Excel 打开）" :disabled="!state.models.length" @click="exportModels('csv')">
+          导出 CSV
+        </button>
+        <button class="btn action-btn" title="将当前列表导出为 JSON 文件" :disabled="!state.models.length" @click="exportModels('json')">
+          导出 JSON
+        </button>
+        <!-- 重复模型检测（E5） -->
+        <button class="btn action-btn" title="按文件哈希查找内容完全相同的重复模型" :disabled="!state.models.length" @click="openDedupe">
+          重复检测
+        </button>
+        <!-- 磁盘占用分析（FEAT-1） -->
+        <button class="btn action-btn" title="按分类与目录统计模型文件占用的磁盘空间" :disabled="!state.models.length" @click="openDiskUsage">
+          占用分析
+        </button>
+      </div>
       <!-- 应用内整理（B-06）：库内移动文件 / 新建文件夹 / 失联标注绑定 -->
       <button class="btn action-btn" title="在应用内整理模型文件：移动到其他文件夹、新建文件夹、手动绑定失联标注" :disabled="state.scanning || !state.folder" @click="openOrganize()">
         整理
@@ -336,9 +338,21 @@ function onScanClick() {
   gap: 8px;
 }
 
+/* 两列网格：压缩纵向空间；半宽按钮用更紧凑的内边距与小字号 */
+.action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .action-btn {
   width: 100%;
   text-align: center;
+}
+
+.action-grid .action-btn {
+  padding: 7px 6px;
+  font-size: 12px;
 }
 
 /* ---------- 设置按钮（固定侧边栏最底部，全宽） ---------- */
