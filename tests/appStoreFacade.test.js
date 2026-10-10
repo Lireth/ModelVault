@@ -26,7 +26,6 @@ const EXPECTED_EXPORTS = [
   'tagsForType',
   'typeInfo',
   'subCategoryInfo',
-  'defaultParams',
   'defaultSettings',
   // Toast/确认
   'toast',

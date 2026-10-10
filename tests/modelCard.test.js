@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ModelCard from '../src/renderer/src/components/ModelCard.vue'
 import { state } from '../src/renderer/src/store/appStore'

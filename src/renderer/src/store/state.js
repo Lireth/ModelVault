@@ -94,20 +94,6 @@ export function subCategoryInfo(key) {
   return SUB_MAP[key] || null
 }
 
-/** 推荐参数默认值 */
-export function defaultParams() {
-  return {
-    steps: null,
-    cfgMin: null,
-    cfgMax: null,
-    sampler: '',
-    scheduler: '',
-    precision: '',
-    resMin: null,
-    resMax: null
-  }
-}
-
 /**
  * 默认应用设置（A-12 单一来源 shared/defaults.js，与主进程同一定义；
  * 返回可变副本，scanExtensions 复制避免污染冻结常量）

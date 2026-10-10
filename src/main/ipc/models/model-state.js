@@ -15,11 +15,6 @@
 /** 后台缩略图生成任务（扫描响应返回后异步执行，新扫描/切换根目录前需等待其完成） */
 let thumbDrainPromise = null
 
-/** 获取当前后台缩略图生成任务 Promise（null 表示无进行中的任务） */
-export function getThumbDrainPromise() {
-  return thumbDrainPromise
-}
-
 /**
  * 等待进行中的后台缩略图生成完成（无任务时立即返回）。
  * 此前「取 promise + await + catch」逻辑在 scan.js 与 store.js 重复实现

@@ -34,7 +34,6 @@ export {
   tagsForType,
   typeInfo,
   subCategoryInfo,
-  defaultParams,
   defaultSettings
 } from './state'
 
