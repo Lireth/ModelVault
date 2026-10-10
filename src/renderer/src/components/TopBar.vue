@@ -4,8 +4,9 @@ import {
   chooseFolder,
   exportModels,
   openDedupe,
+  openDiskUsage,
   scanModels,
-  state,
+  state
 } from '../store/appStore'
 
 /**
@@ -50,6 +51,12 @@ function onExport(format) {
 function onDedupe() {
   closeMenu()
   openDedupe()
+}
+
+/** 磁盘占用分析（FEAT-1） */
+function onDiskUsage() {
+  closeMenu()
+  openDiskUsage()
 }
 
 /** 点击菜单外部区域关闭（pointerdown 先于 click，避免误触菜单项后状态残留） */
@@ -149,9 +156,14 @@ onBeforeUnmount(() => {
           title="按文件哈希查找内容完全相同的重复模型"
           :disabled="!state.models.length"
           @click="onDedupe"
-        >
-          重复检测
-        </button>
+        >重复检测</button>
+        <button
+          class="menu-item"
+          role="menuitem"
+          title="按分类与目录统计模型文件占用的磁盘空间"
+          :disabled="!state.models.length"
+          @click="onDiskUsage"
+        >占用分析</button>
       </div>
     </div>
   </header>

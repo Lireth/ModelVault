@@ -7,6 +7,7 @@ import SettingsPage from './components/SettingsPage.vue'
 import ToastHost from './components/ToastHost.vue'
 import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import DedupePanel from './components/DedupePanel.vue'
+import DiskUsagePanel from './components/DiskUsagePanel.vue'
 import {
   acceptConfirm,
   applyThumbUpdates,
@@ -188,6 +189,9 @@ onUnmounted(() => {
       <main class="content">
         <!-- 设置页面：占用模型预览区位置 -->
         <SettingsPage v-if="state.settingsOpen" />
+
+        <!-- 磁盘占用分析面板（FEAT-1）：占用模型预览区位置 -->
+        <DiskUsagePanel v-else-if="state.diskUsage.open" />
 
         <!-- 重复检测面板（E5）：占用模型预览区位置 -->
         <DedupePanel v-else-if="state.dedupe.open" />

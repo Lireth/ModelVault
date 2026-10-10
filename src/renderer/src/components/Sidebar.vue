@@ -7,6 +7,7 @@ import {
   chooseFolder,
   exportModels,
   openDedupe,
+  openDiskUsage,
   removeRoot,
   scanModels,
   openSettings,
@@ -69,6 +70,10 @@ function onScanClick() {
       <!-- 重复模型检测（E5） -->
       <button class="btn action-btn" title="按文件哈希查找内容完全相同的重复模型" :disabled="!state.models.length" @click="openDedupe">
         重复检测
+      </button>
+      <!-- 磁盘占用分析（FEAT-1） -->
+      <button class="btn action-btn" title="按分类与目录统计模型文件占用的磁盘空间" :disabled="!state.models.length" @click="openDiskUsage">
+        占用分析
       </button>
     </div>
 
