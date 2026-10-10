@@ -151,15 +151,6 @@ onBeforeUnmount(() => {
         <button
           class="menu-item"
           role="menuitem"
-          title="将当前列表导出为 JSON 文件"
-          :disabled="!state.models.length"
-          @click="onExport('json')"
-        >
-          导出 JSON
-        </button>
-        <button
-          class="menu-item"
-          role="menuitem"
           title="按文件哈希查找内容完全相同的重复模型"
           :disabled="!state.models.length"
           @click="onDedupe"

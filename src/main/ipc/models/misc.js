@@ -125,7 +125,7 @@ export function registerMiscHandlers() {
   // 导出模型列表（E2）：渲染进程传当前列表行，主进程弹保存对话框并写文件。
   // 复用已装饰的模型数据（备注/参数/收藏等随行携带），CSV 带 BOM 便于 Excel 打开
   ipcMain.handle('models:exportList', async (event, { format, rows } = {}) => {
-    if (format !== 'csv' && format !== 'json') {
+    if (format !== 'csv') {
       return { error: '不支持的导出格式' }
     }
     if (!Array.isArray(rows)) {
@@ -136,18 +136,13 @@ export function registerMiscHandlers() {
     const result = await dialog.showSaveDialog(win, {
       title: '导出模型列表',
       defaultPath: `modelvault-export-${date}.${format}`,
-      filters:
-        format === 'csv'
-          ? [{ name: 'CSV 表格', extensions: ['csv'] }]
-          : [{ name: 'JSON 文件', extensions: ['json'] }]
+      filters: [{ name: 'CSV 表格', extensions: ['csv'] }]
     })
     if (result.canceled || !result.filePath) {
       return { canceled: true }
     }
     try {
-      const content =
-        format === 'csv' ? buildModelsCsv(rows) : JSON.stringify(rows, null, 2)
-      await fs.writeFile(result.filePath, content, 'utf-8')
+      await fs.writeFile(result.filePath, buildModelsCsv(rows), 'utf-8')
       logger.info(`模型列表已导出: ${result.filePath}（${rows.length} 条）`)
       return { path: result.filePath, count: rows.length }
     } catch (err) {

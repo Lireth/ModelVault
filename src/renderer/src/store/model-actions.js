@@ -49,7 +49,7 @@ export async function deleteModel(id, opts = {}) {
 
 /**
  * 导出当前（筛选后）模型列表到文件（E2）。
- * @param {'csv'|'json'} format 导出格式
+ * @param {'csv'} format 导出格式
  */
 export async function exportModels(format) {
   const list = filteredModels.value

@@ -66,9 +66,6 @@ function onScanClick() {
         <button class="btn action-btn" title="将当前列表导出为 CSV 文件（可被 Excel 打开）" :disabled="!state.models.length" @click="exportModels('csv')">
           导出 CSV
         </button>
-        <button class="btn action-btn" title="将当前列表导出为 JSON 文件" :disabled="!state.models.length" @click="exportModels('json')">
-          导出 JSON
-        </button>
         <!-- 重复模型检测（E5） -->
         <button class="btn action-btn" title="按文件哈希查找内容完全相同的重复模型" :disabled="!state.models.length" @click="openDedupe">
           重复检测

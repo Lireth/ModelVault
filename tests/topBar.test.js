@@ -37,18 +37,17 @@ function mountTopBar() {
 }
 
 describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
-  it('默认关闭；点击 ☰ 展开全部 6 个操作项', async () => {
+  it('默认关闭；点击 ☰ 展开全部操作项', async () => {
     const wrapper = mountTopBar()
     expect(wrapper.find('.narrow-actions-menu').exists()).toBe(false)
     await wrapper.find('.narrow-actions-btn').trigger('click')
     expect(wrapper.find('.narrow-actions-menu').exists()).toBe(true)
     const items = wrapper.findAll('.menu-item')
-    expect(items).toHaveLength(7)
+    expect(items).toHaveLength(6)
     expect(items.map((i) => i.text())).toEqual([
       '重新扫描',
       '选择文件夹',
       '导出 CSV',
-      '导出 JSON',
       '重复检测',
       '占用分析',
       '整理'
@@ -58,7 +57,7 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
   it('「占用分析」打开磁盘占用面板并关闭菜单（FEAT-1 入口）', async () => {
     const wrapper = mountTopBar()
     await wrapper.find('.narrow-actions-btn').trigger('click')
-    await wrapper.findAll('.menu-item')[5].trigger('click')
+    await wrapper.findAll('.menu-item')[4].trigger('click')
     expect(state.diskUsage.open).toBe(true)
     expect(wrapper.find('.narrow-actions-menu').exists()).toBe(false)
   })
@@ -66,7 +65,7 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
   it('「重复检测」打开检测面板（E5 入口）', async () => {
     const wrapper = mountTopBar()
     await wrapper.find('.narrow-actions-btn').trigger('click')
-    await wrapper.findAll('.menu-item')[4].trigger('click')
+    await wrapper.findAll('.menu-item')[3].trigger('click')
     expect(state.dedupe.open).toBe(true)
     expect(wrapper.find('.narrow-actions-menu').exists()).toBe(false)
   })
@@ -102,9 +101,8 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
     expect(items[0].attributes('disabled')).toBeDefined() // 重新扫描（无文件夹）
     expect(items[1].attributes('disabled')).toBeUndefined() // 选择文件夹恒可用
     expect(items[2].attributes('disabled')).toBeDefined() // 导出 CSV（无模型）
-    expect(items[3].attributes('disabled')).toBeDefined() // 导出 JSON（无模型）
-    expect(items[4].attributes('disabled')).toBeDefined() // 重复检测（无模型）
-    expect(items[5].attributes('disabled')).toBeDefined() // 占用分析（无模型）
+    expect(items[3].attributes('disabled')).toBeDefined() // 重复检测（无模型）
+    expect(items[4].attributes('disabled')).toBeDefined() // 占用分析（无模型）
   })
 
   it('点击菜单外部区域关闭', async () => {
