@@ -225,6 +225,7 @@ onBeforeUnmount(() => {
         <button
           class="thumb-delete"
           title="删除这张预览图"
+          aria-label="删除这张预览图"
           type="button"
           @click.stop="onDeleteCover(c)"
         >✕</button>
@@ -384,13 +385,26 @@ onBeforeUnmount(() => {
   line-height: 1;
   padding: 0;
   cursor: pointer;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
+  /* 键盘可达（OPT-2）：以透明度替代 display:none——后者会移出 Tab 序列；
+     隐藏态同时屏蔽指针事件，保持既有点击语义（隐藏时点击该区域仍作用于
+     缩略图本身的「设为默认」）；悬停或键盘聚焦（:focus-visible）时显现并可交互 */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
 }
 
-.cover-thumb:hover .thumb-delete {
-  display: flex;
+.cover-thumb:hover .thumb-delete,
+.thumb-delete:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.thumb-delete:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .thumb-delete:hover {

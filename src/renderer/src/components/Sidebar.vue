@@ -91,8 +91,13 @@ function onScanClick() {
             <span class="root-name">{{ rootName(f) }}</span>
             <span
               class="root-remove"
+              role="button"
+              tabindex="0"
               title="从模型库列表移除（磁盘数据不受影响）"
+              :aria-label="`将模型库 ${rootName(f)} 从列表移除`"
               @click.stop="removeRoot(f)"
+              @keydown.enter.stop.prevent="removeRoot(f)"
+              @keydown.space.stop.prevent="removeRoot(f)"
             >✕</span>
           </button>
         </li>
@@ -237,16 +242,30 @@ function onScanClick() {
   flex-shrink: 0;
   width: 18px;
   height: 18px;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 5px;
   color: var(--text-muted);
   font-size: 10px;
+  cursor: pointer;
+  /* 键盘可达（OPT-2）：以透明度替代 display:none——后者会移出 Tab 序列；
+     隐藏态同时屏蔽指针事件，保持既有点击语义（隐藏时点击该区域仍作用于
+     父级「切换模型库」按钮）；悬停或键盘聚焦（:focus-visible）时显现并可交互 */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
 }
 
-.root-item:hover .root-remove {
-  display: flex;
+.root-item:hover .root-remove,
+.root-remove:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.root-remove:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .root-remove:hover {
