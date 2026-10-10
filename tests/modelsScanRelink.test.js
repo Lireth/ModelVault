@@ -63,6 +63,57 @@ afterAll(async () => {
   }
 })
 
+describe('models:partialScan 局部增量扫描（A-03）', () => {
+  it('只扫描指定子树：返回子树现状，装饰标注生效，子树外文件不出现在响应中', async () => {
+    const scan = getRegisteredHandler('models:scan')
+    const partial = getRegisteredHandler('models:partialScan')
+    await updateSettings({ modelsFolder: root })
+
+    // 初始布局：lora/a（有标注）+ checkpoint/c
+    await fs.mkdir(path.join(root, 'lora'), { recursive: true })
+    await fs.mkdir(path.join(root, 'checkpoint'), { recursive: true })
+    const aAbs = path.join(root, 'lora', 'a.safetensors')
+    const cAbs = path.join(root, 'checkpoint', 'c.safetensors')
+    await fs.writeFile(aAbs, 'x')
+    await fs.writeFile(cAbs, 'x')
+    await scan(makeEvent(), { folder: root })
+    setModelMeta(aAbs, { alias: 'A 模型', favorite: true })
+    setModelMeta(cAbs, { note: '大模型备注' })
+
+    // lora 子树：a 改名为 b
+    await fs.rename(aAbs, path.join(root, 'lora', 'b.safetensors'))
+
+    const res = await partial(makeEvent(), { folder: root, dirs: ['lora'] })
+
+    expect(res.error).toBeUndefined()
+    expect(res.relinked).toBe(1)
+    expect(res.models).toHaveLength(1)
+    expect(res.models[0].id).toBe(path.join(root, 'lora', 'b.safetensors'))
+    // 重关联的标注在局部结果中即时生效
+    expect(res.models[0].alias).toBe('A 模型')
+    expect(res.models[0].favorite).toBe(true)
+    // checkpoint 不在本次响应内
+    expect(res.models.some((m) => m.id === cAbs)).toBe(false)
+    // 子树外的元数据原样保留
+    expect(getModelMeta(cAbs).note).toBe('大模型备注')
+  })
+
+  it('白名单外目录拒绝局部扫描', async () => {
+    const partial = getRegisteredHandler('models:partialScan')
+    const outside = path.join(root, '..', 'outside-' + Date.now())
+    const res = await partial(makeEvent(), { folder: outside, dirs: [''] })
+    expect(res.error).toBeTruthy()
+  })
+
+  it('dirs 非法（含 .. 逃逸/非数组/空）拒绝', async () => {
+    const partial = getRegisteredHandler('models:partialScan')
+    await updateSettings({ modelsFolder: root })
+    expect((await partial(makeEvent(), { folder: root, dirs: [] })).error).toContain('子树')
+    expect((await partial(makeEvent(), { folder: root, dirs: ['../escape'] })).error).toContain('子树')
+    expect((await partial(makeEvent(), { folder: root, dirs: 'lora' })).error).toContain('子树')
+  })
+})
+
 describe('models:scan × A-02 移动后自动重关联', () => {
   it('文件移动到新目录后重扫：relinked=1，装饰结果在新路径携带原标注', async () => {
     const scan = getRegisteredHandler('models:scan')

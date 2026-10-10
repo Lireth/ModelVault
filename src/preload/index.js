@@ -14,6 +14,7 @@ const VALID_INVOKE_CHANNELS = [
   'models:loadStore',
   'models:chooseFolder',
   'models:scan',
+  'models:partialScan',
   'models:cancelScan',
   'models:saveModelData',
   'models:uploadCover',
@@ -103,6 +104,11 @@ const api = {
     scan: (folder) => invokeValidated('models:scan', { folder }),
     /** 取消进行中的扫描，返回 { ok } */
     cancelScan: () => invokeValidated('models:cancelScan'),
+    /**
+     * 局部增量扫描（A-03）：只扫描指定变更子树，返回这些子树的模型现状。
+     * payload 为 { folder, dirs }（dirs 为 POSIX 相对目录数组，'' 为根直属）
+     */
+    partialScan: (payload) => invokeValidated('models:partialScan', payload),
     /** 保存模型推荐参数与备注 */
     saveModelData: (payload) => invokeValidated('models:saveModelData', payload),
     /** 上传模型封面，返回 { cover, coverUrl, covers, meta } 或 { canceled } / { error } */

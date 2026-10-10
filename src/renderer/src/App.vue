@@ -28,6 +28,7 @@ import {
   rejectConfirm,
   saveSettings,
   scanModels,
+  partialScanModels,
   SORT_OPTIONS,
   sortDirectional,
   state,
@@ -81,14 +82,49 @@ let unsubscribeFsChanged = null
 /** 目录变更自动重扫的二级防抖（主进程 3s 静默期后此处再缓冲 1s，E8） */
 let fsChangedTimer = null
 
-function onFsChanged({ root }) {
-  if (root !== state.folder || state.scanning || !state.settings.autoRescan) return
+/**
+ * 扫描进行中收到的变更待处理子树集合（A-07a 漏报修复 + A-03 增量）：
+ * 扫描进行中到达的 fsChanged 不丢弃，其变更子树累积到集合（多次合并），
+ * 由 state.scanning 侦听器在扫描结束后补一次防抖的局部扫描。
+ * null 表示无待处理
+ */
+let fsChangedPendingDirs = null
+
+/**
+ * 安排一次二级防抖后的刷新（A-03）：
+ * 有变更子树走局部增量扫描，空列表（旧载荷/无法定位）由 store 回退全量扫描。
+ */
+function scheduleFsRescan(dirs) {
   clearTimeout(fsChangedTimer)
   fsChangedTimer = setTimeout(() => {
     fsChangedTimer = null
-    if (!state.scanning && state.settings.autoRescan) scanModels()
+    if (!state.scanning && state.settings.autoRescan) partialScanModels(dirs || [])
   }, 1000)
 }
+
+function onFsChanged({ root, dirs }) {
+  if (root !== state.folder || !state.settings.autoRescan) return
+  const subDirs = Array.isArray(dirs) ? dirs : []
+  // 扫描进行中：累积变更子树，扫描结束后由侦听器补一次局部扫描，不丢弃事件
+  if (state.scanning) {
+    if (!fsChangedPendingDirs) fsChangedPendingDirs = new Set()
+    for (const d of subDirs) fsChangedPendingDirs.add(d)
+    return
+  }
+  scheduleFsRescan(subDirs)
+}
+
+// 扫描结束补决策（A-07a）：扫描中累积的变更子树在结束后补一次防抖局部扫描
+watch(
+  () => state.scanning,
+  (scanning, wasScanning) => {
+    if (wasScanning && !scanning && fsChangedPendingDirs) {
+      const pending = [...fsChangedPendingDirs]
+      fsChangedPendingDirs = null
+      if (state.settings.autoRescan) scheduleFsRescan(pending)
+    }
+  }
+)
 
 /**
  * 拖放兜底（B13）：阻止非文件拖放（文本/链接等）触发默认导航覆盖当前窗口。

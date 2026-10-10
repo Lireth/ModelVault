@@ -64,6 +64,26 @@ function trackDeferredThumb(absCover, modelId) {
 }
 
 /**
+ * 登记单个模型对某封面的缩略图归属（A-09 封面即时缩略图）：
+ * 封面 IPC 路径不经过 decorateOne，需要显式登记，drain 完成后才能推送到该卡片。
+ * @param {string} modelId 模型绝对路径
+ * @param {string} absCover 封面绝对路径
+ */
+export function trackDeferredOwner(modelId, absCover) {
+  trackDeferredThumb(absCover, modelId)
+}
+
+/**
+ * 向窗口推送若干卡片的缩略图就绪事件（载荷格式与 drain 推送一致：{updates}）。
+ * @param {object|null} win 来源窗口（null/已销毁时静默跳过）
+ * @param {Array<{id:string, coverUrl:string}>} updates
+ */
+export function sendThumbReady(win, updates) {
+  if (!win || win.isDestroyed() || !updates?.length) return
+  win.webContents.send('models:thumbsReady', { updates })
+}
+
+/**
  * 清空延迟缩略图归属表（切换模型根目录时调用，C5）。
  * 残留的旧根条目会在下一轮 startThumbDrain 中把新根生成的缩略图
  * 推送给旧根的模型卡片（无效更新）。
@@ -93,15 +113,7 @@ export function startThumbDrain(win) {
         entry.decorated.coverUrl = coverUrl
       }
     }
-    // win 可能为 null：扫描进行中窗口被关闭时，scan.js 经
-    // BrowserWindow.fromWebContents 取到的就是 null（A7）。
-    // 漏判会在 drain 回调里抛 TypeError，被 allSettled 吞掉并误记为
-    // 「后台缩略图生成失败」，thumbsReady 推送静默中断
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('models:thumbsReady', {
-        updates: [...ids].map((id) => ({ id, coverUrl }))
-      })
-    }
+    sendThumbReady(win, [...ids].map((id) => ({ id, coverUrl })))
   }).finally(() => {
     setThumbDrainPromise(null)
   })

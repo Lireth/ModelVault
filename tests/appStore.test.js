@@ -18,6 +18,7 @@ import {
   largestModels,
   multiSelectIdSet,
   openDiskUsage,
+  partialScanModels,
   pickDuplicateKeeper,
   rejectConfirm,
   removeDedupeItem,
@@ -59,6 +60,7 @@ function makeApiMock() {
       setDefaultCover: vi.fn(),
       deleteCover: vi.fn(),
       importCover: vi.fn(),
+      partialScan: vi.fn(),
       onScanProgress: vi.fn(() => () => {}),
       onMenuAction: vi.fn(() => () => {}),
       onThumbsReady: vi.fn(() => () => {}),
@@ -101,6 +103,111 @@ beforeEach(() => {
   state.toasts.splice(0, state.toasts.length)
   if (state.confirm.resolve) state.confirm.resolve(false)
   state.confirm = { visible: false, text: '', resolve: null }
+})
+
+describe('partialScanModels 增量合并（A-03）', () => {
+  function setGrid(models) {
+    state.folder = 'D:\\models'
+    state.models = models
+  }
+
+  it('新模型并入列表，子树外模型保持不动', async () => {
+    setGrid([
+      makeModel('D:\\models\\keep.safetensors', { name: 'keep', relDir: '' }),
+      makeModel('D:\\models\\lora\\a.safetensors', { name: 'a', relDir: 'lora' })
+    ])
+    api.models.partialScan.mockResolvedValue({
+      models: [
+        makeModel('D:\\models\\lora\\a.safetensors', { name: 'a', relDir: 'lora' }),
+        makeModel('D:\\models\\lora\\b.safetensors', { name: 'b', relDir: 'lora' })
+      ],
+      dirs: ['lora'],
+      relinked: 0
+    })
+
+    await partialScanModels(['lora'])
+
+    const ids = state.models.map((m) => m.id)
+    expect(ids).toContain('D:\\models\\keep.safetensors') // 子树外不动
+    expect(ids).toContain('D:\\models\\lora\\a.safetensors') // 子树内存量被新结果替换
+    expect(ids).toContain('D:\\models\\lora\\b.safetensors') // 新增
+    expect(state.models).toHaveLength(3)
+    // IPC 入参透传子树
+    expect(api.models.partialScan).toHaveBeenCalledWith({ folder: 'D:\\models', dirs: ['lora'] })
+  })
+
+  it('子树内消失的模型从列表移除，子树外模型保留', async () => {
+    setGrid([
+      makeModel('D:\\models\\lora\\gone.safetensors', { name: 'gone', relDir: 'lora' }),
+      makeModel('D:\\models\\keep.safetensors', { name: 'keep', relDir: '' })
+    ])
+    api.models.partialScan.mockResolvedValue({ models: [], dirs: ['lora'], relinked: 0 })
+
+    await partialScanModels(['lora'])
+
+    const ids = state.models.map((m) => m.id)
+    expect(ids).not.toContain('D:\\models\\lora\\gone.safetensors')
+    expect(ids).toContain('D:\\models\\keep.safetensors')
+  })
+
+  it('dirs 含根目录空串时影响根直属模型，但不影响子目录模型', async () => {
+    setGrid([
+      makeModel('D:\\models\\root-file.safetensors', { name: 'root-file', relDir: '' }),
+      makeModel('D:\\models\\lora\\deep.safetensors', { name: 'deep', relDir: 'lora' })
+    ])
+    api.models.partialScan.mockResolvedValue({ models: [], dirs: [''], relinked: 0 })
+
+    await partialScanModels([''])
+
+    const ids = state.models.map((m) => m.id)
+    expect(ids).not.toContain('D:\\models\\root-file.safetensors')
+    expect(ids).toContain('D:\\models\\lora\\deep.safetensors')
+  })
+
+  it('合并后同步清理多选选区中已消失的 id', async () => {
+    setGrid([
+      makeModel('D:\\models\\lora\\gone.safetensors', { name: 'gone', relDir: 'lora' }),
+      makeModel('D:\\models\\keep.safetensors', { name: 'keep', relDir: '' })
+    ])
+    state.multiSelect.active = true
+    state.multiSelect.ids = ['D:\\models\\lora\\gone.safetensors', 'D:\\models\\keep.safetensors']
+    api.models.partialScan.mockResolvedValue({ models: [], dirs: ['lora'], relinked: 0 })
+
+    await partialScanModels(['lora'])
+
+    expect(state.multiSelect.ids).toEqual(['D:\\models\\keep.safetensors'])
+  })
+
+  it('子树内当前打开详情的模型消失时关闭详情', async () => {
+    setGrid([makeModel('D:\\models\\lora\\gone.safetensors', { name: 'gone', relDir: 'lora' })])
+    state.selectedId = 'D:\\models\\lora\\gone.safetensors'
+    api.models.partialScan.mockResolvedValue({ models: [], dirs: ['lora'], relinked: 0 })
+
+    await partialScanModels(['lora'])
+
+    expect(state.selectedId).toBeNull()
+  })
+
+  it('dirs 为空/缺省时回退全量扫描（防御 watcher 载荷异常）', async () => {
+    setGrid([])
+    api.models.scan.mockResolvedValue({ models: [makeModel('m1')], errors: [] })
+    api.models.partialScan.mockResolvedValue({ models: [makeModel('m2')], dirs: [] })
+
+    await partialScanModels([])
+
+    expect(api.models.scan).toHaveBeenCalled()
+    expect(api.models.partialScan).not.toHaveBeenCalled()
+  })
+
+  it('IPC 返回错误时 toast 提示且不改动列表', async () => {
+    setGrid([makeModel('keep-id')])
+    api.models.partialScan.mockRejectedValue(new Error('局部扫描失败'))
+
+    await partialScanModels(['lora'])
+
+    expect(state.models.map((m) => m.id)).toEqual(['keep-id'])
+    expect(state.toasts.some((t) => t.type === 'error')).toBe(true)
+  })
 })
 
 describe('scanModels 重关联提示（A-02）', () => {

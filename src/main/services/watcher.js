@@ -22,8 +22,14 @@ import logger from '../logger'
 
 /** 关联存储目录名：遍历时整条剔除（其存在与否/内部写入都不代表模型库变更） */
 const DATA_DIR_NAME = '.modelvault'
-/** 轮询间隔（ms）：本地库目录树的 readdir 开销远小于漏事件的风险 */
+/** 基础轮询间隔（ms）：目录最近有变更时以此间隔巡检 */
 const DEFAULT_POLL_INTERVAL = 2000
+/**
+ * 空闲退避阶梯（ms，A-07b）：连续巡检无变更时逐级拉长间隔，
+ * 避免空闲库（尤其移动硬盘/网络盘）被高频全树 readdir 持续唤醒；
+ * 一旦检测到变更立即回到基础间隔。
+ */
+const DEFAULT_BACKOFF = [2000, 5000, 10000]
 /** 广播防抖（ms）：批量解压/移动文件时只触发一次重扫 */
 const DEFAULT_BROADCAST_DEBOUNCE = 3000
 
@@ -40,10 +46,10 @@ function stop() {
 }
 
 /** 向所有窗口广播目录变更 */
-function broadcast(root) {
+function broadcast(root, dirs = []) {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
-      win.webContents.send('models:fsChanged', { root })
+      win.webContents.send('models:fsChanged', { root, dirs })
     }
   }
 }
@@ -105,34 +111,103 @@ export function snapshotsEqual(a, b) {
   return true
 }
 
-/** 防抖广播：静默期内多次变更只触发一次 */
-function scheduleBroadcast(w) {
-  if (w.debounceTimer) clearTimeout(w.debounceTimer)
-  w.debounceTimer = setTimeout(() => {
-    w.debounceTimer = null
-    logger.info(`检测到模型目录变更，触发重扫: ${w.root}`)
-    broadcast(w.root)
-  }, w.debounceMs)
+/**
+ * 计算两次快照间发生条目录变化的目录集合（A-03 增量扫描依据）：
+ * 新增/消失/条目列表不同的目录都计入，返回相对根的 POSIX 路径数组
+ * （根目录为 ''），排序去重。局部重扫只需覆盖这些子树即可与全量结果一致。
+ * @param {string} root 监控根目录（绝对路径）
+ * @param {Map<string, string[]>} oldSnap 旧快照
+ * @param {Map<string, string[]>} newSnap 新快照
+ * @returns {string[]} 变更目录的相对路径（POSIX 分隔，根目录为 ''）
+ */
+export function computeSnapshotDiff(root, oldSnap, newSnap) {
+  const dirs = new Set()
+  const consider = (dirAbs, oldNames, newNames) => {
+    const a = oldNames || []
+    const b = newNames || []
+    if (a.length === b.length && a.every((n, i) => n === b[i])) return
+    const rel = path.relative(root, dirAbs)
+    const normalized = rel === '' ? '' : rel.split(path.sep).join('/')
+    // 理论上快照键都在根内；防御性忽略越界项
+    if (normalized && (normalized.startsWith('..') || path.isAbsolute(normalized))) return
+    dirs.add(normalized)
+  }
+  for (const [dir, names] of oldSnap) consider(dir, names, newSnap.get(dir))
+  for (const [dir, names] of newSnap) consider(dir, oldSnap.get(dir), names)
+  return [...dirs].sort()
 }
 
 /**
- * 执行一次快照遍历。
- * @param {object} w 监控状态
- * @param {boolean} silent 静默模式（建立基准）：只记录快照，无比对/广播
+ * 防抖广播：静默期内多轮变更只广播一次，变更目录取并集（A-03）。
+ * diff 目录在每轮发现变更时合入 w.pendingDirs，广播载荷携带 { root, dirs }，
+ * 渲染层据此只重扫这些子树。
  */
+function scheduleBroadcast(w, changedDirs = []) {
+  if (!Array.isArray(w.pendingDirs)) w.pendingDirs = new Set()
+  for (const d of changedDirs) w.pendingDirs.add(d)
+  if (w.debounceTimer) clearTimeout(w.debounceTimer)
+  w.debounceTimer = setTimeout(() => {
+    w.debounceTimer = null
+    const dirs = [...w.pendingDirs].sort()
+    w.pendingDirs.clear()
+    logger.info(`检测到模型目录变更，触发重扫: ${w.root}（${dirs.length} 个子树）`)
+    broadcast(w.root, dirs)
+  }, w.debounceMs)
+}
+
+/** 是否存在可见（未最小化）的主窗口；无窗口/无法判定时按可见处理 */
+function windowsVisible() {
+  return BrowserWindow.getAllWindows().some(
+    (win) => !win.isDestroyed() && (typeof win.isVisible !== 'function' || win.isVisible())
+  )
+}
+
+/**
+ * 计算下一轮巡检延迟（A-07b 空闲退避）：
+ * idleRounds 为连续无变更轮数；无 backoff 配置（旧 timing）时恒定基础间隔。
+ */
+function nextDelay(w) {
+  const ladder = w.backoff
+  if (!Array.isArray(ladder) || ladder.length === 0) return w.pollInterval
+  return ladder[Math.min(w.idleRounds, ladder.length - 1)]
+}
+
+/** 安排下一轮巡检并对外通告实际延迟（测试钩子 onPollScheduled） */
+function scheduleNextWalk(w) {
+  if (w !== watcher || !watcher) return // 遍历期间监控可能已被停止/替换
+  const delay = nextDelay(w)
+  w.timer = setTimeout(() => runWalk(w, false), delay)
+  w.timer.unref?.()
+  if (typeof w.onPollScheduled === 'function') w.onPollScheduled(delay)
+}
+
 function runWalk(w, silent) {
-  // 上一次遍历未完成（超大目录树）时跳过本轮，避免并发遍历互相踩状态
-  if (w.polling) return
+  // 上一次遍历未完成（超大目录树）时本轮跳过读盘，仅安排下一轮，避免并发遍历
+  if (w.polling) {
+    scheduleNextWalk(w)
+    return
+  }
   w.polling = true
-  collectDirSnapshot(w.root, w.excludeNames)
-    .then((snapshot) => {
+  Promise.resolve()
+    .then(async () => {
+      // 非基准轮且窗口隐藏（最小化）：跳过目录遍历，零磁盘 IO——
+      // 仅靠下一轮定时器轻量探测可见性，移动硬盘/网络盘不被 readdir 唤醒。
+      // 隐藏期间不增减空闲计数；恢复后暂停期间积累的变更由首次比对自然发现。
+      if (!silent && typeof w.isVisible === 'function' && !w.isVisible()) return
+
+      const snapshot = await collectDirSnapshot(w.root, w.excludeNames)
       if (silent) {
         w.snapshot = snapshot
         return
       }
-      if (snapshotsEqual(snapshot, w.snapshot)) return
+      const changedDirs = computeSnapshotDiff(w.root, w.snapshot, snapshot)
+      if (changedDirs.length === 0) {
+        w.idleRounds += 1
+        return
+      }
       w.snapshot = snapshot
-      scheduleBroadcast(w)
+      w.idleRounds = 0 // 有变更：退避重置，下一轮回到基础间隔
+      scheduleBroadcast(w, changedDirs)
     })
     .catch((err) => {
       // 根目录不可读（被删除/离线）：停止监控，等下次扫描/设置变更重新发起
@@ -141,6 +216,9 @@ function runWalk(w, silent) {
     })
     .finally(() => {
       w.polling = false
+      // 基准轮与正常轮都由统一的递归 setTimeout 链安排下一轮；
+      // 基准轮 idleRounds=0，首次延迟即基础间隔（stopWatcher 已清 timer 时不再排）
+      scheduleNextWalk(w)
     })
 }
 
@@ -172,14 +250,26 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
     snapshot: new Map(),
     debounceTimer: null,
     timer: null,
-    debounceMs: timing.broadcastDebounce ?? DEFAULT_BROADCAST_DEBOUNCE
+    polling: false,
+    idleRounds: 0,
+    pendingDirs: new Set(),
+    pollInterval: pollMs,
+    // 退避阶梯：测试 timing 未传 backoff 时为 undefined（恒定间隔，旧行为）；
+    // 生产默认 2s→5s→10s（A-07b）
+    backoff: timing.backoff ?? (timing.pollInterval ? undefined : DEFAULT_BACKOFF),
+    debounceMs: timing.broadcastDebounce ?? DEFAULT_BROADCAST_DEBOUNCE,
+    isVisible: typeof timing.isVisible === 'function' ? timing.isVisible : windowsVisible,
+    onPollScheduled: typeof timing.onPollScheduled === 'function' ? timing.onPollScheduled : null
   }
   watcher = w
-  w.timer = setInterval(() => runWalk(w, false), pollMs)
-  w.timer.unref?.()
-  logger.info(`目录监控已启动（autoRescan，轮询 ${pollMs}ms）: ${root}`)
+  logger.info(
+    `目录监控已启动（autoRescan，基础轮询 ${pollMs}ms` +
+      (w.backoff ? `，空闲退避至 ${w.backoff[w.backoff.length - 1]}ms` : '') +
+      `）: ${root}`
+  )
   // 立即建立基准快照（不等首个间隔；只记录不比对）：
-  // 启用前已存在的文件、以及随后才出现的 .modelvault 都不产生首次误报
+  // 启用前已存在的文件、以及随后才出现的 .modelvault 都不产生首次误报。
+  // 基准轮结束后由递归 setTimeout 链安排后续巡检
   runWalk(w, true)
 }
 

@@ -140,6 +140,69 @@ describe('relinkScannedMeta 库内移动/重命名重关联', () => {
   })
 })
 
+describe('relinkScannedMeta 受影响范围（A-03 局部重扫）', () => {
+  it('只重关联受影响子树：子树外消失/未扫到的键既不迁移也不被当孤儿', async () => {
+    // lora/old.safetensors 在 lora 子树内改名；checkpoint/keep.safetensors 未被本次扫描覆盖
+    setModelMeta(path.join(root, 'lora', 'old.safetensors'), { note: '局部迁移' })
+    setModelMeta(path.join(root, 'checkpoint', 'keep.safetensors'), { note: '我在扫描范围外' })
+
+    const result = relinkScannedMeta([scanned('lora/new.safetensors')], {
+      affectedDirs: ['lora']
+    })
+
+    expect(result.relinked).toBe(1)
+    expect(result.retainedOrphans).toBe(0)
+    expect(getModelMeta(path.join(root, 'lora', 'new.safetensors')).note).toBe('局部迁移')
+    expect(getModelMeta(path.join(root, 'lora', 'old.safetensors'))).toBeNull()
+    // 范围外键原样保留：未迁移、未清理、未计数
+    expect(getModelMeta(path.join(root, 'checkpoint', 'keep.safetensors')).note).toBe('我在扫描范围外')
+  })
+
+  it("affectedDirs=[''] 只处理根目录直属文件，子目录键不受影响", async () => {
+    setModelMeta(path.join(root, 'old-root.safetensors'), { rating: 5 })
+    setModelMeta(path.join(root, 'lora', 'x.safetensors'), { rating: 4 })
+
+    const result = relinkScannedMeta([scanned('new-root.safetensors')], {
+      affectedDirs: ['']
+    })
+
+    expect(result.relinked).toBe(1)
+    expect(getModelMeta(path.join(root, 'new-root.safetensors')).rating).toBe(5)
+    expect(getModelMeta(path.join(root, 'lora', 'x.safetensors')).rating).toBe(4)
+  })
+
+  it('受影响子树内的空孤儿被清理；子树外的空孤儿保留（局部扫描看不见不代表删除）', async () => {
+    setModelMeta(path.join(root, 'lora', 'empty-in.safetensors'), { favorite: false })
+    setModelMeta(path.join(root, 'vae', 'empty-out.safetensors'), { favorite: false })
+
+    // lora 子树扫描后该键消失（空孤儿清理）；vae 未扫描，其空骨架保留
+    const result = relinkScannedMeta([], { affectedDirs: ['lora'] })
+
+    expect(result.prunedEmpty).toBe(1)
+    expect(result.retainedOrphans).toBe(0)
+    expect(getModelMeta(path.join(root, 'lora', 'empty-in.safetensors'))).toBeNull()
+    expect(getModelMeta(path.join(root, 'vae', 'empty-out.safetensors'))).not.toBeNull()
+  })
+
+  it('受影响子树内含数据的孤儿保守保留（歧义不绑，等同全量语义）', async () => {
+    setModelMeta(path.join(root, 'lora', 'a.safetensors'), { note: '保留' })
+    const result = relinkScannedMeta(
+      [scanned('lora/x.safetensors'), scanned('lora/y.safetensors')],
+      { affectedDirs: ['lora'] }
+    )
+    expect(result.relinked).toBe(0)
+    expect(result.retainedOrphans).toBe(1)
+    expect(getModelMeta(path.join(root, 'lora', 'a.safetensors')).note).toBe('保留')
+  })
+
+  it('不传 affectedDirs 时维持全量语义（全部键参与判定）', async () => {
+    setModelMeta(path.join(root, 'a.safetensors'), { alias: '全量迁移' })
+    const result = relinkScannedMeta([scanned('sub/a.safetensors')])
+    expect(result.relinked).toBe(1)
+    expect(getModelMeta(path.join(root, 'sub', 'a.safetensors')).alias).toBe('全量迁移')
+  })
+})
+
 describe('relinkScannedMeta 边界', () => {
   it('空扫描结果时：有数据的孤儿走保留/清理判定，不抛错', async () => {
     setModelMeta(path.join(root, 'kept.safetensors'), { rating: 1 })

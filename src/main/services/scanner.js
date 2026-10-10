@@ -14,7 +14,7 @@ export const MODEL_EXTENSIONS = new Set(['.safetensors', '.ckpt', '.pt', '.pth',
 /** 支持的图片扩展名（用于封面/预览图识别） */
 export const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'])
 
-/** 最大递归深度，避免目录环或异常深层结构拖慢扫描 */
+/** 最大递归深度（相对模型根），避免目录环或异常深层结构拖慢扫描 */
 const MAX_DEPTH = 8
 
 /** 并行 stat 的分批大小：单批内并发获取 size/mtime，批间串行，避免一次性打开过多文件句柄 */
@@ -83,17 +83,45 @@ export async function scanModels(root, onProgress, options = {}) {
   const errors = []
   let dirCount = 0
 
-  const stack = [{ dir: root, depth: 0, rel: '' }]
+  // A-03 子树局部扫描：subDirs 为相对根的 POSIX 目录列表，'' 表示根直属。
+  // 每个初始节点扫描目录内文件；非根节点递归全部后代，根节点（''）不递归——
+  // 根层新增/删除的目录必以其自身路径另行出现在子树集合中，'' 只需采集直属文件
+  const scoped = Array.isArray(options.subDirs) && options.subDirs.length > 0
+  const rootResolved = path.resolve(root)
+  const isInsideRoot = (abs) => {
+    const rel = path.relative(rootResolved, path.resolve(abs))
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+  }
+  const initialDirs = scoped
+    ? options.subDirs
+        .map((item) => {
+          const normalized = typeof item === 'string' ? item.trim() : ''
+          if (normalized === '') return { dir: root, depth: 0, rel: '', descend: false }
+          const segs = normalized.split('/').filter(Boolean)
+          return {
+            dir: path.join(root, ...segs),
+            depth: segs.length,
+            rel: segs.join('/'),
+            descend: true
+          }
+        })
+        // 越界（含 .. 逃逸/绝对路径）与超深子树不入栈
+        .filter((item) => item.depth <= MAX_DEPTH && isInsideRoot(item.dir))
+    : [{ dir: root, depth: 0, rel: '', descend: true }]
+  const stack = initialDirs
 
   while (stack.length > 0) {
     if (signal?.aborted) throw abortError()
-    const { dir, depth, rel } = stack.pop()
+    const { dir, depth, rel, descend } = stack.pop()
     if (depth > MAX_DEPTH) continue
 
     let entries
     try {
       entries = await fs.readdir(dir, { withFileTypes: true })
     } catch (err) {
+      // 子树模式下目标目录已被删除是正常增量场景，静默跳过；
+      // 全量模式（根节点不可读）仍计入错误由调用方决定停止监控
+      if (scoped) continue
       errors.push({ dir, message: err.message })
       continue
     }
@@ -112,8 +140,9 @@ export async function scanModels(root, onProgress, options = {}) {
 
       if (entry.isDirectory()) {
         const lowerName = name.toLowerCase()
-        if (!EXCLUDED_DIRS.has(name) && !userExclude.has(lowerName)) {
-          stack.push({ dir: fullPath, depth: depth + 1, rel: relChild })
+        // descend=false 仅用于子树集合中的根节点（''）：不递归后代
+        if (descend && !EXCLUDED_DIRS.has(name) && !userExclude.has(lowerName)) {
+          stack.push({ dir: fullPath, depth: depth + 1, rel: relChild, descend: true })
         }
         continue
       }

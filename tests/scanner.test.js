@@ -116,6 +116,58 @@ describe('scanModels', () => {
     expect(models).toHaveLength(0)
     expect(errors).toHaveLength(1)
   })
+
+  describe('subDirs 子树局部扫描（A-03）', () => {
+    it('只扫描指定子树：兄弟目录与根目录直属文件均不出现在结果中', async () => {
+      const { models, errors } = await scanModels(root, undefined, { subDirs: ['lora'] })
+      expect(errors).toHaveLength(0)
+      const ids = models.map((m) => m.id)
+      expect(ids).toContain(path.join(root, 'lora', 'b.ckpt'))
+      expect(ids).not.toContain(path.join(root, 'a.safetensors'))
+    })
+
+    it('支持多个子树', async () => {
+      const { models } = await scanModels(root, undefined, { subDirs: ['lora', 'notes'] })
+      // notes 内只有 txt（扩展名过滤），仅 lora/b.ckpt 命中
+      expect(models.map((m) => m.id)).toEqual([path.join(root, 'lora', 'b.ckpt')])
+    })
+
+    it('空子树列表等价于不限制（全量扫描，向后兼容）', async () => {
+      const a = await scanModels(root, undefined, { subDirs: [] })
+      const b = await scanModels(root, undefined, {})
+      expect(a.models.length).toBe(b.models.length)
+      expect(a.models.length).toBeGreaterThanOrEqual(3)
+    })
+
+    it('根目录用空串表示：只扫描根直属，不递归任何子目录', async () => {
+      const { models } = await scanModels(root, undefined, { subDirs: [''] })
+      const ids = models.map((m) => m.id)
+      expect(ids).toContain(path.join(root, 'a.safetensors'))
+      expect(ids).not.toContain(path.join(root, 'lora', 'b.ckpt'))
+    })
+
+    it('不存在的子目录静默跳过（已删除目录的情况），其余子树正常', async () => {
+      const { models, errors } = await scanModels(root, undefined, {
+        subDirs: ['lora', 'gone-dir']
+      })
+      expect(errors).toHaveLength(0)
+      expect(models.map((m) => m.id)).toContain(path.join(root, 'lora', 'b.ckpt'))
+    })
+
+    it('子树扫描仍受 MAX_DEPTH 约束（深于上限不遍历）', async () => {
+      const deep = path.join(root, 'sub-deep')
+      // MAX_DEPTH=8：在第 9 层放模型，局部扫描该子树也不应命中
+      const deepDir = path.join(deep, ...Array.from({ length: 9 }, (_, i) => `d${i}`))
+      await fs.mkdir(deepDir, { recursive: true })
+      await fs.writeFile(path.join(deepDir, 'deep.safetensors'), 'x')
+      try {
+        const { models } = await scanModels(root, undefined, { subDirs: ['sub-deep'] })
+        expect(models.map((m) => m.id)).not.toContain(path.join(deepDir, 'deep.safetensors'))
+      } finally {
+        await fs.rm(deep, { recursive: true, force: true }).catch(() => {})
+      }
+    })
+  })
 })
 
 describe('findSidecarPreview', () => {

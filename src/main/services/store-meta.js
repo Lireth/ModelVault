@@ -382,12 +382,28 @@ export async function switchDataRoot(root) {
  *
  * @param {Array<{id:string, name:string, ext:string, size:number, mtimeMs:number}>} scanned
  *   scanner 本次扫描出的模型列表
+ * @param {object} [options]
+ * @param {string[]} [options.affectedDirs] 本次扫描覆盖的相对目录（POSIX，'' 为根直属；
+ *   A-03 局部重扫）。仅这些目录（含后代）内消失的键才作为孤儿候选；
+ *   未扫描目录内的键一律保持原样——局部扫描"看不见"不等于模型被删除。
+ *   缺省为全量语义（全部键参与判定）
  * @returns {{relinked:number, prunedEmpty:number, retainedOrphans:number}}
  *   relinked 迁移条目数；prunedEmpty 清理的空孤儿数；retainedOrphans 保留的数据孤儿数
  */
-export function relinkScannedMeta(scanned) {
+export function relinkScannedMeta(scanned, options = {}) {
   const zero = { relinked: 0, prunedEmpty: 0, retainedOrphans: 0 }
   if (!data || !getCurrentRoot() || !Array.isArray(scanned)) return zero
+
+  const affectedDirs = Array.isArray(options.affectedDirs) ? options.affectedDirs : null
+  /** 键的相对目录是否落在受影响集合内（d 与其后代；'' 仅根直属文件） */
+  const keyInScope = (key) => {
+    if (!affectedDirs) return true
+    const slash = key.lastIndexOf('/')
+    const dir = slash < 0 ? '' : key.slice(0, slash)
+    return affectedDirs.some((d) =>
+      d === '' ? dir === '' : dir === d || dir.startsWith(`${d}/`)
+    )
+  }
 
   const currentKeys = new Set()
   const newcomers = []
@@ -408,6 +424,8 @@ export function relinkScannedMeta(scanned) {
   const orphans = []
   for (const [key, meta] of Object.entries(data.models)) {
     if (currentKeys.has(key)) continue
+    // 局部重扫：范围外的键保持原样，不迁移也不清理
+    if (!keyInScope(key)) continue
     orphans.push({
       key,
       ...splitRelKey(key),

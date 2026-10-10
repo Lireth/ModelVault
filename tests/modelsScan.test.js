@@ -127,6 +127,34 @@ describe('models:scan 防重入（B4）', () => {
   })
 })
 
+describe('models:partialScan（A-03）', () => {
+  it('全量扫描进行中局部扫描立即拒绝（共用扫描锁）', async () => {
+    const scan = getRegisteredHandler('models:scan')
+    const partial = getRegisteredHandler('models:partialScan')
+    hangScanModels()
+    await registerLibrary(root)
+    const pending = scan(makeEvent(), { folder: root })
+    await waitForScanStarted()
+
+    const blocked = await partial(makeEvent(), { folder: root, dirs: [''] })
+    expect(blocked).toEqual({ error: '正在扫描中，请稍候' })
+
+    releaseScan()
+    await pending
+  })
+
+  it('合法子树局部扫描成功（mock 扫描器返回局部模型）', async () => {
+    const partial = getRegisteredHandler('models:partialScan')
+    await registerLibrary(root)
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+    const res = await partial(makeEvent(), { folder: root, dirs: ['lora'] })
+    expect(res.error).toBeUndefined()
+    expect(res.dirs).toEqual(['lora'])
+    // subDirs 透传给扫描器
+    expect(vi.mocked(scanModels).mock.calls.at(-1)[2].subDirs).toEqual(['lora'])
+  })
+})
+
 describe('models:scan 取消', () => {
   it('cancelScan 中止后返回 { canceled: true }', async () => {
     const scan = getRegisteredHandler('models:scan')
