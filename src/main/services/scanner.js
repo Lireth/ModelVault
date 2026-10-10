@@ -187,42 +187,6 @@ export async function scanModels(root, onProgress, options = {}) {
 }
 
 /**
- * 列举库内全部目录（B-06 应用内整理）：
- * 仅遍历目录、不做文件 stat，返回 POSIX 相对目录数组（'' 代表根直属，恒在首位）。
- * 跳过规则与 scanModels 一致：EXCLUDED_ENTRY 命名（.git 等）、.modelvault 等
- * 内置排除、用户 excludeDirs（小写匹配）、符号链接/junction。
- * @param {string} root 模型根目录
- * @param {{excludeDirs?: string[]}} [options]
- * @returns {Promise<string[]>}
- */
-export async function listLibraryDirs(root, options = {}) {
-  const userExclude = new Set((options.excludeDirs || []).map((d) => String(d).toLowerCase()))
-  const result = ['']
-  const stack = [{ dir: root, rel: '' }]
-  while (stack.length > 0) {
-    const { dir, rel } = stack.pop()
-    let entries
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true })
-    } catch {
-      // 目录被并发删除/无权限：整理面板的目录列举是尽力而为，跳过即可
-      continue
-    }
-    for (const entry of entries) {
-      const name = entry.name
-      if (EXCLUDED_ENTRY.test(name)) continue
-      if (entry.isSymbolicLink() || !entry.isDirectory()) continue
-      if (EXCLUDED_DIRS.has(name) || userExclude.has(name.toLowerCase())) continue
-      const fullPath = path.join(dir, name)
-      const relChild = rel ? `${rel}/${name}` : name
-      result.push(relChild)
-      stack.push({ dir: fullPath, rel: relChild })
-    }
-  }
-  return result.sort()
-}
-
-/**
  * 同名 sidecar 预览图候选（按命中优先级排序）。
  * 展示（findSidecarPreview）与删除清理（ipc/models/misc.js 的 sidecarFilesFor）
  * 共用此常量，保证「能展示的都会被清理、能清理的都有机会展示」（B17）。

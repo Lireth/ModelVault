@@ -43,12 +43,11 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
     await wrapper.find('.narrow-actions-btn').trigger('click')
     expect(wrapper.find('.narrow-actions-menu').exists()).toBe(true)
     const items = wrapper.findAll('.menu-item')
-    expect(items).toHaveLength(4)
+    expect(items).toHaveLength(3)
     expect(items.map((i) => i.text())).toEqual([
       '重新扫描',
       '选择文件夹',
-      '导出 CSV',
-      '整理'
+      '导出 CSV'
     ])
   })
 
@@ -83,7 +82,6 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
     expect(items[0].attributes('disabled')).toBeDefined() // 重新扫描（无文件夹）
     expect(items[1].attributes('disabled')).toBeUndefined() // 选择文件夹恒可用
     expect(items[2].attributes('disabled')).toBeDefined() // 导出 CSV（无模型）
-    expect(items[3].attributes('disabled')).toBeDefined() // 整理（无文件夹）
   })
 
   it('点击菜单外部区域关闭', async () => {

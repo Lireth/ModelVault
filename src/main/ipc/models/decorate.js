@@ -255,15 +255,3 @@ export async function decorateModels(models, signal) {
   await pruneThumbs(usedThumbs)
   return result
 }
-
-/**
- * 装饰单个模型（B-06 应用内整理）：库内移动/手动绑定标注后增量刷新该条目。
- * 刻意不复用 decorateModels——后者末尾会 pruneThumbs 删除「本批未引用」的
- * 全部缩略图，单条目调用会误删全库缩略图；此处传独立 Set 且不做清理。
- * 移动不改变封面文件（封面存于 .modelvault/covers），缩略图同名复用。
- * @param {object} model scanner 形态的单个模型
- * @returns {Promise<object>} 装饰后的模型
- */
-export async function decorateSingle(model) {
-  return decorateOne(model, new Set())
-}

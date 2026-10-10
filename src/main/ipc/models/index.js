@@ -4,7 +4,6 @@ import { registerMetaHandlers } from './meta'
 import { registerCoverHandlers } from './covers'
 import { registerMiscHandlers } from './misc'
 import { registerBackupHandlers } from './backup'
-import { registerOrganizeHandlers } from './organize'
 
 /**
  * models 域 IPC 处理器聚合入口（对外签名与行为不变）。
@@ -22,5 +21,4 @@ export function registerModelIpcHandlers() {
   registerCoverHandlers()
   registerMiscHandlers()
   registerBackupHandlers()
-  registerOrganizeHandlers()
 }

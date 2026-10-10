@@ -87,8 +87,6 @@ beforeEach(() => {
   state.selectedId = null
   state.detailDirty = false
   state.settingsOpen = false
-  state.organize.open = false
-  state.organize.pendingIds = []
   state.toasts.splice(0, state.toasts.length)
   if (state.confirm.resolve) state.confirm.resolve(false)
   state.confirm = { visible: false, text: '', resolve: null }

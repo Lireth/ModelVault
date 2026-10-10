@@ -107,18 +107,3 @@ export {
   showContextMenu,
   handleMenuAction
 } from './model-actions'
-
-// 应用内整理（B-06）
-export {
-  openOrganize,
-  closeOrganize,
-  setOrganizeTargetDir,
-  refreshOrganizeDirs,
-  loadMetaGaps,
-  createOrganizeFolder,
-  renameOrganizeFolder,
-  moveModelsToDir,
-  movePendingToTarget,
-  moveIdsToDir,
-  bindGap
-} from './organize'

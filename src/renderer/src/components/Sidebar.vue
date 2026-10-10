@@ -6,7 +6,6 @@ import {
   typeCounts,
   chooseFolder,
   exportModels,
-  openOrganize,
   removeRoot,
   scanModels,
   openSettings,
@@ -53,7 +52,7 @@ function onScanClick() {
       </div>
     </div>
 
-    <!-- 操作按钮区：位于「模型文件夹」与「分类」之间；常用操作两两并排，整理独占整行 -->
+    <!-- 操作按钮区：位于「模型文件夹」与「分类」之间；常用操作两两并排 -->
     <div class="side-section action-section">
       <div class="action-grid">
         <button class="btn action-btn" title="重新扫描当前模型文件夹" :disabled="state.scanning || !state.folder" @click="onScanClick">
@@ -65,10 +64,6 @@ function onScanClick() {
           导出 CSV
         </button>
       </div>
-      <!-- 应用内整理（B-06）：库内移动文件 / 新建文件夹 / 失联标注绑定 -->
-      <button class="btn action-btn" title="在应用内整理模型文件：移动到其他文件夹、新建文件夹、手动绑定失联标注" :disabled="state.scanning || !state.folder" @click="openOrganize()">
-        整理
-      </button>
     </div>
 
     <!-- 模型库切换（E7 多根目录）：存在其他库时显示 -->
@@ -360,7 +355,7 @@ function onScanClick() {
 }
 
 /* 窄屏图标栏（OPT-1）：断点 900px 与 TopBar.vue 的窄屏操作菜单联动——
-   此范围内操作区（重新扫描/选择文件夹/导出/整理）整体隐藏，
+   此范围内操作区（重新扫描/选择文件夹/导出）整体隐藏，
    改由标题栏 ☰ 菜单提供同等入口；改动任一侧断点时须同步另一侧 */
 @media (max-width: 900px) {
   .sidebar {

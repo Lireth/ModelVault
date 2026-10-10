@@ -6,7 +6,6 @@ import ModelDetail from './components/ModelDetail.vue'
 import SettingsPage from './components/SettingsPage.vue'
 import ToastHost from './components/ToastHost.vue'
 import VirtualModelGrid from './components/VirtualModelGrid.vue'
-import OrganizePanel from './components/OrganizePanel.vue'
 import {
   acceptConfirm,
   applyThumbUpdates,
@@ -24,7 +23,6 @@ import {
   initApp,
   LORA_TAGS,
   multiSelectTags,
-  openOrganize,
   rejectConfirm,
   saveSettings,
   scanModels,
@@ -157,9 +155,9 @@ function isEditableTarget(e) {
   )
 }
 
-/** 设置页/整理面板是否打开（这些场景搜索框不在 DOM 中） */
+/** 设置页是否打开（该场景搜索框不在 DOM 中） */
 function isOverlayPanelOpen() {
-  return state.settingsOpen || state.organize.open
+  return state.settingsOpen
 }
 
 /**
@@ -317,9 +315,6 @@ onUnmounted(() => {
         <!-- 设置页面：占用模型预览区位置 -->
         <SettingsPage v-if="state.settingsOpen" />
 
-        <!-- 应用内整理面板（B-06）：占用模型预览区位置 -->
-        <OrganizePanel v-else-if="state.organize.open" />
-
         <!-- 模型预览区 -->
         <template v-else>
         <!-- 重扫失败但仍有上次结果：顶部错误横幅（B15） -->
@@ -363,8 +358,6 @@ onUnmounted(() => {
             >{{ t.label }}</button>
           </template>
           <span class="batch-sep"></span>
-          <!-- B-06：批量移动到库内其他文件夹（打开整理面板并带入选中模型） -->
-          <button class="btn" :disabled="!state.multiSelect.ids.length || state.scanning" @click="openOrganize([...state.multiSelect.ids])">移动到…</button>
           <button class="btn btn-danger" :disabled="!state.multiSelect.ids.length" @click="batchDeleteModels">移入回收站</button>
           <button class="btn" @click="exitMultiSelect">退出多选</button>
         </div>

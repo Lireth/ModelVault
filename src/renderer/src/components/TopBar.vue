@@ -3,14 +3,13 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   chooseFolder,
   exportModels,
-  openOrganize,
   scanModels,
   state
 } from '../store/appStore'
 
 /**
  * 窄屏操作菜单（OPT-1）：
- * 侧边栏操作区（重新扫描/选择文件夹/导出/整理）在窗口宽度 <900px 时
+ * 侧边栏操作区（重新扫描/选择文件夹/导出）在窗口宽度 <900px 时
  * 被 Sidebar.vue 的媒体查询整体隐藏，核心操作在窄窗口下不可达。
  * 此处于标题栏提供替代入口（☰ 按钮 + 下拉菜单），仅在同样 <900px 时显示；
  * 宽屏下 display:none，桌面端布局与交互零变化。
@@ -44,12 +43,6 @@ function onChooseFolder() {
 function onExport(format) {
   closeMenu()
   exportModels(format)
-}
-
-/** 应用内整理（B-06） */
-function onOrganize() {
-  closeMenu()
-  openOrganize()
 }
 
 /** 点击菜单外部区域关闭（pointerdown 先于 click，避免误触菜单项后状态残留） */
@@ -134,13 +127,6 @@ onBeforeUnmount(() => {
         >
           导出 CSV
         </button>
-        <button
-          class="menu-item"
-          role="menuitem"
-          title="在应用内整理模型文件：移动到其他文件夹、新建文件夹、手动绑定失联标注"
-          :disabled="state.scanning || !state.folder"
-          @click="onOrganize"
-        >整理</button>
       </div>
     </div>
   </header>

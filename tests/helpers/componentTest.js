@@ -33,13 +33,6 @@ export function makeComponentApiMock() {
       importCover: vi.fn(),
       exportList: vi.fn(() => Promise.resolve({ canceled: true })),
       partialScan: vi.fn(() => Promise.resolve({ models: [], dirs: [], relinked: 0 })),
-      // B-06 应用内整理
-      listDirs: vi.fn(() => Promise.resolve({ dirs: [''] })),
-      createFolder: vi.fn(() => Promise.resolve({ ok: true, dir: '' })),
-      renameFolder: vi.fn(() => Promise.resolve({ ok: true, oldDir: '', newDir: '', moved: 0 })),
-      moveModels: vi.fn(() => Promise.resolve({ moved: [], failed: [], destDir: '' })),
-      metaGaps: vi.fn(() => Promise.resolve({ orphans: [], newcomers: [] })),
-      bindMeta: vi.fn(() => Promise.resolve({ ok: true, model: null })),
       onScanProgress: vi.fn(() => () => {}),
       onMenuAction: vi.fn(() => () => {}),
       onThumbsReady: vi.fn(() => () => {}),
@@ -72,16 +65,6 @@ function resetStoreState() {
   state.selectedId = null
   state.detailDirty = false
   state.multiSelect = { active: false, ids: [] }
-  state.organize = {
-    open: false,
-    busy: false,
-    dirs: [],
-    targetDir: '',
-    pendingIds: [],
-    gapsLoading: false,
-    orphans: [],
-    newcomers: []
-  }
   state.settingsOpen = false
   state.settings = defaultSettings()
   state.toasts.splice(0, state.toasts.length)

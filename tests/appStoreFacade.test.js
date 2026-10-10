@@ -87,19 +87,7 @@ const EXPECTED_EXPORTS = [
   'setNsfw',
   'setRating',
   'showContextMenu',
-  'handleMenuAction',
-  // B-06 应用内整理
-  'openOrganize',
-  'closeOrganize',
-  'setOrganizeTargetDir',
-  'refreshOrganizeDirs',
-  'loadMetaGaps',
-  'createOrganizeFolder',
-  'renameOrganizeFolder',
-  'moveModelsToDir',
-  'movePendingToTarget',
-  'moveIdsToDir',
-  'bindGap'
+  'handleMenuAction'
 ]
 
 describe('appStore 门面导出契约（A-04）', () => {

@@ -138,18 +138,6 @@ export const state = reactive({
   detailDirty: false, // 详情页表单有未保存的修改（由 ModelDetail 同步，切换/关闭前确认）
   // 多选批量操作（E4/E6）：ids 为选中模型 id 数组
   multiSelect: { active: false, ids: [] },
-  // 应用内整理面板（B-06）：dirs 为主进程返回的库内目录（含空目录），
-  // pendingIds 为待移动模型，orphans/newcomers 为失联标注绑定候选
-  organize: {
-    open: false,
-    busy: false,
-    dirs: [],
-    targetDir: '',
-    pendingIds: [],
-    gapsLoading: false,
-    orphans: [],
-    newcomers: []
-  },
   // 设置
   settings: defaultSettings(),
   settingsOpen: false,

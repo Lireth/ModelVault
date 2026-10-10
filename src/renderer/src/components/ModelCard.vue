@@ -45,20 +45,6 @@ function onContextMenu() {
   showContextMenu(props.model.id)
 }
 
-/**
- * 拖拽归位（B-06）：写入自定义 MIME 的模型 id 列表。
- * 多选模式下拖动已选中卡片携带整个选区；非多选只拖当前模型。
- * 与操作系统文件拖入（封面导入）通过 MIME 类型区分。
- */
-function onDragStart(e) {
-  const ids =
-    state.multiSelect.active && selected.value
-      ? state.multiSelect.ids
-      : [props.model.id]
-  e.dataTransfer.setData('application/x-modelvault-ids', JSON.stringify(ids))
-  e.dataTransfer.effectAllowed = 'move'
-}
-
 /** 显示名称：备注名优先，为空时回退文件名 */
 const displayName = computed(() => props.model.alias || props.model.name)
 
@@ -103,14 +89,12 @@ const mtimeText = computed(() => {
     :title="model.id"
     tabindex="0"
     role="button"
-    draggable="true"
     :aria-pressed="state.multiSelect.active ? selected : undefined"
     :aria-label="`查看模型 ${displayName} 的详情`"
     @click="onCardActivate"
     @keydown.enter.prevent="onCardActivate"
     @keydown.space.prevent="onCardActivate"
     @contextmenu.prevent="onContextMenu"
-    @dragstart="onDragStart"
   >
     <!-- 多选勾选框（E4）：仅多选模式显示 -->
     <span
