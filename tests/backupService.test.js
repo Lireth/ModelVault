@@ -16,6 +16,7 @@ import {
   zipBackupAsync
 } from '../src/main/services/backup'
 import { DATA_DIR, setDataRoot } from '../src/main/services/store'
+import logger from '../src/main/logger'
 
 /**
  * 备份服务测试（FEAT-3）：
@@ -114,9 +115,22 @@ function readZip(filePath) {
   return out
 }
 
-afterAll(() => {
+afterAll(async () => {
+  // exportBackup/importBackup 内部写日志会懒创建 logs 目录并打开写入流，
+  // 不先关闭流，Windows 上句柄未释放会导致 rmSync 报 ENOTEMPTY
+  logger.stream?.end()
+  logger.stream = null
   for (const dir of tmpDirs) {
-    fs.rmSync(dir, { recursive: true, force: true })
+    // Windows 上句柄完全释放有延迟，失败时短暂重试
+    for (let attempt = 0; ; attempt++) {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true })
+        break
+      } catch (err) {
+        if (attempt >= 9) throw err
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+    }
   }
 })
 
