@@ -38,6 +38,11 @@ const MAX_COVERS_BYTES = 1024 * 1024 * 1024
 const LIB_PREFIX = 'library/'
 const LIB_COVERS_PREFIX = 'library/covers/'
 
+/** 恢复临时目录前缀（解出校验用，成功即改名，残留即垃圾） */
+const RESTORE_TMP_PREFIX = `${DATA_DIR}.restore-`
+/** 覆盖恢复时旧数据的留存目录前缀 */
+const BACKUP_DIR_PREFIX = `${DATA_DIR}.bak-`
+
 /**
  * 校验并解析备份清单（纯函数）。
  * @param {Uint8Array|null|undefined} bytes manifest.json 的内容字节
@@ -175,8 +180,36 @@ export async function exportBackup(win) {
 }
 
 /**
+ * 清理恢复过程的残留目录（OPT-18）：
+ * - `.modelvault.restore-*`：解出用临时目录，正常流程结束时应已改名，存在即残留；
+ * - `.modelvault.bak-*`：覆盖恢复的旧数据留存，仅保留最新一份（keepBak），
+ *   更早的属可重复生成的陈旧副本——不清除会在用户模型目录无限累积
+ *   （每份含全部封面，可达数百 MB）。
+ * 单项删除失败仅告警，不中断恢复主流程。
+ * @param {string} root 目标模型根目录
+ * @param {string} keepBakName 本次恢复生成的 .bak 目录名（basename；无既有数据时为空串）
+ */
+async function pruneRestoreArtifacts(root, keepBakName) {
+  let entries
+  try {
+    entries = await fs.readdir(root)
+  } catch {
+    return
+  }
+  for (const name of entries) {
+    const isStaleTmp = name.startsWith(RESTORE_TMP_PREFIX)
+    const isOldBackup = name.startsWith(BACKUP_DIR_PREFIX) && name !== keepBakName
+    if (!isStaleTmp && !isOldBackup) continue
+    await fs.rm(path.join(root, name), { recursive: true, force: true }).catch((err) => {
+      logger.warn(`清理恢复残留目录失败: ${err.message}`)
+    })
+  }
+}
+
+/**
  * 将库数据还原到目标根目录：先解出到临时目录，校验无误后与既有目录交换
- * （既有数据留 .bak 而非直接删除，恢复中断可回滚）。
+ * （既有数据留 .bak 而非直接删除，恢复中断可回滚）；失败即清理本次临时目录，
+ * 成功后按「仅保留最新 .bak」治理残留（OPT-18）。
  * @returns {Promise<{root: string, models: number, covers: number, skipped: number}>}
  */
 async function restoreLibrary(root, unzipped) {
@@ -189,37 +222,47 @@ async function restoreLibrary(root, unzipped) {
   const stamp = Date.now()
   const tmpDir = `${dataDir}.restore-${stamp}`
   await fs.rm(tmpDir, { recursive: true, force: true })
-  await fs.mkdir(path.join(tmpDir, COVERS_DIR), { recursive: true })
-  await fs.writeFile(path.join(tmpDir, DATA_FILE), storeText)
+  try {
+    await fs.mkdir(path.join(tmpDir, COVERS_DIR), { recursive: true })
+    await fs.writeFile(path.join(tmpDir, DATA_FILE), storeText)
 
-  let covers = 0
-  let skipped = 0
-  for (const [entryName, data] of Object.entries(unzipped)) {
-    if (!entryName.startsWith(LIB_COVERS_PREFIX)) continue
-    const name = safeCoverName(entryName)
-    if (!name) {
-      skipped += 1
-      logger.warn(`恢复时跳过不安全的备份条目: ${entryName}`)
-      continue
+    let covers = 0
+    let skipped = 0
+    for (const [entryName, data] of Object.entries(unzipped)) {
+      if (!entryName.startsWith(LIB_COVERS_PREFIX)) continue
+      const name = safeCoverName(entryName)
+      if (!name) {
+        skipped += 1
+        logger.warn(`恢复时跳过不安全的备份条目: ${entryName}`)
+        continue
+      }
+      await fs.writeFile(path.join(tmpDir, COVERS_DIR, name), data)
+      covers += 1
     }
-    await fs.writeFile(path.join(tmpDir, COVERS_DIR, name), data)
-    covers += 1
-  }
 
-  // 交换：既有目录让位到 .bak，临时目录上位；上位失败则回滚，目标目录不留半成品
-  if (await pathExists(dataDir)) {
-    const bakDir = `${dataDir}.bak-${stamp}`
-    await fs.rename(dataDir, bakDir)
-    try {
+    // 交换：既有目录让位到 .bak，临时目录上位；上位失败则回滚，目标目录不留半成品
+    let bakDir = ''
+    if (await pathExists(dataDir)) {
+      bakDir = `${dataDir}.bak-${stamp}`
+      await fs.rename(dataDir, bakDir)
+      try {
+        await fs.rename(tmpDir, dataDir)
+      } catch (err) {
+        await fs.rename(bakDir, dataDir)
+        throw err
+      }
+    } else {
       await fs.rename(tmpDir, dataDir)
-    } catch (err) {
-      await fs.rename(bakDir, dataDir)
-      throw err
     }
-  } else {
-    await fs.rename(tmpDir, dataDir)
+
+    // 残留治理（OPT-18）：更早的 .bak 仅保留本次一份；历史 .restore 临时目录清除
+    await pruneRestoreArtifacts(root, bakDir ? path.basename(bakDir) : '')
+    return { root, models: Object.keys(parsed?.models || {}).length, covers, skipped }
+  } catch (err) {
+    // 失败兜底：清理本次解出的临时目录，不在用户模型目录留垃圾
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
+    throw err
   }
-  return { root, models: Object.keys(parsed?.models || {}).length, covers, skipped }
 }
 
 /**
@@ -280,7 +323,7 @@ export async function importBackup(win) {
         title: '覆盖确认',
         message: '目标文件夹已存在关联数据（.modelvault）',
         detail:
-          '恢复将覆盖其中的标注与封面。现有数据会先备份为 .modelvault.bak-<时间戳>，确认无误后可手动删除。',
+          '恢复将覆盖其中的标注与封面。现有数据会先备份为 .modelvault.bak-<时间戳>（仅保留最新一份，更早的自动清理），确认无误后可手动删除。',
         buttons: ['取消', '覆盖恢复'],
         defaultId: 0,
         cancelId: 0
