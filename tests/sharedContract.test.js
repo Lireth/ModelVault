@@ -17,7 +17,14 @@ import {
   CHECKPOINT_TAG_DEFS,
   ALL_CATEGORY_KEYS
 } from '../src/shared/model-categories'
-import { SORT_OPTION_DEFS, SORT_BY_KEYS, CARD_SIZE_DEFS, CARD_SIZE_KEYS } from '../src/shared/app-enums'
+import {
+  SORT_OPTION_DEFS,
+  SORT_BY_KEYS,
+  CARD_SIZE_DEFS,
+  CARD_SIZE_KEYS,
+  VIEW_MODE_DEFS,
+  VIEW_MODE_KEYS
+} from '../src/shared/app-enums'
 import { DEFAULT_SETTINGS } from '../src/shared/defaults'
 // scanner 不依赖 electron（仅 node 内置 + shared），可直接在 node 环境导入
 import { MODEL_EXTENSIONS as SCANNER_EXTS } from '../src/main/services/scanner'
@@ -72,6 +79,11 @@ describe('shared/app-enums', () => {
   it('卡片尺寸 key 集合与展示定义一致', () => {
     expect([...CARD_SIZE_KEYS].sort()).toEqual(CARD_SIZE_DEFS.map((d) => d.key).sort())
   })
+
+  it('视图模式 key 集合与展示定义一致（grid/list）', () => {
+    expect([...VIEW_MODE_KEYS].sort()).toEqual(VIEW_MODE_DEFS.map((d) => d.key).sort())
+    expect([...VIEW_MODE_KEYS].sort()).toEqual(['grid', 'list'])
+  })
 })
 
 describe('shared/defaults', () => {
@@ -79,7 +91,7 @@ describe('shared/defaults', () => {
     expect(DEFAULT_SETTINGS.scanExtensions).toEqual(MODEL_EXTENSION_NAMES)
     const expectedKeys = [
       'modelsFolder', 'modelsFolders', 'autoScan', 'excludeDirs', 'theme', 'accentColor',
-      'cardSize', 'sortBy', 'sortAsc', 'scanExtensions',
+      'cardSize', 'viewMode', 'sortBy', 'sortAsc', 'scanExtensions',
       'showSize', 'showMtime', 'showParams', 'autoRescan', 'savedViews'
     ].sort()
     expect(Object.keys(DEFAULT_SETTINGS).sort()).toEqual(expectedKeys)

@@ -215,4 +215,27 @@ describe('App 全局快捷键（B-03）', () => {
     expect(state.confirm.visible).toBe(false)
     expect(state.multiSelect.active).toBe(false)
   })
+
+  it('视图切换按钮在网格/列表间切换并持久化', async () => {
+    const wrapper = await mountApp()
+    await setupGrid(wrapper)
+    window.api.settings.update.mockImplementation((patch) =>
+      Promise.resolve({ settings: { ...state.settings, ...patch } })
+    )
+    expect(state.viewMode).toBe('grid')
+    expect(wrapper.find('.virtual-grid').exists()).toBe(true)
+
+    await wrapper.find('.view-toggle').trigger('click')
+    await flushPromises()
+
+    expect(state.viewMode).toBe('list')
+    expect(window.api.settings.update).toHaveBeenCalledWith({ viewMode: 'list' })
+    expect(wrapper.find('.virtual-list').exists()).toBe(true)
+    expect(wrapper.find('.virtual-grid').exists()).toBe(false)
+
+    await wrapper.find('.view-toggle').trigger('click')
+    await flushPromises()
+    expect(state.viewMode).toBe('grid')
+    expect(wrapper.find('.virtual-grid').exists()).toBe(true)
+  })
 })

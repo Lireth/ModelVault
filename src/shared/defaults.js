@@ -15,6 +15,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // 强调色：预设 key（渲染层 constants/accents.js）或 #rrggbb 自定义色
   accentColor: 'blue',
   cardSize: 'normal',
+  // 首页视图模式：grid（网格卡片）/ list（紧凑列表）
+  viewMode: 'grid',
   sortBy: 'name',
   sortAsc: true,
   scanExtensions: [...MODEL_EXTENSION_NAMES],

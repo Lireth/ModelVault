@@ -29,3 +29,12 @@ export const CARD_SIZE_DEFS = [
 
 /** 合法卡片尺寸 key 集合（主进程校验用） */
 export const CARD_SIZE_KEYS = new Set(CARD_SIZE_DEFS.map((d) => d.key))
+
+/** 首页视图模式：网格卡片 / 紧凑列表（A-12 单一来源，主进程校验用） */
+export const VIEW_MODE_DEFS = [
+  { key: 'grid', label: '网格' },
+  { key: 'list', label: '列表' }
+]
+
+/** 合法视图模式 key 集合 */
+export const VIEW_MODE_KEYS = new Set(VIEW_MODE_DEFS.map((d) => d.key))

@@ -8,6 +8,7 @@ import ModelDetail from './components/ModelDetail.vue'
 import SettingsPage from './components/SettingsPage.vue'
 import ToastHost from './components/ToastHost.vue'
 import VirtualModelGrid from './components/VirtualModelGrid.vue'
+import VirtualModelList from './components/VirtualModelList.vue'
 import {
   allFilteredSelected,
   applyThumbUpdates,
@@ -77,6 +78,12 @@ const sortDirEnabled = computed(() => sortDirectional(state.sortBy))
 async function onSortDirChange() {
   state.sortAsc = !state.sortAsc
   await saveSettings({ sortAsc: state.sortAsc })
+}
+
+/** 切换列表/网格视图：立即生效并静默持久化，重启后保持用户选择 */
+async function onToggleViewMode() {
+  state.viewMode = state.viewMode === 'grid' ? 'list' : 'grid'
+  await saveSettings({ viewMode: state.viewMode })
 }
 
 let unsubscribeProgress = null
@@ -344,6 +351,17 @@ onUnmounted(() => {
               <svg v-else viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M4.5 9 8 12.5 11.5 9" /></svg>
             </button>
           </div>
+
+          <!-- 列表/网格视图切换 -->
+          <button
+            class="view-toggle"
+            :title="state.viewMode === 'grid' ? '当前网格视图，点击切换为列表视图' : '当前列表视图，点击切换为网格视图'"
+            :aria-label="state.viewMode === 'grid' ? '切换为列表视图' : '切换为网格视图'"
+            @click="onToggleViewMode"
+          >
+            <svg v-if="state.viewMode === 'grid'" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11" /><circle cx="5" cy="4" r="0.4" fill="currentColor" /><circle cx="5" cy="8" r="0.4" fill="currentColor" /><circle cx="5" cy="12" r="0.4" fill="currentColor" /></svg>
+            <svg v-else viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2" y="2" width="5.4" height="5.4" rx="1.2" /><rect x="8.6" y="2" width="5.4" height="5.4" rx="1.2" /><rect x="2" y="8.6" width="5.4" height="5.4" rx="1.2" /><rect x="8.6" y="8.6" width="5.4" height="5.4" rx="1.2" /></svg>
+          </button>
         </div>
 
         <!-- 启动加载中（B8）：异步恢复上次模型库的空窗期，已配置过文件夹的
@@ -441,8 +459,9 @@ onUnmounted(() => {
             <p class="muted">当前筛选或搜索条件下没有模型，试试切换分类、取消「收藏」筛选或清空搜索词。</p>
           </div>
 
-          <!-- 模型网格：虚拟滚动，仅渲染视口附近的卡片 -->
-          <VirtualModelGrid v-else :models="filteredModels" />
+          <!-- 模型列表区：网格/紧凑列表双视图，虚拟滚动仅渲染视口附近行 -->
+          <VirtualModelGrid v-if="state.viewMode === 'grid'" :models="filteredModels" />
+          <VirtualModelList v-else :models="filteredModels" />
         </template>
       </template>
       </main>
@@ -631,6 +650,28 @@ onUnmounted(() => {
 
 .sort-dir:hover,
 .sort-dir:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* 列表/网格视图切换按钮（与排序方向按钮同族） */
+.view-toggle {
+  padding: 7px 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  color: var(--text-muted);
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+
+.view-toggle:hover,
+.view-toggle:focus-visible {
   color: var(--accent);
   border-color: var(--accent);
   outline: none;

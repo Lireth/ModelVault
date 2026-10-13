@@ -31,6 +31,7 @@ export {
   SORT_OPTIONS,
   CARD_SIZE_PRESETS,
   CARD_SIZE_OPTIONS,
+  VIEW_MODE_OPTIONS,
   SCAN_EXTENSION_OPTIONS,
   sortDirectional,
   tagsForType,
@@ -43,7 +44,7 @@ export {
 export { toast, dismissToast, confirmDialog, acceptConfirm, rejectConfirm } from './toast'
 
 // 展示格式化
-export { formatSize } from './format'
+export { formatSize, formatDate, formatParamSummary } from './format'
 
 // 库生命周期与全量扫描
 export {

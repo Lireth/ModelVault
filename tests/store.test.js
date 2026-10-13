@@ -427,6 +427,15 @@ describe('应用设置规范化', () => {
     expect(s.theme).toBe('dark')
   })
 
+  it('viewMode 接受 grid/list，未知值回退 grid', async () => {
+    await updateSettings({ viewMode: 'list' })
+    let s = await loadSettings()
+    expect(s.viewMode).toBe('list')
+    await updateSettings({ viewMode: 'kanban' })
+    s = await loadSettings()
+    expect(s.viewMode).toBe('grid')
+  })
+
   it('accentColor 规范化：预设 key 与 #rrggbb 自定义色合法，非法回退默认', async () => {
     await updateSettings({ accentColor: 'violet' })
     let s = await loadSettings()

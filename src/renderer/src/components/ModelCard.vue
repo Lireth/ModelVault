@@ -1,6 +1,8 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
+  formatDate,
+  formatParamSummary,
   formatSize,
   multiSelectIdSet,
   openDetail,
@@ -159,31 +161,10 @@ const subTag = computed(() => {
   return subCategoryInfo(props.model.subCategory)
 })
 
-/** 参数摘要：卡片底部一行展示已填写的推荐参数 */
-const paramSummary = computed(() => {
-  const p = props.model.params
-  if (!p) return ''
-  const parts = []
-  if (Number.isFinite(p.steps)) parts.push(`${p.steps} 步`)
-  // CFG 区间：min/max 相等或缺失时只显示单个值
-  if (Number.isFinite(p.cfgMin) && Number.isFinite(p.cfgMax) && p.cfgMin !== p.cfgMax) {
-    parts.push(`CFG ${p.cfgMin}~${p.cfgMax}`)
-  } else if (Number.isFinite(p.cfgMin)) {
-    parts.push(`CFG ${p.cfgMin}`)
-  } else if (Number.isFinite(p.cfgMax)) {
-    parts.push(`CFG ${p.cfgMax}`)
-  }
-  if (p.sampler) parts.push(p.sampler)
-  if (Number.isFinite(p.resMin) && Number.isFinite(p.resMax)) {
-    parts.push(`${p.resMin}~${p.resMax}px`)
-  }
-  return parts.join(' · ')
-})
+/** 参数摘要：卡片底部一行展示已填写的推荐参数（与列表视图共用格式化） */
+const paramSummary = computed(() => formatParamSummary(props.model.params))
 
-const mtimeText = computed(() => {
-  const d = new Date(props.model.mtimeMs)
-  return d.toLocaleDateString('zh-CN')
-})
+const mtimeText = computed(() => formatDate(props.model.mtimeMs))
 </script>
 
 <template>

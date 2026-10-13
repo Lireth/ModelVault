@@ -37,9 +37,10 @@ export async function initApp() {
     state.folder = data.settings?.modelsFolder || ''
     replaceSettings({ ...defaultSettings(), ...data.settings })
     applyTheme(state.settings.theme)
-    // 应用默认排序方式与方向
+    // 应用默认排序方式与方向、首页视图模式
     if (state.settings.sortBy) state.sortBy = state.settings.sortBy
     state.sortAsc = state.settings.sortAsc !== false
+    if (state.settings.viewMode) state.viewMode = state.settings.viewMode
     if (state.folder && state.settings.autoScan !== false) {
       await scanModels()
     }

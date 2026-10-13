@@ -4,7 +4,7 @@ import path from 'node:path'
 import logger from '../logger'
 // A-12 枚举/默认值单一来源（src/shared）：校验集合与渲染层选项共用同一常量
 import { MODEL_EXTENSION_SET } from '../../shared/model-extensions'
-import { SORT_BY_KEYS, CARD_SIZE_KEYS } from '../../shared/app-enums'
+import { SORT_BY_KEYS, CARD_SIZE_KEYS, VIEW_MODE_KEYS } from '../../shared/app-enums'
 import { DEFAULT_SETTINGS } from '../../shared/defaults'
 import { atomicWriteFile } from './atomic-write'
 import { notifyStoreSaveError } from './store-events'
@@ -108,6 +108,7 @@ export function normalizeSettings(raw) {
     theme: VALID_THEMES.has(raw.theme) ? raw.theme : base.theme,
     accentColor: normalizeAccentColor(raw.accentColor),
     cardSize: CARD_SIZE_KEYS.has(raw.cardSize) ? raw.cardSize : base.cardSize,
+    viewMode: VIEW_MODE_KEYS.has(raw.viewMode) ? raw.viewMode : base.viewMode,
     sortBy: SORT_BY_KEYS.has(raw.sortBy) ? raw.sortBy : base.sortBy,
     sortAsc: typeof raw.sortAsc === 'boolean' ? raw.sortAsc : base.sortAsc,
     scanExtensions: normalizeExtensions(raw.scanExtensions),
