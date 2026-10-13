@@ -107,6 +107,9 @@ export function defaultSettings() {
 
 export const state = reactive({
   folder: '',
+  // 启动加载中（B8）：initApp 异步恢复上次的模型库期间为 true，
+  // 防止「开始使用」引导页对已配置过文件夹的用户闪现
+  booting: true,
   scanning: false,
   scanError: '',
   progress: { dirs: 0, found: 0, current: '' },
@@ -122,8 +125,9 @@ export const state = reactive({
   // 详情
   selectedId: null,
   detailDirty: false, // 详情页表单有未保存的修改（由 ModelDetail 同步，切换/关闭前确认）
-  // 多选批量操作（E4/E6）：ids 为选中模型 id 数组
-  multiSelect: { active: false, ids: [] },
+  // 多选批量操作（E4/E6）：ids 为选中模型 id 数组；busy 表示批量 IPC
+  // 批量提交进行中（B6），期间按钮禁用、防连点重复提交
+  multiSelect: { active: false, ids: [], busy: false },
   // 设置
   settings: defaultSettings(),
   settingsOpen: false,

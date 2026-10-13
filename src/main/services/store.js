@@ -54,6 +54,7 @@ export { loadSettings, getSettings, updateSettings } from './store-settings'
 export {
   loadData,
   wasDataReset,
+  reloadCurrentRootData,
   getModelMeta,
   getMetaMapByAbsPath,
   setModelMeta,

@@ -15,7 +15,7 @@ import {
   unzipBackupAsync,
   zipBackupAsync
 } from '../src/main/services/backup'
-import { DATA_DIR, setDataRoot } from '../src/main/services/store'
+import { DATA_DIR, loadData, setDataRoot, setModelMeta } from '../src/main/services/store'
 import logger from '../src/main/logger'
 
 /**
@@ -308,6 +308,37 @@ describe('importBackup', () => {
     const baks = fs.readdirSync(target).filter((n) => n.startsWith('.modelvault.bak-'))
     expect(baks).toHaveLength(1)
     expect(fs.readFileSync(path.join(target, baks[0], 'store.json'), 'utf8')).toBe('OLD')
+  })
+
+  it('恢复到当前激活根时，恢复前的在途防抖保存不覆盖恢复结果（B1）', async () => {
+    // 恢复目标即当前激活根：内存持有该根的旧数据
+    const target = mkTmp('modelvault-target-')
+    setDataRoot(target)
+    await loadData()
+    // 恢复前的最后一次修改：防抖 500ms 后才落盘（恢复流程中最危险的在途写入）
+    setModelMeta(path.join(target, 'stale.safetensors'), { note: '恢复前的旧数据' })
+
+    const zipPath = makeBackupZip(path.join(mkTmp('modelvault-out-'), 'backup.zip'))
+    dialogMock.showOpenDialog
+      .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
+      .mockResolvedValueOnce({ canceled: false, filePaths: [target] })
+    // restoreLibrary 先静止写盘链：旧数据落盘会创建 .modelvault，恢复走覆盖分支
+    dialogMock.showMessageBox.mockResolvedValue({ response: 1 })
+
+    const res = await importBackup(null)
+    expect(res.libraryRestored.root).toBe(target)
+
+    // 越过防抖延迟：未静止写盘链时，迟到的防抖会用恢复前的旧内存
+    // 原子覆盖刚恢复的 store.json（恢复被静默回滚）
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const store = JSON.parse(
+      fs.readFileSync(path.join(target, '.modelvault', 'store.json'), 'utf8')
+    )
+    expect(store.models['x.safetensors']).toBeDefined()
+    expect(store.models['stale.safetensors']).toBeUndefined()
+    // 清理内存态，避免影响后续用例（setDataRoot 指向已恢复的旧内存数据）
+    setDataRoot(null)
+    await loadData()
   })
 
   it('覆盖确认取消时保留现有数据（设置已恢复、库数据未动）', async () => {

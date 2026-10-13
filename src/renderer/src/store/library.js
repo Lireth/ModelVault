@@ -21,6 +21,10 @@ export async function initApp() {
     }
   } catch (err) {
     toast('error', `初始化失败: ${err.message}`)
+  } finally {
+    // 启动完成（B8）：清除启动态，「开始使用」引导页只在真正未配置
+    // 文件夹时出现——异步恢复 folder 之前它不得对老用户闪现
+    state.booting = false
   }
 }
 

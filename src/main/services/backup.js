@@ -7,6 +7,7 @@ import {
   COVERS_DIR,
   DATA_DIR,
   DATA_FILE,
+  flushStoreSave,
   getCurrentRoot,
   getSettings,
   updateSettings
@@ -290,6 +291,10 @@ async function restoreLibrary(root, unzipped) {
   const storeText = decoder.decode(unzipped[`${LIB_PREFIX}${DATA_FILE}`])
   // 落盘前先校验 JSON：损坏的备份不应触发任何目录交换
   const parsed = JSON.parse(storeText)
+  // 静止关联存储写盘链（B1 修复配套）：在途的防抖/原子写完成于目录交换之后时，
+  // 其 rename 会把恢复前的旧数据覆盖到刚恢复的 store.json 上。恢复目标为
+  // 当前激活根时风险最大；对其他根 flush 只是把旧根待落盘数据写进其自身文件，无副作用
+  await flushStoreSave()
 
   const dataDir = path.join(root, DATA_DIR)
   const stamp = Date.now()

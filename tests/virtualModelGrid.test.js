@@ -255,3 +255,79 @@ describe('VirtualModelGrid 键盘网格导航（E10）', () => {
     wrapper.unmount()
   })
 })
+
+describe('浏览位置锚（B7：局部重扫不把用户拉回顶部）', () => {
+  /** 滚动到指定位置并等待 rAF 捕获浏览锚 */
+  async function scrollTo(container, top) {
+    container.scrollTop = top
+    container.dispatchEvent(new Event('scroll'))
+    await nextFrame()
+  }
+
+  it('锚前行有删除（局部重扫）后按可视区锚平移滚动位置，浏览不跳变', async () => {
+    const models = makeModels(20)
+    const { wrapper, container } = mountInScroller(models)
+    await setContainerWidth(wrapper, 1000) // 4 列 × 5 行，行距 371
+
+    // 滚动到第 2 行中部（792 = 371*2 + 50）：可视区首行锚 = m8（第 2 行首模型）
+    await scrollTo(container, 371 * 2 + 50)
+
+    // 局部重扫：锚之前的 4 个模型（m0..m3，恰好一整行）被删除/移走，
+    // 锚 m8 从第 2 行（索引 8）上移到第 1 行（索引 4）
+    const rescanned = models.slice(4)
+    await wrapper.setProps({ models: rescanned })
+    await wrapper.vm.$nextTick()
+
+    // 滚动位置按锚的新行号平移一行，保留行内偏移 50 → 421。
+    // 修复前：签名首项 id 变化即复位顶部，深位浏览被静默打断
+    expect(container.scrollTop).toBe(371 + 50)
+    // 锚模型回到可视区顶部行
+    const rows = wrapper.findAll('.grid-row')
+    const firstRendered = rows[0]?.findAll('.model-card')[0]?.attributes('data-model-id')
+    expect(['m4', 'm5', 'm6', 'm7']).toContain(firstRendered)
+    wrapper.unmount()
+  })
+
+  it('锚仍在新列表但行号未变时滚动位置纹丝不动（就地合并零扰动）', async () => {
+    const models = makeModels(20)
+    const { wrapper, container } = mountInScroller(models)
+    await setContainerWidth(wrapper, 1000)
+    await scrollTo(container, 371 * 2 + 50)
+
+    // 列表尾部的增删（局部重扫常见）：锚行不受影响
+    const rescanned = [...models.slice(0, 19), makeModel('m-new'), makeModel('m-new2')]
+    await wrapper.setProps({ models: rescanned })
+    await wrapper.vm.$nextTick()
+
+    expect(container.scrollTop).toBe(371 * 2 + 50)
+    wrapper.unmount()
+  })
+
+  it('锚已从新列表消失（筛选/搜索/删除）时复位顶部', async () => {
+    const models = makeModels(20)
+    const { wrapper, container } = mountInScroller(models)
+    await setContainerWidth(wrapper, 1000)
+    await scrollTo(container, 371 * 2 + 50) // 锚 = m8
+
+    // 筛选条件变化：锚模型不在结果中，原位置无意义
+    const filtered = models.filter((m) => m.id !== 'm8')
+    await wrapper.setProps({ models: filtered })
+    await wrapper.vm.$nextTick()
+
+    expect(container.scrollTop).toBe(0)
+    wrapper.unmount()
+  })
+
+  it('未滚动过（顶部浏览）时列表变化复位顶部，不产生滚动跳变', async () => {
+    const models = makeModels(20)
+    const { wrapper, container } = mountInScroller(models)
+    await setContainerWidth(wrapper, 1000)
+    expect(container.scrollTop).toBe(0)
+
+    await wrapper.setProps({ models: [...models].reverse() })
+    await wrapper.vm.$nextTick()
+
+    expect(container.scrollTop).toBe(0)
+    wrapper.unmount()
+  })
+})

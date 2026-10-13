@@ -11,6 +11,7 @@ import {
   isInRoot,
   loadData,
   loadSettings,
+  reloadCurrentRootData,
   removeModelMeta,
   resolveCover,
   saveStoreNow,
@@ -280,6 +281,52 @@ describe('退出落盘 flushStoreSave', () => {
     const text = await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
     const key = path.relative(root, abs).split(path.sep).join('/')
     expect(JSON.parse(text).models[key].alias).toBe('第二版')
+  })
+})
+
+describe('reloadCurrentRootData（备份恢复到当前根后的内存重载，B1）', () => {
+  /** 直接整文件替换磁盘 store.json（备份恢复目录交换的等价形态） */
+  async function replaceStoreOnDisk(models) {
+    await fs.mkdir(path.join(root, '.modelvault'), { recursive: true })
+    await fs.writeFile(
+      path.join(root, '.modelvault', 'store.json'),
+      JSON.stringify({ version: 1, models })
+    )
+  }
+
+  it('重载后内存反映磁盘上的替换内容，而非恢复前的旧内存', async () => {
+    const abs = await touchModel('old.safetensors')
+    setModelMeta(abs, { note: '恢复前的旧数据' })
+    await replaceStoreOnDisk({ 'restored.safetensors': { note: '恢复数据' } })
+
+    await reloadCurrentRootData()
+
+    // 旧内存条目被磁盘上的替换内容取代：没有它，下一次 setModelMeta →
+    // saveStoreNow 会用旧内存原子覆盖刚恢复的文件（恢复被静默回滚）
+    expect(getModelMeta(abs)).toBeNull()
+    expect(getModelMeta(path.join(root, 'restored.safetensors'))?.note).toBe('恢复数据')
+  })
+
+  it('重载丢弃的在途防抖定时器不再落盘：磁盘保持恢复内容', async () => {
+    const abs = await touchModel('pending.safetensors')
+    setModelMeta(abs, { note: '先落盘一版' })
+    await saveStoreNow()
+    await replaceStoreOnDisk({ 'restored.safetensors': { note: '恢复数据' } })
+    // 恢复完成瞬间的在途防抖（恢复前用户刚做的修改）：必须被重载丢弃
+    setModelMeta(abs, { note: '恢复前的最后修改' })
+
+    vi.useFakeTimers()
+    try {
+      await reloadCurrentRootData()
+      // 越过防抖延迟：被丢弃的定时器不得把旧内存覆盖到恢复内容上
+      await vi.advanceTimersByTimeAsync(700)
+    } finally {
+      vi.useRealTimers()
+    }
+    const text = await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
+    const disk = JSON.parse(text)
+    expect(disk.models['restored.safetensors']?.note).toBe('恢复数据')
+    expect(disk.models[path.relative(root, abs).split(path.sep).join('/')]).toBeUndefined()
   })
 })
 

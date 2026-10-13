@@ -32,6 +32,15 @@ export function setThumbDrainPromise(p) {
 }
 
 /**
+ * 当前后台缩略图生成任务 Promise（无任务时为 null）。
+ * startThumbDrain 据此把新一轮 drain 排队在上一轮之后（B5 修复）：
+ * 覆盖式登记会让 awaitThumbDrain 只等最新一轮，旧任务失去切根等待保护。
+ */
+export function getThumbDrainPromise() {
+  return thumbDrainPromise
+}
+
+/**
  * 增量扫描装饰结果缓存（会话内 LRU，键=模型绝对路径）。
  * 重复扫描时 mtime 与元数据签名均未变化的模型直接复用上次的装饰结果，
  * 跳过封面逐张 stat、sidecar 查找等重复 IO，扫描耗时与库规模解耦。

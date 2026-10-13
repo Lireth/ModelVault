@@ -26,11 +26,12 @@ vi.mock('../src/main/services/scanner.js', async (importOriginal) => {
   return { ...actual, findSidecarText: vi.fn() }
 })
 
-import { decorateModels, metaSignature, resolveCoverSafe, startThumbDrain, clearDeferredOwners } from '../src/main/ipc/models/decorate'
-import { awaitThumbDrain } from '../src/main/ipc/models/model-state'
+import { decorateModels, metaSignature, resolveCoverSafe, startThumbDrain, clearDeferredOwners, trackDeferredOwner } from '../src/main/ipc/models/decorate'
+import { awaitThumbDrain, getThumbDrainPromise } from '../src/main/ipc/models/model-state'
 import { loadData, setDataRoot, getModelMeta, setModelMeta, DATA_DIR, COVERS_DIR } from '../src/main/services/store'
 import { findSidecarText } from '../src/main/services/scanner'
 import { clearDeferredJobs } from '../src/main/services/thumbs'
+import * as thumbsModule from '../src/main/services/thumbs'
 import { nativeImage } from 'electron'
 import logger from '../src/main/logger'
 
@@ -298,6 +299,48 @@ describe('startThumbDrain 窗口生命周期（A7）', () => {
     expect(win.webContents.send).toHaveBeenCalledWith('models:thumbsReady', {
       updates: [{ id: abs, coverUrl: expect.stringContaining('thumbs') }]
     })
+  })
+
+  it('上一轮 drain 未完成时新一轮排队等待：不并发执行，链尾才清登记（B5）', async () => {
+    // spy 真实 drainDeferredThumbs：按调用序挂起，手动释放以控制时序
+    const releases = []
+    const drainSpy = vi.spyOn(thumbsModule, 'drainDeferredThumbs').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releases.push(() => resolve())
+        })
+    )
+
+    try {
+      const win1 = { isDestroyed: () => false, webContents: { send: vi.fn() } }
+      const win2 = { isDestroyed: () => false, webContents: { send: vi.fn() } }
+
+      await setupDeferredThumb() // 登记任务 1
+      startThumbDrain(win1) // 第一轮取走任务 1（drain 挂起中）
+      // 第二轮的归属登记：第二模型不能走 setupDeferredThumb——同一模型会命中
+      // 装饰缓存而不登记任何新任务，导致第二轮被 deferredOwners 空表短路
+      trackDeferredOwner(path.join(root, 'second.safetensors'), path.join(root, 'second.png'))
+      startThumbDrain(win2) // 第二轮登记：必须排队，不得并发启动
+
+      // 让出事件循环：排队实现的 spy 调用发生在微任务中。
+      // 修复前：覆盖式登记使两轮并发执行（drain 内部现取 getThumbsDir()，
+      // 切根窗口期会把旧根源图写进新根 thumbs 目录），此处已有 2 个调用
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(releases).toHaveLength(1)
+
+      releases[0]() // 放行第一轮
+      await new Promise((resolve) => setImmediate(resolve))
+      // 第一轮完成后第二轮才启动
+      expect(releases).toHaveLength(2)
+
+      releases[1]()
+      await awaitThumbDrain()
+      // 链尾正确清空登记（修复前旧轮的 finally 会把新轮 promise 误清为 null，
+      // 使 awaitThumbDrain 的切根保护彻底失效）
+      expect(getThumbDrainPromise()).toBeNull()
+    } finally {
+      drainSpy.mockRestore()
+    }
   })
 })
 

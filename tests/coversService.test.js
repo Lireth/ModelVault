@@ -191,6 +191,28 @@ describe('pruneOrphanCovers（孤儿封面清理）', () => {
   it('封面目录不存在时静默跳过（ENOENT 容错）', async () => {
     await expect(pruneOrphanCovers()).resolves.toBeUndefined()
   })
+
+  it('readdir 在途时登记引用的封面不被误删（B4 上传/清理竞态回归）', async () => {
+    const coversDir = path.join(root, DATA_DIR, COVERS_DIR)
+    await fs.mkdir(coversDir, { recursive: true })
+    const late = path.join(coversDir, 'late.png')
+    await fs.writeFile(late, PNG_MAGIC)
+    const modelAbs = path.join(root, 'm.safetensors')
+
+    // 发起清理但不等待：pruneOrphanCovers 同步执行到 await fs.readdir(dir)
+    // 后挂起，控制权回到本用例——此刻文件已落盘可见但引用尚未登记
+    const pruning = pruneOrphanCovers()
+    // 同步完成引用登记（与上传链路一致：copyFile 的 await 返回后紧跟同步登记，
+    // 二者同处一个事件循环同步块）。readdir 的完成回调是后续宏任务，
+    // 必然在本行之后才执行
+    setModelMeta(modelAbs, { cover: `${DATA_DIR}/${COVERS_DIR}/late.png` })
+    await pruning
+
+    // 引用快照取自 readdir 之后：删除决策能看到最新登记，新上传的封面幸存。
+    // 修复前快照取自 readdir 之前：late.png 已出现在 entries 中却不被旧快照
+    // 引用，被当孤儿删除（用户上传丢失且留下死引用）
+    await expect(fs.access(late)).resolves.toBeUndefined()
+  })
 })
 
 describe('saveClipboardImage（剪贴板图片大小上限）', () => {

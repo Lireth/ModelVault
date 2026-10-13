@@ -12,6 +12,7 @@ import {
   filteredModels,
   formatSize,
   importCoversFromDrop,
+  initApp,
   multiSelectIdSet,
   partialScanModels,
   rejectConfirm,
@@ -575,6 +576,89 @@ describe('批量操作单次状态合并（O2）', () => {
     await p
     expect(api.models.deleteModel).not.toHaveBeenCalled()
     expect(state.models).toHaveLength(1)
+  })
+
+  it('批量提交在途时连点被拦截：不重复发起 IPC（B6 in-flight 防护）', async () => {
+    state.models = [makeModel('a'), makeModel('b')]
+    state.multiSelect.ids = ['a', 'b']
+    state.multiSelect.busy = false
+    // 两个模型的 IPC 各自挂起：逐一收集 resolve（单个变量会被后一次调用覆盖）
+    const resolvers = []
+    api.models.setMetaFlags.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvers.push(resolve)
+        })
+    )
+
+    const first = batchFavorite(true) // 不 await：构造在途窗口（busy 同步置位）
+    const second = batchFavorite(true) // 在途期间的连点：必须被 busy 拦截
+    await second
+
+    // 仅第一批 2 个 IPC（每模型一个）；连点不得把同一批再提交一遍
+    expect(api.models.setMetaFlags).toHaveBeenCalledTimes(2)
+    expect(state.multiSelect.busy).toBe(true) // 首批在途，按钮应保持禁用
+
+    for (const resolve of resolvers) resolve({ meta: { favorite: true, nsfw: false, rating: 0 } })
+    await first
+    expect(state.multiSelect.busy).toBe(false) // 完成后恢复可用
+    expect(state.models.map((m) => m.favorite)).toEqual([true, true])
+  })
+
+  it('批量删除在途（含确认层弹出）时连点不重复提交', async () => {
+    state.models = [makeModel('a')]
+    state.multiSelect.ids = ['a']
+    state.multiSelect.busy = false
+    let release = () => {}
+    api.models.deleteModel.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ ok: true })
+        })
+    )
+
+    const first = batchDeleteModels()
+    // 确认层已弹出但删除 IPC 尚未发出：busy 已置位，连点直接拦截
+    const second = await batchDeleteModels()
+    expect(second).toBeUndefined()
+    expect(state.multiSelect.busy).toBe(true)
+
+    acceptConfirm() // 通过第一个（已在途的）确认层
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    release()
+    await first
+    expect(api.models.deleteModel).toHaveBeenCalledTimes(1)
+    expect(state.models).toHaveLength(0)
+    expect(state.multiSelect.busy).toBe(false)
+  })
+})
+
+describe('启动引导态（B8）', () => {
+  it('initApp 完成后清除 booting：异步恢复 folder 期间不闪现引导页', async () => {
+    state.booting = true
+    api.models.loadStore.mockResolvedValue({ settings: { modelsFolder: '' }, models: {} })
+    // 无 folder：不触发扫描，initApp 直接完成
+    await initApp()
+    expect(state.folder).toBe('')
+    expect(state.booting).toBe(false)
+  })
+
+  it('已配置过文件夹时 initApp 后扫描完成，引导页全程不出现', async () => {
+    state.booting = true
+    api.models.loadStore.mockResolvedValue({ settings: { modelsFolder: 'D:\\lib' }, models: {} })
+    api.models.scan.mockResolvedValue({ models: [], errors: [], byType: {}, durationMs: 1 })
+    await initApp()
+    expect(state.folder).toBe('D:\\lib')
+    expect(state.scanning).toBe(false)
+    expect(state.booting).toBe(false)
+  })
+
+  it('initApp 失败（IPC 异常）时 booting 仍清除，失败可见', async () => {
+    state.booting = true
+    api.models.loadStore.mockRejectedValue(new Error('IPC 断开'))
+    await initApp()
+    expect(state.booting).toBe(false)
+    expect(state.toasts.some((t) => t.type === 'error' && t.text.includes('初始化失败'))).toBe(true)
   })
 })
 

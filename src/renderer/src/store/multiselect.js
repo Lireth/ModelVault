@@ -81,28 +81,35 @@ export function toggleSelectAllFiltered() {
  * 批量更新快捷标记（收藏/NSFW/评分，E6）：复用 setMetaFlags 既有校验与
  * 持久化管线，并发逐个调用；结果收集为 Map 后经 applyMetaUpdates 单趟
  * 同步本地状态（O2），避免逐个落定造成的多次响应式失效。
+ * in-flight 防护（B6）：执行期间置 busy，批量操作栏按钮禁用，防止连点
+ * 对同一批模型重复提交数百个 IPC。
  * @param {object} patch { favorite?/nsfw?/rating? }
  * @param {string} label 完成提示文案（如「收藏」）
  */
 async function batchApplyFlags(patch, label) {
   const ids = [...state.multiSelect.ids]
-  if (ids.length === 0) return
-  const results = await Promise.allSettled(
-    ids.map((id) => window.api.models.setMetaFlags({ id, ...patch }))
-  )
-  const metaMap = new Map()
-  let fail = 0
-  results.forEach((r, i) => {
-    if (r.status === 'fulfilled' && r.value?.meta) metaMap.set(ids[i], r.value.meta)
-    else fail += 1
-  })
-  const ok = applyMetaUpdates(metaMap, (meta) => ({
-    favorite: meta.favorite === true,
-    nsfw: meta.nsfw === true,
-    rating: meta.rating || 0
-  }))
-  if (fail === 0) toast('success', `已为 ${ok} 个模型${label}`)
-  else toast('warn', `${label}完成：成功 ${ok} 个，失败 ${fail} 个`)
+  if (ids.length === 0 || state.multiSelect.busy) return
+  state.multiSelect.busy = true
+  try {
+    const results = await Promise.allSettled(
+      ids.map((id) => window.api.models.setMetaFlags({ id, ...patch }))
+    )
+    const metaMap = new Map()
+    let fail = 0
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled' && r.value?.meta) metaMap.set(ids[i], r.value.meta)
+      else fail += 1
+    })
+    const ok = applyMetaUpdates(metaMap, (meta) => ({
+      favorite: meta.favorite === true,
+      nsfw: meta.nsfw === true,
+      rating: meta.rating || 0
+    }))
+    if (fail === 0) toast('success', `已为 ${ok} 个模型${label}`)
+    else toast('warn', `${label}完成：成功 ${ok} 个，失败 ${fail} 个`)
+  } finally {
+    state.multiSelect.busy = false
+  }
 }
 
 /** 批量收藏/取消收藏 */
@@ -128,25 +135,30 @@ export function batchRating(rating) {
  */
 export async function batchSetSubCategory(subCategory) {
   const ids = [...state.multiSelect.ids]
-  if (ids.length === 0) return
-  const results = await Promise.allSettled(
-    ids.map((id) => window.api.models.saveModelData({ id, subCategory }))
-  )
-  const metaMap = new Map()
-  let fail = 0
-  results.forEach((r, i) => {
-    if (r.status === 'fulfilled' && r.value?.meta) metaMap.set(ids[i], r.value.meta)
-    else fail += 1
-  })
-  const ok = applyMetaUpdates(metaMap, (meta) => ({
-    params: meta.params,
-    alias: meta.alias || '',
-    note: meta.note,
-    subCategory: meta.subCategory || '',
-    triggerWords: meta.triggerWords || ''
-  }))
-  if (fail === 0) toast('success', `已为 ${ok} 个模型设置标签`)
-  else toast('warn', `标签设置完成：成功 ${ok} 个，失败 ${fail} 个`)
+  if (ids.length === 0 || state.multiSelect.busy) return
+  state.multiSelect.busy = true
+  try {
+    const results = await Promise.allSettled(
+      ids.map((id) => window.api.models.saveModelData({ id, subCategory }))
+    )
+    const metaMap = new Map()
+    let fail = 0
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled' && r.value?.meta) metaMap.set(ids[i], r.value.meta)
+      else fail += 1
+    })
+    const ok = applyMetaUpdates(metaMap, (meta) => ({
+      params: meta.params,
+      alias: meta.alias || '',
+      note: meta.note,
+      subCategory: meta.subCategory || '',
+      triggerWords: meta.triggerWords || ''
+    }))
+    if (fail === 0) toast('success', `已为 ${ok} 个模型设置标签`)
+    else toast('warn', `标签设置完成：成功 ${ok} 个，失败 ${fail} 个`)
+  } finally {
+    state.multiSelect.busy = false
+  }
 }
 
 /**
@@ -156,27 +168,32 @@ export async function batchSetSubCategory(subCategory) {
  */
 export async function batchDeleteModels() {
   const ids = [...state.multiSelect.ids]
-  if (ids.length === 0) return
-  if (
-    !(await confirmDialog(
-      `确定将选中的 ${ids.length} 个模型移入系统回收站吗？可在系统回收站恢复。`
-    ))
-  ) {
-    return
+  if (ids.length === 0 || state.multiSelect.busy) return
+  state.multiSelect.busy = true
+  try {
+    if (
+      !(await confirmDialog(
+        `确定将选中的 ${ids.length} 个模型移入系统回收站吗？可在系统回收站恢复。`
+      ))
+    ) {
+      return
+    }
+    const results = await Promise.allSettled(ids.map((id) => window.api.models.deleteModel(id)))
+    const deletedIds = new Set()
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled' && !r.value?.error) deletedIds.add(ids[i])
+    })
+    if (deletedIds.size > 0) {
+      // 单趟移除：整体替换数组，selectedId 与多选选区同步按 Set 清理
+      state.models = state.models.filter((m) => !deletedIds.has(m.id))
+      if (deletedIds.has(state.selectedId)) state.selectedId = null
+      state.multiSelect.ids = state.multiSelect.ids.filter((id) => !deletedIds.has(id))
+    }
+    const ok = deletedIds.size
+    const fail = ids.length - ok
+    if (fail === 0) toast('success', `已将 ${ok} 个模型移入回收站，可在系统回收站恢复`)
+    else toast('warn', `删除完成：成功 ${ok} 个，失败 ${fail} 个`)
+  } finally {
+    state.multiSelect.busy = false
   }
-  const results = await Promise.allSettled(ids.map((id) => window.api.models.deleteModel(id)))
-  const deletedIds = new Set()
-  results.forEach((r, i) => {
-    if (r.status === 'fulfilled' && !r.value?.error) deletedIds.add(ids[i])
-  })
-  if (deletedIds.size > 0) {
-    // 单趟移除：整体替换数组，selectedId 与多选选区同步按 Set 清理
-    state.models = state.models.filter((m) => !deletedIds.has(m.id))
-    if (deletedIds.has(state.selectedId)) state.selectedId = null
-    state.multiSelect.ids = state.multiSelect.ids.filter((id) => !deletedIds.has(id))
-  }
-  const ok = deletedIds.size
-  const fail = ids.length - ok
-  if (fail === 0) toast('success', `已将 ${ok} 个模型移入回收站，可在系统回收站恢复`)
-  else toast('warn', `删除完成：成功 ${ok} 个，失败 ${fail} 个`)
 }

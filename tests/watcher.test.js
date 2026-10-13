@@ -259,6 +259,30 @@ describe('syncWatcher 目录监控（A8）', () => {
     await sleep(250)
     expect(sentEvents).toHaveLength(0)
   })
+
+  it('切根后旧根的变更零广播、新根监控不受旧根状态影响（B2 代际防护）', async () => {
+    const rootA = root
+    const rootB = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-watcher-'))
+    roots.push(rootB)
+    syncWatcher(rootA, true, [], timing)
+    await sleep(60)
+    // 切换到新根：旧 watcher 停止，其任何在途遍历回调都不得再安排广播/巡检，
+    // 也不得因旧根的后续异常误停新 watcher
+    syncWatcher(rootB, true, [], timing)
+
+    // 旧根发生变更（若旧 watcher 的代际校验被破坏，其广播会把渲染层
+    // 的 autoRescan 指回旧根，用户刚切的库被静默切回）
+    await moveBundleIn(await makeBundle('stale'), 'stale')
+    await sleep(250)
+    expect(sentEvents.filter((e) => e.payload.root === rootA)).toHaveLength(0)
+
+    // 新根监控正常存活：变更照常广播（载荷为新根）
+    await fs.writeFile(path.join(rootB, 'fresh.safetensors'), 'x')
+    await waitFor(
+      () => sentEvents.some((e) => e.payload.root === rootB),
+      '切根后新根的变更未广播（新 watcher 被误停？）'
+    )
+  })
 })
 
 describe('A-07b 自适应轮询', () => {

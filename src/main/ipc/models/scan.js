@@ -229,7 +229,15 @@ export function registerScanHandlers() {
       const appSettings = getSettings()
       const scanResult = await scanModels(root, null, {
         excludeDirs: appSettings.excludeDirs || [],
-        extensions: undefined, // scanner 默认扩展名
+        // 与全量扫描一致地应用用户配置的扫描扩展名（B3 修复）：此前传
+        // undefined 落回默认全集，用户已排除的扩展名（如 .ckpt）会在
+        // watcher 触发一次局部重扫后“复活”，局部结果与全量结果不一致。
+        // 空数组防御回退 undefined：scanner 语义中空集 = 扫不到任何文件，
+        // 规范化后的 scanExtensions 恒非空，此处仅为契约兜底
+        extensions:
+          Array.isArray(appSettings.scanExtensions) && appSettings.scanExtensions.length > 0
+            ? appSettings.scanExtensions
+            : undefined,
         subDirs,
         signal
       })

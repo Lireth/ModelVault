@@ -153,6 +153,31 @@ describe('models:partialScan（A-03）', () => {
     // subDirs 透传给扫描器
     expect(vi.mocked(scanModels).mock.calls.at(-1)[2].subDirs).toEqual(['lora'])
   })
+
+  it('局部扫描应用用户配置的扫描扩展名（B3：与全量结果一致）', async () => {
+    const partial = getRegisteredHandler('models:partialScan')
+    await registerLibrary(root)
+    await updateSettings({ scanExtensions: ['.safetensors'] })
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+
+    const res = await partial(makeEvent(), { folder: root, dirs: [''] })
+    expect(res.error).toBeUndefined()
+    // 此前局部扫描落回默认全集：用户排除的扩展名（如 .ckpt）会在 watcher
+    // 触发一次增量重扫后“复活”，局部结果与全量结果不一致
+    expect(vi.mocked(scanModels).mock.calls.at(-1)[2].extensions).toEqual(['.safetensors'])
+  })
+
+  it('未改设置时局部扫描透传规范化的全量扩展名（非 undefined 全集）', async () => {
+    const partial = getRegisteredHandler('models:partialScan')
+    await registerLibrary(root)
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+
+    await partial(makeEvent(), { folder: root, dirs: [''] })
+
+    const extensions = vi.mocked(scanModels).mock.calls.at(-1)[2].extensions
+    expect(Array.isArray(extensions)).toBe(true)
+    expect(extensions.length).toBeGreaterThan(0)
+  })
 })
 
 describe('models:scan 取消', () => {

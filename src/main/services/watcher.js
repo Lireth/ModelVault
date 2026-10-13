@@ -139,10 +139,15 @@ export function computeSnapshotDiff(root, oldSnap, newSnap) {
 
 /**
  * 防抖广播：静默期内多轮变更只广播一次，变更目录取并集（A-03）。
+ * 代际校验（B2 修复）：w 已不是当前 watcher（stop/syncWatcher 切换到新根）
+ * 时，旧根在途遍历检出的变更必须直接丢弃——否则它会设置一个无人清理的
+ * 防抖定时器，稍后向渲染进程广播旧根的 models:fsChanged，可能触发
+ * partialScan(旧根) 把用户刚切换的库静默切回旧根。
  * diff 目录在每轮发现变更时合入 w.pendingDirs，广播载荷携带 { root, dirs }，
  * 渲染层据此只重扫这些子树。
  */
 function scheduleBroadcast(w, changedDirs = []) {
+  if (w !== watcher) return
   if (!Array.isArray(w.pendingDirs)) w.pendingDirs = new Set()
   for (const d of changedDirs) w.pendingDirs.add(d)
   if (w.debounceTimer) clearTimeout(w.debounceTimer)
@@ -210,9 +215,11 @@ function runWalk(w, silent) {
       scheduleBroadcast(w, changedDirs)
     })
     .catch((err) => {
-      // 根目录不可读（被删除/离线）：停止监控，等下次扫描/设置变更重新发起
-      logger.warn(`目录监控异常，已停止: ${err.message}`)
-      stopWatcher()
+      // 根目录不可读（被删除/离线）：停止监控，等下次扫描/设置变更重新发起。
+      // 代际校验（B2 修复）：异常来自旧根的在途遍历时，当前 watcher 已是新根，
+      // 绝不能被误停——只丢弃该次遍历
+      logger.warn(`目录监控异常${w === watcher ? '，已停止' : '（旧根遍历已丢弃）'}: ${err.message}`)
+      if (w === watcher) stopWatcher()
     })
     .finally(() => {
       w.polling = false

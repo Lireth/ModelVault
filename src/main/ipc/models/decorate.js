@@ -5,7 +5,7 @@ import { isValidImageFile } from '../../services/covers'
 import { drainDeferredThumbs, getThumbPathDeferred, pruneThumbs } from '../../services/thumbs'
 import { readSafetensorsInfo } from '../../services/safetensors'
 import { toImageUrl } from '../../protocol'
-import { decorateCache, setThumbDrainPromise } from './model-state'
+import { decorateCache, getThumbDrainPromise, setThumbDrainPromise } from './model-state'
 import { abortError, boundedMapSet } from '../../utils'
 
 /**
@@ -95,28 +95,41 @@ export function clearDeferredOwners() {
 /**
  * 扫描响应返回后，后台补齐缺失的缩略图（批内并发、批间串行），
  * 完成后经 models:thumbsReady 事件推送受影响模型的封面 URL 更新。
+ * 链式排队（B5 修复）：新一轮 drain 排队在上一轮完成之后才开始，
+ * 覆盖式登记 promise 会让 awaitThumbDrain 只等最新一轮——扫描后台 drain
+ * 进行中用户操作封面再触发一轮时，旧任务失去「切根前等待完成」的保护，
+ * 其执行时经 drainDeferredThumbs 现取 getThumbsDir()，切根后会把旧根源图
+ * 的缩略图写进新根 thumbs 目录（B10 声称已防住的同类竞态）；且旧任务的
+ * finally 会把新一轮 promise 误清为 null，使保护彻底失效。
  */
 export function startThumbDrain(win) {
   if (deferredOwners.size === 0) return
   const ownersSnapshot = new Map(deferredOwners)
   deferredOwners.clear()
-  const drainPromise = drainDeferredThumbs((absCover, thumbPath) => {
-    const ids = ownersSnapshot.get(absCover)
-    if (!ids?.size) return
-    const coverUrl = toImageUrl(thumbPath)
-    // 同步更新装饰缓存，使下一次扫描的缓存命中直接携带缩略图 URL
-    for (const id of ids) {
-      const entry = decorateCache.get(id)
-      if (entry && entry.deferredCover === absCover) {
-        entry.deferredCover = ''
-        entry.thumbPath = thumbPath
-        entry.decorated.coverUrl = coverUrl
-      }
-    }
-    sendThumbReady(win, [...ids].map((id) => ({ id, coverUrl })))
-  }).finally(() => {
-    setThumbDrainPromise(null)
-  })
+  const prev = getThumbDrainPromise()
+  const drainPromise = (prev ? prev.catch(() => {}) : Promise.resolve())
+    .then(() =>
+      drainDeferredThumbs((absCover, thumbPath) => {
+        const ids = ownersSnapshot.get(absCover)
+        if (!ids?.size) return
+        const coverUrl = toImageUrl(thumbPath)
+        // 同步更新装饰缓存，使下一次扫描的缓存命中直接携带缩略图 URL
+        for (const id of ids) {
+          const entry = decorateCache.get(id)
+          if (entry && entry.deferredCover === absCover) {
+            entry.deferredCover = ''
+            entry.thumbPath = thumbPath
+            entry.decorated.coverUrl = coverUrl
+          }
+        }
+        sendThumbReady(win, [...ids].map((id) => ({ id, coverUrl })))
+      })
+    )
+    .finally(() => {
+      // 仍是本轮时才清除：排队执行保证了这里只会在链尾清空，防御性校验
+      // 避免极端情况下误清新一轮的登记
+      if (getThumbDrainPromise() === drainPromise) setThumbDrainPromise(null)
+    })
   setThumbDrainPromise(drainPromise)
 }
 

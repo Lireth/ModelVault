@@ -180,6 +180,22 @@ export function wasDataReset() {
   return dataReset
 }
 
+/**
+ * 从磁盘重载当前根目录的元数据，并丢弃在途的防抖保存（备份恢复到当前根后调用）。
+ * 备份恢复直接替换磁盘上的 store.json，若不重载：内存中的旧数据会在下一次
+ * setModelMeta → saveStoreNow 时原子覆盖刚恢复的文件，恢复结果被静默回滚。
+ * 挂起的防抖定时器必须一并丢弃——它携带的是恢复前的数据上下文，迟到的
+ * 落盘同样会覆盖恢复结果。
+ * @returns {Promise<object>} 重新加载后的内存数据
+ */
+export async function reloadCurrentRootData() {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  return loadData()
+}
+
 /** 收集元数据中引用的所有封面相对路径（孤儿封面清理的保留名单） */
 export function getReferencedCovers() {
   const refs = new Set()

@@ -204,9 +204,16 @@ export async function pruneOrphanCovers() {
       logger.warn('元数据曾损坏重置，跳过孤儿封面清理以避免误删')
       return
     }
-    const referenced = getReferencedCovers()
     const dir = getCoversDir()
     const entries = await fs.readdir(dir)
+    // 引用快照必须在 readdir 之后取（B4 修复）：封面导入链路中「文件落盘可见」
+    // 与「appendCoverMeta 引用登记」处于同一同步块（copyFile 的 await 返回后
+    // 紧跟同步登记，无事件循环让位）。若快照取在 readdir 之前，快照与 readdir
+    // 之间恰好完成一次上传时，新文件已出现在 entries 中却不被旧快照引用，
+    // 会被误判孤儿删掉（用户上传丢失且留下死引用）。快照后移后，删除决策与
+    // 最新引用状态处于同一同步段：登记先完成则快照含引用；登记未完成则
+    // 文件尚未落盘、不在 entries 中——两种交错均安全
+    const referenced = getReferencedCovers()
     const prefix = `${DATA_DIR}/${COVERS_DIR}/`
     const stale = entries.filter((n) => !referenced.has(`${prefix}${n}`))
     if (stale.length === 0) return

@@ -65,6 +65,15 @@ async function onSortChange(e) {
 /** 收藏优先/按评分为固定语义排序，方向切换无意义（O1） */
 const sortDirEnabled = computed(() => sortDirectional(state.sortBy))
 
+/**
+ * 批量操作可用（B6）：有选中且无进行中的批量提交。
+ * 批量 IPC 逐个并发提交期间置 busy，全栏按钮禁用，防止连点对同一批模型
+ * 重复发起数百个 IPC；也向用户提供「处理中」的忙碌反馈。
+ */
+const batchReady = computed(
+  () => state.multiSelect.ids.length > 0 && !state.multiSelect.busy
+)
+
 /** 切换排序方向（U2）：翻转当前排序结果并持久化 */
 async function onSortDirChange() {
   state.sortAsc = !state.sortAsc
@@ -327,21 +336,22 @@ onUnmounted(() => {
         <div v-if="state.folder && state.multiSelect.active" class="batch-bar">
           <button
             class="btn batch-select-all"
-            :disabled="filteredModels.length === 0"
+            :disabled="filteredModels.length === 0 || state.multiSelect.busy"
             @click="toggleSelectAllFiltered"
           >{{ allFilteredSelected ? '取消全选' : '全选' }}</button>
           <span class="batch-count">已选 {{ state.multiSelect.ids.length }}</span>
+          <span v-if="state.multiSelect.busy" class="batch-busy">处理中…</span>
           <span class="batch-sep"></span>
-          <button class="btn" :disabled="!state.multiSelect.ids.length" @click="batchFavorite(true)">收藏</button>
-          <button class="btn" :disabled="!state.multiSelect.ids.length" @click="batchFavorite(false)">取消收藏</button>
-          <button class="btn" :disabled="!state.multiSelect.ids.length" @click="batchNsfw(true)">标记 NSFW</button>
-          <button class="btn" :disabled="!state.multiSelect.ids.length" @click="batchNsfw(false)">取消 NSFW</button>
+          <button class="btn" :disabled="!batchReady" @click="batchFavorite(true)">收藏</button>
+          <button class="btn" :disabled="!batchReady" @click="batchFavorite(false)">取消收藏</button>
+          <button class="btn" :disabled="!batchReady" @click="batchNsfw(true)">标记 NSFW</button>
+          <button class="btn" :disabled="!batchReady" @click="batchNsfw(false)">取消 NSFW</button>
           <span class="batch-label">评分</span>
           <button
             v-for="i in 5"
             :key="i"
             class="batch-star"
-            :disabled="!state.multiSelect.ids.length"
+            :disabled="!batchReady"
             :title="`批量评 ${i} 星`"
             @click="batchRating(i)"
           >★</button>
@@ -352,14 +362,14 @@ onUnmounted(() => {
               v-for="t in multiSelectTags"
               :key="t.key"
               class="btn"
-              :style="state.multiSelect.ids.length ? { borderColor: t.color, color: t.color } : {}"
-              :disabled="!state.multiSelect.ids.length"
+              :style="batchReady ? { borderColor: t.color, color: t.color } : {}"
+              :disabled="!batchReady"
               @click="batchSetSubCategory(t.key)"
             >{{ t.label }}</button>
           </template>
           <span class="batch-sep"></span>
-          <button class="btn btn-danger" :disabled="!state.multiSelect.ids.length" @click="batchDeleteModels">移入回收站</button>
-          <button class="btn" @click="exitMultiSelect">退出多选</button>
+          <button class="btn btn-danger" :disabled="!batchReady" @click="batchDeleteModels">移入回收站</button>
+          <button class="btn" :disabled="state.multiSelect.busy" @click="exitMultiSelect">退出多选</button>
         </div>
 
         <!-- 搜索 + 排序：位于模型清单上方（选择文件夹后显示） -->
@@ -396,8 +406,15 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- 启动加载中（B8）：异步恢复上次模型库的空窗期，已配置过文件夹的
+             用户不闪现「开始使用」引导页 -->
+        <div v-if="state.booting" class="empty-state">
+          <div class="spinner"></div>
+          <h2>正在启动…</h2>
+        </div>
+
         <!-- 未选择文件夹 -->
-        <div v-if="!state.folder && !state.scanning" class="empty-state">
+        <div v-else-if="!state.folder && !state.scanning" class="empty-state">
           <div class="empty-icon">📁</div>
           <h2>开始使用</h2>
           <p>选择存放 Stable Diffusion 模型、LoRA 等文件的文件夹，<br />模匣将自动识别并分类其中的模型。</p>
@@ -700,6 +717,19 @@ onUnmounted(() => {
   color: var(--accent);
   font-weight: 600;
   min-width: 52px;
+}
+
+/* 批量提交进行中的忙碌提示（B6） */
+.batch-busy {
+  font-size: 12px;
+  color: var(--text-muted);
+  animation: batch-busy-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes batch-busy-pulse {
+  50% {
+    opacity: 0.45;
+  }
 }
 
 .batch-label {

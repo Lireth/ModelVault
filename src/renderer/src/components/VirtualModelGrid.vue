@@ -120,6 +120,9 @@ function onGridKeydown(e) {
       next = Math.max(0, next)
       scroller.scrollTop = next
       scrollTop.value = next
+      // 键盘导航不触发 scroll 事件的 rAF 捕获（同步改动 scrollTop 后
+      // 事件在下一帧才到），此处直接更新浏览锚（B7）
+      captureAnchor()
     }
   }
   focusModel(id)
@@ -147,6 +150,26 @@ function findScrollParent(el) {
  */
 let scrollRafId = 0
 
+/**
+ * 浏览位置锚（B7）：最近一次滚动稳定后的可视区首行信息。
+ * 「列表签名变化 → 按锚恢复」取代此前「首项 id 未变则保留」的判断——
+ * mtime 排序下局部重扫更新任意文件的 mtime 都会改变列表首项，把正在深位
+ * 浏览的用户静默拉回顶部。非响应式变量：仅列表变化时读取，不参与渲染。
+ */
+let anchorId = ''
+let anchorRow = -1
+let anchorScrollTop = 0
+
+/** 捕获当前浏览位置锚：可视区首行行号、该行首个模型 id 与滚动位置（保留行内偏移用） */
+function captureAnchor() {
+  if (!scroller) return
+  const top = scroller.scrollTop
+  const row = Math.max(0, Math.floor(top / rowPitch.value))
+  anchorRow = row
+  anchorScrollTop = top
+  anchorId = props.models[row * columns.value]?.id || ''
+}
+
 function onScroll() {
   if (!scroller || scrollRafId) return
   scrollRafId = requestAnimationFrame(() => {
@@ -154,6 +177,7 @@ function onScroll() {
     if (!scroller) return
     scrollTop.value = scroller.scrollTop
     viewportHeight.value = scroller.clientHeight
+    captureAnchor()
   })
 }
 
@@ -209,24 +233,39 @@ watch(
 )
 
 /**
- * 列表身份变化（筛选/搜索/排序导致长度或首尾项变化）时复位滚动位置（B16）：
+ * 列表身份变化（筛选/搜索/排序导致长度或首尾项变化）时恢复/复位滚动位置：
  * 组件复用不重挂，列表变短后旧 scrollTop 会落在无效区间产生跳变。
  * 用「长度 + 首尾项 id」作签名，避免就地更新（如缩略图替换封面 URL）
  * 触发复位打断用户滚动。
- * O4 细化：首项 id 未变且用户不在顶部时（典型为 autoRescan 增删模型，
- * 排序与筛选条件未变），保留浏览位置——大库浏览中后台重扫不再把用户
- * 拉回顶部；内容收缩导致的越界由浏览器钳制 scrollTop 并经 scroll 事件同步。
- * 筛选/搜索/排序变更几乎必然改变首项 id，仍复位顶部。
+ * B7 细化（取代旧「首项 id 未变则保留」判断）：以最近滚动捕获的浏览锚
+ * （可视区首行模型 id）为准——
+ * - 锚仍在新列表：滚动位置按锚的新行号平移（保留行内偏移），用户浏览
+ *   不跳变。覆盖 autoRescan 局部重扫的就地合并，以及 mtime 排序下
+ *   首项易主但可视内容未变的重排——此前这类变化会把深位用户拉回顶部；
+ * - 无锚（未滚动过/在顶部）或锚已从列表消失（筛选/搜索/删除）：复位顶部
+ *   （筛选/搜索变更几乎必然使锚失效，语义与旧版一致）。
+ * 内容收缩导致的越界由浏览器钳制 scrollTop 并经 scroll 事件同步。
  */
 watch(
   () =>
     `${props.models.length}|${props.models[0]?.id}|${props.models[props.models.length - 1]?.id}`,
-  (sig, oldSig) => {
+  () => {
     if (!scroller) return
-    if (oldSig && scroller.scrollTop > 0 && sig.split('|')[1] === oldSig.split('|')[1]) {
-      scrollTop.value = scroller.scrollTop
+    const idx = anchorId ? indexById.value.get(anchorId) : undefined
+    if (anchorId && idx !== undefined) {
+      const newRow = Math.floor(idx / columns.value)
+      const target = Math.max(0, anchorScrollTop + (newRow - anchorRow) * rowPitch.value)
+      if (target !== scroller.scrollTop) {
+        scroller.scrollTop = target
+        scrollTop.value = target
+      }
+      // 以恢复后的位置为基准重捕锚：连续多次列表变化都以最新位置计算
+      captureAnchor()
       return
     }
+    anchorId = ''
+    anchorRow = -1
+    anchorScrollTop = 0
     scroller.scrollTop = 0
     scrollTop.value = 0
   }
