@@ -103,7 +103,8 @@ export function subCategoryInfo(key) {
 export function defaultSettings() {
   return {
     ...DEFAULT_SETTINGS,
-    scanExtensions: [...DEFAULT_SETTINGS.scanExtensions]
+    scanExtensions: [...DEFAULT_SETTINGS.scanExtensions],
+    savedViews: [...DEFAULT_SETTINGS.savedViews]
   }
 }
 

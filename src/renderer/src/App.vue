@@ -46,6 +46,18 @@ watch(searchInput, (value) => {
   }, 200)
 })
 
+// 反向同步（智能视图应用等外部路径改写 state.search）：回填搜索框显示。
+// 不等才赋值——输入防抖链路随后写回同值，不会形成回环
+watch(
+  () => state.search,
+  (value) => {
+    if (value !== searchInput.value) {
+      clearTimeout(searchTimer)
+      searchInput.value = value
+    }
+  }
+)
+
 function clearSearch() {
   clearTimeout(searchTimer)
   searchInput.value = ''

@@ -417,6 +417,66 @@ describe('应用设置规范化', () => {
     s = await loadSettings()
     expect(s.sortAsc).toBe(true)
   })
+
+  it('savedViews 规范化：非法条目剔除、id 去重、缺省字段与未知排序回退', async () => {
+    await updateSettings({
+      savedViews: [
+        {
+          id: 'v1',
+          name: ' LoRA收藏 ',
+          search: '动漫',
+          typeFilter: 'lora',
+          subFilter: 'role',
+          showFavoritesOnly: true,
+          sortBy: 'mtime',
+          sortAsc: false
+        },
+        { id: '', name: '无id' }, // 缺 id：剔除
+        { id: 'v2', name: '  ' }, // 空白名称：剔除
+        { id: 'v1', name: '重复id' }, // id 去重（首条保留）
+        { id: 'v3', name: '缺省字段' }, // 其余字段回退默认
+        { id: 'v4', name: '未知排序', sortBy: 'xxx', sortAsc: 'yes' },
+        'not-an-object' // 非对象：剔除
+      ]
+    })
+    const s = await loadSettings()
+    expect(s.savedViews).toHaveLength(3)
+    expect(s.savedViews[0]).toEqual({
+      id: 'v1',
+      name: 'LoRA收藏',
+      search: '动漫',
+      typeFilter: 'lora',
+      subFilter: 'role',
+      showFavoritesOnly: true,
+      sortBy: 'mtime',
+      sortAsc: false
+    })
+    expect(s.savedViews[1]).toEqual({
+      id: 'v3',
+      name: '缺省字段',
+      search: '',
+      typeFilter: 'all',
+      subFilter: '',
+      showFavoritesOnly: false,
+      sortBy: 'name',
+      sortAsc: true
+    })
+    // 未知排序/非布尔方向回退默认
+    expect(s.savedViews[2].sortBy).toBe('name')
+    expect(s.savedViews[2].sortAsc).toBe(true)
+  })
+
+  it('savedViews 缺失或非数组时回退空数组，上限 20 个', async () => {
+    await updateSettings({ savedViews: 'oops' })
+    let s = await loadSettings()
+    expect(s.savedViews).toEqual([])
+
+    const many = Array.from({ length: 25 }, (_, i) => ({ id: `v${i}`, name: `视图${i}` }))
+    await updateSettings({ savedViews: many })
+    s = await loadSettings()
+    expect(s.savedViews).toHaveLength(20)
+    expect(s.savedViews[19].id).toBe('v19')
+  })
 })
 
 describe('应用设置文件损坏恢复（B2）', () => {

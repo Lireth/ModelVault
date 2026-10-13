@@ -18,5 +18,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   showSize: true,
   showMtime: true,
   showParams: true,
-  autoRescan: false
+  autoRescan: false,
+  // 智能视图（组合筛选收藏）：{id, name, search, typeFilter, subFilter,
+  //   showFavoritesOnly, sortBy, sortAsc} 快照数组，侧栏一键切换
+  savedViews: []
 })

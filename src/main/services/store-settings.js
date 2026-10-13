@@ -26,7 +26,8 @@ let settings = null
 export function defaultSettings() {
   return {
     ...DEFAULT_SETTINGS,
-    scanExtensions: [...DEFAULT_SETTINGS.scanExtensions]
+    scanExtensions: [...DEFAULT_SETTINGS.scanExtensions],
+    savedViews: [...DEFAULT_SETTINGS.savedViews]
   }
 }
 
@@ -40,6 +41,36 @@ function normalizeExtensions(raw) {
     : []
   const unique = [...new Set(list)]
   return unique.length > 0 ? unique : [...MODEL_EXTENSION_SET]
+}
+
+/**
+ * 规范化智能视图列表（组合筛选收藏）：
+ * 逐字段类型/长度校验（typeFilter/subFilter 不做枚举校验——非法值在渲染层
+ * 仅表现为空筛选结果，无害；枚举单一来源在渲染层侧），id 去重，上限 20 个。
+ */
+function normalizeSavedViews(raw) {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set()
+  const out = []
+  for (const v of raw) {
+    if (!v || typeof v !== 'object') continue
+    const id = typeof v.id === 'string' ? v.id.trim() : ''
+    const name = typeof v.name === 'string' ? v.name.trim() : ''
+    if (!id || id.length > 40 || !name || name.length > 30 || seen.has(id)) continue
+    seen.add(id)
+    out.push({
+      id,
+      name,
+      search: typeof v.search === 'string' ? v.search.slice(0, 100) : '',
+      typeFilter: typeof v.typeFilter === 'string' ? v.typeFilter.slice(0, 20) : 'all',
+      subFilter: typeof v.subFilter === 'string' ? v.subFilter.slice(0, 50) : '',
+      showFavoritesOnly: v.showFavoritesOnly === true,
+      sortBy: SORT_BY_KEYS.has(v.sortBy) ? v.sortBy : 'name',
+      sortAsc: typeof v.sortAsc === 'boolean' ? v.sortAsc : true
+    })
+    if (out.length >= 20) break
+  }
+  return out
 }
 
 /** 规范化应用设置：仅接受已知字段并校验类型 */
@@ -70,7 +101,8 @@ export function normalizeSettings(raw) {
     showSize: typeof raw.showSize === 'boolean' ? raw.showSize : base.showSize,
     showMtime: typeof raw.showMtime === 'boolean' ? raw.showMtime : base.showMtime,
     showParams: typeof raw.showParams === 'boolean' ? raw.showParams : base.showParams,
-    autoRescan: raw.autoRescan === true
+    autoRescan: raw.autoRescan === true,
+    savedViews: normalizeSavedViews(raw.savedViews)
   }
 }
 

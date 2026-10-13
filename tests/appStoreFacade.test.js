@@ -52,6 +52,13 @@ const EXPECTED_EXPORTS = [
   // 派生
   'filteredModels',
   'typeCounts',
+  // 智能视图（组合筛选收藏）
+  'savedViews',
+  'activeSavedViewId',
+  'viewSummary',
+  'saveCurrentAsView',
+  'applySavedView',
+  'deleteSavedView',
   // 查找派生
   'modelById',
   // 详情

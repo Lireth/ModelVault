@@ -63,6 +63,16 @@ export {
 // 筛选派生
 export { filteredModels, typeCounts } from './filter'
 
+// 智能视图（组合筛选收藏）
+export {
+  savedViews,
+  activeSavedViewId,
+  viewSummary,
+  saveCurrentAsView,
+  applySavedView,
+  deleteSavedView
+} from './saved-views'
+
 // 查找派生
 export { modelById } from './selectors'
 
