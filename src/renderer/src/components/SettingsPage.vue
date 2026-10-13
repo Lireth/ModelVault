@@ -342,7 +342,9 @@ async function onSave() {
   <div v-if="state.settingsOpen" class="settings-page">
     <header class="settings-header">
       <h2>设置</h2>
-      <button class="wc-btn" title="关闭设置页面" @click="onCancel">✕</button>
+      <button class="wc-btn" title="关闭设置页面" @click="onCancel">
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+      </button>
     </header>
 
     <div class="settings-body">
@@ -575,8 +577,11 @@ async function onSave() {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  /* 玻璃容器：与详情面板同款磨砂 */
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
@@ -586,7 +591,7 @@ async function onSave() {
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--glass-border);
   flex-shrink: 0;
 }
 
@@ -613,9 +618,9 @@ async function onSave() {
 }
 
 .settings-group {
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
   padding: 4px 16px;
 }
 
@@ -628,7 +633,7 @@ async function onSave() {
 }
 
 .setting-row + .setting-row {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--glass-border);
 }
 
 .setting-col {
@@ -672,9 +677,9 @@ async function onSave() {
 .exclude-input {
   margin-top: 6px;
   padding: 8px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  background: var(--bg-card);
+  background: color-mix(in srgb, var(--bg-card) 60%, transparent);
   color: var(--text);
   font-size: var(--font-xs);
   font-family: var(--font-mono);
@@ -699,9 +704,9 @@ async function onSave() {
   align-items: center;
   gap: 6px;
   padding: 5px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-full);
-  background: var(--bg-card);
+  background: color-mix(in srgb, var(--bg-card) 60%, transparent);
   font-size: var(--font-xs);
   font-family: var(--font-mono);
   color: var(--text-muted);
@@ -723,7 +728,7 @@ async function onSave() {
   margin: 0;
 }
 
-/* 开关 */
+/* 开关：开启态极光渐变 + 微光 */
 .switch {
   appearance: none;
   width: 40px;
@@ -732,7 +737,7 @@ async function onSave() {
   background: var(--border);
   position: relative;
   cursor: pointer;
-  transition: background var(--dur-fast);
+  transition: background var(--dur-fast), box-shadow var(--dur-fast);
   flex-shrink: 0;
 }
 
@@ -749,7 +754,8 @@ async function onSave() {
 }
 
 .switch:checked {
-  background: var(--accent);
+  background: var(--accent-grad);
+  box-shadow: 0 0 10px rgba(90, 163, 250, 0.35);
 }
 
 .switch:checked::after {
@@ -759,10 +765,11 @@ async function onSave() {
 /* 分段选择 */
 .seg-group {
   display: flex;
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   overflow: hidden;
   flex-shrink: 0;
+  background: color-mix(in srgb, var(--bg) 45%, transparent);
 }
 
 .seg-btn {
@@ -772,15 +779,17 @@ async function onSave() {
   color: var(--text-muted);
   font-size: var(--font-xs);
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 
 .seg-btn + .seg-btn {
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--glass-border);
 }
 
 .seg-btn.active {
-  background: var(--bg-active);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
+  font-weight: 600;
 }
 
 /* 关于 */
@@ -855,7 +864,7 @@ async function onSave() {
   justify-content: flex-end;
   gap: 12px;
   padding: 16px 20px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--glass-border);
   flex-shrink: 0;
 }
 </style>

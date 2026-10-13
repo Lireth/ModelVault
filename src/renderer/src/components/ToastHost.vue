@@ -13,11 +13,16 @@ import { dismissToast, state } from '../store/appStore'
           class="toast"
           :class="`toast-${t.type}`"
         >
-          <span class="toast-icon">
-            {{ t.type === 'success' ? '✓' : t.type === 'error' ? '✕' : t.type === 'warn' ? '!' : 'ℹ' }}
+          <span class="toast-icon" aria-hidden="true">
+            <svg v-if="t.type === 'success'" viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3.2L13 4.8" /></svg>
+            <svg v-else-if="t.type === 'error'" viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+            <svg v-else-if="t.type === 'warn'" viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M8 4v5.5" /><path d="M8 12.6v.2" /></svg>
+            <svg v-else viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M8 7v4.5" /><path d="M8 4.1v.2" /></svg>
           </span>
           <span>{{ t.text }}</span>
-          <button class="toast-close" title="关闭" aria-label="关闭通知" @click="dismissToast(t.id)">✕</button>
+          <button class="toast-close" title="关闭" aria-label="关闭通知" @click="dismissToast(t.id)">
+            <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+          </button>
         </div>
       </TransitionGroup>
     </div>
@@ -42,8 +47,11 @@ import { dismissToast, state } from '../store/appStore'
   display: flex;
   align-items: center;
   gap: 8px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  /* 玻璃 Toast：磨砂浮层 */
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   padding: 12px 16px;
   font-size: var(--font-sm);
@@ -57,12 +65,13 @@ import { dismissToast, state } from '../store/appStore'
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-size: var(--font-xs);
   line-height: 1;
   padding: 2px 4px;
   margin-left: 4px;
   cursor: pointer;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
 }
 
 .toast-close:hover {

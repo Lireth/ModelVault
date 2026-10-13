@@ -85,9 +85,10 @@ const emit = defineEmits(['apply-resolution', 'apply-triggers'])
 
 <style scoped>
 .autoinfo-panel {
-  border: 1px solid var(--border);
+  /* 玻璃信息面板：半透明底 + 亮边，与详情磨砂面板拉开层次 */
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
   padding: 12px 16px;
   display: flex;
   flex-direction: column;
@@ -137,8 +138,8 @@ const emit = defineEmits(['apply-resolution', 'apply-triggers'])
   font-size: 11px;
   padding: 3px 9px;
   border-radius: var(--radius-full);
-  border: 1px solid var(--border);
-  background: var(--bg-card);
+  border: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--bg-card) 60%, transparent);
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -286,7 +286,9 @@ onUnmounted(() => {
         <!-- 搜索 + 排序：位于模型清单上方（选择文件夹后显示） -->
         <div v-if="state.folder" class="search-row">
           <div class="search-box" title="搜索名称、备注名、备注与分类标签">
-            <span class="search-icon">🔍</span>
+            <span class="search-icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.6" /><path d="M10.6 10.6 14 14" /></svg>
+            </span>
             <input
               ref="searchFieldEl"
               v-model="searchInput"
@@ -294,7 +296,9 @@ onUnmounted(() => {
               placeholder="搜索名称 / 备注 / 触发词…（Ctrl+F 聚焦）"
               spellcheck="false"
             />
-            <button v-if="searchInput" class="search-clear" title="清空搜索" @click="clearSearch">✕</button>
+            <button v-if="searchInput" class="search-clear" title="清空搜索" @click="clearSearch">
+              <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+            </button>
           </div>
 
           <div class="sort-select" title="排序方式">
@@ -313,7 +317,10 @@ onUnmounted(() => {
                     : '当前降序，点击切换为升序'
               "
               @click="onSortDirChange"
-            >{{ state.sortAsc ? '↑' : '↓' }}</button>
+            >
+              <svg v-if="state.sortAsc" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 12.5v-9M4.5 7 8 3.5 11.5 7" /></svg>
+              <svg v-else viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5v9M4.5 9 8 12.5 11.5 9" /></svg>
+            </button>
           </div>
         </div>
 
@@ -326,7 +333,9 @@ onUnmounted(() => {
 
         <!-- 未选择文件夹 -->
         <div v-else-if="!state.folder && !state.scanning" class="empty-state">
-          <div class="empty-icon">📁</div>
+          <div class="empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" /></svg>
+          </div>
           <h2>开始使用</h2>
           <p>选择存放 Stable Diffusion 模型、LoRA 等文件的文件夹，<br />模匣将自动识别并分类其中的模型。</p>
           <button class="btn btn-primary btn-large" @click="chooseFolder">选择模型文件夹</button>
@@ -345,7 +354,9 @@ onUnmounted(() => {
 
         <!-- 扫描失败：展示错误详情并提供重试（B15） -->
         <div v-else-if="state.scanError" class="empty-state">
-          <div class="empty-icon">⚠️</div>
+          <div class="empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 21.5 20h-19z" /><path d="M12 10v4.5" /><circle cx="12" cy="17.4" r="0.4" fill="currentColor" stroke="none" /></svg>
+          </div>
           <h2>扫描失败</h2>
           <p class="muted scan-error-detail">{{ state.scanError }}</p>
           <button class="btn btn-primary btn-large" @click="scanModels">重新扫描</button>
@@ -353,7 +364,9 @@ onUnmounted(() => {
 
         <!-- 库中无任何模型（未应用筛选时；保留结果栏逻辑见下方，避免筛选状态死锁） -->
         <div v-else-if="state.models.length === 0" class="empty-state">
-          <div class="empty-icon">🔍</div>
+          <div class="empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.3 15.3 20.5 20.5" /></svg>
+          </div>
           <h2>没有匹配的模型</h2>
           <p class="muted">
             当前文件夹中未发现支持的模型文件（.safetensors / .ckpt / .pt / .pth / .bin），可尝试点击侧边栏「重新扫描」。
@@ -373,14 +386,20 @@ onUnmounted(() => {
               :class="{ active: state.showFavoritesOnly }"
               :title="state.showFavoritesOnly ? '显示全部模型' : '仅显示收藏的模型'"
               @click="state.showFavoritesOnly = !state.showFavoritesOnly"
-            >★ 收藏</button>
+            >
+              <svg viewBox="0 0 24 24" width="11" height="11" :fill="state.showFavoritesOnly ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z" /></svg>
+              收藏
+            </button>
             <!-- 多选模式开关（E4） -->
             <button
               class="fav-filter"
               :class="{ active: state.multiSelect.active }"
               :title="state.multiSelect.active ? '退出多选模式' : '进入多选模式，批量管理模型'"
               @click="toggleMultiSelectMode"
-            >☑ 多选</button>
+            >
+              <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3" /><path d="M5 8.2l2.1 2.1L11.4 6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              多选
+            </button>
             <!-- LoRA 分类筛选：仅选中 LoRA 分类时显示（即使筛选结果为空也保持可见） -->
             <label v-if="state.typeFilter === 'lora'" class="sort-select sub-filter" title="按 LoRA 分类筛选">
               <span class="sort-label">分类</span>
@@ -393,9 +412,11 @@ onUnmounted(() => {
 
           <!-- 空结果（有筛选条件时保留结果栏，便于切换分类/取消收藏筛选/清空搜索） -->
           <div v-if="filteredModels.length === 0" class="empty-state">
-            <div class="empty-icon">🔍</div>
+            <div class="empty-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.3 15.3 20.5 20.5" /></svg>
+            </div>
             <h2>没有匹配的模型</h2>
-            <p class="muted">当前筛选或搜索条件下没有模型，试试切换分类、取消「★ 收藏」筛选或清空搜索词。</p>
+            <p class="muted">当前筛选或搜索条件下没有模型，试试切换分类、取消「收藏」筛选或清空搜索词。</p>
           </div>
 
           <!-- 模型网格：虚拟滚动，仅渲染视口附近的卡片 -->
@@ -494,24 +515,28 @@ onUnmounted(() => {
 .search-icon {
   position: absolute;
   left: 10px;
-  font-size: var(--font-xs);
-  opacity: 0.55;
+  display: inline-flex;
+  color: var(--text-muted);
+  opacity: 0.7;
   pointer-events: none;
 }
 
 .search-box input {
   width: 100%;
   padding: 8px 30px 8px 30px;
-  border: 1px solid var(--border);
+  /* 玻璃输入框：半透明底 + 亮边 */
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
   color: var(--text);
   font-size: var(--font-sm);
   outline: none;
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .search-box input:focus {
   border-color: var(--accent);
+  box-shadow: var(--glow-accent);
 }
 
 .search-clear {
@@ -522,9 +547,11 @@ onUnmounted(() => {
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-size: 11px;
   cursor: pointer;
   border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .search-clear:hover {
@@ -547,9 +574,9 @@ onUnmounted(() => {
 
 .sort-select select {
   padding: 7px 28px 7px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
   color: var(--text);
   font-size: var(--font-sm);
   font-family: inherit;
@@ -569,13 +596,14 @@ onUnmounted(() => {
 /* 排序方向切换按钮（U2） */
 .sort-dir {
   padding: 6px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
   color: var(--text-muted);
-  font-size: var(--font-sm);
   line-height: 1;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
   transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 
@@ -628,11 +656,15 @@ onUnmounted(() => {
   font-size: var(--font-xs);
   padding: 4px 12px;
   border-radius: var(--radius-full);
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border-bright);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
 }
 
 .fav-filter:hover {
@@ -644,6 +676,8 @@ onUnmounted(() => {
   border-color: var(--favorite);
   color: var(--favorite);
   font-weight: 600;
+  background: color-mix(in srgb, var(--favorite) 8%, transparent);
+  box-shadow: var(--glow-favorite);
 }
 
 /* 空状态 */
@@ -657,8 +691,11 @@ onUnmounted(() => {
   padding: 40px;
 }
 
+/* 空态线稿图标：强调色与中性色混合，柔和不刺眼 */
 .empty-icon {
-  font-size: 44px;
+  color: color-mix(in srgb, var(--accent) 62%, var(--text-muted));
+  display: inline-flex;
+  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 22%, transparent));
 }
 
 .empty-state h2 {
@@ -681,11 +718,13 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+/* 加载环：极光双色（蓝 → 紫） */
 .spinner {
   width: 34px;
   height: 34px;
-  border: 3px solid var(--border);
+  border: 3px solid color-mix(in srgb, var(--border) 70%, transparent);
   border-top-color: var(--accent);
+  border-right-color: #b18cff;
   border-radius: 50%;
   animation: spin 0.9s linear infinite;
 }

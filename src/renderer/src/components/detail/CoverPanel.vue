@@ -252,7 +252,7 @@ onBeforeUnmount(() => {
           aria-label="删除这张预览图"
           type="button"
           @click.stop="onDeleteCover(c)"
-        >✕</button>
+        ><svg viewBox="0 0 16 16" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg></button>
       </div>
     </div>
   </div>
@@ -272,8 +272,9 @@ onBeforeUnmount(() => {
   aspect-ratio: 1;
   border-radius: var(--radius-md);
   overflow: hidden;
-  border: 1px solid var(--border);
-  background: var(--bg);
+  border: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
 }
 
 .detail-cover img {
@@ -332,10 +333,11 @@ onBeforeUnmount(() => {
   aspect-ratio: 1;
   border-radius: var(--radius-md);
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   background: var(--bg);
   cursor: pointer;
-  transition: border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+  transition: border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .cover-thumb:hover {

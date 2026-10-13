@@ -187,20 +187,25 @@ const topSize = computed(() =>
 .stat-item {
   flex: 1;
   min-width: 110px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
   padding: 12px 16px;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
+/* 统计数字：极光渐变文字，与品牌色呼应 */
 .stat-num {
   font-size: 18px;
   font-weight: 700;
-  color: var(--accent);
+  background: var(--accent-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
   font-variant-numeric: tabular-nums;
+  width: fit-content;
 }
 
 .stat-label {
@@ -215,9 +220,9 @@ const topSize = computed(() =>
 }
 
 .stats-block {
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
   padding: 12px 16px;
 }
 
@@ -305,7 +310,8 @@ const topSize = computed(() =>
 .cov-fill {
   height: 100%;
   border-radius: 3px;
-  background: var(--accent);
+  /* 覆盖率进度：极光渐变 */
+  background: var(--accent-grad);
   transition: width var(--dur-base) var(--ease-out);
 }
 

@@ -355,7 +355,9 @@ async function onSave() {
           <h2 :title="selectedModel.name">{{ selectedModel.alias || selectedModel.name }}</h2>
           <div class="detail-header-actions">
             <button class="btn" @click="revealModel(selectedModel.id)">打开所在文件夹</button>
-            <button class="wc-btn" title="关闭" @click="closeDetail">✕</button>
+            <button class="wc-btn" title="关闭" @click="closeDetail">
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+            </button>
           </div>
         </header>
 
@@ -376,7 +378,10 @@ async function onSave() {
                 type="button"
                 :title="selectedModel.favorite ? '取消收藏' : '收藏该模型'"
                 @click="onToggleFavorite"
-              >{{ selectedModel.favorite ? '★ 已收藏' : '☆ 收藏' }}</button>
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" :fill="selectedModel.favorite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z" /></svg>
+                {{ selectedModel.favorite ? '已收藏' : '收藏' }}
+              </button>
               <button
                 class="nsfw-toggle"
                 :class="{ active: selectedModel.nsfw }"
@@ -393,7 +398,7 @@ async function onSave() {
                   :class="{ on: i <= (selectedModel.rating || 0) }"
                   type="button"
                   @click="onSetRating(i)"
-                >★</button>
+                ><svg viewBox="0 0 24 24" width="16" height="16" :fill="i <= (selectedModel.rating || 0) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z" /></svg></button>
               </div>
             </div>
 
@@ -437,7 +442,8 @@ async function onSave() {
 
             <!-- 健康检查警示（F6）：下载损坏/中断的模型提前可见，避免使用时才发现 -->
             <div v-if="selectedModel.suspect" class="suspect-warn alert-warning" role="alert">
-              ⚠ 该文件疑似损坏（结构校验失败或 0 字节），在绘画工具中加载可能失败，建议重新下载或移入回收站。
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M8.9 1.9a1 1 0 0 0-1.8 0l-5.6 10.4A1 1 0 0 0 2.4 13.8h11.2a1 1 0 0 0 .9-1.5zM8 5.6a.9.9 0 0 1 .9.9v2.8a.9.9 0 0 1-1.8 0V6.5a.9.9 0 0 1 .9-.9zm0 6.9a1 1 0 1 1 0-2 1 1 0 0 1 0 2z" /></svg>
+              该文件疑似损坏（结构校验失败或 0 字节），在绘画工具中加载可能失败，建议重新下载或移入回收站。
             </div>
 
             <h3 class="params-heading">
@@ -567,7 +573,8 @@ async function onSave() {
   right: 0;
   bottom: 0;
   background: var(--overlay-strong);
-  backdrop-filter: blur(3px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -576,15 +583,18 @@ async function onSave() {
 }
 
 .detail-panel {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  /* 磨砂玻璃主面板：透出底层极光与网格 */
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-xl);
   width: min(960px, 100%);
   max-height: calc(100vh - var(--titlebar-height) - 48px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-lg), 0 0 60px rgba(90, 163, 250, 0.06);
 }
 
 .detail-header {
@@ -593,7 +603,7 @@ async function onSave() {
   justify-content: space-between;
   gap: 12px;
   padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--glass-border);
 }
 
 .detail-header h2 {
@@ -623,8 +633,8 @@ async function onSave() {
   grid-template-columns: auto 1fr;
   gap: 6px 12px;
   font-size: var(--font-xs);
-  background: var(--bg);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   padding: 12px;
 }
@@ -652,6 +662,13 @@ async function onSave() {
 .suspect-warn {
   font-size: var(--font-xs);
   color: var(--warning);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.suspect-warn svg {
+  flex-shrink: 0;
 }
 
 .detail-form-col h3 {
@@ -677,9 +694,9 @@ async function onSave() {
 .preset-btn {
   font-size: 11px;
   padding: 3px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-full);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
   color: var(--text-muted);
   cursor: pointer;
   transition: all var(--dur-fast) var(--ease-out);
@@ -706,14 +723,18 @@ async function onSave() {
 }
 
 .fav-toggle {
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border-bright);
   border-radius: var(--radius-md);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
   color: var(--text-muted);
   font-size: var(--font-xs);
   padding: 6px 16px;
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .fav-toggle:hover {
@@ -725,13 +746,14 @@ async function onSave() {
   border-color: var(--favorite);
   color: var(--favorite);
   font-weight: 600;
+  box-shadow: var(--glow-favorite);
 }
 
 /* NSFW 标记按钮：激活时红色高亮，提示首页预览图将被模糊 */
 .nsfw-toggle {
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border-bright);
   border-radius: var(--radius-md);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
   color: var(--text-muted);
   font-size: var(--font-xs);
   padding: 6px 16px;
@@ -767,11 +789,13 @@ async function onSave() {
   border: none;
   background: transparent;
   color: var(--border);
-  font-size: 18px;
   line-height: 1;
-  padding: 0 1px;
+  padding: 1px;
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+  display: inline-flex;
+  align-items: center;
+  transition: color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out),
+    filter var(--dur-fast) var(--ease-out);
 }
 
 .star:hover {
@@ -780,6 +804,7 @@ async function onSave() {
 
 .star.on {
   color: var(--favorite);
+  filter: drop-shadow(0 0 4px rgba(245, 179, 1, 0.35));
 }
 
 /* 触发词行：文本框占满剩余宽度，复制按钮固定在右侧 */
@@ -797,9 +822,9 @@ async function onSave() {
   flex: 1;
   min-width: 0;
   padding: 8px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
   color: var(--text);
   font-size: var(--font-sm);
   outline: none;
@@ -822,9 +847,9 @@ async function onSave() {
 
 .subcat-chip {
   padding: 6px 16px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-full);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
   color: var(--text);
   font-size: var(--font-xs);
   cursor: pointer;
@@ -893,9 +918,9 @@ async function onSave() {
 .field input,
 .note-input {
   padding: 8px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
   color: var(--text);
   font-size: var(--font-sm);
   outline: none;

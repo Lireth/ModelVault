@@ -132,8 +132,11 @@ function onScanClick() {
 .sidebar {
   width: 232px;
   flex-shrink: 0;
-  border-right: 1px solid var(--border);
-  background: var(--bg-card);
+  border-right: 1px solid var(--glass-border);
+  /* 玻璃侧栏：磨砂透出底层极光 */
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -144,15 +147,16 @@ function onScanClick() {
 .side-section h3 {
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
   color: var(--text-muted);
   margin-bottom: 8px;
   padding-left: 6px;
 }
 
 .folder-box {
-  background: var(--bg);
-  border: 1px solid var(--border);
+  /* 半透明底透出侧栏磨砂，亮边模拟玻璃切面 */
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   padding: 12px 12px;
   display: flex;
@@ -277,12 +281,23 @@ function onScanClick() {
   text-align: left;
 }
 
+.type-item {
+  transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+
 .type-item:hover {
   background: var(--bg-hover);
 }
 
+/* 选中分类：左侧强调光条 + 渐变淡出的极光底色 */
 .type-item.active {
-  background: var(--bg-active);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 16%, transparent),
+    color-mix(in srgb, var(--accent) 4%, transparent) 70%,
+    transparent
+  );
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 /* 类型色点样式（.type-dot）为 main.css 公共类；此处仅补「全部」渐变变体 */
@@ -300,9 +315,10 @@ function onScanClick() {
 .type-count {
   font-size: 11px;
   color: var(--text-muted);
-  background: var(--bg);
-  border-radius: var(--radius-md);
-  padding: 1px 8px;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  padding: 0 8px;
   min-width: 20px;
   text-align: center;
 }

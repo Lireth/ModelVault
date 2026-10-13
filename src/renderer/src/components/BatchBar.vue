@@ -56,7 +56,7 @@ const batchAllDisabled = computed(() =>
       :disabled="!batchReady"
       :title="`批量评 ${i} 星`"
       @click="batchRating(i)"
-    >★</button>
+    ><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z" /></svg></button>
     <button
       class="btn"
       :disabled="!batchReady"
@@ -94,9 +94,13 @@ const batchAllDisabled = computed(() =>
   flex-wrap: wrap;
   gap: 8px;
   padding: 8px 12px;
-  border: 1px solid var(--accent);
+  /* 玻璃操作条：磨砂底 + 强调色描边微光，提示处于多选模式 */
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
   border-radius: var(--radius-md);
-  background: var(--bg-active);
+  background: color-mix(in srgb, var(--bg-active) 72%, transparent);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  box-shadow: 0 4px 20px rgba(90, 163, 250, 0.1);
 }
 
 .batch-count {
@@ -135,10 +139,11 @@ const batchAllDisabled = computed(() =>
   border: none;
   background: transparent;
   color: var(--border);
-  font-size: 17px;
   line-height: 1;
-  padding: 0 1px;
+  padding: 1px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
   transition: color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 

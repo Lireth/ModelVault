@@ -79,8 +79,11 @@ watch(
 }
 
 .confirm-dialog {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  /* 玻璃对话框：磨砂浮层 */
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   padding: 20px 24px;
   min-width: 320px;

@@ -105,7 +105,7 @@ const mtimeText = computed(() => {
       :aria-checked="selected"
       title="选中/取消选中"
       @click.stop="toggleSelect(model.id)"
-    >{{ selected ? '✓' : '' }}</span>
+    ><svg v-if="selected" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8" /></svg></span>
     <div class="cover">
       <img
         v-if="model.coverUrl && !coverError"
@@ -126,7 +126,7 @@ const mtimeText = computed(() => {
         v-if="model.suspect"
         class="suspect-badge"
         title="文件疑似损坏（结构校验失败或 0 字节），建议重新下载或删除"
-      >⚠ 损坏</span>
+      ><svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor" aria-hidden="true"><path d="M8.9 1.9a1 1 0 0 0-1.8 0l-5.6 10.4A1 1 0 0 0 2.4 13.8h11.2a1 1 0 0 0 .9-1.5zM8 5.6a.9.9 0 0 1 .9.9v2.8a.9.9 0 0 1-1.8 0V6.5a.9.9 0 0 1 .9-.9zm0 6.9a1 1 0 1 1 0-2 1 1 0 0 1 0 2z" /></svg>损坏</span>
       <!-- 禁用角标（F10）：.disabled 后缀，绘画工具不加载 -->
       <span
         v-if="model.disabled"
@@ -152,7 +152,11 @@ const mtimeText = computed(() => {
           @click.stop="onToggleFavorite"
           @keydown.enter.stop.prevent
           @keydown.space.stop.prevent
-        >★</button>
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" :fill="model.favorite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z" />
+          </svg>
+        </button>
       </div>
       <div v-if="state.settings.showSize || state.settings.showMtime" class="model-meta">
         <span v-if="state.settings.showSize">{{ formatSize(model.size) }}</span>
@@ -178,19 +182,25 @@ const mtimeText = computed(() => {
   border: none;
   background: transparent;
   color: var(--border);
-  font-size: var(--font-md);
   line-height: 1;
-  padding: 0 2px;
+  padding: 2px;
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out);
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  transition: color var(--dur-fast) var(--ease-out), filter var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
 
 .fav-btn:hover {
   color: var(--favorite);
+  transform: scale(1.12);
 }
 
+/* 已收藏：金色 + 微光晕 */
 .fav-btn.active {
   color: var(--favorite);
+  filter: drop-shadow(0 0 5px rgba(245, 179, 1, 0.4));
 }
 
 .name-row .model-name {
@@ -199,25 +209,28 @@ const mtimeText = computed(() => {
 }
 .model-card {
   position: relative;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  /* 玻璃拟态卡片：微渐变厚度 + 细腻亮边 */
+  background: var(--card-grad);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
   cursor: pointer;
-  transition: transform var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+  transition: transform var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
   display: flex;
   flex-direction: column;
 }
 
 .model-card:hover {
-  transform: translateY(-2px);
-  border-color: var(--accent);
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: var(--card-hover-shadow);
 }
 
 /* 多选选中态（E4）：强调边框 + 勾选角标 */
 .model-card.selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent) inset;
+  box-shadow: 0 0 0 1px var(--accent) inset, 0 0 18px rgba(90, 163, 250, 0.16);
 }
 
 .select-check {
@@ -228,11 +241,12 @@ const mtimeText = computed(() => {
   width: 20px;
   height: 20px;
   border-radius: var(--radius-sm);
-  border: 1.5px solid var(--border);
-  background: var(--bg-card);
+  border: 1.5px solid var(--glass-border-bright);
+  /* 磨砂底压在封面上，未选中时也能看清 */
+  background: var(--overlay-thumb);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   color: var(--on-bright);
-  font-size: var(--font-xs);
-  font-weight: 700;
   line-height: 1;
   display: flex;
   align-items: center;
@@ -284,6 +298,8 @@ const mtimeText = computed(() => {
   padding: 3px 9px;
   border-radius: var(--radius-full);
   opacity: 0.95;
+  /* 角标浮于封面的立体感 */
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
 }
 
 .sub-badge {
@@ -324,6 +340,9 @@ const mtimeText = computed(() => {
   background: var(--warning);
   padding: 2px 8px;
   border-radius: var(--radius-full);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 
 /* 禁用角标（F10）：左下角，中性色 */

@@ -1,14 +1,15 @@
 :root {
   /* 标题栏高度：需与 mainWindow.js 中 titleBarOverlay.height 保持一致 */
   --titlebar-height: 40px;
-  --bg: #101418;
-  --bg-card: #1a2027;
-  --bg-hover: #222a33;
-  --bg-active: #1d2733;
-  --border: #2c3642;
-  --text: #e6eaee;
-  --text-muted: #8a97a5;
-  --accent: #4f9cf9;
+  /* ---------- 基础色板（极光玻璃风：深邃蓝黑底 + 细腻亮边） ---------- */
+  --bg: #0a0e14;
+  --bg-card: #131a24;
+  --bg-hover: #1c2530;
+  --bg-active: #1a2734;
+  --border: #27313d;
+  --text: #e8edf3;
+  --text-muted: #8b98a8;
+  --accent: #5aa3fa;
   /* 强调色 hover 态：暗色混黑加深，浅色主题覆盖为混白提亮 */
   --accent-hover: color-mix(in srgb, var(--accent) 88%, #000);
   --danger: #e5484d;
@@ -27,11 +28,11 @@
   /* 软警示色（Toast 警告图标底）：比 --warning 更适合做底色 */
   --warning-soft: #ffb86b;
   /* 强遮罩（详情弹层背景）：浅色主题覆盖为浅色磨砂 */
-  --overlay-strong: rgba(6, 9, 12, 0.6);
+  --overlay-strong: rgba(5, 8, 12, 0.55);
   /* 图片悬浮遮罩（封面缩略图 hover 提示条）：叠于图片之上，双主题通用 */
   --overlay-thumb: rgba(6, 9, 12, 0.6);
-  /* 品牌渐变（设置按钮等强调元素） */
-  --accent-grad: linear-gradient(135deg, #4f9cf9, #b18cff);
+  /* 品牌渐变（设置按钮等强调元素）：极光蓝 → 极光紫 */
+  --accent-grad: linear-gradient(135deg, #5aa3fa, #b18cff);
   /* 模型类型色：state.js 的 MODEL_TYPES.color 经 var() 引用（单一来源），
      设计上为固定亮色底 + --on-bright 深色文字，不随主题变化 */
   --type-checkpoint: #4f9cf9;
@@ -39,6 +40,26 @@
   --type-vae: #3ddc97;
   --type-lora: #b18cff;
   --type-other: #8a97a5;
+  /* ---------- 玻璃拟态（半透明面板 + 细腻亮边 + 顶部高光） ----------
+     固定面板（侧栏/标题栏/详情/Toast/确认层/批量栏/浮层菜单）使用：
+     半透明底透出底层极光，backdrop-filter 磨砂化；边框不用实色，
+     改用低亮度 rgba 亮边模拟玻璃切面的反光 */
+  --glass-bg: rgba(19, 26, 36, 0.72);
+  --glass-bg-strong: rgba(17, 23, 32, 0.86);
+  --glass-border: rgba(158, 190, 228, 0.13);
+  --glass-border-bright: rgba(170, 200, 238, 0.26);
+  --glass-blur: 16px;
+  /* 卡片渐变（实色微渐变，模拟玻璃厚度；数量大不能用 backdrop-filter） */
+  --card-grad: linear-gradient(165deg, #182130 0%, #121924 100%);
+  /* 卡片 hover：下沉阴影 + 极光微光 */
+  --card-hover-shadow: 0 14px 34px rgba(0, 0, 0, 0.38), 0 0 24px rgba(90, 163, 250, 0.13);
+  /* 极光氛围（body::before 全局光晕）：左上蓝、右上紫、底部青 */
+  --aurora-1: rgba(90, 163, 250, 0.15);
+  --aurora-2: rgba(177, 140, 255, 0.13);
+  --aurora-3: rgba(61, 220, 151, 0.07);
+  /* 强调色光晕阴影：hover/激活态的外发光 */
+  --glow-accent: 0 0 0 1px rgba(90, 163, 250, 0.35), 0 6px 24px rgba(90, 163, 250, 0.18);
+  --glow-favorite: 0 0 14px rgba(245, 179, 1, 0.35);
   /* ---------- 间距（4px 基数）：组件内 6/10/14/18px 就近归档到 8/12/16/20 ---------- */
   --space-1: 4px;
   --space-2: 8px;
@@ -67,6 +88,7 @@
   /* ---------- 动效 ---------- */
   --dur-fast: 120ms;
   --dur-base: 200ms;
+  --dur-slow: 340ms;
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
   /* 弹层层级：详情 < Toast < 确认层 */
   --z-detail: 100;
@@ -75,15 +97,15 @@
   color-scheme: dark;
 }
 
-/* ---------- 浅色主题（设置中切换） ---------- */
+/* ---------- 浅色主题（设置中切换）：玻璃转白瓷磨砂，极光减淡 ---------- */
 html.light {
-  --bg: #f5f7fa;
+  --bg: #edf1f6;
   --bg-card: #ffffff;
-  --bg-hover: #e9eef4;
-  --bg-active: #e3ebf5;
-  --border: #d4dce5;
-  --text: #24292f;
-  --text-muted: #6a7683;
+  --bg-hover: #e8eef5;
+  --bg-active: #e1eaf4;
+  --border: #d3dbe4;
+  --text: #232a33;
+  --text-muted: #68758a;
   --accent: #2f7fe0;
   --accent-hover: color-mix(in srgb, var(--accent) 88%, #fff);
   --danger: #d93036;
@@ -97,13 +119,26 @@ html.light {
   --success: #1a8f5e;
   --warning-soft: #d98e3f;
   /* 浅色磨砂遮罩（详情弹层背景） */
-  --overlay-strong: rgba(240, 244, 248, 0.72);
+  --overlay-strong: rgba(235, 240, 246, 0.66);
   /* 浅色主题渐变用更深的端点保证对比度 */
   --accent-grad: linear-gradient(135deg, #2f7fe0, #8a5fe8);
   /* 浅色主题阴影换灰系（黑阴影过重） */
   --shadow-sm: 0 8px 24px rgba(15, 23, 42, 0.08);
   --shadow-md: 0 12px 40px rgba(15, 23, 42, 0.12);
   --shadow-lg: 0 18px 50px rgba(15, 23, 42, 0.16);
+  /* 白瓷玻璃：高透明白底 + 低透明度深色描边 */
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-bg-strong: rgba(255, 255, 255, 0.88);
+  --glass-border: rgba(35, 55, 85, 0.1);
+  --glass-border-bright: rgba(35, 55, 85, 0.18);
+  --card-grad: linear-gradient(165deg, #ffffff 0%, #f4f7fb 100%);
+  --card-hover-shadow: 0 12px 30px rgba(15, 23, 42, 0.13), 0 0 22px rgba(47, 127, 224, 0.1);
+  /* 浅色极光：同源色相、更低强度，白底上仅作氛围 */
+  --aurora-1: rgba(47, 127, 224, 0.1);
+  --aurora-2: rgba(138, 95, 232, 0.09);
+  --aurora-3: rgba(26, 143, 94, 0.05);
+  --glow-accent: 0 0 0 1px rgba(47, 127, 224, 0.3), 0 6px 20px rgba(47, 127, 224, 0.14);
+  --glow-favorite: 0 0 14px rgba(185, 130, 0, 0.3);
   color-scheme: light;
 }
 
@@ -122,6 +157,24 @@ body {
   font-size: var(--font-md);
 }
 
+/* ---------- 极光氛围背景：固定于视口的三团光晕（蓝/紫/青），
+     低透明度大面积径向渐变，为玻璃面板提供可透出的色彩层次 ---------- */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(44% 40% at 10% -8%, var(--aurora-1), transparent 62%),
+    radial-gradient(40% 36% at 92% 2%, var(--aurora-2), transparent 60%),
+    radial-gradient(50% 44% at 55% 110%, var(--aurora-3), transparent 64%);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
 #app {
   height: 100vh;
 }
@@ -132,7 +185,7 @@ body {
   height: 100vh;
 }
 
-/* ---------- 标题栏（整行可拖动移动窗口） ---------- */
+/* ---------- 标题栏（整行可拖动移动窗口）：半透明磨砂透出极光 ---------- */
 .titlebar {
   display: flex;
   align-items: center;
@@ -142,7 +195,10 @@ body {
      弹窗遮罩以此为顶部起点，避免覆盖原生窗口控件区域 */
   height: var(--titlebar-height);
   padding: 0 20px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   -webkit-app-region: drag;
   user-select: none;
   flex-shrink: 0;
@@ -155,15 +211,21 @@ body {
   flex-shrink: 0;
 }
 
+/* 品牌名：极光渐变文字（品牌锚点，全局唯一渐变文字处） */
 .brand-name {
   font-size: var(--font-xl);
   font-weight: 700;
   letter-spacing: 2px;
+  background: var(--accent-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .brand-en {
   font-size: var(--font-sm);
   color: var(--text-muted);
+  letter-spacing: 0.5px;
 }
 
 @media (max-width: 1100px) {
@@ -181,6 +243,10 @@ body {
   color: var(--text-muted);
   font-size: var(--font-sm);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 
 .wc-btn:hover {
@@ -195,7 +261,7 @@ button {
 
 .btn {
   padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border-bright);
   border-radius: var(--radius-md);
   background: var(--bg-hover);
   color: var(--text);
@@ -203,7 +269,7 @@ button {
   cursor: pointer;
   white-space: nowrap;
   transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+    color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
   -webkit-app-region: no-drag;
 }
 
@@ -224,16 +290,26 @@ button {
   cursor: not-allowed;
 }
 
+/* 主按钮：极光渐变 + 柔和光晕（品牌色贯穿的核心行动点） */
 .btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-grad);
+  border-color: transparent;
   color: var(--on-accent);
+  font-weight: 600;
+  box-shadow: 0 2px 14px rgba(90, 163, 250, 0.28);
 }
 
-/* 弃用 filter:brightness（GPU 合成层开销 + 浅色主题提亮方向不对），改混色 */
+html.light .btn-primary {
+  box-shadow: 0 2px 12px rgba(47, 127, 224, 0.24);
+}
+
+/* 弃用 filter:brightness（GPU 合成层开销 + 浅色主题提亮方向不对），改光晕增强 */
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  box-shadow: 0 4px 20px rgba(90, 163, 250, 0.42);
+}
+
+html.light .btn-primary:hover:not(:disabled) {
+  box-shadow: 0 4px 18px rgba(47, 127, 224, 0.36);
 }
 
 /* 危险操作按钮（批量删除等）：自 App.vue 迁入全局（多组件共用） */
@@ -255,34 +331,37 @@ button {
   line-height: 1.7;
 }
 
-/* ---------- 底栏 ---------- */
+/* ---------- 底栏：与标题栏同款磨砂，上下呼应 ---------- */
 .footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 16px;
   padding: 8px 20px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   color: var(--text-muted);
   font-size: var(--font-xs);
   flex-shrink: 0;
 }
 
-/* ---------- 滚动条 ---------- */
+/* ---------- 滚动条：纤细半透明，融入玻璃质感 ---------- */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: var(--radius-sm);
+  background: rgba(139, 152, 168, 0.32);
+  border-radius: var(--radius-full);
   border: 2px solid transparent;
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+  background: rgba(139, 152, 168, 0.55);
   background-clip: content-box;
 }
 
@@ -300,6 +379,11 @@ input[type='number']::-webkit-inner-spin-button {
 input[type='number'] {
   appearance: textfield;
   -moz-appearance: textfield;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--text-muted) 72%, transparent);
 }
 
 /* ---------- 公共类（自多组件 scoped 重复定义抽取，改此处即全局生效） ---------- */
@@ -327,7 +411,7 @@ input[type='number'] {
   font-size: var(--font-sm);
   color: var(--text-muted);
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   padding: var(--space-1) var(--space-3);
 }
