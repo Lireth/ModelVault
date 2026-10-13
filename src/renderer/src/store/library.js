@@ -1,4 +1,4 @@
-import { state, defaultSettings, replaceSettings } from './state'
+import { state, defaultSettings, replaceModels, replaceSettings } from './state'
 import { toast } from './toast'
 
 /**
@@ -138,7 +138,7 @@ export async function scanModels() {
       toast('error', res.error)
       return
     }
-    state.models = res.models
+    replaceModels(res.models)
     state.lastScan = { count: res.models.length, durationMs: res.durationMs }
     // A-02：主进程自动重关联了被移动/重命名模型的标注时，告知用户数量
     const relinkedSuffix = res.relinked > 0

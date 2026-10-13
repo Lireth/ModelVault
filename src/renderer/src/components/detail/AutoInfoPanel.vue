@@ -86,9 +86,9 @@ const emit = defineEmits(['apply-resolution', 'apply-triggers'])
 <style scoped>
 .autoinfo-panel {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--bg);
-  padding: 12px 14px;
+  padding: 12px 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -111,7 +111,7 @@ const emit = defineEmits(['apply-resolution', 'apply-triggers'])
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 4px 12px;
-  font-size: 12px;
+  font-size: var(--font-xs);
 }
 
 .autoinfo-list dt {
@@ -136,7 +136,7 @@ const emit = defineEmits(['apply-resolution', 'apply-triggers'])
 .autoinfo-word {
   font-size: 11px;
   padding: 3px 9px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--border);
   background: var(--bg-card);
   max-width: 220px;

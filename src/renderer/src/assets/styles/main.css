@@ -9,6 +9,8 @@
   --text: #e6eaee;
   --text-muted: #8a97a5;
   --accent: #4f9cf9;
+  /* 强调色 hover 态：暗色混黑加深，浅色主题覆盖为混白提亮 */
+  --accent-hover: color-mix(in srgb, var(--accent) 88%, #000);
   --danger: #e5484d;
   /* 警示色（F6 疑似损坏角标/警示条） */
   --warning: #e6a700;
@@ -20,8 +22,52 @@
   --on-bright: #10141a;
   /* 主题强调色（accent/favorite）之上的文字：浅色主题强调色变深，改用白字 */
   --on-accent: #10141a;
+  /* 成功色（Toast 图标底等）：固定亮色底配 --on-bright 深色文字 */
+  --success: #3ddc97;
+  /* 软警示色（Toast 警告图标底）：比 --warning 更适合做底色 */
+  --warning-soft: #ffb86b;
+  /* 强遮罩（详情弹层背景）：浅色主题覆盖为浅色磨砂 */
+  --overlay-strong: rgba(6, 9, 12, 0.6);
+  /* 图片悬浮遮罩（封面缩略图 hover 提示条）：叠于图片之上，双主题通用 */
+  --overlay-thumb: rgba(6, 9, 12, 0.6);
+  /* 品牌渐变（设置按钮等强调元素） */
+  --accent-grad: linear-gradient(135deg, #4f9cf9, #b18cff);
+  /* 模型类型色：state.js 的 MODEL_TYPES.color 经 var() 引用（单一来源），
+     设计上为固定亮色底 + --on-bright 深色文字，不随主题变化 */
+  --type-checkpoint: #4f9cf9;
+  --type-text_encoder: #ffb86b;
+  --type-vae: #3ddc97;
+  --type-lora: #b18cff;
+  --type-other: #8a97a5;
+  /* ---------- 间距（4px 基数）：组件内 6/10/14/18px 就近归档到 8/12/16/20 ---------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  /* ---------- 圆角：小控件/按钮输入/卡片/大面板/胶囊 ---------- */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-full: 999px;
+  /* ---------- 阴影（弹层三档）：浅色主题覆盖为灰系 ---------- */
+  --shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 12px 40px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.45);
+  /* ---------- 字号 ---------- */
+  --font-xs: 12px;
+  --font-sm: 13px;
+  --font-md: 14px;
+  --font-lg: 16px;
+  --font-xl: 20px;
   /* 等宽字体栈（路径/数值展示统一） */
   --font-mono: Consolas, monospace;
+  /* ---------- 动效 ---------- */
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
   /* 弹层层级：详情 < Toast < 确认层 */
   --z-detail: 100;
   --z-toast: 200;
@@ -39,6 +85,7 @@ html.light {
   --text: #24292f;
   --text-muted: #6a7683;
   --accent: #2f7fe0;
+  --accent-hover: color-mix(in srgb, var(--accent) 88%, #fff);
   --danger: #d93036;
   /* 浅色主题用更深的警示色保证在白色背景上的可读性 */
   --warning: #b98200;
@@ -46,6 +93,17 @@ html.light {
   --favorite: #b98200;
   --overlay: rgba(255, 255, 255, 0.85);
   --on-accent: #ffffff;
+  /* 浅色主题用更深的成功/软警示色保证在白色背景上的可读性 */
+  --success: #1a8f5e;
+  --warning-soft: #d98e3f;
+  /* 浅色磨砂遮罩（详情弹层背景） */
+  --overlay-strong: rgba(240, 244, 248, 0.72);
+  /* 浅色主题渐变用更深的端点保证对比度 */
+  --accent-grad: linear-gradient(135deg, #2f7fe0, #8a5fe8);
+  /* 浅色主题阴影换灰系（黑阴影过重） */
+  --shadow-sm: 0 8px 24px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0 12px 40px rgba(15, 23, 42, 0.12);
+  --shadow-lg: 0 18px 50px rgba(15, 23, 42, 0.16);
   color-scheme: light;
 }
 
@@ -61,7 +119,7 @@ body {
   color: var(--text);
   overflow: hidden;
   /* 响应式：根据系统缩放微调基础字号 */
-  font-size: 14px;
+  font-size: var(--font-md);
 }
 
 #app {
@@ -93,18 +151,18 @@ body {
 .brand {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 12px;
   flex-shrink: 0;
 }
 
 .brand-name {
-  font-size: 20px;
+  font-size: var(--font-xl);
   font-weight: 700;
   letter-spacing: 2px;
 }
 
 .brand-en {
-  font-size: 13px;
+  font-size: var(--font-sm);
   color: var(--text-muted);
 }
 
@@ -118,10 +176,10 @@ body {
   width: 32px;
   height: 28px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--font-sm);
   cursor: pointer;
 }
 
@@ -136,19 +194,29 @@ button {
 }
 
 .btn {
-  padding: 8px 16px;
+  padding: var(--space-2) var(--space-4);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-hover);
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--font-sm);
   cursor: pointer;
   white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
   -webkit-app-region: no-drag;
 }
 
+/* 统一交互态：背景提亮 + 边框强调双反馈（原仅 border 变色，反馈弱） */
 .btn:hover:not(:disabled) {
+  background: var(--bg-active);
   border-color: var(--accent);
+}
+
+/* 键盘可达性：统一 focus ring（原仅部分组件有） */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .btn:disabled {
@@ -159,11 +227,13 @@ button {
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
+/* 弃用 filter:brightness（GPU 合成层开销 + 浅色主题提亮方向不对），改混色 */
 .btn-primary:hover:not(:disabled) {
-  filter: brightness(1.1);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 /* 危险操作按钮（批量删除等）：自 App.vue 迁入全局（多组件共用） */
@@ -181,7 +251,7 @@ button {
 /* ---------- 内容区通用 ---------- */
 .muted {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--font-sm);
   line-height: 1.7;
 }
 
@@ -194,7 +264,7 @@ button {
   padding: 8px 20px;
   border-top: 1px solid var(--border);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--font-xs);
   flex-shrink: 0;
 }
 
@@ -206,7 +276,7 @@ button {
 
 ::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   border: 2px solid transparent;
   background-clip: content-box;
 }
@@ -230,4 +300,51 @@ input[type='number']::-webkit-inner-spin-button {
 input[type='number'] {
   appearance: textfield;
   -moz-appearance: textfield;
+}
+
+/* ---------- 公共类（自多组件 scoped 重复定义抽取，改此处即全局生效） ---------- */
+
+/* 类型色点：侧栏分类列表 / 统计区共用（原 Sidebar 9px / StatsSection 8px 归一） */
+.type-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* 无封面占位：卡片网格 / 详情封面面板共用（斜纹占位 + 扩展名标签） */
+.cover-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: repeating-linear-gradient(45deg, var(--bg) 0 12px, var(--bg-card) 12px 24px);
+}
+
+.cover-ext {
+  font-family: var(--font-mono);
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-1) var(--space-3);
+}
+
+/* 警示条容器视觉（布局由组件自行组织）：
+   金色系——扫描错误条（App.vue，复用收藏金色语义）；
+   黄色系——健康检查警示（ModelDetail，--warning 语义） */
+.alert-gold {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid rgba(245, 179, 1, 0.45);
+  background: rgba(245, 179, 1, 0.08);
+  border-radius: var(--radius-md);
+}
+
+.alert-warning {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--warning);
+  background: var(--bg);
+  border-radius: var(--radius-md);
 }

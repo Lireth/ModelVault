@@ -81,15 +81,15 @@ watch(
 .confirm-dialog {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 20px 24px;
   min-width: 320px;
   max-width: 480px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-md);
 }
 
 .confirm-text {
-  font-size: 14px;
+  font-size: var(--font-md);
   line-height: 1.6;
   white-space: pre-wrap;
 }
@@ -97,7 +97,7 @@ watch(
 .confirm-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
-  margin-top: 18px;
+  gap: 12px;
+  margin-top: 20px;
 }
 </style>

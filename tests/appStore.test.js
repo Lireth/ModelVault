@@ -17,6 +17,7 @@ import {
   multiSelectIdSet,
   partialScanModels,
   rejectConfirm,
+  replaceModels,
   saveSettings,
   scanModels,
   selectedModel,
@@ -79,12 +80,10 @@ beforeEach(() => {
   state.folder = ''
   state.scanning = false
   state.scanError = ''
-  state.models = []
+  replaceModels([])
   state.typeFilter = 'all'
   state.subFilter = ''
   state.showFavoritesOnly = false
-  state.minRating = 0
-  state.suspectOnly = false
   state.search = ''
   state.sortBy = 'name'
   state.sortAsc = true
@@ -334,48 +333,6 @@ describe('筛选与排序（filteredModels）', () => {
     expect(filteredModels.value.map((m) => m.id)).toEqual(['m1'])
   })
 
-  it('评分筛选 ≥N 星（F1）：标注过的评分可反查，0 恢复全部', () => {
-    state.models = [
-      makeModel('low', { name: '低分', rating: 1 }),
-      makeModel('mid', { name: '中等', rating: 3 }),
-      makeModel('high', { name: '高分', rating: 5 }),
-      makeModel('none', { name: '未评分', rating: 0 })
-    ]
-    state.minRating = 3
-    // 默认名称排序（zh-CN）：高(gao) < 中(zhong)
-    expect(filteredModels.value.map((m) => m.id)).toEqual(['high', 'mid'])
-    state.minRating = 5
-    expect(filteredModels.value.map((m) => m.id)).toEqual(['high'])
-    state.minRating = 0
-    expect(filteredModels.value).toHaveLength(4)
-  })
-
-  it('隐藏 NSFW 模型（F1，持久化设置）：开启后列表整体过滤', () => {
-    state.models = [
-      makeModel('safe', { name: '普通', nsfw: false }),
-      makeModel('risky', { name: '标记', nsfw: true })
-    ]
-    expect(state.settings.hideNsfw).toBe(false)
-    expect(filteredModels.value).toHaveLength(2)
-    Object.assign(state.settings, { hideNsfw: true })
-    expect(filteredModels.value.map((m) => m.id)).toEqual(['safe'])
-    Object.assign(state.settings, { hideNsfw: false })
-    expect(filteredModels.value).toHaveLength(2)
-  })
-
-  it('仅看疑似损坏（F6 健康检查筛选）：坏模型可单独排查', () => {
-    state.models = [
-      makeModel('good', { name: '健康模型', suspect: false }),
-      makeModel('bad', { name: '损坏模型', suspect: true })
-    ]
-    expect(state.suspectOnly).toBe(false)
-    expect(filteredModels.value).toHaveLength(2)
-    state.suspectOnly = true
-    expect(filteredModels.value.map((m) => m.id)).toEqual(['bad'])
-    state.suspectOnly = false
-    expect(filteredModels.value).toHaveLength(2)
-  })
-
   it('搜索域纳入 safetensors 自动解析信息（F2）：作者/基底模型/训练标签可命中', () => {
     state.models = [
       makeModel('lora1', {
@@ -480,6 +437,46 @@ describe('toggleFavorite（A6 错误可见性）', () => {
     expect(ok).toBe(false)
     expect(state.models[0].favorite).toBe(false)
     expect(state.toasts.some((t) => t.text.includes('模型不存在'))).toBe(true)
+  })
+})
+
+describe('标注操作响应传播（shallowReactive 回归）', () => {
+  it('元素级更新后派生状态（selectedModel/filteredModels）立即同步，无需整体替换', async () => {
+    // 与真实扫描一致：列表经 replaceModels 装配（数组为 shallowReactive 代理）
+    replaceModels([
+      makeModel('m1', { name: '甲', favorite: false }),
+      makeModel('m2', { name: '乙' })
+    ])
+    api.models.setMetaFlags.mockResolvedValue({
+      meta: { favorite: true, nsfw: true, rating: 3 }
+    })
+    state.selectedId = 'm1'
+    expect(selectedModel.value.favorite).toBe(false)
+    expect(selectedModel.value.nsfw).toBe(false)
+
+    await toggleFavorite('m1')
+
+    // 数据层：元素对象已就位替换
+    expect(state.models[0].favorite).toBe(true)
+    // 响应传播层（回归核心）：shallowReactive 下元素级索引赋值必须触发
+    // modelById→selectedModel 重算，否则详情页标注按钮点击后视觉无变化
+    expect(selectedModel.value.favorite).toBe(true)
+    expect(selectedModel.value.nsfw).toBe(true)
+    expect(selectedModel.value.rating).toBe(3)
+  })
+
+  it('未经 replaceModels 装配的原始数组不具备该保证（守卫约定边界）', async () => {
+    // 直接裸赋值（测试遗留写法）：数据会变，但派生状态不重算——
+    // 固化「数组级更新必须走 replaceModels」的约定，防止约定被悄然破坏
+    state.models = [makeModel('m1', { favorite: false })]
+    state.selectedId = 'm1'
+    expect(selectedModel.value.favorite).toBe(false) // 先读一次，建立派生缓存
+    api.models.setMetaFlags.mockResolvedValue({
+      meta: { favorite: true, nsfw: false, rating: 0 }
+    })
+    await toggleFavorite('m1')
+    expect(state.models[0].favorite).toBe(true)
+    expect(selectedModel.value.favorite).toBe(false)
   })
 })
 

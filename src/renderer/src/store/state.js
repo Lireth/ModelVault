@@ -19,13 +19,15 @@ import { DEFAULT_SETTINGS } from '../../../shared/defaults'
 /**
  * 模型类型定义：key 与主进程 scanner.js 分类结果一致，
  * 数组顺序即侧栏展示顺序（固定排列）。
+ * color 为 CSS 变量引用（inline style 原生支持 var()），取值单一来源于
+ * main.css 的 --type-* 系列，消除双端 hex 重复定义。
  */
 export const MODEL_TYPES = [
-  { key: 'checkpoint', label: 'Checkpoint/大模型', color: '#4f9cf9' },
-  { key: 'text_encoder', label: 'TextEncoders/文本编码器', color: '#ffb86b' },
-  { key: 'vae', label: 'VAE/变分自编码器', color: '#3ddc97' },
-  { key: 'lora', label: 'LoRA', color: '#b18cff' },
-  { key: 'other', label: '其他模型', color: '#8a97a5' }
+  { key: 'checkpoint', label: 'Checkpoint/大模型', color: 'var(--type-checkpoint)' },
+  { key: 'text_encoder', label: 'TextEncoders/文本编码器', color: 'var(--type-text_encoder)' },
+  { key: 'vae', label: 'VAE/变分自编码器', color: 'var(--type-vae)' },
+  { key: 'lora', label: 'LoRA', color: 'var(--type-lora)' },
+  { key: 'other', label: '其他模型', color: 'var(--type-other)' }
 ]
 
 /**
@@ -114,9 +116,12 @@ export function defaultSettings() {
  * 的逐字段赋值、settings 的深层字段写入如主题/卡片尺寸实时预览）
  * 显式包 reactive 维持深响应——它们体量小，代理成本可忽略。
  * models 的更新约定（必须遵守，否则浅响应下不触发界面更新）：
- * - 元素级：state.models[i] = { ...old, patch }（第一层索引赋值）
- * - 数组级：state.models = nextArray（整体替换）
- * - 禁止：splice/push/sort 等原位变异与 Object.assign(元素, …)
+ * - 数组级：replaceModels(nextArray)（整体替换；助手会包一层 shallowReactive，
+ *   直接 `state.models = X` 落入的是原始数组，后续元素级操作将失去响应性）
+ * - 元素级：state.models[i] = { ...old, patch }（第一层索引赋值——models 数组
+ *   本身是 shallowReactive 代理，索引赋值可触发；元素对象保持原始引用零代理开销）
+ * - 禁止：splice/push/sort 等原位变异与 Object.assign(元素, …)（数组代理可拦截
+ *   索引赋值，但元素为原始对象，就地改字段不会触发任何依赖）
  */
 export const state = shallowReactive({
   folder: '',
@@ -127,13 +132,11 @@ export const state = shallowReactive({
   scanError: '',
   progress: { dirs: 0, found: 0, current: '' }, // 每次整体替换，无需深响应
   lastScan: null, // { count, durationMs }
-  models: [],
+  models: shallowReactive([]),
   // 筛选 / 排序（平铺字段始终为活动视图的镜像，B-02）
   typeFilter: 'all',
   subFilter: '', // LoRA 分类筛选（仅 typeFilter 为 lora 时生效）
   showFavoritesOnly: false, // 仅显示收藏的模型
-  minRating: 0, // 评分筛选（F1）：0 为不筛选，1-5 为仅显示 ≥N 星（会话态）
-  suspectOnly: false, // 仅显示疑似损坏模型（F6 健康检查筛选，会话态）
   search: '',
   sortBy: 'name', // name | type | size | mtime | favorite | rating
   sortAsc: true, // 排序方向：true 升序 / false 降序（收藏优先/按评分为固定语义排序，忽略方向，O1）
@@ -151,6 +154,18 @@ export const state = shallowReactive({
   // 自定义确认层（U4：confirmDialog 逐字段赋值，需深响应）
   confirm: reactive({ visible: false, text: '', resolve: null })
 })
+
+/**
+ * 整体替换模型列表（models 数组级更新的唯一入口）：
+ * 传入数组包一层 shallowReactive 后整体赋值——数组代理负责拦截索引读写
+ * 与遍历（元素级 `state.models[i] = {...}` 因此可触发更新），元素对象保持
+ * 原始引用（零代理开销，O3 目标不变）。传入已是 shallowReactive 的数组时
+ * 幂等（Vue 对已代理目标原样返回）。
+ * @param {Array} list 新模型列表（原始数组或已代理数组）
+ */
+export function replaceModels(list) {
+  state.models = shallowReactive(list)
+}
 
 /**
  * 就地整体替换应用设置（O3）：settings 的 reactive 包装不得被

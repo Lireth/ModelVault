@@ -1,5 +1,5 @@
 import { beforeEach, vi } from 'vitest'
-import { defaultSettings, state } from '../../src/renderer/src/store/appStore'
+import { defaultSettings, replaceModels, state } from '../../src/renderer/src/store/appStore'
 
 /**
  * 渲染层组件测试通用装配（OPT-16 测试基建）：
@@ -58,12 +58,10 @@ function resetStoreState() {
   state.scanning = false
   state.scanError = ''
   state.progress = { dirs: 0, found: 0, current: '' }
-  state.models = []
+  replaceModels([])
   state.typeFilter = 'all'
   state.subFilter = ''
   state.showFavoritesOnly = false
-  state.minRating = 0
-  state.suspectOnly = false
   state.search = ''
   state.sortBy = 'name'
   state.sortAsc = true

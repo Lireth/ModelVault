@@ -44,10 +44,10 @@ import { dismissToast, state } from '../store/appStore'
   gap: 8px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 16px;
-  font-size: 13px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font-size: var(--font-sm);
+  box-shadow: var(--shadow-sm);
   max-width: 70vw;
   /* host 容器为 pointer-events:none 防挡点击，toast 自身恢复以支持关闭按钮（U6） */
   pointer-events: auto;
@@ -57,7 +57,7 @@ import { dismissToast, state } from '../store/appStore'
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--font-xs);
   line-height: 1;
   padding: 2px 4px;
   margin-left: 4px;
@@ -82,14 +82,14 @@ import { dismissToast, state } from '../store/appStore'
   color: var(--on-bright);
 }
 
-.toast-success .toast-icon { background: #3ddc97; }
+.toast-success .toast-icon { background: var(--success); }
 .toast-error .toast-icon { background: var(--danger); color: #fff; }
-.toast-warn .toast-icon { background: #ffb86b; }
+.toast-warn .toast-icon { background: var(--warning-soft); }
 .toast-info .toast-icon { background: var(--accent); color: #fff; }
 
 .toast-enter-active,
 .toast-leave-active {
-  transition: all 0.25s ease;
+  transition: all var(--dur-base) var(--ease-out);
 }
 .toast-enter-from,
 .toast-leave-to {

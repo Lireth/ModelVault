@@ -22,6 +22,7 @@
 // 状态单例、常量、纯函数
 export {
   state,
+  replaceModels,
   replaceSettings,
   MODEL_TYPES,
   SUB_CATEGORIES,

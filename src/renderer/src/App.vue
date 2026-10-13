@@ -275,7 +275,7 @@ onUnmounted(() => {
         <!-- 模型预览区 -->
         <template v-else>
         <!-- 重扫失败但仍有上次结果：顶部错误横幅（B15） -->
-        <div v-if="state.scanError && !state.scanning && state.models.length > 0" class="scan-error-bar">
+        <div v-if="state.scanError && !state.scanning && state.models.length > 0" class="scan-error-bar alert-gold">
           <span class="scan-error-text" :title="state.scanError">⚠ {{ state.scanError }}</span>
           <button class="scan-error-retry" @click="scanModels">重试</button>
         </div>
@@ -437,21 +437,17 @@ onUnmounted(() => {
   align-content: start;
 }
 
-/* ---------- 搜索框（模型清单上方） ---------- */
+/* ---------- 扫描错误警示条：容器视觉为 main.css 公共类 .alert-gold ---------- */
 .scan-error-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 14px;
-  border: 1px solid rgba(245, 179, 1, 0.45);
-  background: rgba(245, 179, 1, 0.08);
-  border-radius: 8px;
+  gap: var(--space-3);
 }
 
 .scan-error-text {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--favorite);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -460,14 +456,14 @@ onUnmounted(() => {
 
 .scan-error-retry {
   flex-shrink: 0;
-  font-size: 12px;
-  padding: 3px 14px;
-  border-radius: 999px;
+  font-size: var(--font-xs);
+  padding: 3px 16px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--favorite);
   background: transparent;
   color: var(--favorite);
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 
 .scan-error-retry:hover {
@@ -498,7 +494,7 @@ onUnmounted(() => {
 .search-icon {
   position: absolute;
   left: 10px;
-  font-size: 12px;
+  font-size: var(--font-xs);
   opacity: 0.55;
   pointer-events: none;
 }
@@ -507,10 +503,10 @@ onUnmounted(() => {
   width: 100%;
   padding: 8px 30px 8px 30px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--font-sm);
   outline: none;
 }
 
@@ -528,7 +524,7 @@ onUnmounted(() => {
   color: var(--text-muted);
   font-size: 11px;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .search-clear:hover {
@@ -545,17 +541,17 @@ onUnmounted(() => {
 }
 
 .sort-label {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--text-muted);
 }
 
 .sort-select select {
-  padding: 7px 28px 7px 10px;
+  padding: 7px 28px 7px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--font-sm);
   font-family: inherit;
   outline: none;
   cursor: pointer;
@@ -572,15 +568,15 @@ onUnmounted(() => {
 
 /* 排序方向切换按钮（U2） */
 .sort-dir {
-  padding: 6px 10px;
+  padding: 6px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--font-sm);
   line-height: 1;
   cursor: pointer;
-  transition: color 0.12s ease, border-color 0.12s ease;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 
 .sort-dir:hover,
@@ -593,7 +589,7 @@ onUnmounted(() => {
 .result-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 /* LoRA 分类筛选：靠结果栏右侧 */
@@ -603,8 +599,8 @@ onUnmounted(() => {
 
 .chip {
   font-size: 11px;
-  padding: 3px 10px;
-  border-radius: 999px;
+  padding: 3px 12px;
+  border-radius: var(--radius-full);
   background: var(--bg-active);
   color: var(--accent);
 }
@@ -629,14 +625,14 @@ onUnmounted(() => {
 
 /* 收藏筛选按钮 */
 .fav-filter {
-  font-size: 12px;
+  font-size: var(--font-xs);
   padding: 4px 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: color 0.12s ease, border-color 0.12s ease;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 
 .fav-filter:hover {
@@ -670,7 +666,7 @@ onUnmounted(() => {
 }
 
 .empty-state p {
-  font-size: 13px;
+  font-size: var(--font-sm);
   color: var(--text-muted);
   line-height: 1.8;
 }
@@ -701,7 +697,7 @@ onUnmounted(() => {
 }
 
 .btn-large {
-  padding: 10px 22px;
-  font-size: 14px;
+  padding: 12px 22px;
+  font-size: var(--font-md);
 }
 </style>

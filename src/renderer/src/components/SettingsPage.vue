@@ -577,7 +577,7 @@ async function onSave() {
   flex-direction: column;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
@@ -585,13 +585,13 @@ async function onSave() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 20px;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
 .settings-header h2 {
-  font-size: 16px;
+  font-size: var(--font-lg);
 }
 
 .settings-body {
@@ -609,14 +609,14 @@ async function onSave() {
   text-transform: uppercase;
   letter-spacing: 1px;
   color: var(--text-muted);
-  margin-top: 10px;
+  margin-top: 12px;
 }
 
 .settings-group {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--bg);
-  padding: 4px 14px;
+  padding: 4px 16px;
 }
 
 .setting-row {
@@ -646,7 +646,7 @@ async function onSave() {
 }
 
 .setting-title {
-  font-size: 13px;
+  font-size: var(--font-sm);
   font-weight: 600;
 }
 
@@ -671,12 +671,12 @@ async function onSave() {
 
 .exclude-input {
   margin-top: 6px;
-  padding: 8px 10px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-card);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-xs);
   font-family: var(--font-mono);
   resize: vertical;
   outline: none;
@@ -700,9 +700,9 @@ async function onSave() {
   gap: 6px;
   padding: 5px 12px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--bg-card);
-  font-size: 12px;
+  font-size: var(--font-xs);
   font-family: var(--font-mono);
   color: var(--text-muted);
   cursor: pointer;
@@ -728,11 +728,11 @@ async function onSave() {
   appearance: none;
   width: 40px;
   height: 22px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--border);
   position: relative;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background var(--dur-fast);
   flex-shrink: 0;
 }
 
@@ -745,7 +745,7 @@ async function onSave() {
   height: 16px;
   border-radius: 50%;
   background: #fff;
-  transition: left 0.15s;
+  transition: left var(--dur-fast);
 }
 
 .switch:checked {
@@ -760,17 +760,17 @@ async function onSave() {
 .seg-group {
   display: flex;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   flex-shrink: 0;
 }
 
 .seg-btn {
-  padding: 6px 14px;
+  padding: 6px 16px;
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--font-xs);
   cursor: pointer;
 }
 
@@ -789,7 +789,7 @@ async function onSave() {
   grid-template-columns: 90px 1fr;
   gap: 8px 12px;
   padding: 12px 0;
-  font-size: 12px;
+  font-size: var(--font-xs);
 }
 
 .about-list dt {
@@ -805,12 +805,12 @@ async function onSave() {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 0;
+  padding: 12px 0;
   flex-wrap: wrap;
 }
 
 .update-msg {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--text-muted);
 }
 
@@ -837,24 +837,24 @@ async function onSave() {
 .update-notes {
   flex-basis: 100%;
   margin: 0;
-  padding: 8px 10px;
+  padding: 8px 12px;
   max-height: 160px;
   overflow-y: auto;
-  font-size: 12px;
+  font-size: var(--font-xs);
   line-height: 1.6;
   color: var(--text-muted);
   white-space: pre-wrap;
   word-break: break-word;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .settings-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
-  padding: 14px 20px;
+  gap: 12px;
+  padding: 16px 20px;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
 }

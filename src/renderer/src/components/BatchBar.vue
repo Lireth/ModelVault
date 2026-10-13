@@ -95,12 +95,12 @@ const batchAllDisabled = computed(() =>
   gap: 8px;
   padding: 8px 12px;
   border: 1px solid var(--accent);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--bg-active);
 }
 
 .batch-count {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--accent);
   font-weight: 600;
   min-width: 52px;
@@ -108,7 +108,7 @@ const batchAllDisabled = computed(() =>
 
 /* 批量提交进行中的忙碌提示（B6） */
 .batch-busy {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--text-muted);
   animation: batch-busy-pulse 1.2s ease-in-out infinite;
 }
@@ -120,7 +120,7 @@ const batchAllDisabled = computed(() =>
 }
 
 .batch-label {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--text-muted);
 }
 
@@ -139,7 +139,7 @@ const batchAllDisabled = computed(() =>
   line-height: 1;
   padding: 0 1px;
   cursor: pointer;
-  transition: color 0.12s ease, transform 0.12s ease;
+  transition: color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 
 .batch-star:hover:not(:disabled) {
@@ -149,6 +149,6 @@ const batchAllDisabled = computed(() =>
 
 .batch-bar .btn {
   padding: 5px 12px;
-  font-size: 12px;
+  font-size: var(--font-xs);
 }
 </style>

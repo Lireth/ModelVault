@@ -142,7 +142,7 @@ onBeforeUnmount(() => {
 }
 
 .narrow-actions-btn {
-  font-size: 16px;
+  font-size: var(--font-lg);
   line-height: 1;
   /* 标题栏整行为拖拽区，交互按钮必须排除拖动，否则点击被拖动区域吞掉 */
   -webkit-app-region: no-drag;
@@ -161,17 +161,17 @@ onBeforeUnmount(() => {
   padding: 6px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
 }
 
 .menu-item {
   padding: 8px 12px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--font-sm);
   text-align: left;
   cursor: pointer;
   white-space: nowrap;
@@ -187,7 +187,9 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
-@media (max-width: 900px) {
+/* md 断点 960px：与 Sidebar.vue 窄屏图标栏联动（原 900px，与窗口 minWidth=960
+   对齐后 100% DPI 下拖到最窄即可触达，消除死区） */
+@media (max-width: 960px) {
   .narrow-actions {
     display: block;
   }
