@@ -2,8 +2,8 @@
 import { describe, it, expect, beforeEach, beforeAll } from 'vitest'
 import { mount } from '@vue/test-utils'
 import VirtualModelGrid from '../src/renderer/src/components/VirtualModelGrid.vue'
-import { state } from '../src/renderer/src/store/appStore'
-import { setupComponentTest } from './helpers/componentTest'
+import { acceptConfirm, rejectConfirm, state } from '../src/renderer/src/store/appStore'
+import { setupComponentTest, settle } from './helpers/componentTest'
 
 /**
  * VirtualModelGrid 组件测试（OPT-21）：
@@ -252,6 +252,118 @@ describe('VirtualModelGrid 键盘网格导航（E10）', () => {
     focusCard(wrapper, 'm2')
     await wrapper.find('.virtual-grid').trigger('keydown', { key: 'a' })
     expect(document.activeElement?.getAttribute('data-model-id')).toBe('m2')
+    wrapper.unmount()
+  })
+})
+
+describe('VirtualModelGrid 焦点卡片快捷键（F 收藏 / Delete 删除）', () => {
+  function focusCard(wrapper, id) {
+    wrapper.element.querySelector(`[data-model-id="${globalThis.CSS.escape(id)}"]`)?.focus()
+  }
+
+  it('F 收藏/取消收藏焦点卡片', async () => {
+    window.api.models.setMetaFlags.mockResolvedValue({
+      meta: { favorite: true, nsfw: false, rating: 0 }
+    })
+    const models = makeModels(5)
+    state.models = models
+    const { wrapper } = mountInScroller(models)
+    await wrapper.vm.$nextTick()
+    focusCard(wrapper, 'm2')
+    await wrapper.find('.virtual-grid').trigger('keydown', { key: 'f' })
+    await settle()
+    expect(window.api.models.setMetaFlags).toHaveBeenCalledTimes(1)
+    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({ id: 'm2', favorite: true })
+    wrapper.unmount()
+  })
+
+  it('F 在多选模式下只作用于焦点卡片本身（不触发批量收藏）', async () => {
+    window.api.models.setMetaFlags.mockResolvedValue({
+      meta: { favorite: true, nsfw: false, rating: 0 }
+    })
+    const models = makeModels(5)
+    state.models = models
+    state.multiSelect.active = true
+    state.multiSelect.ids = ['m0', 'm1']
+    const { wrapper } = mountInScroller(models)
+    await wrapper.vm.$nextTick()
+    focusCard(wrapper, 'm2')
+    await wrapper.find('.virtual-grid').trigger('keydown', { key: 'f' })
+    await settle()
+    expect(window.api.models.setMetaFlags).toHaveBeenCalledTimes(1)
+    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({ id: 'm2', favorite: true })
+    wrapper.unmount()
+  })
+
+  it('Ctrl+F 组合键放行全局处理（网格不触发收藏）', async () => {
+    const models = makeModels(5)
+    state.models = models
+    const { wrapper } = mountInScroller(models)
+    await wrapper.vm.$nextTick()
+    focusCard(wrapper, 'm2')
+    await wrapper.find('.virtual-grid').trigger('keydown', { key: 'f', ctrlKey: true })
+    await settle()
+    expect(window.api.models.setMetaFlags).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('无焦点卡片时 F/Delete 均不生效', async () => {
+    const models = makeModels(5)
+    state.models = models
+    const { wrapper } = mountInScroller(models)
+    await wrapper.vm.$nextTick()
+    await wrapper.find('.virtual-grid').trigger('keydown', { key: 'f' })
+    await wrapper.find('.virtual-grid').trigger('keydown', { key: 'Delete' })
+    await settle()
+    expect(window.api.models.setMetaFlags).not.toHaveBeenCalled()
+    expect(state.confirm.visible).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('Delete 非多选模式：确认后删除焦点卡片，焦点顺延到下一张', async () => {
+    window.api.models.deleteModel.mockResolvedValue({})
+    const models = makeModels(5)
+    state.models = models
+    const { wrapper } = mountInScroller(models)
+    await wrapper.vm.$nextTick()
+    focusCard(wrapper, 'm1')
+    await wrapper.find('.virtual-grid').trigger('keydown', { key: 'Delete' })
+    // 自带确认层：确认前不调删除 IPC
+    expect(state.confirm.visible).toBe(true)
+    expect(window.api.models.deleteModel).not.toHaveBeenCalled()
+    acceptConfirm()
+    await settle()
+    expect(window.api.models.deleteModel).toHaveBeenCalledWith('m1')
+    expect(document.activeElement?.getAttribute('data-model-id')).toBe('m2')
+    wrapper.unmount()
+  })
+
+  it('Delete 取消确认不删除', async () => {
+    const models = makeModels(5)
+    state.models = models
+    const { wrapper } = mountInScroller(models)
+    await wrapper.vm.$nextTick()
+    focusCard(wrapper, 'm1')
+    await wrapper.find('.virtual-grid').trigger('keydown', { key: 'Delete' })
+    expect(state.confirm.visible).toBe(true)
+    rejectConfirm()
+    await settle()
+    expect(window.api.models.deleteModel).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('Delete 在多选模式下让位 App 层批量删除（网格不弹单删确认）', async () => {
+    const models = makeModels(5)
+    state.models = models
+    state.multiSelect.active = true
+    state.multiSelect.ids = ['m1']
+    const { wrapper } = mountInScroller(models)
+    await wrapper.vm.$nextTick()
+    focusCard(wrapper, 'm1')
+    await wrapper.find('.virtual-grid').trigger('keydown', { key: 'Delete' })
+    await settle()
+    expect(state.confirm.visible).toBe(false)
+    expect(window.api.models.deleteModel).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

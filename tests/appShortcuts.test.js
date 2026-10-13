@@ -9,7 +9,7 @@ import { setupComponentTest } from './helpers/componentTest'
 /**
  * App 全局快捷键测试（B-03）：
  * - Ctrl+F 聚焦搜索框（面板打开时无效，搜索框不存在）
- * - Esc 清空搜索词（面板/详情/确认层打开时让位，不抢关闭行为）
+ * - Esc 逐层退出：先退出多选模式，再清空搜索词（面板/详情/确认层打开时让位，不抢关闭行为）
  * - Ctrl+A 进入多选并全选当前筛选结果；输入框内保持原生全选
  * - Delete 多选时弹出批量删除确认（不直接删除）
  * - Ctrl+D 多选时批量收藏；详情打开时收藏当前模型
@@ -97,6 +97,22 @@ describe('App 全局快捷键（B-03）', () => {
 
     press('Escape')
 
+    expect(state.search).toBe('')
+  })
+
+  it('Esc 优先退出多选模式，再次 Esc 才清空搜索词', async () => {
+    const wrapper = await mountApp()
+    await setupGrid(wrapper)
+    state.search = 'lora'
+    press('a', { ctrlKey: true })
+    expect(state.multiSelect.active).toBe(true)
+
+    press('Escape')
+    expect(state.multiSelect.active).toBe(false)
+    expect(state.multiSelect.ids).toEqual([])
+    expect(state.search).toBe('lora')
+
+    press('Escape')
     expect(state.search).toBe('')
   })
 

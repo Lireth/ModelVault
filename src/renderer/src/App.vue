@@ -15,6 +15,7 @@ import {
   batchFavorite,
   cancelScan,
   chooseFolder,
+  exitMultiSelect,
   filteredModels,
   handleMenuAction,
   initApp,
@@ -158,9 +159,10 @@ function isOverlayPanelOpen() {
 /**
  * 全局快捷键：
  * - Ctrl+F 聚焦搜索（面板打开/未选文件夹时无效）；
- * - Esc 清空搜索词（面板/详情/确认层打开时让位其自有 Esc 逻辑）；
+ * - Esc 逐层退出：多选模式 → 清空搜索词（面板/详情/确认层打开时让位其自有 Esc 逻辑）；
  * - Ctrl+A 进入多选并全选当前筛选结果；Delete 批量移入回收站（自带确认）；
- * - Ctrl+D 多选时批量收藏，详情打开时收藏当前模型。
+ * - Ctrl+D 多选时批量收藏，详情打开时收藏当前模型；
+ * - 网格内焦点卡片快捷键（方向键导航 / F 收藏 / Delete 单卡删除）由 VirtualModelGrid 处理。
  * 输入控件内除 Ctrl+F 外不拦截，避免破坏文本编辑。
  */
 function onGlobalKeydown(e) {
@@ -186,9 +188,17 @@ function onGlobalKeydown(e) {
 
   if (e.key === 'Escape') {
     // 详情打开时 Esc 由 ModelDetail 处理（可能涉及脏表单确认）
-    if (!detailOpen && state.search) {
-      clearSearch()
-      e.preventDefault()
+    if (!detailOpen) {
+      // 多选为模式态，优先退出；再次 Esc 才轮到清空搜索词
+      if (state.multiSelect.active) {
+        exitMultiSelect()
+        e.preventDefault()
+        return
+      }
+      if (state.search) {
+        clearSearch()
+        e.preventDefault()
+      }
     }
     return
   }

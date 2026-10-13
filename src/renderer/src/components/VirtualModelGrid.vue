@@ -1,7 +1,13 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ModelCard from './ModelCard.vue'
-import { CARD_SIZE_PRESETS, state } from '../store/appStore'
+import {
+  CARD_SIZE_PRESETS,
+  confirmDialog,
+  deleteModel,
+  state,
+  toggleFavorite
+} from '../store/appStore'
 
 /**
  * 模型卡片虚拟滚动网格：
@@ -87,7 +93,10 @@ function focusModel(id) {
  */
 function onGridKeydown(e) {
   const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
-  if (!keys.includes(e.key)) return
+  if (!keys.includes(e.key)) {
+    onCardActionKey(e)
+    return
+  }
   const total = props.models.length
   if (total === 0) return
   const card = document.activeElement?.closest?.('[data-model-id]')
@@ -126,6 +135,47 @@ function onGridKeydown(e) {
     }
   }
   focusModel(id)
+}
+
+/**
+ * 焦点卡片快捷操作（键盘导航体系）：
+ * - F 收藏/取消收藏焦点卡片（多选模式下同样只作用于焦点卡片本身，
+ *   批量收藏走 App 层 Ctrl+D）；
+ * - Delete 删除焦点卡片（自带确认，移入系统回收站）；多选模式下不拦截，
+ *   冒泡至 App 层批量删除。
+ * Ctrl/Alt 组合键放行（Ctrl+F 等全局快捷键由 App 层处理）；
+ * 详情/确认层/设置页打开时不作用于背景卡片（详情内快捷键由其自身处理）。
+ */
+function onCardActionKey(e) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+  if (state.confirm.visible || state.selectedId !== null || state.settingsOpen) return
+  const card = document.activeElement?.closest?.('[data-model-id]')
+  const id = card?.dataset.modelId
+  if (!id) return
+  if (e.key === 'f' || e.key === 'F') {
+    e.preventDefault()
+    toggleFavorite(id)
+    return
+  }
+  if (e.key === 'Delete' && !state.multiSelect.active) {
+    e.preventDefault()
+    onDeleteFocused(id)
+  }
+}
+
+/**
+ * Delete 删除焦点卡片：确认后走既有删除链路（移入回收站 + 关联数据清理），
+ * 成功后焦点顺延到原位置卡片（越界取前一张），避免焦点丢回 body 中断键盘流。
+ */
+async function onDeleteFocused(id) {
+  const idx = indexById.value.get(id)
+  const m = idx !== undefined ? props.models[idx] : null
+  if (!m) return
+  // 删除前取好顺延目标：删除后列表前移，原位置即下一张
+  const nextId = props.models[idx + 1]?.id ?? props.models[idx - 1]?.id
+  if (!(await confirmDialog(`确定将「${m.alias || m.name}」移入系统回收站吗？`))) return
+  if (!(await deleteModel(id))) return
+  if (nextId) focusModel(nextId)
 }
 
 /* ---------------- 滚动与尺寸测量 ---------------- */
