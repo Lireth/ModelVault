@@ -2,9 +2,32 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { BrowserWindow, dialog } from 'electron'
 import logger from '../../logger'
-import { getModelMeta, isInRoot, renameModelMeta, setModelMeta, toRelKey } from '../../services/store'
+import {
+  getCoversDir,
+  getCurrentRoot,
+  getModelMeta,
+  getSettings,
+  isInRoot,
+  relativizeCover,
+  renameModelMeta,
+  setModelMeta,
+  toRelKey
+} from '../../services/store'
 import { computeFileSha256 } from '../../services/hash'
+import {
+  CIVITAI_API,
+  downloadCoverImage,
+  downloadToFile,
+  fetchVersion,
+  matchByHash,
+  parseCivitaiVersionId
+} from '../../services/civitai'
+import { civitaiImportPatch } from '../../services/scanner'
+import { hasImageMagic } from '../../services/covers'
 import { sidecarFilesFor } from './misc'
+import { coverListFromMeta } from './covers'
+import { resolveCoverSafe } from './decorate'
+import { toImageUrl } from '../../protocol'
 import { wrapHandler, checkModelIdInRoot } from '../handler'
 
 /**
@@ -24,10 +47,25 @@ import { wrapHandler, checkModelIdInRoot } from '../handler'
 let hashing = false
 let hashAbort = null
 
+/** 在线匹配批状态锁（F13） */
+let matching = false
+let matchAbort = null
+
+/** 下载状态锁（F14）：同时只允许一个下载（磁盘与带宽考虑） */
+let downloading = false
+let downloadAbort = null
+
 /** 是否需要（重）算：无哈希，或 mtime 与计算时不同（F9 复用条件） */
 function needsHash(meta, mtimeMs) {
   return !meta?.hash || meta.hashMtime !== mtimeMs
 }
+
+/** Civitai API Token（设置页配置，可空） */
+function civitaiToken() {
+  return (getSettings().civitaiToken || '').trim()
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** 注册文件操作链路的 IPC 处理器 */
 export function registerFilesHandlers() {
@@ -167,4 +205,179 @@ export function registerFilesHandlers() {
     logger.info(`模型已移动: ${id} -> ${newPath}`)
     return { path: newPath }
   }, { errorPrefix: '移动失败' })
+
+  /* ---------------- Civitai 在线能力（F13/F14，批次 5） ---------------- */
+
+  // 批量在线匹配（F13）：按 SHA256 查询 Civitai，补全触发词/NSFW/封面。
+  // items 为 [{ id, hash }]（须先经「查重」算出哈希）；空字段才写入，
+  // 与 sidecar/civitai.info 导入同一原则，绝不覆盖用户已有标注
+  wrapHandler('models:civitaiMatch', async (event, { items } = {}) => {
+    if (matching) return { error: '正在在线匹配中' }
+    if (!Array.isArray(items)) return { error: '无效的清单' }
+    const candidates = items.filter(
+      (x) => typeof x?.id === 'string' && isInRoot(x.id) && /^[0-9a-f]{64}$/.test(x.hash || '')
+    )
+    if (candidates.length === 0) {
+      return { error: '选中模型均无有效哈希，请先执行「查重」计算 SHA256' }
+    }
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const token = civitaiToken()
+    matching = true
+    matchAbort = new AbortController()
+    const signal = matchAbort.signal
+    const send = (channel, payload) => {
+      if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
+    }
+    let matched = 0
+    let noMatch = 0
+    let failed = 0
+    let covers = 0
+    const updates = []
+    try {
+      for (let i = 0; i < candidates.length; i++) {
+        if (signal.aborted) break
+        const { id, hash } = candidates[i]
+        send('models:civitaiProgress', { done: i, total: candidates.length, current: id })
+        const r = await matchByHash(hash, token, signal)
+        if (r.error) {
+          failed += 1
+          logger.warn(`Civitai 匹配失败（跳过）: ${id} ${r.error}`)
+          continue
+        }
+        if (!r.matched) {
+          noMatch += 1
+          continue
+        }
+        matched += 1
+        const meta = getModelMeta(id) || {}
+        const patch = civitaiImportPatch(meta, r.version) || {}
+        // 封面：仅元数据无任何封面时下载示例图（空字段才写入）
+        if ((!Array.isArray(meta.covers) || meta.covers.length === 0) && r.version.imageUrls[0]) {
+          try {
+            const abs = await downloadCoverImage(r.version.imageUrls[0], getCoversDir(), hasImageMagic, {
+              token,
+              signal
+            })
+            if (abs) {
+              const rel = relativizeCover(abs)
+              if (rel) {
+                patch.covers = [...(meta.covers || []), rel]
+                patch.cover = meta.cover || rel
+                covers += 1
+              }
+            }
+          } catch (err) {
+            if (err?.name === 'AbortError') throw err
+            // 封面失败不影响标注补全
+          }
+        }
+        const merged = Object.keys(patch).length > 0 ? setModelMeta(id, { ...meta, ...patch }) : null
+        if (merged) {
+          // 推送渲染层就地更新所需字段（与装饰结果同构）
+          updates.push({
+            id,
+            fields: {
+              triggerWords: merged.triggerWords || '',
+              triggerWordsSource: merged.triggerWordsSource || '',
+              nsfw: merged.nsfw === true,
+              cover: resolveCoverSafe(merged.cover || ''),
+              coverUrl: merged.cover ? toImageUrl(resolveCoverSafe(merged.cover)) : '',
+              covers: coverListFromMeta(merged)
+            }
+          })
+        }
+        // 公开 API 礼貌间隔，避免限流
+        if (i < candidates.length - 1) await sleep(600)
+      }
+      if (updates.length > 0) send('models:civitaiApplied', { updates })
+      const canceled = signal.aborted
+      send('models:civitaiProgress', { done: candidates.length, total: candidates.length, current: '' })
+      logger.info(
+        `Civitai 批量匹配${canceled ? '已取消' : '完成'}：命中 ${matched}（补封面 ${covers}）/ 未命中 ${noMatch} / 失败 ${failed}`
+      )
+      return { matched, noMatch, failed, covers, canceled }
+    } finally {
+      matching = false
+      matchAbort = null
+    }
+  }, { errorPrefix: '在线匹配失败' })
+
+  // 取消在线匹配批
+  wrapHandler('models:cancelCivitaiMatch', () => {
+    if (matching && matchAbort) {
+      matchAbort.abort()
+      return { ok: true }
+    }
+    return { ok: false }
+  })
+
+  // 解析 Civitai 模型页链接为版本预览（F14 第一步：下载前确认）
+  wrapHandler('models:resolveCivitaiLink', async (event, { url } = {}) => {
+    const versionId = parseCivitaiVersionId(url)
+    if (!versionId) {
+      return { error: '无法解析链接：支持 civitai.com/models/… 页面链接（须含版本号）' }
+    }
+    const r = await fetchVersion(versionId, civitaiToken(), undefined)
+    if (r.error) return { error: r.error }
+    return { version: r.version }
+  }, { errorPrefix: '链接解析失败' })
+
+  // 下载 Civitai 模型到当前库（F14 第二步）：流式下载 + 官方 SHA256 校验 +
+  // 成功后预写元数据（触发词/NSFW/哈希——下载完成即有哈希，查重免算）
+  wrapHandler('models:downloadCivitaiModel', async (event, { versionId, filename, sha256, trainedWords, nsfw } = {}) => {
+    if (downloading) return { error: '已有下载进行中' }
+    if (!Number.isInteger(versionId) || versionId <= 0) return { error: '无效的版本号' }
+    const root = getCurrentRoot()
+    if (!root) return { error: '尚未选择模型文件夹' }
+    const safeName = path.basename(
+      typeof filename === 'string' && filename ? filename : `civitai-${versionId}.safetensors`
+    )
+    if (!/\.safetensors$/i.test(safeName)) return { error: '仅支持下载 .safetensors 模型文件' }
+    const dest = path.join(root, safeName)
+    try {
+      await fs.access(dest)
+      return { error: '库根目录已存在同名文件' }
+    } catch {
+      /* 不存在，可下载 */
+    }
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const token = civitaiToken()
+    downloading = true
+    downloadAbort = new AbortController()
+    const signal = downloadAbort.signal
+    const send = (channel, payload) => {
+      if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
+    }
+    try {
+      const result = await downloadToFile(`${CIVITAI_API}/download/models/${versionId}`, dest, {
+        token,
+        expectedSha256: /^[0-9a-f]{64}$/.test(sha256 || '') ? sha256 : '',
+        onProgress: (p) => send('models:downloadProgress', p),
+        signal
+      })
+      // 预写元数据：下载完成即有官方哈希（hashMtime 锚定当前 mtime）
+      const stat = await fs.stat(dest)
+      const patch = { hash: result.sha256, hashMtime: stat.mtimeMs }
+      if (Array.isArray(trainedWords) && trainedWords.length > 0) {
+        patch.triggerWords = trainedWords.filter((w) => typeof w === 'string' && w.trim()).join(', ')
+        patch.triggerWordsSource = 'civitai'
+      }
+      if (nsfw === true) patch.nsfw = true
+      setModelMeta(dest, patch)
+      logger.info(`模型下载完成: ${dest}（${result.received} 字节，SHA256 校验通过）`)
+      return { path: dest, sizeBytes: result.received, sha256: result.sha256 }
+    } finally {
+      downloading = false
+      downloadAbort = null
+    }
+  }, { errorPrefix: '下载失败' })
+
+  // 取消进行中的下载（半成品文件由下载函数自身清理）
+  wrapHandler('models:cancelDownload', () => {
+    if (downloading && downloadAbort) {
+      downloadAbort.abort()
+      return { ok: true }
+    }
+    return { ok: false }
+  })
 }

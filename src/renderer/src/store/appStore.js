@@ -57,7 +57,8 @@ export {
   scanModels,
   cancelScan,
   applyThumbUpdates,
-  applyHashUpdates
+  applyHashUpdates,
+  applyCivitaiUpdates
 } from './library'
 
 // 筛选派生
@@ -115,5 +116,12 @@ export {
   toggleDisabledModel,
   moveModelTo,
   hashModels,
-  cancelHash
+  cancelHash,
+  civitaiMatchModels,
+  cancelCivitaiMatch,
+  openDownloadDialog,
+  closeDownloadDialog,
+  resolveDownloadLink,
+  confirmDownload,
+  cancelDownload
 } from './model-actions'

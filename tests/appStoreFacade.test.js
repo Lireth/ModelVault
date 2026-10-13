@@ -49,6 +49,7 @@ const EXPECTED_EXPORTS = [
   'cancelScan',
   'applyThumbUpdates',
   'applyHashUpdates',
+  'applyCivitaiUpdates',
   // 派生
   'filteredModels',
   'typeCounts',
@@ -99,7 +100,15 @@ const EXPECTED_EXPORTS = [
   'toggleDisabledModel',
   'moveModelTo',
   'hashModels',
-  'cancelHash'
+  'cancelHash',
+  // Civitai 在线能力（批次 5）
+  'civitaiMatchModels',
+  'cancelCivitaiMatch',
+  'openDownloadDialog',
+  'closeDownloadDialog',
+  'resolveDownloadLink',
+  'confirmDownload',
+  'cancelDownload'
 ]
 
 describe('appStore 门面导出契约（A-04）', () => {

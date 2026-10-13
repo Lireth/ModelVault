@@ -32,7 +32,12 @@ const VALID_INVOKE_CHANNELS = [
   'models:hashLibrary',
   'models:cancelHash',
   'models:toggleDisabled',
-  'models:moveModelTo'
+  'models:moveModelTo',
+  'models:civitaiMatch',
+  'models:cancelCivitaiMatch',
+  'models:resolveCivitaiLink',
+  'models:downloadCivitaiModel',
+  'models:cancelDownload'
 ]
 
 const VALID_RECEIVE_CHANNELS = [
@@ -42,7 +47,10 @@ const VALID_RECEIVE_CHANNELS = [
   'models:storeError',
   'models:fsChanged',
   'models:hashProgress',
-  'models:hashReady'
+  'models:hashReady',
+  'models:civitaiProgress',
+  'models:civitaiApplied',
+  'models:downloadProgress'
 ]
 
 /** 带白名单校验的 invoke（所有便捷方法的统一入口） */
@@ -162,7 +170,29 @@ const api = {
     /** 订阅哈希批算进度（{ done, total, current }），返回取消监听函数 */
     onHashProgress: (listener) => subscribe('models:hashProgress', listener),
     /** 订阅哈希完成批量更新（{ updates: [{ id, hash }] }），返回取消监听函数 */
-    onHashReady: (listener) => subscribe('models:hashReady', listener)
+    onHashReady: (listener) => subscribe('models:hashReady', listener),
+    /**
+     * Civitai 在线匹配（F13）：items 为 [{ id, hash }]，返回
+     * { matched, noMatch, failed, covers, canceled } 或 { error }
+     */
+    civitaiMatch: (items) => invokeValidated('models:civitaiMatch', { items }),
+    /** 取消进行中的在线匹配批，返回 { ok } */
+    cancelCivitaiMatch: () => invokeValidated('models:cancelCivitaiMatch'),
+    /**
+     * 解析 Civitai 模型页链接为版本预览（F14），返回
+     * { version: { name, filename, sizeBytes, sha256, nsfw, trainedWords, baseModel } } 或 { error }
+     */
+    resolveCivitaiLink: (url) => invokeValidated('models:resolveCivitaiLink', { url }),
+    /** 下载版本到当前库根（F14），返回 { path, sizeBytes, sha256 } 或 { error } */
+    downloadCivitaiModel: (payload) => invokeValidated('models:downloadCivitaiModel', payload),
+    /** 取消进行中的下载，返回 { ok } */
+    cancelDownload: () => invokeValidated('models:cancelDownload'),
+    /** 订阅在线匹配进度（{ done, total, current }），返回取消监听函数 */
+    onCivitaiProgress: (listener) => subscribe('models:civitaiProgress', listener),
+    /** 订阅匹配结果就地更新（{ updates: [{ id, fields }] }），返回取消监听函数 */
+    onCivitaiApplied: (listener) => subscribe('models:civitaiApplied', listener),
+    /** 订阅下载进度（{ received, total }），返回取消监听函数 */
+    onDownloadProgress: (listener) => subscribe('models:downloadProgress', listener)
   }
 }
 

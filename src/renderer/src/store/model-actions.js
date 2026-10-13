@@ -227,6 +227,16 @@ export async function handleMenuAction(id, action) {
       if (m) await hashModels([{ id, mtimeMs: m.mtimeMs }])
       break
     }
+    case 'civitaiMatchModel': {
+      // 无哈希先算（完成后 hashReady 已就地更新），再在线匹配
+      let m = state.models.find((x) => x.id === id)
+      if (m && !m.hash) {
+        await hashModels([{ id, mtimeMs: m.mtimeMs }])
+        m = state.models.find((x) => x.id === id)
+      }
+      if (m?.hash) await civitaiMatchModels([{ id, hash: m.hash }])
+      break
+    }
     case 'deleteModel': {
       const m = state.models.find((x) => x.id === id)
       if (!m) break
@@ -334,4 +344,115 @@ export function cancelHash() {
   window.api.models.cancelHash().catch((err) => {
     toast('error', `取消哈希失败: ${err.message}`)
   })
+}
+
+/* ---------------- Civitai 在线能力（F13/F14，批次 5） ---------------- */
+
+/**
+ * Civitai 在线匹配（F13）：items 为 [{ id, hash }]（须已有 SHA256），
+ * 命中后补全触发词/NSFW/封面（主进程空字段才写入），结果经
+ * civitaiApplied 事件就地更新。
+ * @param {Array<{id: string, hash: string}>} items
+ */
+export async function civitaiMatchModels(items) {
+  if (state.matching) {
+    toast('warn', '正在在线匹配中')
+    return
+  }
+  const list = (items || []).filter((x) => x && typeof x.id === 'string' && /^[0-9a-f]{64}$/.test(x.hash || ''))
+  if (list.length === 0) {
+    toast('warn', '选中模型均未计算哈希，请先执行「查重」')
+    return
+  }
+  state.matching = true
+  state.matchProgress = { done: 0, total: list.length, current: '' }
+  try {
+    const res = await window.api.models.civitaiMatch(list)
+    if (res?.error) {
+      toast('error', res.error)
+      return
+    }
+    if (res.canceled) {
+      toast('info', `在线匹配已取消（本次命中 ${res.matched} 个）`)
+    } else {
+      const parts = [`命中 ${res.matched}`]
+      if (res.covers > 0) parts.push(`补封面 ${res.covers}`)
+      if (res.noMatch > 0) parts.push(`未命中 ${res.noMatch}`)
+      if (res.failed > 0) parts.push(`失败 ${res.failed}`)
+      toast('success', `Civitai 匹配完成：${parts.join(' / ')}`)
+    }
+  } catch (err) {
+    toast('error', `在线匹配失败: ${err.message}`)
+  } finally {
+    state.matching = false
+  }
+}
+
+/** 取消进行中的在线匹配批 */
+export function cancelCivitaiMatch() {
+  window.api.models.cancelCivitaiMatch().catch(() => {})
+}
+
+/* ---------------- Civitai 下载（F14） ---------------- */
+
+/** 打开下载弹层（保留上次输入的链接便于重试） */
+export function openDownloadDialog() {
+  state.downloadDialog.visible = true
+}
+
+/** 关闭下载弹层（进行中的下载不受影响，进度仍在后台推进） */
+export function closeDownloadDialog() {
+  state.downloadDialog.visible = false
+}
+
+/** 解析链接为版本预览（弹层第一步） */
+export async function resolveDownloadLink(url) {
+  state.downloadDialog.resolving = true
+  state.downloadDialog.error = ''
+  state.downloadDialog.version = null
+  try {
+    const res = await window.api.models.resolveCivitaiLink(url)
+    if (res?.error) {
+      state.downloadDialog.error = res.error
+      return
+    }
+    state.downloadDialog.version = res.version
+  } catch (err) {
+    state.downloadDialog.error = `解析失败: ${err.message}`
+  } finally {
+    state.downloadDialog.resolving = false
+  }
+}
+
+/** 确认下载（弹层第二步 → 进度阶段）：完成后 watcher 自动发现新文件 */
+export async function confirmDownload() {
+  const version = state.downloadDialog.version
+  if (!version?.versionId) return
+  state.downloading = true
+  state.downloadProgress = { received: 0, total: version.sizeBytes || 0 }
+  try {
+    const res = await window.api.models.downloadCivitaiModel({
+      versionId: version.versionId,
+      filename: version.filename,
+      sha256: version.sha256,
+      trainedWords: version.trainedWords,
+      nsfw: version.nsfw
+    })
+    if (res?.error) {
+      toast('error', res.error)
+      return
+    }
+    toast('success', `下载完成：${res.path}（SHA256 校验通过），列表稍后自动刷新`)
+    state.downloadDialog.visible = false
+    state.downloadDialog.version = null
+  } catch (err) {
+    toast('error', `下载失败: ${err.message}`)
+  } finally {
+    state.downloading = false
+  }
+}
+
+/** 取消进行中的下载（半成品文件由主进程清理） */
+export function cancelDownload() {
+  window.api.models.cancelDownload().catch(() => {})
 }
