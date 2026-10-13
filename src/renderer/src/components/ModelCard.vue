@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
   formatSize,
   multiSelectIdSet,
@@ -24,6 +24,110 @@ watch(
     coverError.value = false
   }
 )
+
+/* ---------------- 封面悬停轮播（多预览图模型） ----------------
+ * 模型带多张预览图（covers 由扫描装饰附带）时，悬停封面区自动轮播：
+ * - 悬停停稳（HOVER_DELAY）后才启动，光标扫过网格不触发，避免闪切；
+ * - 切换前先预加载，加载失败的封面本轮会话内跳过，杜绝碎图帧；
+ * - 离开封面区立即停播并恢复默认封面；会话序号使在途预加载结果作废。
+ */
+const HOVER_DELAY = 400
+const CYCLE_INTERVAL = 1400
+
+/** 当前轮播项在 covers 中的索引；-1 表示未轮播（显示默认封面） */
+const cycleIdx = ref(-1)
+/** 本轮悬停会话内加载失败的封面 path（跳过不重试） */
+const cycleFailed = new Set()
+
+let hoverTimer = 0
+let cycleTimer = 0
+let cycleSession = 0
+let cycleAdvancing = false
+
+const cycleList = computed(() => props.model.covers || [])
+
+/** 当前轮播图 URL（空串表示未轮播） */
+const cycleUrl = computed(() =>
+  cycleIdx.value >= 0 ? cycleList.value[cycleIdx.value]?.url || '' : ''
+)
+
+function clearCycleTimers() {
+  clearTimeout(hoverTimer)
+  hoverTimer = 0
+  clearInterval(cycleTimer)
+  cycleTimer = 0
+}
+
+/** 预加载封面图：本地文件加载快，但多 MB 原图解码仍需时间，先载后切避免空白帧 */
+function preloadImage(url) {
+  return new Promise((resolve, reject) => {
+    const im = new Image()
+    im.onload = () => resolve()
+    im.onerror = () => reject(new Error(`cover preload failed: ${url}`))
+    im.src = url
+  })
+}
+
+/** 推进到下一张可加载的封面（并发推进只保留最早一趟，在途结果按会话校验） */
+async function advanceCycle(session) {
+  if (cycleAdvancing) return
+  const list = cycleList.value
+  if (list.length < 2) return
+  cycleAdvancing = true
+  try {
+    for (let step = 1; step < list.length; step++) {
+      const next = (cycleIdx.value + step) % list.length
+      const c = list[next]
+      if (cycleFailed.has(c.path)) continue
+      try {
+        await preloadImage(c.url)
+      } catch {
+        cycleFailed.add(c.path)
+        continue
+      }
+      if (session !== cycleSession) return
+      cycleIdx.value = next
+      return
+    }
+    // 其余封面全部加载失败：停止轮播，回到默认封面
+    if (session === cycleSession) stopCycle()
+  } finally {
+    cycleAdvancing = false
+  }
+}
+
+function startCycle() {
+  if (cycleList.value.length < 2 || hoverTimer || cycleTimer) return
+  const session = ++cycleSession
+  hoverTimer = setTimeout(() => {
+    hoverTimer = 0
+    // 从默认封面位置起步，首轮即切到默认封面的下一张
+    const defIdx = cycleList.value.findIndex((c) => c.path === props.model.cover)
+    cycleIdx.value = defIdx >= 0 ? defIdx : 0
+    advanceCycle(session)
+    cycleTimer = setInterval(() => advanceCycle(session), CYCLE_INTERVAL)
+  }, HOVER_DELAY)
+}
+
+function stopCycle() {
+  cycleSession += 1
+  clearCycleTimers()
+  cycleIdx.value = -1
+  cycleFailed.clear()
+}
+
+/** 已展示轮播图加载失败（预加载成功后的兜底）：跳过该图继续推进 */
+function onCycleImgError(c) {
+  cycleFailed.add(c.path)
+  advanceCycle(cycleSession)
+}
+
+// 封面集合变化（详情页增删封面后回到列表）时重置轮播状态
+watch(
+  () => cycleList.value.map((c) => c.path).join('|'),
+  stopCycle
+)
+onBeforeUnmount(stopCycle)
 
 const info = computed(() => typeInfo(props.model.type))
 
@@ -106,7 +210,7 @@ const mtimeText = computed(() => {
       title="选中/取消选中"
       @click.stop="toggleSelect(model.id)"
     ><svg v-if="selected" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8" /></svg></span>
-    <div class="cover">
+    <div class="cover" @mouseenter="startCycle" @mouseleave="stopCycle">
       <img
         v-if="model.coverUrl && !coverError"
         :src="model.coverUrl"
@@ -118,6 +222,29 @@ const mtimeText = computed(() => {
       />
       <div v-else class="cover-placeholder">
         <span class="cover-ext">{{ model.ext }}</span>
+      </div>
+      <!-- 悬停轮播层：叠在默认封面之上，key 切换经 transition 交叉淡入淡出；
+           aria-hidden 纯视觉增强，读屏仍只报卡片主图 -->
+      <div v-if="cycleUrl" class="cycle-layer" aria-hidden="true">
+        <transition name="cycle-fade">
+          <img
+            :key="cycleUrl"
+            :src="cycleUrl"
+            :class="{ blurred: model.nsfw }"
+            alt=""
+            draggable="false"
+            @error="onCycleImgError(cycleList[cycleIdx])"
+          />
+        </transition>
+      </div>
+      <!-- 轮播位置指示点：仅轮播中显示，位于封面底部居中（左右角标区之外） -->
+      <div v-if="cycleUrl" class="cycle-dots" aria-hidden="true">
+        <span
+          v-for="(c, i) in cycleList"
+          :key="c.path"
+          class="cycle-dot"
+          :class="{ on: i === cycleIdx }"
+        />
       </div>
       <span class="type-badge" :style="{ background: info.color }">{{ info.label }}</span>
       <span v-if="model.nsfw" class="nsfw-badge">NSFW</span>
@@ -284,6 +411,60 @@ const mtimeText = computed(() => {
 .cover img.blurred {
   filter: blur(14px);
   transform: scale(1.1); /* 放大避免模糊边缘露出原图 */
+}
+
+/* 悬停轮播层：覆盖默认封面，transition 默认模式（新旧图同时驻留）实现交叉淡入淡出 */
+.cycle-layer {
+  position: absolute;
+  inset: 0;
+  /* 不拦截指针：悬停/离开事件归属 .cover，点击仍打开详情 */
+  pointer-events: none;
+}
+
+.cycle-layer img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cycle-fade-enter-active,
+.cycle-fade-leave-active {
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+
+.cycle-fade-enter-from,
+.cycle-fade-leave-to {
+  opacity: 0;
+}
+
+/* 轮播位置指示点：底部居中，避开左右角标区 */
+.cycle-dots {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 5px;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.cycle-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.45);
+  /* 压在浅色封面上也可辨 */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  transition: background var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+
+.cycle-dot.on {
+  background: #fff;
+  transform: scale(1.3);
 }
 
 /* 封面占位（.cover-placeholder/.cover-ext）为 main.css 公共类 */

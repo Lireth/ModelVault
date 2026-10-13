@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ModelCard from '../src/renderer/src/components/ModelCard.vue'
 import { state } from '../src/renderer/src/store/appStore'
@@ -125,5 +125,126 @@ describe('ModelCard 收藏按钮键盘行为（OPT-3 回归）', () => {
     await settle()
     expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({ id: 'm1', favorite: false })
     expect(state.selectedId).toBeNull()
+  })
+})
+
+describe('ModelCard 封面悬停轮播', () => {
+  /**
+   * 与组件内常量对齐：悬停停稳 HOVER_DELAY 后启动，之后每 CYCLE_INTERVAL 推进一张。
+   * Image 桩按 URL 集合决定 load/error（queueMicrotask 触发，配合
+   * advanceTimersByTimeAsync 的微任务冲刷，无需真实图片加载）。
+   */
+  const HOVER_DELAY = 400
+  const CYCLE_INTERVAL = 1400
+  let failUrls = new Set()
+  let restoreImage = null
+
+  function makeCovers(prefix, count) {
+    return Array.from({ length: count }, (_, i) => ({
+      rel: `${prefix}${i}.png`,
+      path: `/lib/${prefix}${i}.png`,
+      url: `mvimg://local/${prefix}${i}.png`
+    }))
+  }
+
+  /** 当前轮播展示的最新一张轮播图 src（无轮播层时为空串） */
+  function currentCycleSrc(wrapper) {
+    const imgs = wrapper.findAll('.cycle-layer img')
+    return imgs.length ? imgs.at(-1).attributes('src') : ''
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    failUrls = new Set()
+    const Original = globalThis.Image
+    globalThis.Image = class {
+      set src(url) {
+        queueMicrotask(() => {
+          if (failUrls.has(url)) this.onerror?.(new Error('load failed'))
+          else this.onload?.()
+        })
+      }
+    }
+    restoreImage = () => {
+      globalThis.Image = Original
+    }
+  })
+
+  afterEach(() => {
+    restoreImage()
+    vi.useRealTimers()
+  })
+
+  it('少于两张封面时悬停不启动轮播', async () => {
+    const covers = makeCovers('a', 1)
+    const wrapper = mountCard(
+      makeModel('m1', { cover: covers[0].path, covers, coverUrl: 'mvimg://thumb/a0.png' })
+    )
+    await wrapper.find('.cover').trigger('mouseenter')
+    await vi.advanceTimersByTimeAsync(HOVER_DELAY + CYCLE_INTERVAL * 2)
+    expect(wrapper.find('.cycle-layer').exists()).toBe(false)
+    expect(wrapper.find('.cycle-dots').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('悬停停稳后从默认封面下一张开始轮播并循环', async () => {
+    const covers = makeCovers('b', 3)
+    const wrapper = mountCard(
+      makeModel('m1', { cover: covers[0].path, covers, coverUrl: 'mvimg://thumb/b0.png' })
+    )
+    await wrapper.find('.cover').trigger('mouseenter')
+    await vi.advanceTimersByTimeAsync(HOVER_DELAY)
+    expect(currentCycleSrc(wrapper)).toBe(covers[1].url)
+    expect(wrapper.findAll('.cycle-dot')).toHaveLength(3)
+    expect(wrapper.findAll('.cycle-dot')[1].classes()).toContain('on')
+    await vi.advanceTimersByTimeAsync(CYCLE_INTERVAL)
+    expect(currentCycleSrc(wrapper)).toBe(covers[2].url)
+    await vi.advanceTimersByTimeAsync(CYCLE_INTERVAL)
+    expect(currentCycleSrc(wrapper)).toBe(covers[0].url)
+    wrapper.unmount()
+  })
+
+  it('光标扫过未停稳不触发轮播', async () => {
+    const covers = makeCovers('c', 2)
+    const wrapper = mountCard(
+      makeModel('m1', { cover: covers[0].path, covers, coverUrl: 'mvimg://thumb/c0.png' })
+    )
+    await wrapper.find('.cover').trigger('mouseenter')
+    await vi.advanceTimersByTimeAsync(HOVER_DELAY - 100)
+    await wrapper.find('.cover').trigger('mouseleave')
+    await vi.advanceTimersByTimeAsync(HOVER_DELAY + CYCLE_INTERVAL * 2)
+    expect(wrapper.find('.cycle-layer').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('离开封面区立即停播并恢复默认封面', async () => {
+    const covers = makeCovers('d', 2)
+    const wrapper = mountCard(
+      makeModel('m1', { cover: covers[0].path, covers, coverUrl: 'mvimg://thumb/d0.png' })
+    )
+    await wrapper.find('.cover').trigger('mouseenter')
+    await vi.advanceTimersByTimeAsync(HOVER_DELAY)
+    expect(wrapper.find('.cycle-layer').exists()).toBe(true)
+    await wrapper.find('.cover').trigger('mouseleave')
+    expect(wrapper.find('.cycle-layer').exists()).toBe(false)
+    // 停播后计时器已清理，时间推进不再复活轮播
+    await vi.advanceTimersByTimeAsync(CYCLE_INTERVAL * 3)
+    expect(wrapper.find('.cycle-layer').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('加载失败的封面被跳过', async () => {
+    const covers = makeCovers('e', 3)
+    failUrls.add(covers[1].url)
+    const wrapper = mountCard(
+      makeModel('m1', { cover: covers[0].path, covers, coverUrl: 'mvimg://thumb/e0.png' })
+    )
+    await wrapper.find('.cover').trigger('mouseenter')
+    await vi.advanceTimersByTimeAsync(HOVER_DELAY)
+    // 第二张预加载失败，首轮直接落到第三张
+    expect(currentCycleSrc(wrapper)).toBe(covers[2].url)
+    await vi.advanceTimersByTimeAsync(CYCLE_INTERVAL)
+    expect(currentCycleSrc(wrapper)).toBe(covers[0].url)
+    wrapper.unmount()
   })
 })
