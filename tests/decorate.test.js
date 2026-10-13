@@ -344,6 +344,71 @@ describe('startThumbDrain 窗口生命周期（A7）', () => {
   })
 })
 
+describe('健康检查与 civitai 自动导入（F6/F8 集成）', () => {
+  /** 构造合法 safetensors 文件（可无 __metadata__） */
+  async function writeSafetensors(abs, metadata) {
+    const header = JSON.stringify({
+      weight: { dtype: 'F16', shape: [1], data_offsets: [0, 2] },
+      ...(metadata ? { __metadata__: metadata } : {})
+    })
+    const lenBuf = Buffer.alloc(8)
+    lenBuf.writeUInt32LE(Buffer.byteLength(header), 0)
+    await fs.writeFile(abs, Buffer.concat([lenBuf, Buffer.from(header), Buffer.from([1, 2])]))
+  }
+
+  it('0 字节与损坏 safetensors 标记 suspect；合法但无元信息的不标记（F6）', async () => {
+    // 0 字节文件（任意扩展名）
+    const empty = path.join(root, 'empty.ckpt')
+    await fs.writeFile(empty, '')
+    const [d0] = await decorateModels([makeModel(empty, { ext: '.ckpt', type: 'other', size: 0 })])
+    expect(d0.suspect).toBe(true)
+
+    // 损坏 safetensors（垃圾字节，头部不可解析）
+    const broken = path.join(root, 'broken.safetensors')
+    await fs.writeFile(broken, Buffer.from('garbage — not a safetensors container!!'))
+    const [d1] = await decorateModels([makeModel(broken)])
+    expect(d1.suspect).toBe(true)
+    expect(d1.autoInfo).toBeNull()
+
+    // 合法但无 __metadata__：readSafetensorsInfo 为 null，健康检查通过 → 不标记
+    const healthy = path.join(root, 'healthy.safetensors')
+    await writeSafetensors(healthy, null)
+    const [d2] = await decorateModels([makeModel(healthy)])
+    expect(d2.suspect).toBe(false)
+    expect(d2.autoInfo).toBeNull()
+  })
+
+  it('civitai.info 的 trainedWords 与 nsfw 空字段自动导入（F8）', async () => {
+    const abs = path.join(root, 'girl-lora.safetensors')
+    await writeSafetensors(abs, null)
+    await fs.writeFile(
+      path.join(root, 'girl-lora.civitai.info'),
+      JSON.stringify({ name: 'Girl LoRA', trainedWords: ['cat-girl', 'masterpiece'], nsfw: true })
+    )
+    const [decorated] = await decorateModels([makeModel(abs, { type: 'lora' })])
+    expect(decorated.triggerWords).toBe('cat-girl, masterpiece')
+    expect(decorated.triggerWordsSource).toBe('civitai')
+    expect(decorated.nsfw).toBe(true)
+
+    // 已导入字段不被再次装饰覆盖（幂等；「空字段才写入」原则）
+    const [again] = await decorateModels([makeModel(abs, { type: 'lora' })])
+    expect(again.triggerWords).toBe('cat-girl, masterpiece')
+  })
+
+  it('civitai 导入不覆盖用户已有触发词（空字段才写入）', async () => {
+    const abs = path.join(root, 'owned-lora.safetensors')
+    await writeSafetensors(abs, null)
+    await fs.writeFile(
+      path.join(root, 'owned-lora.civitai.info'),
+      JSON.stringify({ trainedWords: ['should-not-apply'] })
+    )
+    setModelMeta(abs, { triggerWords: '用户已有' })
+    const [decorated] = await decorateModels([makeModel(abs, { type: 'lora' })])
+    expect(decorated.triggerWords).toBe('用户已有')
+    expect(decorated.triggerWordsSource).toBe('')
+  })
+})
+
 describe('metaSignature（装饰缓存签名，A-08 记忆化表征）', () => {
   function baseMeta(overrides = {}) {
     return {

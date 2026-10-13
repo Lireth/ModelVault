@@ -98,8 +98,12 @@ function normalizeModelMeta(raw) {
     // 触发词（LoRA 等模型的唤起词，自由文本，详情页可一键复制）
     triggerWords:
       typeof raw.triggerWords === 'string' ? raw.triggerWords.trim().slice(0, 1000) : '',
-    // 触发词来源（'sidecar' 表示由同名 .txt 首行自动导入；用户在详情页保存后清除）
-    triggerWordsSource: raw.triggerWordsSource === 'sidecar' ? 'sidecar' : '',
+    // 触发词来源（'sidecar' = 同名 .txt 首行自动导入；'civitai' = 同名
+    // .civitai.info 的 trainedWords 自动导入，F8；用户在详情页保存后清除）
+    triggerWordsSource:
+      raw.triggerWordsSource === 'sidecar' || raw.triggerWordsSource === 'civitai'
+        ? raw.triggerWordsSource
+        : '',
     // 收藏标记（false 为未收藏）
     favorite: raw.favorite === true,
     // NSFW 标记：勾选后首页卡片预览图做模糊处理（详情页正常展示）

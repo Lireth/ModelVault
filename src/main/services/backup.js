@@ -42,6 +42,13 @@ const COVER_IO_CONCURRENCY = 8
 const ZIP_LEVEL = 6
 
 /**
+ * 备份文件大小上限（O5）：fflate 解压为全内存操作，读入的 zip 字节与解出的
+ * 全部条目双份驻留主进程堆；与导出侧封面上限同理由地拒绝超限输入，
+ * 避免低内存机器在导入大备份时 OOM
+ */
+const MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024
+
+/**
  * 有限并发映射（A-01）：固定数量的 worker 抢占式领取任务，
  * 结果按输入下标归位（顺序稳定）。
  * @template T, R
@@ -198,11 +205,15 @@ export async function exportBackup(win) {
       // 该库尚未生成过关联数据：仅备份应用设置
     }
     if (storeText) {
-      // 封面整体纳入前先统计总字节，超限拒绝（内存打包的保护阀）
-      let totalBytes = 0
+      // 封面整体纳入前先统计总字节，超限拒绝（内存打包的保护阀）。
+      // O5：统计并发化（复用下方读取的同一并发度）——数百封面下逐个串行
+      // await stat 的统计阶段比 8 路并发的读取阶段还慢，成为备份瓶颈
       const coverNames = await fs.readdir(coversDir).catch(() => [])
-      for (const name of coverNames) {
-        const stat = await fs.stat(path.join(coversDir, name)).catch(() => null)
+      const stats = await mapLimit(coverNames, COVER_IO_CONCURRENCY, (name) =>
+        fs.stat(path.join(coversDir, name)).catch(() => null)
+      )
+      let totalBytes = 0
+      for (const stat of stats) {
         if (stat?.isFile()) totalBytes += stat.size
       }
       if (totalBytes > MAX_COVERS_BYTES) {
@@ -318,6 +329,9 @@ async function restoreLibrary(root, unzipped) {
         return
       }
       await fs.writeFile(path.join(tmpDir, COVERS_DIR, name), data)
+      // 写盘后立即释放该条目（O5）：数百 MB 的解压封面集不再整体驻留到
+      // 恢复流程结束，堆峰值随写入推进递减
+      unzipped[entryName] = null
       covers += 1
     })
 
@@ -364,6 +378,14 @@ export async function importBackup(win) {
 
   let unzipped
   try {
+    // 大小预检（O5）：先于整文件读入——超大备份的全内存解压会挤爆低内存
+    // 机器的主进程堆，超限引导手动复制 .modelvault 文件夹
+    const fileStat = await fs.stat(filePath)
+    if (fileStat.size > MAX_BACKUP_BYTES) {
+      return {
+        error: `备份文件超过 ${Math.floor(MAX_BACKUP_BYTES / 1024 / 1024 / 1024)}GB，为避免内存占用过高已停止恢复；请手动复制 .modelvault 文件夹`
+      }
+    }
     // 异步分片解压（A-01）：zip 较大时不阻塞主进程事件循环
     unzipped = await unzipBackupAsync(new Uint8Array(await fs.readFile(filePath)))
   } catch (err) {

@@ -10,6 +10,8 @@
   --text-muted: #8a97a5;
   --accent: #4f9cf9;
   --danger: #e5484d;
+  /* 警示色（F6 疑似损坏角标/警示条） */
+  --warning: #e6a700;
   /* 收藏星标金色（U3：收藏/评分相关元素统一取色） */
   --favorite: #f5b301;
   /* 深色半透明覆盖层（图片角标等） */
@@ -38,6 +40,8 @@ html.light {
   --text-muted: #6a7683;
   --accent: #2f7fe0;
   --danger: #d93036;
+  /* 浅色主题用更深的警示色保证在白色背景上的可读性 */
+  --warning: #b98200;
   /* 浅色主题用更深的金色保证在白色背景上的可读性 */
   --favorite: #b98200;
   --overlay: rgba(255, 255, 255, 0.85);
@@ -160,6 +164,18 @@ button {
 
 .btn-primary:hover:not(:disabled) {
   filter: brightness(1.1);
+}
+
+/* 危险操作按钮（批量删除等）：自 App.vue 迁入全局（多组件共用） */
+.btn-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
 }
 
 /* ---------- 内容区通用 ---------- */

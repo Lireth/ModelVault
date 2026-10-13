@@ -160,3 +160,34 @@ export async function readSafetensorsInfo(absPath) {
     await fh?.close().catch(() => {})
   }
 }
+
+/**
+ * 校验 safetensors 文件结构是否健康（F6 健康检查）：
+ * 只验证容器结构——头部 8 字节长度区可读、头部长度在合理区间、头部 JSON
+ * 可解析；不要求含训练元信息（合法但无 __metadata__ 的文件是健康的）。
+ * 下载损坏/中断的文件（截断、头部垃圾、非 JSON 内容）在此被识别。
+ * 与 readSafetensorsInfo 的分工：后者返回 null 兼指「损坏」与「无元信息」，
+ * 装饰层无法区分；健康检查仅在元信息解析失败时补一次以分辨二者。
+ * @param {string} absPath .safetensors 文件绝对路径
+ * @returns {Promise<boolean>} 结构健康返回 true
+ */
+export async function checkSafetensorsHealthy(absPath) {
+  let fh = null
+  try {
+    fh = await fs.open(absPath, 'r')
+    const lenBuf = Buffer.alloc(8)
+    const first = await fh.read(lenBuf, 0, 8, 0)
+    if (first.bytesRead < 8) return false
+    const headerLen = readHeaderLength(lenBuf)
+    if (!headerLen || headerLen > MAX_HEADER_BYTES) return false
+    const headerBuf = Buffer.alloc(headerLen)
+    const second = await fh.read(headerBuf, 0, headerLen, 8)
+    if (second.bytesRead < headerLen) return false
+    JSON.parse(headerBuf.toString('utf8'))
+    return true
+  } catch {
+    return false
+  } finally {
+    await fh?.close().catch(() => {})
+  }
+}

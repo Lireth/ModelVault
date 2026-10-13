@@ -160,6 +160,15 @@ async function onToggleHideNsfw(e) {
         />
         <span>隐藏 NSFW 模型</span>
       </label>
+      <!-- 健康检查筛选（F6）：排查下载损坏的模型（0 字节 / 头部不可解析） -->
+      <label class="nsfw-toggle" title="仅显示扫描时结构校验失败的模型：0 字节或 safetensors 头部不可解析，建议重新下载或删除">
+        <input
+          v-model="state.suspectOnly"
+          type="checkbox"
+          aria-label="仅显示疑似损坏的模型"
+        />
+        <span>仅看疑似损坏</span>
+      </label>
     </div>
 
     <!-- 设置按钮：固定在侧边栏最底部，宽度自适应侧边栏 -->

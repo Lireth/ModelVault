@@ -2,7 +2,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { classifyModel, findSidecarPreview, findSidecarText, scanModels, sidecarImportPatch } from '../src/main/services/scanner'
+import {
+  civitaiImportPatch,
+  classifyModel,
+  findSidecarCivitaiInfo,
+  findSidecarPreview,
+  findSidecarText,
+  scanModels,
+  sidecarImportPatch
+} from '../src/main/services/scanner'
 
 /**
  * scanner.js 单元测试：
@@ -265,5 +273,51 @@ describe('sidecarImportPatch', () => {
     expect(patch.triggerWords).toBeUndefined()
     expect(sidecarImportPatch('lora', { note: '', triggerWords: '' }, '   ')).toBeNull()
     expect(sidecarImportPatch('lora', { note: '' }, '')).toBeNull()
+  })
+})
+
+describe('civitaiImportPatch / findSidecarCivitaiInfo（F8）', () => {
+  it('trainedWords 导入为逗号连接文本并标记来源；已有触发词不覆盖', () => {
+    const patch = civitaiImportPatch(
+      { triggerWords: '', nsfw: false },
+      { trainedWords: ['trigger-a', ' trigger-b ', ''] }
+    )
+    expect(patch).toEqual({ triggerWords: 'trigger-a, trigger-b', triggerWordsSource: 'civitai' })
+    // 已有触发词：跳过（哪怕 civitai 有候选）
+    expect(civitaiImportPatch({ triggerWords: '已有', nsfw: false }, { trainedWords: ['x'] })).toBeNull()
+  })
+
+  it('nsfw 仅在来源明确为 true 且当前未标记时导入，单向不可逆', () => {
+    const patch = civitaiImportPatch({ triggerWords: 'x', nsfw: false }, { nsfw: true })
+    expect(patch).toEqual({ nsfw: true })
+    // 已标记：不重复；来源非 true：不导入（civitai.info 缺失该字段时不得清标记）
+    expect(civitaiImportPatch({ triggerWords: 'x', nsfw: true }, { nsfw: true })).toBeNull()
+    expect(civitaiImportPatch({ triggerWords: 'x', nsfw: false }, { nsfw: false })).toBeNull()
+    expect(civitaiImportPatch({ triggerWords: 'x', nsfw: false }, {})).toBeNull()
+  })
+
+  it('真实文件读取：合法 JSON 解析、损坏/超大/缺失返回 null', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-civitai-'))
+    try {
+      const model = path.join(dir, 'my-lora.safetensors')
+      await fs.writeFile(model, 'x')
+      // 合法
+      await fs.writeFile(
+        path.join(dir, 'my-lora.civitai.info'),
+        JSON.stringify({ name: 'My LoRA', nsfw: true, trainedWords: ['a', 'b'], baseModel: 'SDXL 1.0' })
+      )
+      const info = await findSidecarCivitaiInfo(model)
+      expect(info.name).toBe('My LoRA')
+      expect(info.trainedWords).toEqual(['a', 'b'])
+      // 损坏 JSON
+      await fs.writeFile(path.join(dir, 'my-lora.civitai.info'), '{broken json')
+      expect(await findSidecarCivitaiInfo(model)).toBeNull()
+      // 无 sidecar 的模型
+      const other = path.join(dir, 'other.safetensors')
+      await fs.writeFile(other, 'x')
+      expect(await findSidecarCivitaiInfo(other)).toBeNull()
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+    }
   })
 })

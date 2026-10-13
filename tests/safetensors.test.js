@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import {
+  checkSafetensorsHealthy,
   extractSafetensorsInfo,
   extractTagCandidates,
   hasUsefulInfo,
@@ -172,6 +173,59 @@ describe('parseHeaderBuffer / readSafetensorsInfo', () => {
       lenBuf.writeUInt32LE(0xffff, 0)
       await fs.writeFile(lying, Buffer.concat([lenBuf, Buffer.from('{}')]))
       expect(await readSafetensorsInfo(lying)).toBeNull()
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+})
+
+describe('checkSafetensorsHealthy（F6 健康检查）', () => {
+  /** 构造 safetensors 文件字节（同上 describe 的 buildFile，局部副本） */
+  function buildFile(metadata) {
+    const header = JSON.stringify({
+      'weight': { dtype: 'F16', shape: [1], data_offsets: [0, 2] },
+      ...(metadata ? { __metadata__: metadata } : {})
+    })
+    const lenBuf = Buffer.alloc(8)
+    lenBuf.writeUInt32LE(Buffer.byteLength(header), 0)
+    return Buffer.concat([lenBuf, Buffer.from(header, 'utf8'), Buffer.from([1, 2])])
+  }
+
+  it('合法文件（含/不含元信息）均健康——与 readSafetensorsInfo 的关键区别', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-st-health-'))
+    try {
+      // 含元信息
+      const withMeta = path.join(dir, 'with-meta.safetensors')
+      await fs.writeFile(withMeta, buildFile({ ss_base_model_version: 'SD 1.5' }))
+      expect(await checkSafetensorsHealthy(withMeta)).toBe(true)
+      // 无 __metadata__ 的合法文件：readSafetensorsInfo 返回 null 但结构健康
+      const noMeta = path.join(dir, 'no-meta.safetensors')
+      await fs.writeFile(noMeta, buildFile(null))
+      expect(await readSafetensorsInfo(noMeta)).toBeNull()
+      expect(await checkSafetensorsHealthy(noMeta)).toBe(true)
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+
+  it('损坏文件识别为不健康：垃圾字节、截断、声称头部长度越界、不存在', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-st-broken-'))
+    try {
+      const garbage = path.join(dir, 'garbage.safetensors')
+      await fs.writeFile(garbage, Buffer.from('this is not a safetensors file at all!!!'))
+      expect(await checkSafetensorsHealthy(garbage)).toBe(false)
+
+      const truncated = path.join(dir, 'truncated.safetensors')
+      await fs.writeFile(truncated, Buffer.from([1, 2, 3]))
+      expect(await checkSafetensorsHealthy(truncated)).toBe(false)
+
+      const lying = path.join(dir, 'lying.safetensors')
+      const lenBuf = Buffer.alloc(8)
+      lenBuf.writeUInt32LE(0xffff, 0)
+      await fs.writeFile(lying, Buffer.concat([lenBuf, Buffer.from('{}')]))
+      expect(await checkSafetensorsHealthy(lying)).toBe(false)
+
+      expect(await checkSafetensorsHealthy(path.join(dir, 'missing.safetensors'))).toBe(false)
     } finally {
       await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
     }

@@ -121,6 +121,12 @@ const mtimeText = computed(() => {
       </div>
       <span class="type-badge" :style="{ background: info.color }">{{ info.label }}</span>
       <span v-if="model.nsfw" class="nsfw-badge">NSFW</span>
+      <!-- 健康检查角标（F6）：0 字节或 safetensors 头部不可解析的疑似损坏文件 -->
+      <span
+        v-if="model.suspect"
+        class="suspect-badge"
+        title="文件疑似损坏（结构校验失败或 0 字节），建议重新下载或删除"
+      >⚠ 损坏</span>
       <span v-if="subTag" class="sub-badge" :style="{ color: subTag.color, borderColor: subTag.color }">
         {{ subTag.label }}
       </span>
@@ -314,6 +320,19 @@ const mtimeText = computed(() => {
   letter-spacing: 1px;
   color: #fff;
   background: var(--danger);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+/* 疑似损坏角标（F6）：位于封面右下角，警示色 */
+.suspect-badge {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--warning, #e6a700);
   padding: 2px 8px;
   border-radius: 999px;
 }

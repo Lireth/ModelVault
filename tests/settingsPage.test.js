@@ -127,3 +127,59 @@ describe('SettingsPage 日志与诊断入口（B-04）', () => {
     expect(text).toContain('win32')
   })
 })
+
+describe('库统计区（F7）', () => {
+  /** 构造带统计字段的模型（字段与装饰结果对齐） */
+  function statModel(id, overrides = {}) {
+    return {
+      id,
+      name: id,
+      type: 'lora',
+      size: 1024,
+      mtimeMs: 1000,
+      note: '',
+      alias: '',
+      params: null,
+      hasManualCover: false,
+      favorite: false,
+      nsfw: false,
+      rating: 0,
+      suspect: false,
+      ...overrides
+    }
+  }
+
+  it('展示总模型数、分类行、标注覆盖率与最占空间 TOP-N', async () => {
+    state.models = [
+      statModel('big', { name: '大模型', type: 'checkpoint', size: 3 * 1024 * 1024 * 1024, note: '有备注' }),
+      statModel('small', { name: '小模型', size: 512 })
+    ]
+    const wrapper = await mountSettings()
+
+    const section = wrapper.find('.stats-section')
+    expect(section.exists()).toBe(true)
+    // 总数为 2
+    const overview = wrapper.findAll('.stat-item')
+    expect(overview[0].text()).toContain('2')
+    // 分类行含 Checkpoint（带数量）
+    const typeRows = wrapper.findAll('.type-stats li')
+    expect(typeRows.length).toBeGreaterThanOrEqual(2)
+    expect(typeRows.some((r) => r.text().includes('Checkpoint') && r.text().includes('1'))).toBe(true)
+    // 覆盖率行：有备注 50%
+    const covRows = wrapper.findAll('.cov-row')
+    expect(covRows.some((r) => r.text().includes('有备注') && r.text().includes('50%'))).toBe(true)
+    // TOP 列表按容量降序：大模型在前
+    const tops = wrapper.findAll('.top-list li')
+    expect(tops).toHaveLength(2)
+    expect(tops[0].text()).toContain('大模型')
+    wrapper.unmount()
+  })
+
+  it('空库时显示「尚未扫描模型」占位而非报错', async () => {
+    const wrapper = await mountSettings()
+    expect(wrapper.find('.stats-section').exists()).toBe(true)
+    expect(wrapper.findAll('.stats-empty').length).toBeGreaterThanOrEqual(2)
+    expect(wrapper.find('.top-list').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})

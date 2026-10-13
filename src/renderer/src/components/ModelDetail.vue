@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import AutoInfoPanel from './detail/AutoInfoPanel.vue'
 import CoverPanel from './detail/CoverPanel.vue'
 import { PARAM_LIMITS, SAMPLERS, SCHEDULERS, PRECISIONS, PARAM_PRESETS, matchParamPreset } from '../constants/modelParams'
@@ -205,6 +205,50 @@ function onPanelContextMenu() {
   if (selectedModel.value) showContextMenu(selectedModel.value.id)
 }
 
+/* ---------------- 焦点管理（O10：键盘/读屏可达性） ---------------- */
+
+/** 面板容器（打开时焦点移入，tabindex=-1 仅作焦点落点） */
+const panelEl = ref(null)
+/** 打开详情前的焦点元素（关闭时归还，键盘用户不丢焦点） */
+let restoreFocusEl = null
+
+/** 面板内 Tab 序列中的可聚焦元素 */
+function focusablesInPanel() {
+  if (!panelEl.value) return []
+  return [...panelEl.value.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+  )].filter((el) => !el.disabled && el.offsetParent !== null)
+}
+
+// 打开时焦点入面板、关闭时归还触发元素（与确认层同款可达性标准）；
+// 模型间切换（model → model）不移动焦点
+watch(selectedModel, (m, old) => {
+  if (m && !old) {
+    restoreFocusEl = document.activeElement
+    nextTick(() => panelEl.value?.focus())
+  } else if (!m && old) {
+    if (restoreFocusEl && typeof restoreFocusEl.focus === 'function') restoreFocusEl.focus()
+    restoreFocusEl = null
+  }
+})
+
+/** Tab 焦点陷阱：Tab 不穿透遮罩聚焦到被遮挡的网格卡片，在面板内首末循环 */
+function onPanelTab(e) {
+  if (e.key !== 'Tab') return
+  const items = focusablesInPanel()
+  if (items.length === 0) return
+  const first = items[0]
+  const last = items[items.length - 1]
+  const active = document.activeElement
+  if (e.shiftKey && (active === first || active === panelEl.value)) {
+    e.preventDefault()
+    last.focus()
+  } else if (!e.shiftKey && active === last) {
+    e.preventDefault()
+    first.focus()
+  }
+}
+
 /** ESC 关闭详情页（U1）：设置页打开时让位给它的 ESC 处理；
  *  表单有未保存修改时经 closeDetail 内的确认拦截（C8）。
  *  确认层可见时整键让位（F1）：模态确认期间底层页面不得响应 ESC，
@@ -297,7 +341,16 @@ async function onSave() {
 <template>
   <Teleport to="body">
     <div v-if="selectedModel" class="detail-mask" @click.self="closeDetail">
-      <section class="detail-panel" @contextmenu.prevent="onPanelContextMenu">
+      <section
+        ref="panelEl"
+        class="detail-panel"
+        tabindex="-1"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="`模型详情：${selectedModel.alias || selectedModel.name}`"
+        @contextmenu.prevent="onPanelContextMenu"
+        @keydown="onPanelTab"
+      >
         <header class="detail-header">
           <h2 :title="selectedModel.name">{{ selectedModel.alias || selectedModel.name }}</h2>
           <div class="detail-header-actions">
@@ -382,6 +435,11 @@ async function onSave() {
               </dl>
             </div>
 
+            <!-- 健康检查警示（F6）：下载损坏/中断的模型提前可见，避免使用时才发现 -->
+            <div v-if="selectedModel.suspect" class="suspect-warn" role="alert">
+              ⚠ 该文件疑似损坏（结构校验失败或 0 字节），在绘画工具中加载可能失败，建议重新下载或移入回收站。
+            </div>
+
             <h3 class="params-heading">
               推荐参数
               <!-- 模板一键填表（F5）：按基底模型推荐的按钮高亮，其余可手动选用 -->
@@ -450,7 +508,12 @@ async function onSave() {
 
             <!-- 触发词：仅 LoRA 模型提供，支持一键复制 -->
             <template v-if="selectedModel.type === 'lora'">
-              <h3>触发词</h3>
+              <h3>
+                触发词
+                <span v-if="selectedModel.triggerWordsSource" class="sidecar-hint">
+                  来自同名 {{ selectedModel.triggerWordsSource === 'civitai' ? '.civitai.info' : '.txt' }} 自动导入，可自由修改
+                </span>
+              </h3>
               <div class="trigger-row">
                 <textarea
                   v-model="form.triggerWords"
@@ -583,6 +646,16 @@ async function onSave() {
   flex-direction: column;
   gap: 10px;
   min-width: 0;
+}
+
+/* 健康检查警示条（F6） */
+.suspect-warn {
+  font-size: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--warning, #e6a700);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--warning, #e6a700);
 }
 
 .detail-form-col h3 {

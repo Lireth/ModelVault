@@ -270,3 +270,57 @@ export function sidecarImportPatch(type, meta, text) {
   }
   return Object.keys(patch).length > 0 ? patch : null
 }
+
+/** civitai.info 元数据文件的大小上限：超出视为不可信（误命中的大文件），跳过导入 */
+const CIVITAI_INFO_MAX_BYTES = 1024 * 1024
+
+/**
+ * 读取模型文件同名的 civitai.info 元数据（F8：Civitai 下载器随模型保存的
+ * modelVersion JSON，社区下载的模型普遍携带），解析出 trainedWords/nsfw。
+ * @param {string} modelPath 模型文件绝对路径
+ * @returns {Promise<object|null>} 解析后的 JSON 对象；未找到/过大/损坏返回 null
+ */
+export async function findSidecarCivitaiInfo(modelPath) {
+  const infoPath = path.join(
+    path.dirname(modelPath),
+    `${path.basename(modelPath, path.extname(modelPath))}.civitai.info`
+  )
+  try {
+    const stat = await fs.stat(infoPath)
+    if (!stat.isFile() || stat.size === 0 || stat.size > CIVITAI_INFO_MAX_BYTES) return null
+    const text = await fs.readFile(infoPath, 'utf8')
+    const parsed = JSON.parse(text)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 由 civitai.info 内容与当前元数据构造自动导入补丁（纯函数，F8）：
+ * - 触发词为空：导入 trainedWords（逗号连接），来源标记 civitai；
+ * - NSFW 未标记且来源明确为 NSFW：导入 nsfw 标记；
+ * 均不满足时不产生补丁——绝不覆盖任何用户已有标注（与 .txt sidecar
+ * 的「空字段才写入」同一原则）。
+ * @param {object} meta 当前模型元数据（导入判空的基准）
+ * @param {object} info findSidecarCivitaiInfo 解析出的 JSON
+ * @returns {object|null} 可合并到元数据的补丁；无需导入返回 null
+ */
+export function civitaiImportPatch(meta, info) {
+  if (!info || typeof info !== 'object' || !meta) return null
+  const patch = {}
+  if (!meta.triggerWords && Array.isArray(info.trainedWords)) {
+    const words = info.trainedWords
+      .filter((w) => typeof w === 'string' && w.trim())
+      .map((w) => w.trim())
+      .slice(0, 50)
+    if (words.length > 0) {
+      patch.triggerWords = words.join(', ')
+      patch.triggerWordsSource = 'civitai'
+    }
+  }
+  if (meta.nsfw !== true && info.nsfw === true) {
+    patch.nsfw = true
+  }
+  return Object.keys(patch).length > 0 ? patch : null
+}

@@ -1,0 +1,141 @@
+<script setup>
+import { computed } from 'vue'
+import {
+  allFilteredSelected,
+  batchApplyTriggers,
+  batchDeleteModels,
+  batchFavorite,
+  batchNsfw,
+  batchRating,
+  batchSetSubCategory,
+  exitMultiSelect,
+  filteredModels,
+  multiSelectTags,
+  state,
+  toggleSelectAllFiltered
+} from '../store/appStore'
+
+/**
+ * 多选批量操作栏（E4/E6，O9 自 App.vue 拆出）：位于搜索行下方。
+ * in-flight 防护（B6）：批量 IPC 逐个并发提交期间 state.multiSelect.busy
+ * 置位，全栏按钮禁用防连点重复提交，并给出「处理中」忙碌反馈。
+ */
+
+/** 批量操作可用：有选中且无进行中的批量提交 */
+const batchReady = computed(
+  () => state.multiSelect.ids.length > 0 && !state.multiSelect.busy
+)
+</script>
+
+<template>
+  <div v-if="state.folder && state.multiSelect.active" class="batch-bar">
+    <button
+      class="btn batch-select-all"
+      :disabled="filteredModels.length === 0 || state.multiSelect.busy"
+      @click="toggleSelectAllFiltered"
+    >{{ allFilteredSelected ? '取消全选' : '全选' }}</button>
+    <span class="batch-count">已选 {{ state.multiSelect.ids.length }}</span>
+    <span v-if="state.multiSelect.busy" class="batch-busy">处理中…</span>
+    <span class="batch-sep"></span>
+    <button class="btn" :disabled="!batchReady" @click="batchFavorite(true)">收藏</button>
+    <button class="btn" :disabled="!batchReady" @click="batchFavorite(false)">取消收藏</button>
+    <button class="btn" :disabled="!batchReady" @click="batchNsfw(true)">标记 NSFW</button>
+    <button class="btn" :disabled="!batchReady" @click="batchNsfw(false)">取消 NSFW</button>
+    <span class="batch-label">评分</span>
+    <button
+      v-for="i in 5"
+      :key="i"
+      class="batch-star"
+      :disabled="!batchReady"
+      :title="`批量评 ${i} 星`"
+      @click="batchRating(i)"
+    >★</button>
+    <button
+      class="btn"
+      :disabled="!batchReady"
+      title="将各模型 safetensors 自动解析的训练标签候选批量填入触发词（已有触发词的模型不改动）"
+      @click="batchApplyTriggers"
+    >填触发词</button>
+    <template v-if="multiSelectTags.length">
+      <span class="batch-sep"></span>
+      <span class="batch-label">标签</span>
+      <button
+        v-for="t in multiSelectTags"
+        :key="t.key"
+        class="btn"
+        :style="batchReady ? { borderColor: t.color, color: t.color } : {}"
+        :disabled="!batchReady"
+        @click="batchSetSubCategory(t.key)"
+      >{{ t.label }}</button>
+    </template>
+    <span class="batch-sep"></span>
+    <button class="btn btn-danger" :disabled="!batchReady" @click="batchDeleteModels">移入回收站</button>
+    <button class="btn" :disabled="state.multiSelect.busy" @click="exitMultiSelect">退出多选</button>
+  </div>
+</template>
+
+<style scoped>
+.batch-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--bg-active);
+}
+
+.batch-count {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 600;
+  min-width: 52px;
+}
+
+/* 批量提交进行中的忙碌提示（B6） */
+.batch-busy {
+  font-size: 12px;
+  color: var(--text-muted);
+  animation: batch-busy-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes batch-busy-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.batch-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.batch-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+.batch-star {
+  border: none;
+  background: transparent;
+  color: var(--border);
+  font-size: 17px;
+  line-height: 1;
+  padding: 0 1px;
+  cursor: pointer;
+  transition: color 0.12s ease, transform 0.12s ease;
+}
+
+.batch-star:hover:not(:disabled) {
+  transform: scale(1.2);
+  color: var(--favorite);
+}
+
+.batch-bar .btn {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+</style>

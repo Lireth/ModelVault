@@ -1,9 +1,15 @@
 import path from 'node:path'
 import { getModelMeta, resolveCover, setModelMeta } from '../../services/store'
-import { findSidecarPreview, findSidecarText, sidecarImportPatch } from '../../services/scanner'
+import {
+  civitaiImportPatch,
+  findSidecarCivitaiInfo,
+  findSidecarPreview,
+  findSidecarText,
+  sidecarImportPatch
+} from '../../services/scanner'
 import { isValidImageFile } from '../../services/covers'
 import { drainDeferredThumbs, getThumbPathDeferred, pruneThumbs } from '../../services/thumbs'
-import { readSafetensorsInfo } from '../../services/safetensors'
+import { checkSafetensorsHealthy, readSafetensorsInfo } from '../../services/safetensors'
 import { toImageUrl } from '../../protocol'
 import { decorateCache, getThumbDrainPromise, setThumbDrainPromise } from './model-state'
 import { abortError, boundedMapSet } from '../../utils'
@@ -134,8 +140,9 @@ export function startThumbDrain(win) {
 }
 
 /**
- * sidecar .txt 自动导入（WebUI 惯例的同名说明文本）：
- * 仅当备注为空（LoRA 另加触发词为空）时读取同名 txt 导入，
+ * sidecar 自动导入（.txt 说明文本 + civitai.info 元数据，F8）：
+ * 仅当对应字段为空时导入（备注空读 txt 全文；LoRA 触发词空读 txt 首行；
+ * 任意类型触发词空读 civitai trainedWords；NSFW 未标记读 civitai 分级），
  * 导入结果经 setModelMeta 落盘并标记来源，不覆盖任何用户已有标注。
  * @param {{id: string, type: string}} model 模型对象
  * @param {object} meta 当前元数据
@@ -143,17 +150,30 @@ export function startThumbDrain(win) {
  */
 async function importSidecarMeta(model, meta) {
   const needNote = !meta.note
-  const needTriggers = model.type === 'lora' && !meta.triggerWords
-  if (!needNote && !needTriggers) return meta
-  const text = await findSidecarText(model.id)
-  if (!text) return meta
+  const needTxtTriggers = model.type === 'lora' && !meta.triggerWords
+  // civitai.info：触发词（任意类型）或 NSFW 标记可补时尝试读取
+  const needCivitai = !meta.triggerWords || meta.nsfw !== true
+  if (!needNote && !needTxtTriggers && !needCivitai) return meta
+  const [text, civitaiInfo] = await Promise.all([
+    needNote || needTxtTriggers ? findSidecarText(model.id) : Promise.resolve(''),
+    needCivitai ? findSidecarCivitaiInfo(model.id) : Promise.resolve(null)
+  ])
   // await 间隙后重读最新元数据：读取与写盘之间用户可能已并发保存
   // （saveModelData/setMetaFlags 为同步读-改-写），基于旧 meta 展开写回
   // 会覆盖刚保存的评分/收藏/备注。重读后的读-并-写均为同步调用，
   // 在同一事件循环轮次内完成，与用户路径不再交错（E3 竞态修复）
   const latest = getModelMeta(model.id) || meta
-  const patch = sidecarImportPatch(model.type, latest, text)
-  if (!patch) return latest
+  // txt 与 civitai 的补丁各自以「最新元数据」判空：同一次装饰中 txt 先落
+  // 的字段 civitai 不再重复覆盖；两者补丁字段不相交时并存
+  const patch = {}
+  const txtPatch = sidecarImportPatch(model.type, latest, text)
+  if (txtPatch) Object.assign(patch, txtPatch)
+  const civitaiPatch = civitaiImportPatch(
+    txtPatch && txtPatch.triggerWords ? { ...latest, ...txtPatch } : latest,
+    civitaiInfo
+  )
+  if (civitaiPatch) Object.assign(patch, civitaiPatch)
+  if (Object.keys(patch).length === 0) return latest
   return setModelMeta(model.id, { ...latest, ...patch }) || latest
 }
 
@@ -220,10 +240,18 @@ async function decorateOne(model, usedThumbs) {
   }
   // 文件头部自动解析信息（仅 .safetensors：kohya ss_* / modelspec.* 训练元信息，
   // 仅供详情页展示与一键填入，不写入元数据、不覆盖用户标注）。
-  // 仅读文件头部数 KB，装饰阶段可安全执行；结果随装饰缓存复用，会话内不重复读盘
+  // 健康检查（F6）：0 字节文件直接判损坏；safetensors 元信息解析失败时
+  // 补一次结构校验分辨「无元信息」与「文件损坏」（下载截断/头部垃圾），
+  // 结果标记 suspect 随装饰缓存复用——坏模型在使用时才暴雷，提前可见
   let autoInfo = null
-  if (model.ext === '.safetensors') {
+  let suspect = false
+  if (model.size <= 0) {
+    suspect = true
+  } else if (model.ext === '.safetensors') {
     autoInfo = await readSafetensorsInfo(model.id)
+    if (!autoInfo) {
+      suspect = !(await checkSafetensorsHealthy(model.id))
+    }
   }
   const decorated = {
     ...model,
@@ -243,6 +271,10 @@ async function decorateOne(model, usedThumbs) {
     // 大模型自动标注为「基底模型」分类（未手动标注时默认生效）
     subCategory: meta.subCategory || (model.type === 'checkpoint' ? 'base' : ''),
     triggerWords: meta.triggerWords || '',
+    // 触发词来源（'sidecar'/'civitai' 时详情页显示自动导入提示，F8）
+    triggerWordsSource: meta.triggerWordsSource || '',
+    // 结构疑似损坏（F6）：0 字节或 safetensors 头部不可解析
+    suspect,
     autoInfo
   }
   // 写入装饰缓存（容量超限时按插入顺序淘汰最旧条目，C4 共享工具）

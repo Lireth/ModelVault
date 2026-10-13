@@ -362,6 +362,19 @@ describe('筛选与排序（filteredModels）', () => {
     expect(filteredModels.value).toHaveLength(2)
   })
 
+  it('仅看疑似损坏（F6 健康检查筛选）：坏模型可单独排查', () => {
+    state.models = [
+      makeModel('good', { name: '健康模型', suspect: false }),
+      makeModel('bad', { name: '损坏模型', suspect: true })
+    ]
+    expect(state.suspectOnly).toBe(false)
+    expect(filteredModels.value).toHaveLength(2)
+    state.suspectOnly = true
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['bad'])
+    state.suspectOnly = false
+    expect(filteredModels.value).toHaveLength(2)
+  })
+
   it('搜索域纳入 safetensors 自动解析信息（F2）：作者/基底模型/训练标签可命中', () => {
     state.models = [
       makeModel('lora1', {

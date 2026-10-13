@@ -1,30 +1,24 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import TopBar from './components/TopBar.vue'
 import Sidebar from './components/Sidebar.vue'
+import BatchBar from './components/BatchBar.vue'
+import ConfirmOverlay from './components/ConfirmOverlay.vue'
 import ModelDetail from './components/ModelDetail.vue'
 import SettingsPage from './components/SettingsPage.vue'
 import ToastHost from './components/ToastHost.vue'
 import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import {
-  acceptConfirm,
+  allFilteredSelected,
   applyThumbUpdates,
-  batchApplyTriggers,
   batchDeleteModels,
   batchFavorite,
-  batchNsfw,
-  batchRating,
-  batchSetSubCategory,
   cancelScan,
   chooseFolder,
-  allFilteredSelected,
-  exitMultiSelect,
   filteredModels,
   handleMenuAction,
   initApp,
   LORA_TAGS,
-  multiSelectTags,
-  rejectConfirm,
   saveSettings,
   scanModels,
   partialScanModels,
@@ -65,15 +59,6 @@ async function onSortChange(e) {
 
 /** 收藏优先/按评分为固定语义排序，方向切换无意义（O1） */
 const sortDirEnabled = computed(() => sortDirectional(state.sortBy))
-
-/**
- * 批量操作可用（B6）：有选中且无进行中的批量提交。
- * 批量 IPC 逐个并发提交期间置 busy，全栏按钮禁用，防止连点对同一批模型
- * 重复发起数百个 IPC；也向用户提供「处理中」的忙碌反馈。
- */
-const batchReady = computed(
-  () => state.multiSelect.ids.length > 0 && !state.multiSelect.busy
-)
 
 /** 切换排序方向（U2）：翻转当前排序结果并持久化 */
 async function onSortDirChange() {
@@ -237,44 +222,6 @@ function onGlobalKeydown(e) {
   }
 }
 
-/* ---------------- 确认层键盘支持（A8） ---------------- */
-
-const confirmCancelBtn = ref(null)
-const confirmOkBtn = ref(null)
-
-/** 确认层键盘交互：ESC=取消、Enter=确认（焦点在按钮上时由按钮原生处理）、
- *  Tab 在两个按钮间循环（简单焦点陷阱），防止焦点穿透到被遮挡内容。
- *  stopPropagation（F1）：确认层打开期间键盘事件由本层独占消费，
- *  否则事件继续冒泡到 window，触发详情页/设置页的 ESC 处理器，
- *  脏表单时 closeDetail/onCancel 会把确认层再次弹出，ESC 无法取消 */
-function onConfirmKeydown(e) {
-  if (e.key === 'Escape') {
-    e.preventDefault()
-    e.stopPropagation()
-    rejectConfirm()
-  } else if (e.key === 'Tab') {
-    e.preventDefault()
-    e.stopPropagation()
-    ;(e.shiftKey ? confirmOkBtn.value : confirmCancelBtn.value)?.focus()
-  } else if (e.key === 'Enter' && e.target?.tagName !== 'BUTTON') {
-    e.preventDefault()
-    e.stopPropagation()
-    acceptConfirm()
-  }
-}
-
-// 打开确认层时把焦点移入「取消」按钮（安全默认）：此前焦点仍留在触发按钮上，
-// Enter 会再次触发原操作而非确认；Tab 可达「确定」
-watch(
-  () => state.confirm.visible,
-  async (visible) => {
-    if (visible) {
-      await nextTick()
-      confirmCancelBtn.value?.focus()
-    }
-  }
-)
-
 onMounted(async () => {
   window.addEventListener('dragover', onWindowDragOver)
   window.addEventListener('drop', onWindowDrop)
@@ -333,51 +280,8 @@ onUnmounted(() => {
           <button class="scan-error-retry" @click="scanModels">重试</button>
         </div>
 
-        <!-- 多选批量操作栏（E4/E6）：位于搜索行下方 -->
-        <div v-if="state.folder && state.multiSelect.active" class="batch-bar">
-          <button
-            class="btn batch-select-all"
-            :disabled="filteredModels.length === 0 || state.multiSelect.busy"
-            @click="toggleSelectAllFiltered"
-          >{{ allFilteredSelected ? '取消全选' : '全选' }}</button>
-          <span class="batch-count">已选 {{ state.multiSelect.ids.length }}</span>
-          <span v-if="state.multiSelect.busy" class="batch-busy">处理中…</span>
-          <span class="batch-sep"></span>
-          <button class="btn" :disabled="!batchReady" @click="batchFavorite(true)">收藏</button>
-          <button class="btn" :disabled="!batchReady" @click="batchFavorite(false)">取消收藏</button>
-          <button class="btn" :disabled="!batchReady" @click="batchNsfw(true)">标记 NSFW</button>
-          <button class="btn" :disabled="!batchReady" @click="batchNsfw(false)">取消 NSFW</button>
-          <span class="batch-label">评分</span>
-          <button
-            v-for="i in 5"
-            :key="i"
-            class="batch-star"
-            :disabled="!batchReady"
-            :title="`批量评 ${i} 星`"
-            @click="batchRating(i)"
-          >★</button>
-          <button
-            class="btn"
-            :disabled="!batchReady"
-            title="将各模型 safetensors 自动解析的训练标签候选批量填入触发词（已有触发词的模型不改动）"
-            @click="batchApplyTriggers"
-          >填触发词</button>
-          <template v-if="multiSelectTags.length">
-            <span class="batch-sep"></span>
-            <span class="batch-label">标签</span>
-            <button
-              v-for="t in multiSelectTags"
-              :key="t.key"
-              class="btn"
-              :style="batchReady ? { borderColor: t.color, color: t.color } : {}"
-              :disabled="!batchReady"
-              @click="batchSetSubCategory(t.key)"
-            >{{ t.label }}</button>
-          </template>
-          <span class="batch-sep"></span>
-          <button class="btn btn-danger" :disabled="!batchReady" @click="batchDeleteModels">移入回收站</button>
-          <button class="btn" :disabled="state.multiSelect.busy" @click="exitMultiSelect">退出多选</button>
-        </div>
+        <!-- 多选批量操作栏（E4/E6，O9 拆分为 BatchBar 组件）：位于搜索行下方 -->
+        <BatchBar />
 
         <!-- 搜索 + 排序：位于模型清单上方（选择文件夹后显示） -->
         <div v-if="state.folder" class="search-row">
@@ -508,24 +412,9 @@ onUnmounted(() => {
     <ModelDetail />
     <ToastHost />
 
-    <!-- 自定义确认层（U4）：替代 window.confirm，覆盖区不包含标题栏（保持窗口控制可达）；
-         键盘支持见 onConfirmKeydown（A8：ESC=取消 / Enter=确认 / Tab 焦点陷阱） -->
-    <Teleport to="body">
-      <div
-        v-if="state.confirm.visible"
-        class="confirm-overlay"
-        @click.self="rejectConfirm"
-        @keydown="onConfirmKeydown"
-      >
-        <div class="confirm-dialog" role="dialog" aria-modal="true" aria-label="操作确认">
-          <p class="confirm-text">{{ state.confirm.text }}</p>
-          <div class="confirm-actions">
-            <button ref="confirmCancelBtn" class="btn" @click="rejectConfirm">取消</button>
-            <button ref="confirmOkBtn" class="btn btn-primary confirm-ok" @click="acceptConfirm">确定</button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <!-- 自定义确认层（U4，O9 拆分为 ConfirmOverlay 组件）：
+         替代 window.confirm，覆盖区不包含标题栏（保持窗口控制可达） -->
+    <ConfirmOverlay />
   </div>
 </template>
 
@@ -707,83 +596,6 @@ onUnmounted(() => {
   gap: 10px;
 }
 
-/* ---------- 多选批量操作栏（E4/E6） ---------- */
-.batch-bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px 12px;
-  border: 1px solid var(--accent);
-  border-radius: 10px;
-  background: var(--bg-active);
-}
-
-.batch-count {
-  font-size: 12px;
-  color: var(--accent);
-  font-weight: 600;
-  min-width: 52px;
-}
-
-/* 批量提交进行中的忙碌提示（B6） */
-.batch-busy {
-  font-size: 12px;
-  color: var(--text-muted);
-  animation: batch-busy-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes batch-busy-pulse {
-  50% {
-    opacity: 0.45;
-  }
-}
-
-.batch-label {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.batch-sep {
-  width: 1px;
-  height: 18px;
-  background: var(--border);
-  margin: 0 4px;
-}
-
-.batch-star {
-  border: none;
-  background: transparent;
-  color: var(--border);
-  font-size: 17px;
-  line-height: 1;
-  padding: 0 1px;
-  cursor: pointer;
-  transition: color 0.12s ease, transform 0.12s ease;
-}
-
-.batch-star:hover:not(:disabled) {
-  transform: scale(1.2);
-  color: var(--favorite);
-}
-
-.batch-bar .btn {
-  padding: 5px 12px;
-  font-size: 12px;
-}
-
-/* 危险操作按钮（批量删除） */
-.btn-danger {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-
-.btn-danger:hover:not(:disabled) {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
-}
-
 /* LoRA 分类筛选：靠结果栏右侧 */
 .sub-filter {
   margin-left: auto;
@@ -891,43 +703,5 @@ onUnmounted(() => {
 .btn-large {
   padding: 10px 22px;
   font-size: 14px;
-}
-
-/* ---------- 自定义确认层（U4） ---------- */
-.confirm-overlay {
-  position: fixed;
-  /* 不遮标题栏：保留原生标题栏叠加层控件的可达性（项目约定） */
-  top: var(--titlebar-height);
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: var(--overlay);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: var(--z-confirm);
-}
-
-.confirm-dialog {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 20px 24px;
-  min-width: 320px;
-  max-width: 480px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-}
-
-.confirm-text {
-  font-size: 14px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-}
-
-.confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 18px;
 }
 </style>

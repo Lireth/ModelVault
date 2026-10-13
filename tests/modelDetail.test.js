@@ -319,3 +319,52 @@ describe('推荐参数模板（F5）', () => {
     wrapper.unmount()
   })
 })
+
+describe('焦点管理与健康警示（O10/F6）', () => {
+  it('打开详情焦点移入面板，关闭后归还触发元素（键盘用户不丢焦点）', async () => {
+    // 组件常驻挂载（与真实应用一致）：先挂载（无选中），焦点 watch 在
+    // 此后的 null→model 转变中触发——其他用例「先选中后挂载」路径下
+    // 挂载时 selectedModel 已有值，watch 不会触发
+    const wrapper = mountDetail()
+    // jsdom 限制：未连入 document 的元素 focus() 不生效，须真实挂载
+    document.body.appendChild(wrapper.element)
+    await flushPromises()
+
+    // 模拟触发元素：打开详情前获得焦点的卡片
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    trigger.focus()
+    expect(document.activeElement).toBe(trigger)
+
+    selectModel()
+    await flushPromises()
+    await settle()
+    // 打开后：焦点移入面板容器
+    const panel = wrapper.find('.detail-panel')
+    expect(document.activeElement).toBe(panel.element)
+
+    state.selectedId = null
+    await flushPromises()
+    await settle()
+    // 关闭后：焦点归还触发元素
+    expect(document.activeElement).toBe(trigger)
+    trigger.remove()
+    wrapper.element.remove()
+    wrapper.unmount()
+  })
+
+  it('suspect 模型显示损坏警示条，健康模型不显示（F6）', async () => {
+    selectModel({ suspect: true })
+    const wrapper = mountDetail()
+    await flushPromises()
+    expect(wrapper.find('.suspect-warn').exists()).toBe(true)
+    wrapper.unmount()
+
+    state.selectedId = null
+    selectModel({ suspect: false })
+    const wrapper2 = mountDetail()
+    await flushPromises()
+    expect(wrapper2.find('.suspect-warn').exists()).toBe(false)
+    wrapper2.unmount()
+  })
+})

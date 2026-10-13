@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import StatsSection from './StatsSection.vue'
 import {
   applyTheme,
   CARD_SIZE_OPTIONS,
@@ -496,6 +497,12 @@ async function onSave() {
           </div>
           <input v-model="form.showParams" type="checkbox" class="switch" />
         </label>
+      </div>
+
+      <!-- 库统计（F7）：模型资产总览，随扫描/标注即时刷新 -->
+      <h3>库统计</h3>
+      <div class="settings-group">
+        <StatsSection />
       </div>
 
       <!-- 数据备份 -->

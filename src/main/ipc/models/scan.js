@@ -118,6 +118,10 @@ export function registerScanHandlers() {
       const relinkResult = relinkScannedMeta(models)
 
       const decorated = await decorateModels(models, signal)
+      // 原始扫描数组的元素壳随装饰完成立即释放（O8）：装饰结果为字段浅拷贝的
+      // 新对象，原始元素不再被引用；大库扫描期间原始数组、装饰数组与 IPC
+      // 结构化克隆三份并存，此步可砍掉约 1/3 的瞬时内存峰值
+      models.length = 0
       const byType = {}
       for (const m of decorated) {
         byType[m.type] = (byType[m.type] || 0) + 1
@@ -232,6 +236,7 @@ export function registerScanHandlers() {
       // 重关联限定受影响子树：范围外元数据保持原样
       const relinkResult = relinkScannedMeta(models, { affectedDirs: subDirs })
       const decorated = await decorateModels(models, signal)
+      models.length = 0 // 同全量扫描：装饰后立即释放原始数组（O8）
 
       const win = BrowserWindow.fromWebContents(event.sender)
       // 装饰中新登记的缩略图任务经既有后台链生成并推送

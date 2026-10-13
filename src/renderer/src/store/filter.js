@@ -51,11 +51,11 @@ function searchHaystack(m) {
 /** 筛选 + 搜索 + 排序后的模型列表 */
 export const filteredModels = computed(() => {
   const keyword = state.search.trim().toLowerCase()
-  const { typeFilter, subFilter, showFavoritesOnly, minRating } = state
+  const { typeFilter, subFilter, showFavoritesOnly, minRating, suspectOnly } = state
   const hideNsfw = state.settings.hideNsfw === true
   // LoRA 分类筛选：仅选中 LoRA 分类且指定了子分类时生效
   const checkSub = typeFilter === 'lora' && subFilter
-  // 单趟完成分类/子分类/收藏/评分/NSFW/关键词过滤（O3）：合并原四段 filter，
+  // 单趟完成分类/子分类/收藏/评分/NSFW/健康/关键词过滤（O3）：合并原四段 filter，
   // 消除中间数组分配；无筛选条件时仅做一次遍历拷贝
   const list = []
   for (const m of state.models) {
@@ -64,6 +64,7 @@ export const filteredModels = computed(() => {
     if (showFavoritesOnly && !m.favorite) continue
     if (minRating > 0 && m.rating < minRating) continue
     if (hideNsfw && m.nsfw) continue
+    if (suspectOnly && !m.suspect) continue
     if (keyword && !searchHaystack(m).includes(keyword)) continue
     list.push(m)
   }
