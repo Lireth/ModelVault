@@ -1,4 +1,4 @@
-import { state } from './state'
+import { state, replaceModels } from './state'
 import { toast, confirmDialog } from './toast'
 import { applyMetaFlags } from './meta-apply'
 import { filteredModels } from './filter'
@@ -41,8 +41,8 @@ export async function deleteModel(id, opts = {}) {
     return false
   }
   const idx = state.models.findIndex((m) => m.id === id)
-  // O3 约定：浅响应下原位 splice 不触发更新，须整体替换数组
-  if (idx >= 0) state.models = state.models.filter((m) => m.id !== id)
+  // O3 约定：整体替换须经 replaceModels（保持数组代理，元素级更新才可触发）
+  if (idx >= 0) replaceModels(state.models.filter((m) => m.id !== id))
   if (state.selectedId === id) state.selectedId = null
   if (!opts.silent) toast('success', '模型已移入回收站')
   return true

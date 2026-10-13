@@ -17,6 +17,7 @@ import {
   multiSelectIdSet,
   partialScanModels,
   rejectConfirm,
+  replaceModels,
   saveSettings,
   scanModels,
   selectedModel,
@@ -79,7 +80,7 @@ beforeEach(() => {
   state.folder = ''
   state.scanning = false
   state.scanError = ''
-  state.models = []
+  replaceModels([])
   state.typeFilter = 'all'
   state.subFilter = ''
   state.showFavoritesOnly = false
@@ -436,6 +437,46 @@ describe('toggleFavorite（A6 错误可见性）', () => {
     expect(ok).toBe(false)
     expect(state.models[0].favorite).toBe(false)
     expect(state.toasts.some((t) => t.text.includes('模型不存在'))).toBe(true)
+  })
+})
+
+describe('标注操作响应传播（shallowReactive 回归）', () => {
+  it('元素级更新后派生状态（selectedModel/filteredModels）立即同步，无需整体替换', async () => {
+    // 与真实扫描一致：列表经 replaceModels 装配（数组为 shallowReactive 代理）
+    replaceModels([
+      makeModel('m1', { name: '甲', favorite: false }),
+      makeModel('m2', { name: '乙' })
+    ])
+    api.models.setMetaFlags.mockResolvedValue({
+      meta: { favorite: true, nsfw: true, rating: 3 }
+    })
+    state.selectedId = 'm1'
+    expect(selectedModel.value.favorite).toBe(false)
+    expect(selectedModel.value.nsfw).toBe(false)
+
+    await toggleFavorite('m1')
+
+    // 数据层：元素对象已就位替换
+    expect(state.models[0].favorite).toBe(true)
+    // 响应传播层（回归核心）：shallowReactive 下元素级索引赋值必须触发
+    // modelById→selectedModel 重算，否则详情页标注按钮点击后视觉无变化
+    expect(selectedModel.value.favorite).toBe(true)
+    expect(selectedModel.value.nsfw).toBe(true)
+    expect(selectedModel.value.rating).toBe(3)
+  })
+
+  it('未经 replaceModels 装配的原始数组不具备该保证（守卫约定边界）', async () => {
+    // 直接裸赋值（测试遗留写法）：数据会变，但派生状态不重算——
+    // 固化「数组级更新必须走 replaceModels」的约定，防止约定被悄然破坏
+    state.models = [makeModel('m1', { favorite: false })]
+    state.selectedId = 'm1'
+    expect(selectedModel.value.favorite).toBe(false) // 先读一次，建立派生缓存
+    api.models.setMetaFlags.mockResolvedValue({
+      meta: { favorite: true, nsfw: false, rating: 0 }
+    })
+    await toggleFavorite('m1')
+    expect(state.models[0].favorite).toBe(true)
+    expect(selectedModel.value.favorite).toBe(false)
   })
 })
 

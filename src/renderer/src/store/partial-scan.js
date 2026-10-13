@@ -1,4 +1,4 @@
-import { state } from './state'
+import { state, replaceModels } from './state'
 import { toast } from './toast'
 import { scanModels } from './library'
 
@@ -51,7 +51,7 @@ export async function partialScanModels(dirs) {
       removedIds.push(m.id)
       return false
     })
-    state.models = untouched.concat(incoming)
+    replaceModels(untouched.concat(incoming))
     state.lastScan = {
       count: state.models.length,
       durationMs: res.durationMs

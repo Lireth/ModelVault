@@ -14,6 +14,7 @@ import { filteredModels as filteredFromModule } from '../src/renderer/src/store/
 const EXPECTED_EXPORTS = [
   // 状态与常量
   'state',
+  'replaceModels',
   'replaceSettings',
   'MODEL_TYPES',
   'SUB_CATEGORIES',
