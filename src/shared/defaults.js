@@ -20,8 +20,5 @@ export const DEFAULT_SETTINGS = Object.freeze({
   showParams: true,
   autoRescan: false,
   // 隐藏 NSFW 模型（F1）：首页列表整体过滤掉 nsfw 标记的模型，持久化偏好
-  hideNsfw: false,
-  // Civitai API Token（F13/F14，可选）：NSFW 内容与部分下载须自备 Token；
-  // 明文存于本地 %APPDATA% settings.json，仅随请求头发往 civitai.com
-  civitaiToken: ''
+  hideNsfw: false
 })

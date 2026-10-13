@@ -85,7 +85,6 @@ beforeEach(() => {
   state.showFavoritesOnly = false
   state.minRating = 0
   state.suspectOnly = false
-  state.dupeOnly = false
   state.search = ''
   state.sortBy = 'name'
   state.sortAsc = true
@@ -375,25 +374,6 @@ describe('筛选与排序（filteredModels）', () => {
     expect(filteredModels.value.map((m) => m.id)).toEqual(['bad'])
     state.suspectOnly = false
     expect(filteredModels.value).toHaveLength(2)
-  })
-
-  it('仅看重复文件（F9）：按 SHA256+大小分组，未算哈希与唯一的排除', () => {
-    const h = 'a'.repeat(64)
-    state.models = [
-      makeModel('d1', { name: 'dup-a', hash: h, size: 100 }),
-      makeModel('d2', { name: 'dup-b', hash: h, size: 100 }),
-      makeModel('u1', { name: 'uniq', hash: 'b'.repeat(64), size: 100 }),
-      makeModel('n1', { name: 'no-hash', hash: '' })
-    ]
-    state.dupeOnly = true
-    expect(filteredModels.value.map((m) => m.id)).toEqual(['d1', 'd2'])
-    // 哈希就地替换后分组自动重算（hashReady 事件路径）
-    state.models = state.models.map((m) =>
-      m.id === 'u1' ? { ...m, hash: h } : m
-    )
-    expect(filteredModels.value.map((m) => m.id)).toEqual(['d1', 'd2', 'u1'])
-    state.dupeOnly = false
-    expect(filteredModels.value).toHaveLength(4)
   })
 
   it('搜索域纳入 safetensors 自动解析信息（F2）：作者/基底模型/训练标签可命中', () => {

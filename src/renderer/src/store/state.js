@@ -134,18 +134,7 @@ export const state = shallowReactive({
   showFavoritesOnly: false, // 仅显示收藏的模型
   minRating: 0, // 评分筛选（F1）：0 为不筛选，1-5 为仅显示 ≥N 星（会话态）
   suspectOnly: false, // 仅显示疑似损坏模型（F6 健康检查筛选，会话态）
-  dupeOnly: false, // 仅显示完全重复模型（F9，依赖已算 SHA256，会话态）
   search: '',
-  // 哈希批算（F9）：进行中状态与进度（经 models:hashProgress 推送）
-  hashing: false,
-  hashProgress: { done: 0, total: 0, current: '' },
-  // Civitai 在线匹配（F13）与下载（F14）：进行中状态与进度
-  matching: false,
-  matchProgress: { done: 0, total: 0, current: '' },
-  downloading: false,
-  downloadProgress: { received: 0, total: 0 },
-  // 下载弹层（F14）：URL 输入 → 版本预览 → 确认下载
-  downloadDialog: reactive({ visible: false, url: '', resolving: false, version: null, error: '' }),
   sortBy: 'name', // name | type | size | mtime | favorite | rating
   sortAsc: true, // 排序方向：true 升序 / false 降序（收藏优先/按评分为固定语义排序，忽略方向，O1）
   // 详情

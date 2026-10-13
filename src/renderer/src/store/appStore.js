@@ -56,16 +56,14 @@ export {
   removeRoot,
   scanModels,
   cancelScan,
-  applyThumbUpdates,
-  applyHashUpdates,
-  applyCivitaiUpdates
+  applyThumbUpdates
 } from './library'
 
 // 筛选派生
 export { filteredModels, typeCounts } from './filter'
 
-// 查找/重复分组派生（F9）
-export { modelById, dupeIdSet, dupeCountById } from './selectors'
+// 查找派生
+export { modelById } from './selectors'
 
 // 局部增量扫描详情
 export { selectedModel, openDetail, closeDetail } from './detail'
@@ -114,14 +112,5 @@ export {
   showContextMenu,
   handleMenuAction,
   toggleDisabledModel,
-  moveModelTo,
-  hashModels,
-  cancelHash,
-  civitaiMatchModels,
-  cancelCivitaiMatch,
-  openDownloadDialog,
-  closeDownloadDialog,
-  resolveDownloadLink,
-  confirmDownload,
-  cancelDownload
+  moveModelTo
 } from './model-actions'

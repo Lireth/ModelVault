@@ -29,15 +29,8 @@ const VALID_INVOKE_CHANNELS = [
   'models:exportList',
   'models:exportBackup',
   'models:importBackup',
-  'models:hashLibrary',
-  'models:cancelHash',
   'models:toggleDisabled',
-  'models:moveModelTo',
-  'models:civitaiMatch',
-  'models:cancelCivitaiMatch',
-  'models:resolveCivitaiLink',
-  'models:downloadCivitaiModel',
-  'models:cancelDownload'
+  'models:moveModelTo'
 ]
 
 const VALID_RECEIVE_CHANNELS = [
@@ -45,12 +38,7 @@ const VALID_RECEIVE_CHANNELS = [
   'models:menuAction',
   'models:thumbsReady',
   'models:storeError',
-  'models:fsChanged',
-  'models:hashProgress',
-  'models:hashReady',
-  'models:civitaiProgress',
-  'models:civitaiApplied',
-  'models:downloadProgress'
+  'models:fsChanged'
 ]
 
 /** 带白名单校验的 invoke（所有便捷方法的统一入口） */
@@ -156,43 +144,10 @@ const api = {
     onThumbsReady: (listener) => subscribe('models:thumbsReady', listener),
     /** 订阅右键菜单动作事件，返回取消监听函数 */
     onMenuAction: (listener) => subscribe('models:menuAction', listener),
-    /**
-     * 全库 SHA256 后台批算（F9）：models 为 [{ id, mtimeMs }] 精简清单，
-     * 返回 { computed, skipped, canceled } 或 { error }
-     */
-    hashLibrary: (models) => invokeValidated('models:hashLibrary', { models }),
-    /** 取消进行中的哈希批算（已算部分保留），返回 { ok } */
-    cancelHash: () => invokeValidated('models:cancelHash'),
     /** 加/去 .disabled 后缀（F10），返回 { path } 或 { error } */
     toggleDisabled: (id, disabled) => invokeValidated('models:toggleDisabled', { id, disabled }),
     /** 库内移动模型（F11，目标目录经原生对话框选择），返回 { path } / { canceled } / { error } */
-    moveModelTo: (id) => invokeValidated('models:moveModelTo', { id }),
-    /** 订阅哈希批算进度（{ done, total, current }），返回取消监听函数 */
-    onHashProgress: (listener) => subscribe('models:hashProgress', listener),
-    /** 订阅哈希完成批量更新（{ updates: [{ id, hash }] }），返回取消监听函数 */
-    onHashReady: (listener) => subscribe('models:hashReady', listener),
-    /**
-     * Civitai 在线匹配（F13）：items 为 [{ id, hash }]，返回
-     * { matched, noMatch, failed, covers, canceled } 或 { error }
-     */
-    civitaiMatch: (items) => invokeValidated('models:civitaiMatch', { items }),
-    /** 取消进行中的在线匹配批，返回 { ok } */
-    cancelCivitaiMatch: () => invokeValidated('models:cancelCivitaiMatch'),
-    /**
-     * 解析 Civitai 模型页链接为版本预览（F14），返回
-     * { version: { name, filename, sizeBytes, sha256, nsfw, trainedWords, baseModel } } 或 { error }
-     */
-    resolveCivitaiLink: (url) => invokeValidated('models:resolveCivitaiLink', { url }),
-    /** 下载版本到当前库根（F14），返回 { path, sizeBytes, sha256 } 或 { error } */
-    downloadCivitaiModel: (payload) => invokeValidated('models:downloadCivitaiModel', payload),
-    /** 取消进行中的下载，返回 { ok } */
-    cancelDownload: () => invokeValidated('models:cancelDownload'),
-    /** 订阅在线匹配进度（{ done, total, current }），返回取消监听函数 */
-    onCivitaiProgress: (listener) => subscribe('models:civitaiProgress', listener),
-    /** 订阅匹配结果就地更新（{ updates: [{ id, fields }] }），返回取消监听函数 */
-    onCivitaiApplied: (listener) => subscribe('models:civitaiApplied', listener),
-    /** 订阅下载进度（{ received, total }），返回取消监听函数 */
-    onDownloadProgress: (listener) => subscribe('models:downloadProgress', listener)
+    moveModelTo: (id) => invokeValidated('models:moveModelTo', { id })
   }
 }
 

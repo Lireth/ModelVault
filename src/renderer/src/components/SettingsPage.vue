@@ -32,8 +32,7 @@ const form = reactive({
   scanExtensions: [],
   showSize: true,
   showMtime: true,
-  showParams: true,
-  civitaiToken: ''
+  showParams: true
 })
 
 /** 打开设置页时记录已保存值，用于关闭时还原预览 */
@@ -56,7 +55,6 @@ function fillForm() {
   form.showSize = state.settings.showSize !== false
   form.showMtime = state.settings.showMtime !== false
   form.showParams = state.settings.showParams !== false
-  form.civitaiToken = state.settings.civitaiToken || ''
   // 填充完成后建立脏检测基线（A9）：此后表单值与快照不一致即为脏
   savedSnapshot = formSnapshotValue()
   loadAppInfo()
@@ -84,8 +82,7 @@ function formSnapshotValue() {
     scanExtensions: [...form.scanExtensions].sort(),
     showSize: form.showSize,
     showMtime: form.showMtime,
-    showParams: form.showParams,
-    civitaiToken: form.civitaiToken
+    showParams: form.showParams
   }
 }
 
@@ -103,7 +100,6 @@ const settingsDirty = computed(() => {
     form.showSize !== s.showSize ||
     form.showMtime !== s.showMtime ||
     form.showParams !== s.showParams ||
-    form.civitaiToken !== s.civitaiToken ||
     form.scanExtensions.length !== s.scanExtensions.length ||
     form.scanExtensions.slice().sort().some((e, i) => e !== s.scanExtensions[i])
   )
@@ -318,8 +314,7 @@ async function onSave() {
       scanExtensions: [...form.scanExtensions],
       showSize: form.showSize,
       showMtime: form.showMtime,
-      showParams: form.showParams,
-      civitaiToken: form.civitaiToken.trim()
+      showParams: form.showParams
     })
     if (!ok) return
     // 默认排序方式立即生效
@@ -510,28 +505,6 @@ async function onSave() {
         <StatsSection />
       </div>
 
-      <!-- Civitai 在线能力（F13/F14）：API Token 为可选配置 -->
-      <h3>Civitai</h3>
-      <div class="settings-group">
-        <label class="setting-row">
-          <div class="setting-info">
-            <span class="setting-title">API Token（可选）</span>
-            <span class="setting-desc">
-              用于在线补全/下载时的请求认证（NSFW 内容与部分下载须自备 Token）。
-              Token 明文保存在本机 %APPDATA%\modelvault\settings.json，仅随请求头发往 civitai.com。
-            </span>
-          </div>
-          <input
-            v-model="form.civitaiToken"
-            type="password"
-            class="token-input"
-            placeholder="留空表示匿名访问公开内容"
-            autocomplete="off"
-            spellcheck="false"
-          />
-        </label>
-      </div>
-
       <!-- 数据备份 -->
       <h3>数据备份</h3>
       <div class="settings-group">
@@ -637,12 +610,6 @@ async function onSave() {
   letter-spacing: 1px;
   color: var(--text-muted);
   margin-top: 10px;
-}
-
-/* Civitai Token 输入（F13/F14） */
-.token-input {
-  width: 280px;
-  max-width: 40%;
 }
 
 .settings-group {

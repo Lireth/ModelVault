@@ -71,8 +71,7 @@ export function normalizeSettings(raw) {
     showMtime: typeof raw.showMtime === 'boolean' ? raw.showMtime : base.showMtime,
     showParams: typeof raw.showParams === 'boolean' ? raw.showParams : base.showParams,
     autoRescan: raw.autoRescan === true,
-    hideNsfw: raw.hideNsfw === true,
-    civitaiToken: typeof raw.civitaiToken === 'string' ? raw.civitaiToken.trim().slice(0, 200) : ''
+    hideNsfw: raw.hideNsfw === true
   }
 }
 

@@ -184,37 +184,3 @@ export function applyThumbUpdates(updates) {
     }
   }
 }
-
-/**
- * 应用哈希批算完成事件（F9）：批量就地替换 hash 字段（单趟），
- * dupeIdSet/dupeCountById 随元素替换自动重算。
- * @param {Array<{id: string, hash: string}>} updates
- */
-export function applyHashUpdates(updates) {
-  if (!Array.isArray(updates) || updates.length === 0) return
-  const indexById = new Map(state.models.map((m, i) => [m.id, i]))
-  for (const { id, hash } of updates) {
-    if (!id || typeof hash !== 'string') continue
-    const idx = indexById.get(id)
-    if (idx !== undefined) {
-      state.models[idx] = { ...state.models[idx], hash }
-    }
-  }
-}
-
-/**
- * 应用 Civitai 匹配结果（F13）：主进程已按装饰结果同构构造 fields
- * （触发词/NSFW/封面），渲染层单趟就地替换元素。
- * @param {Array<{id: string, fields: object}>} updates
- */
-export function applyCivitaiUpdates(updates) {
-  if (!Array.isArray(updates) || updates.length === 0) return
-  const indexById = new Map(state.models.map((m, i) => [m.id, i]))
-  for (const { id, fields } of updates) {
-    if (!id || !fields) continue
-    const idx = indexById.get(id)
-    if (idx !== undefined) {
-      state.models[idx] = { ...state.models[idx], ...fields }
-    }
-  }
-}

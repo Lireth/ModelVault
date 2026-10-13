@@ -4,7 +4,7 @@ import { defaultSettings, state } from '../../src/renderer/src/store/appStore'
 /**
  * 渲染层组件测试通用装配（OPT-16 测试基建）：
  * - window.api 桩：组件交互经此与主进程通信（与 appStore.test.js 同构，
- *   额外覆盖导出列表 / 哈希批处理 / 目录变更等事件通道）；
+ *   额外覆盖导出列表 / 目录变更等事件通道）；
  * - matchMedia 桩：jsdom 未实现该 API，TopBar 窄屏菜单的断点监听依赖它；
  * - store 状态复位：组件直接读写全局 state，用例间必须隔离；
  * - 清理 document.body：@vue/test-utils 默认不自动卸载，避免跨用例残留。
@@ -64,9 +64,6 @@ function resetStoreState() {
   state.showFavoritesOnly = false
   state.minRating = 0
   state.suspectOnly = false
-  state.dupeOnly = false
-  state.hashing = false
-  state.hashProgress = { done: 0, total: 0, current: '' }
   state.search = ''
   state.sortBy = 'name'
   state.sortAsc = true

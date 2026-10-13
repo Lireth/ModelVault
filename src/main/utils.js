@@ -34,7 +34,7 @@ export function boundedMapSet(map, key, value, max) {
  * 伪装 github.com@evil.com 与外形相似域名 github.com.evil.com
  * 均会因真实主机不匹配而被拒绝）。
  */
-const ALLOWED_EXTERNAL_HOSTS = new Set(['github.com', 'civitai.com'])
+const ALLOWED_EXTERNAL_HOSTS = new Set(['github.com'])
 
 /**
  * 校验外部 URL 是否允许经 shell.openExternal 拉起（B3）：

@@ -111,10 +111,6 @@ export function registerMiscHandlers() {
       },
       // 库内移动（F11）
       { label: '移动到…', click: () => send('moveModel') },
-      // 单模型哈希（F9）：菜单内直接计算，结果随 hashReady 就地更新
-      { label: '计算 SHA256 哈希', click: () => send('hashModel') },
-      // 在线匹配（F13）：渲染层处理（无哈希时先算再匹配）
-      { label: '在线匹配元数据…', click: () => send('civitaiMatchModel') },
       { type: 'separator' },
       { label: meta.favorite ? '取消收藏' : '收藏', click: () => send('toggleFavorite') },
       { label: '移入回收站', click: () => send('deleteModel') }

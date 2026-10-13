@@ -48,15 +48,11 @@ const EXPECTED_EXPORTS = [
   'scanModels',
   'cancelScan',
   'applyThumbUpdates',
-  'applyHashUpdates',
-  'applyCivitaiUpdates',
   // 派生
   'filteredModels',
   'typeCounts',
-  // 查找/重复分组派生（F9）
+  // 查找派生
   'modelById',
-  'dupeIdSet',
-  'dupeCountById',
   // 详情
   'selectedModel',
   'openDetail',
@@ -98,17 +94,7 @@ const EXPECTED_EXPORTS = [
   'handleMenuAction',
   // 文件操作（批次 4）
   'toggleDisabledModel',
-  'moveModelTo',
-  'hashModels',
-  'cancelHash',
-  // Civitai 在线能力（批次 5）
-  'civitaiMatchModels',
-  'cancelCivitaiMatch',
-  'openDownloadDialog',
-  'closeDownloadDialog',
-  'resolveDownloadLink',
-  'confirmDownload',
-  'cancelDownload'
+  'moveModelTo'
 ]
 
 describe('appStore 门面导出契约（A-04）', () => {
