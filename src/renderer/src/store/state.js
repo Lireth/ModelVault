@@ -19,13 +19,15 @@ import { DEFAULT_SETTINGS } from '../../../shared/defaults'
 /**
  * 模型类型定义：key 与主进程 scanner.js 分类结果一致，
  * 数组顺序即侧栏展示顺序（固定排列）。
+ * color 为 CSS 变量引用（inline style 原生支持 var()），取值单一来源于
+ * main.css 的 --type-* 系列，消除双端 hex 重复定义。
  */
 export const MODEL_TYPES = [
-  { key: 'checkpoint', label: 'Checkpoint/大模型', color: '#4f9cf9' },
-  { key: 'text_encoder', label: 'TextEncoders/文本编码器', color: '#ffb86b' },
-  { key: 'vae', label: 'VAE/变分自编码器', color: '#3ddc97' },
-  { key: 'lora', label: 'LoRA', color: '#b18cff' },
-  { key: 'other', label: '其他模型', color: '#8a97a5' }
+  { key: 'checkpoint', label: 'Checkpoint/大模型', color: 'var(--type-checkpoint)' },
+  { key: 'text_encoder', label: 'TextEncoders/文本编码器', color: 'var(--type-text_encoder)' },
+  { key: 'vae', label: 'VAE/变分自编码器', color: 'var(--type-vae)' },
+  { key: 'lora', label: 'LoRA', color: 'var(--type-lora)' },
+  { key: 'other', label: '其他模型', color: 'var(--type-other)' }
 ]
 
 /**
