@@ -83,8 +83,6 @@ beforeEach(() => {
   state.typeFilter = 'all'
   state.subFilter = ''
   state.showFavoritesOnly = false
-  state.minRating = 0
-  state.suspectOnly = false
   state.search = ''
   state.sortBy = 'name'
   state.sortAsc = true
@@ -332,48 +330,6 @@ describe('筛选与排序（filteredModels）', () => {
     expect(filteredModels.value).toHaveLength(0)
     state.search = '新备注'
     expect(filteredModels.value.map((m) => m.id)).toEqual(['m1'])
-  })
-
-  it('评分筛选 ≥N 星（F1）：标注过的评分可反查，0 恢复全部', () => {
-    state.models = [
-      makeModel('low', { name: '低分', rating: 1 }),
-      makeModel('mid', { name: '中等', rating: 3 }),
-      makeModel('high', { name: '高分', rating: 5 }),
-      makeModel('none', { name: '未评分', rating: 0 })
-    ]
-    state.minRating = 3
-    // 默认名称排序（zh-CN）：高(gao) < 中(zhong)
-    expect(filteredModels.value.map((m) => m.id)).toEqual(['high', 'mid'])
-    state.minRating = 5
-    expect(filteredModels.value.map((m) => m.id)).toEqual(['high'])
-    state.minRating = 0
-    expect(filteredModels.value).toHaveLength(4)
-  })
-
-  it('隐藏 NSFW 模型（F1，持久化设置）：开启后列表整体过滤', () => {
-    state.models = [
-      makeModel('safe', { name: '普通', nsfw: false }),
-      makeModel('risky', { name: '标记', nsfw: true })
-    ]
-    expect(state.settings.hideNsfw).toBe(false)
-    expect(filteredModels.value).toHaveLength(2)
-    Object.assign(state.settings, { hideNsfw: true })
-    expect(filteredModels.value.map((m) => m.id)).toEqual(['safe'])
-    Object.assign(state.settings, { hideNsfw: false })
-    expect(filteredModels.value).toHaveLength(2)
-  })
-
-  it('仅看疑似损坏（F6 健康检查筛选）：坏模型可单独排查', () => {
-    state.models = [
-      makeModel('good', { name: '健康模型', suspect: false }),
-      makeModel('bad', { name: '损坏模型', suspect: true })
-    ]
-    expect(state.suspectOnly).toBe(false)
-    expect(filteredModels.value).toHaveLength(2)
-    state.suspectOnly = true
-    expect(filteredModels.value.map((m) => m.id)).toEqual(['bad'])
-    state.suspectOnly = false
-    expect(filteredModels.value).toHaveLength(2)
   })
 
   it('搜索域纳入 safetensors 自动解析信息（F2）：作者/基底模型/训练标签可命中', () => {

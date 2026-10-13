@@ -70,8 +70,7 @@ export function normalizeSettings(raw) {
     showSize: typeof raw.showSize === 'boolean' ? raw.showSize : base.showSize,
     showMtime: typeof raw.showMtime === 'boolean' ? raw.showMtime : base.showMtime,
     showParams: typeof raw.showParams === 'boolean' ? raw.showParams : base.showParams,
-    autoRescan: raw.autoRescan === true,
-    hideNsfw: raw.hideNsfw === true
+    autoRescan: raw.autoRescan === true
   }
 }
 

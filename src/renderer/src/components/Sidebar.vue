@@ -8,7 +8,6 @@ import {
   exportModels,
   openSettings,
   removeRoot,
-  saveSettings,
   scanModels,
   switchRoot
 } from '../store/appStore'
@@ -38,16 +37,6 @@ function selectType(key) {
 
 function onScanClick() {
   if (!state.scanning) scanModels()
-}
-
-/**
- * 切换「隐藏 NSFW 模型」（F1，持久化偏好）：
- * 保存成功后 state.settings 随主进程规范化结果同步，:checked 响应式生效；
- * 失败时手动回滚 checkbox（v-model 会绕过保存链直接改内存，故用受控勾选）
- */
-async function onToggleHideNsfw(e) {
-  const ok = await saveSettings({ hideNsfw: e.target.checked })
-  if (!ok) e.target.checked = !e.target.checked
 }
 </script>
 
@@ -130,45 +119,6 @@ async function onToggleHideNsfw(e) {
           </button>
         </li>
       </ul>
-    </div>
-
-    <!-- 评分筛选 + NSFW 开关（F1）：用户标注过的评分/NSFW 可反查 -->
-    <div class="side-section">
-      <h3>筛选</h3>
-      <div class="rating-filter" title="仅显示评分达到 N 星的模型">
-        <button
-          class="rating-btn"
-          :class="{ active: state.minRating === 0 }"
-          title="显示全部评分"
-          @click="state.minRating = 0"
-        >全部</button>
-        <button
-          v-for="i in 5"
-          :key="i"
-          class="rating-btn"
-          :class="{ active: state.minRating === i }"
-          :title="`仅显示 ${i} 星及以上`"
-          @click="state.minRating = i"
-        >★{{ i }}+</button>
-      </div>
-      <label class="nsfw-switch" title="在列表中隐藏标记为 NSFW 的模型（卡片仍可在详情页查看）">
-        <input
-          type="checkbox"
-          :checked="state.settings.hideNsfw === true"
-          aria-label="隐藏 NSFW 模型"
-          @change="onToggleHideNsfw"
-        />
-        <span>隐藏 NSFW 模型</span>
-      </label>
-      <!-- 健康检查筛选（F6）：排查下载损坏的模型（0 字节 / 头部不可解析） -->
-      <label class="nsfw-switch" title="仅显示扫描时结构校验失败的模型：0 字节或 safetensors 头部不可解析，建议重新下载或删除">
-        <input
-          v-model="state.suspectOnly"
-          type="checkbox"
-          aria-label="仅显示疑似损坏的模型"
-        />
-        <span>仅看疑似损坏</span>
-      </label>
     </div>
 
     <!-- 设置按钮：固定在侧边栏最底部，宽度自适应侧边栏 -->
@@ -357,51 +307,6 @@ async function onToggleHideNsfw(e) {
   text-align: center;
 }
 
-/* ---------- 评分筛选 + NSFW 开关（F1） ---------- */
-.rating-filter {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 8px;
-}
-
-.rating-btn {
-  font-size: 11px;
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
-  background: var(--bg);
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all var(--dur-fast) var(--ease-out);
-}
-
-.rating-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.rating-btn.active {
-  border-color: var(--accent);
-  background: var(--bg-active);
-  color: var(--accent);
-}
-
-/* 侧栏筛选开关（重命名自 .nsfw-toggle：与 ModelDetail 的 NSFW 标记按钮同名异义，消歧） */
-.nsfw-switch {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--font-xs);
-  color: var(--text);
-  cursor: pointer;
-  padding: 2px var(--space-1);
-}
-
-.nsfw-switch input {
-  accent-color: var(--accent);
-}
-
 /* ---------- 操作按钮区（模型文件夹与分类之间） ---------- */
 .action-section {
   display: flex;
@@ -451,9 +356,7 @@ async function onToggleHideNsfw(e) {
   .type-label,
   .type-count,
   .side-section h3,
-  .action-section,
-  .rating-filter,
-  .nsfw-switch {
+  .action-section {
     display: none;
   }
   .type-item {
