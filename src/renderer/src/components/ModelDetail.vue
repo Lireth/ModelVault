@@ -436,7 +436,7 @@ async function onSave() {
             </div>
 
             <!-- 健康检查警示（F6）：下载损坏/中断的模型提前可见，避免使用时才发现 -->
-            <div v-if="selectedModel.suspect" class="suspect-warn" role="alert">
+            <div v-if="selectedModel.suspect" class="suspect-warn alert-warning" role="alert">
               ⚠ 该文件疑似损坏（结构校验失败或 0 字节），在绘画工具中加载可能失败，建议重新下载或移入回收站。
             </div>
 
@@ -578,7 +578,7 @@ async function onSave() {
 .detail-panel {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-xl);
   width: min(960px, 100%);
   max-height: calc(100vh - var(--titlebar-height) - 48px);
   display: flex;
@@ -597,7 +597,7 @@ async function onSave() {
 }
 
 .detail-header h2 {
-  font-size: 16px;
+  font-size: var(--font-lg);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -622,10 +622,10 @@ async function onSave() {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 6px 12px;
-  font-size: 12px;
+  font-size: var(--font-xs);
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 12px;
 }
 
@@ -644,22 +644,18 @@ async function onSave() {
 .detail-form-col {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
 }
 
-/* 健康检查警示条（F6） */
+/* 健康检查警示条（F6）：容器视觉为 main.css 公共类 .alert-warning */
 .suspect-warn {
-  font-size: 12px;
-  padding: 8px 12px;
-  border: 1px solid var(--warning);
-  border-radius: 8px;
-  background: var(--bg);
+  font-size: var(--font-xs);
   color: var(--warning);
 }
 
 .detail-form-col h3 {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--accent);
   letter-spacing: 1px;
   margin-top: 4px;
@@ -680,13 +676,13 @@ async function onSave() {
 
 .preset-btn {
   font-size: 11px;
-  padding: 3px 10px;
+  padding: 3px 12px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--bg);
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: all var(--dur-fast) var(--ease-out);
 }
 
 .preset-btn:hover {
@@ -706,18 +702,18 @@ async function onSave() {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
 }
 
 .fav-toggle {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text-muted);
-  font-size: 12px;
-  padding: 6px 14px;
+  font-size: var(--font-xs);
+  padding: 6px 16px;
   cursor: pointer;
-  transition: color 0.12s ease, border-color 0.12s ease;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 
 .fav-toggle:hover {
@@ -734,13 +730,13 @@ async function onSave() {
 /* NSFW 标记按钮：激活时红色高亮，提示首页预览图将被模糊 */
 .nsfw-toggle {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text-muted);
-  font-size: 12px;
-  padding: 6px 14px;
+  font-size: var(--font-xs);
+  padding: 6px 16px;
   cursor: pointer;
-  transition: color 0.12s ease, border-color 0.12s ease;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 
 .nsfw-toggle:hover {
@@ -762,7 +758,7 @@ async function onSave() {
 }
 
 .rating-label {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--text-muted);
   margin-right: 6px;
 }
@@ -775,7 +771,7 @@ async function onSave() {
   line-height: 1;
   padding: 0 1px;
   cursor: pointer;
-  transition: color 0.12s ease, transform 0.12s ease;
+  transition: color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 
 .star:hover {
@@ -800,12 +796,12 @@ async function onSave() {
 .trigger-input {
   flex: 1;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--font-sm);
   outline: none;
   resize: vertical;
   font-family: inherit;
@@ -825,12 +821,12 @@ async function onSave() {
 }
 
 .subcat-chip {
-  padding: 6px 14px;
+  padding: 6px 16px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--bg);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-xs);
   cursor: pointer;
 }
 
@@ -858,7 +854,7 @@ async function onSave() {
 .form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
 /* 备注名 + 文件信息行：底部对齐（信息框底部与备注名输入框底部平齐） */
@@ -890,18 +886,18 @@ async function onSave() {
 }
 
 .field span {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--text-muted);
 }
 
 .field input,
 .note-input {
-  padding: 8px 10px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--font-sm);
   outline: none;
   width: 100%;
 }
@@ -939,7 +935,7 @@ async function onSave() {
 
 .form-actions {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   margin-top: 8px;
 }
 </style>

@@ -44,9 +44,9 @@ import { dismissToast, state } from '../store/appStore'
   gap: 8px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 16px;
-  font-size: 13px;
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font-size: var(--font-sm);
   box-shadow: var(--shadow-sm);
   max-width: 70vw;
   /* host 容器为 pointer-events:none 防挡点击，toast 自身恢复以支持关闭按钮（U6） */
@@ -57,7 +57,7 @@ import { dismissToast, state } from '../store/appStore'
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--font-xs);
   line-height: 1;
   padding: 2px 4px;
   margin-left: 4px;
@@ -89,7 +89,7 @@ import { dismissToast, state } from '../store/appStore'
 
 .toast-enter-active,
 .toast-leave-active {
-  transition: all 0.25s ease;
+  transition: all var(--dur-base) var(--ease-out);
 }
 .toast-enter-from,
 .toast-leave-to {

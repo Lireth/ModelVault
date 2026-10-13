@@ -263,14 +263,14 @@ onBeforeUnmount(() => {
 .detail-cover-col {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
 }
 
 .detail-cover {
   position: relative;
   aspect-ratio: 1;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   border: 1px solid var(--border);
   background: var(--bg);
@@ -283,22 +283,7 @@ onBeforeUnmount(() => {
   display: block;
 }
 
-.cover-placeholder {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: repeating-linear-gradient(45deg, var(--bg) 0 12px, var(--bg-card) 12px 24px);
-}
-
-.cover-ext {
-  font-family: var(--font-mono);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 4px 12px;
-}
+/* 封面占位（.cover-placeholder/.cover-ext）为 main.css 公共类 */
 
 .type-badge {
   position: absolute;
@@ -307,8 +292,8 @@ onBeforeUnmount(() => {
   font-size: 11px;
   font-weight: 600;
   color: var(--on-bright);
-  padding: 3px 10px;
-  border-radius: 999px;
+  padding: 3px 12px;
+  border-radius: var(--radius-full);
 }
 
 /* 拖拽导入封面：悬停高亮 + 提示 */
@@ -324,7 +309,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   background: var(--overlay-thumb);
   color: #fff;
-  font-size: 14px;
+  font-size: var(--font-md);
   font-weight: 600;
   pointer-events: none;
 }
@@ -345,12 +330,12 @@ onBeforeUnmount(() => {
 .cover-thumb {
   position: relative;
   aspect-ratio: 1;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   border: 1px solid var(--border);
   background: var(--bg);
   cursor: pointer;
-  transition: border-color 0.12s ease, transform 0.12s ease;
+  transition: border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 
 .cover-thumb:hover {
@@ -389,7 +374,7 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: var(--on-bright);
   background: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   padding: 1px 7px;
   opacity: 0.95;
 }
@@ -417,7 +402,7 @@ onBeforeUnmount(() => {
      缩略图本身的「设为默认」）；悬停或键盘聚焦（:focus-visible）时显现并可交互 */
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.12s ease;
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 
 .cover-thumb:hover .thumb-delete,

@@ -178,11 +178,11 @@ const mtimeText = computed(() => {
   border: none;
   background: transparent;
   color: var(--border);
-  font-size: 14px;
+  font-size: var(--font-md);
   line-height: 1;
   padding: 0 2px;
   cursor: pointer;
-  transition: color 0.12s ease;
+  transition: color var(--dur-fast) var(--ease-out);
 }
 
 .fav-btn:hover {
@@ -201,10 +201,10 @@ const mtimeText = computed(() => {
   position: relative;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   cursor: pointer;
-  transition: transform 0.12s ease, border-color 0.12s ease;
+  transition: transform var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
   display: flex;
   flex-direction: column;
 }
@@ -227,11 +227,11 @@ const mtimeText = computed(() => {
   z-index: 2;
   width: 20px;
   height: 20px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1.5px solid var(--border);
   background: var(--bg-card);
   color: var(--on-bright);
-  font-size: 12px;
+  font-size: var(--font-xs);
   font-weight: 700;
   line-height: 1;
   display: flex;
@@ -272,24 +272,7 @@ const mtimeText = computed(() => {
   transform: scale(1.1); /* 放大避免模糊边缘露出原图 */
 }
 
-.cover-placeholder {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: repeating-linear-gradient(45deg, var(--bg) 0 12px, var(--bg-card) 12px 24px);
-}
-
-.cover-ext {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--text-muted);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 4px 12px;
-}
+/* 封面占位（.cover-placeholder/.cover-ext）为 main.css 公共类 */
 
 .type-badge {
   position: absolute;
@@ -299,7 +282,7 @@ const mtimeText = computed(() => {
   font-weight: 600;
   color: var(--on-bright);
   padding: 3px 9px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   opacity: 0.95;
 }
 
@@ -310,7 +293,7 @@ const mtimeText = computed(() => {
   font-size: 11px;
   font-weight: 600;
   padding: 2px 9px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   border: 1px solid;
   background: var(--overlay);
   backdrop-filter: blur(2px);
@@ -327,7 +310,7 @@ const mtimeText = computed(() => {
   color: #fff;
   background: var(--danger);
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
 }
 
 /* 疑似损坏角标（F6）：位于封面右下角，警示色 */
@@ -340,7 +323,7 @@ const mtimeText = computed(() => {
   color: var(--on-bright);
   background: var(--warning);
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
 }
 
 /* 禁用角标（F10）：左下角，中性色 */
@@ -353,19 +336,19 @@ const mtimeText = computed(() => {
   color: var(--text-muted);
   background: var(--overlay);
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   z-index: 1;
 }
 
 .card-body {
-  padding: 10px 12px 12px;
+  padding: 12px 12px 12px;
   display: flex;
   flex-direction: column;
   gap: 5px;
 }
 
 .model-name {
-  font-size: 13px;
+  font-size: var(--font-sm);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;

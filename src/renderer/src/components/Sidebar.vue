@@ -151,7 +151,7 @@ async function onToggleHideNsfw(e) {
           @click="state.minRating = i"
         >★{{ i }}+</button>
       </div>
-      <label class="nsfw-toggle" title="在列表中隐藏标记为 NSFW 的模型（卡片仍可在详情页查看）">
+      <label class="nsfw-switch" title="在列表中隐藏标记为 NSFW 的模型（卡片仍可在详情页查看）">
         <input
           type="checkbox"
           :checked="state.settings.hideNsfw === true"
@@ -161,7 +161,7 @@ async function onToggleHideNsfw(e) {
         <span>隐藏 NSFW 模型</span>
       </label>
       <!-- 健康检查筛选（F6）：排查下载损坏的模型（0 字节 / 头部不可解析） -->
-      <label class="nsfw-toggle" title="仅显示扫描时结构校验失败的模型：0 字节或 safetensors 头部不可解析，建议重新下载或删除">
+      <label class="nsfw-switch" title="仅显示扫描时结构校验失败的模型：0 字节或 safetensors 头部不可解析，建议重新下载或删除">
         <input
           v-model="state.suspectOnly"
           type="checkbox"
@@ -188,7 +188,7 @@ async function onToggleHideNsfw(e) {
   flex-direction: column;
   overflow-y: auto;
   padding: 16px 12px;
-  gap: 18px;
+  gap: 20px;
 }
 
 .side-section h3 {
@@ -203,8 +203,8 @@ async function onToggleHideNsfw(e) {
 .folder-box {
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  padding: 12px 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -212,7 +212,7 @@ async function onToggleHideNsfw(e) {
 }
 
 .folder-name {
-  font-size: 13px;
+  font-size: var(--font-sm);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -244,12 +244,12 @@ async function onToggleHideNsfw(e) {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 6px 12px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-xs);
   cursor: pointer;
   text-align: left;
 }
@@ -284,7 +284,7 @@ async function onToggleHideNsfw(e) {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   color: var(--text-muted);
   font-size: 10px;
   cursor: pointer;
@@ -293,7 +293,7 @@ async function onToggleHideNsfw(e) {
      父级「切换模型库」按钮）；悬停或键盘聚焦（:focus-visible）时显现并可交互 */
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.12s ease;
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 
 .root-item:hover .root-remove,
@@ -317,12 +317,12 @@ async function onToggleHideNsfw(e) {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 10px;
+  padding: 7px 12px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--font-sm);
   cursor: pointer;
   text-align: left;
 }
@@ -335,13 +335,7 @@ async function onToggleHideNsfw(e) {
   background: var(--bg-active);
 }
 
-.type-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
+/* 类型色点样式（.type-dot）为 main.css 公共类；此处仅补「全部」渐变变体 */
 .all-dot {
   background: var(--accent-grad);
 }
@@ -357,7 +351,7 @@ async function onToggleHideNsfw(e) {
   font-size: 11px;
   color: var(--text-muted);
   background: var(--bg);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 1px 8px;
   min-width: 20px;
   text-align: center;
@@ -375,11 +369,11 @@ async function onToggleHideNsfw(e) {
   font-size: 11px;
   padding: 3px 8px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--bg);
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: all var(--dur-fast) var(--ease-out);
 }
 
 .rating-btn:hover {
@@ -393,17 +387,18 @@ async function onToggleHideNsfw(e) {
   color: var(--accent);
 }
 
-.nsfw-toggle {
+/* 侧栏筛选开关（重命名自 .nsfw-toggle：与 ModelDetail 的 NSFW 标记按钮同名异义，消歧） */
+.nsfw-switch {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: var(--space-2);
+  font-size: var(--font-xs);
   color: var(--text);
   cursor: pointer;
-  padding: 2px 4px;
+  padding: 2px var(--space-1);
 }
 
-.nsfw-toggle input {
+.nsfw-switch input {
   accent-color: var(--accent);
 }
 
@@ -428,30 +423,26 @@ async function onToggleHideNsfw(e) {
 
 .action-grid .action-btn {
   padding: 7px 6px;
-  font-size: 12px;
+  font-size: var(--font-xs);
 }
 
-/* ---------- 设置按钮（固定侧边栏最底部，全宽） ---------- */
+/* ---------- 设置按钮（固定侧边栏最底部，全宽；hover 态由全局 .btn:hover 统一） ---------- */
 .settings-btn {
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 9px 10px;
+  padding: 9px 12px;
   flex-shrink: 0;
   margin-top: auto;
 }
 
-.settings-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  border-color: var(--accent);
-}
-
-/* 窄屏图标栏（OPT-1）：断点 900px 与 TopBar.vue 的窄屏操作菜单联动——
+/* 窄屏图标栏（OPT-1）：断点 960px 与 TopBar.vue 的窄屏操作菜单联动——
    此范围内操作区（重新扫描/选择文件夹/导出）整体隐藏，
-   改由标题栏 ☰ 菜单提供同等入口；改动任一侧断点时须同步另一侧 */
-@media (max-width: 900px) {
+   改由标题栏 ☰ 菜单提供同等入口；改动任一侧断点时须同步另一侧。
+   960px 与窗口 minWidth 对齐：100% DPI 下拖到最窄即可触达（原 900px 存在死区） */
+@media (max-width: 960px) {
   .sidebar {
     width: 64px;
     padding: 16px 6px;
@@ -462,7 +453,7 @@ async function onToggleHideNsfw(e) {
   .side-section h3,
   .action-section,
   .rating-filter,
-  .nsfw-toggle {
+  .nsfw-switch {
     display: none;
   }
   .type-item {

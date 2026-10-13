@@ -175,7 +175,7 @@ const topSize = computed(() =>
 .stats-section {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 .stats-overview {
@@ -188,9 +188,9 @@ const topSize = computed(() =>
   flex: 1;
   min-width: 110px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--bg);
-  padding: 10px 14px;
+  padding: 12px 16px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -211,14 +211,14 @@ const topSize = computed(() =>
 .stats-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  gap: 16px;
 }
 
 .stats-block {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--bg);
-  padding: 12px 14px;
+  padding: 12px 16px;
 }
 
 .stats-block h4 {
@@ -229,7 +229,7 @@ const topSize = computed(() =>
 }
 
 .stats-empty {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: var(--text-muted);
   margin: 4px 0;
 }
@@ -245,15 +245,10 @@ const topSize = computed(() =>
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--font-xs);
 }
 
-.type-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
+/* 类型色点样式（.type-dot）为 main.css 公共类 */
 
 .type-name {
   flex: 1;
@@ -289,8 +284,8 @@ const topSize = computed(() =>
 .cov-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 12px;
+  gap: 12px;
+  font-size: var(--font-xs);
 }
 
 .cov-label {
@@ -311,7 +306,7 @@ const topSize = computed(() =>
   height: 100%;
   border-radius: 3px;
   background: var(--accent);
-  transition: width 0.3s ease;
+  transition: width var(--dur-base) var(--ease-out);
 }
 
 .cov-value {
@@ -332,8 +327,8 @@ const topSize = computed(() =>
 .top-list li {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 12px;
+  gap: 12px;
+  font-size: var(--font-xs);
 }
 
 .top-list li::before {
