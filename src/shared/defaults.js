@@ -10,7 +10,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   modelsFolders: [],
   autoScan: true,
   excludeDirs: [],
+  // 主题：dark / light / system（跟随系统亮暗，渲染层解析为有效主题后应用）
   theme: 'dark',
+  // 强调色：预设 key（渲染层 constants/accents.js）或 #rrggbb 自定义色
+  accentColor: 'blue',
   cardSize: 'normal',
   sortBy: 'name',
   sortAsc: true,

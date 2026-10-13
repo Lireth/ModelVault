@@ -49,6 +49,8 @@ export { formatSize } from './format'
 export {
   initApp,
   applyTheme,
+  resolveTheme,
+  applyAccent,
   openSettings,
   closeSettings,
   saveSettings,

@@ -357,7 +357,8 @@ const mtimeText = computed(() => {
 /* 多选选中态（E4）：强调边框 + 勾选角标 */
 .model-card.selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent) inset, 0 0 18px rgba(90, 163, 250, 0.16);
+  box-shadow: 0 0 0 1px var(--accent) inset,
+    0 0 18px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .select-check {

@@ -16,8 +16,20 @@ import { LEGACY_STORE_FILE, SETTINGS_FILE } from './store-paths'
  * 运行期内存为准（getSettings），更新即时原子落盘。
  */
 
-/** 应用设置允许的主题取值（主题当前仅亮/暗，无需 shared 化） */
-const VALID_THEMES = new Set(['dark', 'light'])
+/** 应用设置允许的主题取值（system 由渲染层解析为有效亮/暗后应用） */
+const VALID_THEMES = new Set(['dark', 'light', 'system'])
+
+/** 强调色取值：预设 key（短字符串，渲染层解析未知值回退默认）或 #rrggbb 自定义色 */
+const ACCENT_COLOR_RE = /^#[0-9a-fA-F]{6}$/
+
+/** 规范化强调色：预设 key（≤20 字符）或自定义 hex，其余回退默认 */
+function normalizeAccentColor(raw) {
+  if (typeof raw !== 'string') return DEFAULT_SETTINGS.accentColor
+  const v = raw.trim()
+  if (ACCENT_COLOR_RE.test(v)) return v.toLowerCase()
+  if (v && v.length <= 20 && !v.includes('#')) return v
+  return DEFAULT_SETTINGS.accentColor
+}
 
 /** 内存中的应用设置 */
 let settings = null
@@ -94,6 +106,7 @@ export function normalizeSettings(raw) {
     autoScan: typeof raw.autoScan === 'boolean' ? raw.autoScan : base.autoScan,
     excludeDirs,
     theme: VALID_THEMES.has(raw.theme) ? raw.theme : base.theme,
+    accentColor: normalizeAccentColor(raw.accentColor),
     cardSize: CARD_SIZE_KEYS.has(raw.cardSize) ? raw.cardSize : base.cardSize,
     sortBy: SORT_BY_KEYS.has(raw.sortBy) ? raw.sortBy : base.sortBy,
     sortAsc: typeof raw.sortAsc === 'boolean' ? raw.sortAsc : base.sortAsc,

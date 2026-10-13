@@ -1,14 +1,38 @@
 import { state, defaultSettings, replaceModels, replaceSettings } from './state'
 import { toast } from './toast'
+import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
 
 /**
  * 模型库生命周期与扫描（A-04 自 appStore.js 拆出）：
  * 初始化/主题/设置/目录切换/全量扫描/取消/缩略图回填。
  */
 
+/**
+ * 系统亮暗媒体查询（主题跟随系统）：惰性求值——
+ * node 测试环境无 window/matchMedia（jsdom 亦未实现），返回 null，
+ * resolveTheme 将 system 解析为 dark（与默认主题一致）；
+ * 不缓存查询对象：调用方测试桩在 import 后才注入，且 Chromium 侧
+ * 每次调用返回的 MediaQueryList 状态总是最新的。
+ */
+function getSystemThemeQuery() {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-color-scheme: light)')
+    : null
+}
+
+/**
+ * 解析主题模式为有效主题：system 依系统亮暗取值，未知值回退 dark。
+ * 主进程（原生标题栏配色）只认 dark/light，IPC 一律发送解析后的有效主题。
+ */
+export function resolveTheme(mode) {
+  if (mode === 'system') return getSystemThemeQuery()?.matches ? 'light' : 'dark'
+  return mode === 'light' ? 'light' : 'dark'
+}
+
 /** 应用初始化：加载持久化数据与应用设置，按设置决定是否自动扫描 */
 export async function initApp() {
   try {
+    bindSystemThemeListener()
     const data = await window.api.models.loadStore()
     state.folder = data.settings?.modelsFolder || ''
     replaceSettings({ ...defaultSettings(), ...data.settings })
@@ -28,10 +52,51 @@ export async function initApp() {
   }
 }
 
-/** 应用主题：切换 CSS 变量并同步原生标题栏颜色 */
+/** 系统主题监听仅绑定一次（initApp 可重入） */
+let systemThemeBound = false
+
+/** 跟随系统模式下，系统亮暗变化即时重应用（主题与强调色的深/浅变体一并刷新） */
+function bindSystemThemeListener() {
+  if (systemThemeBound) return
+  const query = getSystemThemeQuery()
+  if (!query || typeof query.addEventListener !== 'function') return
+  systemThemeBound = true
+  query.addEventListener('change', () => {
+    if (state.settings.theme === 'system') applyTheme('system')
+  })
+}
+
+/** 应用主题：切换 CSS 变量、同步原生标题栏颜色，并重应用强调色（深/浅变体） */
 export function applyTheme(theme) {
-  document.documentElement.classList.toggle('light', theme === 'light')
-  window.api.window.setTheme(theme).catch(() => {})
+  const effective = resolveTheme(theme)
+  document.documentElement.classList.toggle('light', effective === 'light')
+  window.api.window.setTheme(effective).catch(() => {})
+  applyAccent(state.settings.accentColor, effective)
+}
+
+/**
+ * 应用强调色：预设按有效主题取深/浅变体，自定义 #rrggbb 直接使用
+ * （accent2 同色、渐变退化为纯色）；未知值回退默认预设（主进程校验宽松，
+ * 渲染层为最终兜底）。以 inline style 覆盖 main.css 令牌，双主题通用。
+ * @param {string} accentColor 预设 key 或 #rrggbb
+ * @param {string} [effective] 有效主题（缺省按当前设置解析）
+ */
+export function applyAccent(accentColor, effective = resolveTheme(state.settings.theme)) {
+  const variant = effective === 'light' ? 'light' : 'dark'
+  const preset = ACCENT_PRESETS.find((p) => p.key === accentColor)
+  let accent
+  let accent2
+  if (preset) {
+    ;({ accent, accent2 } = preset[variant])
+  } else if (CUSTOM_ACCENT_RE.test(accentColor || '')) {
+    accent = accentColor
+    accent2 = accentColor
+  } else {
+    ;({ accent, accent2 } = ACCENT_PRESETS[0][variant])
+  }
+  const root = document.documentElement
+  root.style.setProperty('--accent', accent)
+  root.style.setProperty('--accent-2', accent2)
 }
 
 export function openSettings() {

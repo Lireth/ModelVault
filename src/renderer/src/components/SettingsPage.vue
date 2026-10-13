@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import StatsSection from './StatsSection.vue'
 import {
+  applyAccent,
   applyTheme,
   CARD_SIZE_OPTIONS,
   chooseFolder,
@@ -17,6 +18,7 @@ import {
   state,
   toast
 } from '../store/appStore'
+import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
 
 /** 应用信息（关于板块） */
 const appInfo = ref(null)
@@ -27,6 +29,7 @@ const form = reactive({
   autoRescan: false,
   excludeText: '',
   theme: 'dark',
+  accentColor: 'blue',
   cardSize: 'normal',
   sortBy: 'name',
   scanExtensions: [],
@@ -37,6 +40,7 @@ const form = reactive({
 
 /** 打开设置页时记录已保存值，用于关闭时还原预览 */
 let savedTheme = 'dark'
+let savedAccent = 'blue'
 let savedCardSize = 'normal'
 
 const saving = ref(false)
@@ -44,11 +48,13 @@ const saving = ref(false)
 /** 从全局状态填充表单（打开设置页时调用） */
 function fillForm() {
   savedTheme = state.settings.theme || 'dark'
+  savedAccent = state.settings.accentColor || 'blue'
   savedCardSize = state.settings.cardSize || 'normal'
   form.autoScan = state.settings.autoScan !== false
   form.autoRescan = state.settings.autoRescan === true
   form.excludeText = (state.settings.excludeDirs || []).join('\n')
   form.theme = savedTheme
+  form.accentColor = savedAccent
   form.cardSize = savedCardSize
   form.sortBy = state.settings.sortBy || 'name'
   form.scanExtensions = [...(state.settings.scanExtensions || [])]
@@ -77,6 +83,7 @@ function formSnapshotValue() {
     autoRescan: form.autoRescan,
     excludeText: form.excludeText,
     theme: form.theme,
+    accentColor: form.accentColor,
     cardSize: form.cardSize,
     sortBy: form.sortBy,
     scanExtensions: [...form.scanExtensions].sort(),
@@ -95,6 +102,7 @@ const settingsDirty = computed(() => {
     form.autoRescan !== s.autoRescan ||
     form.excludeText !== s.excludeText ||
     form.theme !== s.theme ||
+    form.accentColor !== s.accentColor ||
     form.cardSize !== s.cardSize ||
     form.sortBy !== s.sortBy ||
     form.showSize !== s.showSize ||
@@ -125,6 +133,14 @@ watch(
   }
 )
 
+// 强调色实时预览（applyTheme 内部会按有效主题重应用强调色，此处直接应用即可）
+watch(
+  () => form.accentColor,
+  (color) => {
+    if (state.settingsOpen) applyAccent(color)
+  }
+)
+
 watch(
   () => form.cardSize,
   (size) => {
@@ -139,6 +155,7 @@ async function onCancel() {
     return
   }
   applyTheme(savedTheme)
+  applyAccent(savedAccent)
   state.settings.cardSize = savedCardSize
   closeSettings()
 }
@@ -309,6 +326,7 @@ async function onSave() {
       autoRescan: form.autoRescan,
       excludeDirs,
       theme: form.theme,
+      accentColor: form.accentColor,
       cardSize: form.cardSize,
       sortBy: form.sortBy,
       scanExtensions: [...form.scanExtensions],
@@ -422,11 +440,15 @@ async function onSave() {
         <div class="setting-row">
           <div class="setting-info">
             <span class="setting-title">主题</span>
-            <span class="setting-desc">界面配色方案</span>
+            <span class="setting-desc">界面配色方案，跟随系统时随系统亮暗自动切换</span>
           </div>
           <div class="seg-group">
             <button
-              v-for="t in [{ key: 'dark', label: '深色' }, { key: 'light', label: '浅色' }]"
+              v-for="t in [
+                { key: 'dark', label: '深色' },
+                { key: 'light', label: '浅色' },
+                { key: 'system', label: '跟随系统' }
+              ]"
               :key="t.key"
               type="button"
               class="seg-btn"
@@ -435,6 +457,34 @@ async function onSave() {
             >
               {{ t.label }}
             </button>
+          </div>
+        </div>
+
+        <!-- 强调色：预设色板 + 自定义取色（实时预览，保存后持久化） -->
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-title">强调色</span>
+            <span class="setting-desc">按钮、选中态、光晕等界面强调元素的颜色</span>
+          </div>
+          <div class="accent-group">
+            <button
+              v-for="a in ACCENT_PRESETS"
+              :key="a.key"
+              type="button"
+              class="accent-swatch"
+              :class="{ active: form.accentColor === a.key }"
+              :title="a.label"
+              :aria-label="`强调色 ${a.label}`"
+              :style="{ background: `linear-gradient(135deg, ${a.dark.accent}, ${a.dark.accent2})` }"
+              @click="form.accentColor = a.key"
+            ></button>
+            <label
+              class="accent-swatch accent-custom"
+              :class="{ active: CUSTOM_ACCENT_RE.test(form.accentColor) }"
+              :title="CUSTOM_ACCENT_RE.test(form.accentColor) ? `自定义 ${form.accentColor}` : '自定义颜色'"
+            >
+              <input v-model="form.accentColor" type="color" aria-label="自定义强调色" />
+            </label>
           </div>
         </div>
 
@@ -755,11 +805,59 @@ async function onSave() {
 
 .switch:checked {
   background: var(--accent-grad);
-  box-shadow: 0 0 10px rgba(90, 163, 250, 0.35);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .switch:checked::after {
   left: 21px;
+}
+
+/* 强调色色板：圆形渐变预览，选中态外发光圈 */
+.accent-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.accent-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: transform var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.accent-swatch:hover {
+  transform: scale(1.12);
+}
+
+.accent-swatch.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 10px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.accent-swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 自定义取色：彩虹圆锥渐变示意「任意色」，原生 color input 隐形覆盖触发取色器 */
+.accent-custom {
+  position: relative;
+  display: inline-block;
+  background: conic-gradient(#f66, #fc3, #6f6, #3cf, #66f, #f66);
+  overflow: hidden;
+}
+
+.accent-custom input[type='color'] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 
 /* 分段选择 */

@@ -594,7 +594,7 @@ async function onSave() {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: var(--shadow-lg), 0 0 60px rgba(90, 163, 250, 0.06);
+  box-shadow: var(--shadow-lg), 0 0 60px color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .detail-header {

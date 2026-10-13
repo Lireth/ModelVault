@@ -72,9 +72,9 @@ let api
 beforeEach(() => {
   api = makeApiMock()
   vi.stubGlobal('window', { api })
-  // applyTheme（saveSettings/主题切换）会触碰 document
+  // applyTheme/applyAccent（saveSettings/主题与强调色切换）会触碰 document
   vi.stubGlobal('document', {
-    documentElement: { classList: { toggle: vi.fn() } }
+    documentElement: { classList: { toggle: vi.fn() }, style: { setProperty: vi.fn() } }
   })
   // 重置模块级单例状态，用例间互不污染
   state.folder = ''

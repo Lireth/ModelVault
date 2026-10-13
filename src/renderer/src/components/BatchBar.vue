@@ -100,7 +100,7 @@ const batchAllDisabled = computed(() =>
   background: color-mix(in srgb, var(--bg-active) 72%, transparent);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
-  box-shadow: 0 4px 20px rgba(90, 163, 250, 0.1);
+  box-shadow: 0 4px 20px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .batch-count {

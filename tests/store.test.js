@@ -418,6 +418,31 @@ describe('应用设置规范化', () => {
     expect(s.sortAsc).toBe(true)
   })
 
+  it('theme 接受 dark/light/system，未知值回退 dark', async () => {
+    await updateSettings({ theme: 'system' })
+    let s = await loadSettings()
+    expect(s.theme).toBe('system')
+    await updateSettings({ theme: 'neon' })
+    s = await loadSettings()
+    expect(s.theme).toBe('dark')
+  })
+
+  it('accentColor 规范化：预设 key 与 #rrggbb 自定义色合法，非法回退默认', async () => {
+    await updateSettings({ accentColor: 'violet' })
+    let s = await loadSettings()
+    expect(s.accentColor).toBe('violet')
+    // 自定义 hex 统一小写
+    await updateSettings({ accentColor: '#FF8800' })
+    s = await loadSettings()
+    expect(s.accentColor).toBe('#ff8800')
+    // 非法形态（含 # 但非 hex / 超长 / 非字符串）回退默认 blue
+    for (const bad of ['#12345', '#1234567', 'x'.repeat(21), 42]) {
+      await updateSettings({ accentColor: bad })
+      s = await loadSettings()
+      expect(s.accentColor).toBe('blue')
+    }
+  })
+
   it('savedViews 规范化：非法条目剔除、id 去重、缺省字段与未知排序回退', async () => {
     await updateSettings({
       savedViews: [

@@ -746,7 +746,7 @@ onUnmounted(() => {
   height: 34px;
   border: 3px solid color-mix(in srgb, var(--border) 70%, transparent);
   border-top-color: var(--accent);
-  border-right-color: #b18cff;
+  border-right-color: var(--accent-2);
   border-radius: 50%;
   animation: spin 0.9s linear infinite;
 }

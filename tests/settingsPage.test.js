@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import SettingsPage from '../src/renderer/src/components/SettingsPage.vue'
-import { state } from '../src/renderer/src/store/appStore'
+import { acceptConfirm, state } from '../src/renderer/src/store/appStore'
 import { setupComponentTest } from './helpers/componentTest'
 
 /**
@@ -125,6 +125,71 @@ describe('SettingsPage 日志与诊断入口（B-04）', () => {
     expect(text).toContain('0.1.0')
     expect(text).toContain('44.0.0')
     expect(text).toContain('win32')
+  })
+})
+
+describe('SettingsPage 主题跟随系统与自定义强调色', () => {
+  /** 清理 documentElement 主题残留 */
+  function resetDom() {
+    document.documentElement.classList.remove('light')
+    document.documentElement.style.removeProperty('--accent')
+    document.documentElement.style.removeProperty('--accent-2')
+  }
+
+  it('主题分段含「跟随系统」，点击后预览经解析应用（组件测试桩系统为深色）', async () => {
+    const wrapper = await mountSettings()
+    const systemBtn = wrapper.findAll('.seg-btn').find((b) => b.text() === '跟随系统')
+    expect(systemBtn).toBeTruthy()
+    await systemBtn.trigger('click')
+    await flushPromises()
+    expect(systemBtn.classes()).toContain('active')
+    // componentTest 的 matchMedia 桩 matches=false → system 解析为 dark
+    expect(window.api.window.setTheme).toHaveBeenLastCalledWith('dark')
+    expect(document.documentElement.classList.contains('light')).toBe(false)
+    wrapper.unmount()
+    resetDom()
+  })
+
+  it('点击预设色板实时预览并纳入保存载荷', async () => {
+    window.api.settings.update.mockImplementation((patch) =>
+      Promise.resolve({ settings: { ...state.settings, ...patch } })
+    )
+    const wrapper = await mountSettings()
+    const violet = wrapper.findAll('.accent-swatch').find((b) => b.attributes('title') === '星云紫')
+    expect(violet).toBeTruthy()
+    await violet.trigger('click')
+    await flushPromises()
+    // 实时预览：inline 令牌覆盖（深色变体）
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#a78bfa')
+    expect(violet.classes()).toContain('active')
+    // 保存：accentColor 进入载荷
+    const saveBtn = wrapper.findAll('button').find((b) => b.text() === '保存')
+    await saveBtn.trigger('click')
+    await flushPromises()
+    expect(window.api.settings.update).toHaveBeenCalledWith(
+      expect.objectContaining({ accentColor: 'violet' })
+    )
+    wrapper.unmount()
+    resetDom()
+  })
+
+  it('放弃修改关闭时还原已保存的强调色', async () => {
+    const wrapper = await mountSettings()
+    const violet = wrapper.findAll('.accent-swatch').find((b) => b.attributes('title') === '星云紫')
+    await violet.trigger('click')
+    await flushPromises()
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#a78bfa')
+    // 有未保存修改 → 关闭需确认，确认后还原为默认 blue
+    const cancelBtn = wrapper.findAll('button').find((b) => b.text() === '关闭设置页面')
+    await cancelBtn.trigger('click')
+    await flushPromises()
+    expect(state.confirm.visible).toBe(true)
+    acceptConfirm()
+    await flushPromises()
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#5aa3fa')
+    expect(state.settingsOpen).toBe(false)
+    wrapper.unmount()
+    resetDom()
   })
 })
 

@@ -40,6 +40,8 @@ const EXPECTED_EXPORTS = [
   // 库与扫描
   'initApp',
   'applyTheme',
+  'resolveTheme',
+  'applyAccent',
   'openSettings',
   'closeSettings',
   'saveSettings',

@@ -78,7 +78,7 @@ describe('shared/defaults', () => {
   it('默认设置引用共享扩展名集合的副本，且含全部既有字段', () => {
     expect(DEFAULT_SETTINGS.scanExtensions).toEqual(MODEL_EXTENSION_NAMES)
     const expectedKeys = [
-      'modelsFolder', 'modelsFolders', 'autoScan', 'excludeDirs', 'theme',
+      'modelsFolder', 'modelsFolders', 'autoScan', 'excludeDirs', 'theme', 'accentColor',
       'cardSize', 'sortBy', 'sortAsc', 'scanExtensions',
       'showSize', 'showMtime', 'showParams', 'autoRescan', 'savedViews'
     ].sort()
