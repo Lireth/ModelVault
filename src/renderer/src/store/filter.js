@@ -48,15 +48,19 @@ function searchHaystack(m) {
   return hay
 }
 
-/** 筛选 + 搜索 + 排序后的模型列表 */
-export const filteredModels = computed(() => {
+/**
+ * 筛选 + 搜索后的未排序列表（过滤层，模块私有）。
+ * 与排序分层缓存（P4 性能优化）：切换排序方式/方向时本层 computed 命中缓存，
+ * 跳过全量 O(n) 过滤与搜索域匹配，仅重排即可。
+ * 单趟完成分类/子分类/收藏/评分/NSFW/健康/关键词过滤（O3）：合并原四段 filter，
+ * 消除中间数组分配；无筛选条件时仅做一次遍历拷贝。
+ */
+const filteredUnsorted = computed(() => {
   const keyword = state.search.trim().toLowerCase()
   const { typeFilter, subFilter, showFavoritesOnly, minRating, suspectOnly } = state
   const hideNsfw = state.settings.hideNsfw === true
   // LoRA 分类筛选：仅选中 LoRA 分类且指定了子分类时生效
   const checkSub = typeFilter === 'lora' && subFilter
-  // 单趟完成分类/子分类/收藏/评分/NSFW/健康/关键词过滤（O3）：合并原四段 filter，
-  // 消除中间数组分配；无筛选条件时仅做一次遍历拷贝
   const list = []
   for (const m of state.models) {
     if (typeFilter !== 'all' && m.type !== typeFilter) continue
@@ -68,6 +72,13 @@ export const filteredModels = computed(() => {
     if (keyword && !searchHaystack(m).includes(keyword)) continue
     list.push(m)
   }
+  return list
+})
+
+/** 筛选 + 搜索 + 排序后的模型列表（导出名与行为不变，仅内部分层） */
+export const filteredModels = computed(() => {
+  // 拷贝后排序：内层结果被 computed 缓存复用，不得原位变异
+  const list = [...filteredUnsorted.value]
   switch (state.sortBy) {
     case 'size':
       list.sort((a, b) => b.size - a.size)
