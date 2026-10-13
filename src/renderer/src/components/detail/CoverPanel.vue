@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import CoverGallery from './CoverGallery.vue'
 import {
   confirmDialog,
   deleteCover,
@@ -14,11 +15,25 @@ import {
 
 /**
  * 封面管理面板（C1 自 ModelDetail.vue 左侧列拆出）：
- * 大图预览（拖拽导入/上传/粘贴）、多封面缩略图网格（设默认/删除）。
+ * 大图预览（拖拽导入/上传/粘贴，点击进入全屏画廊）、多封面缩略图网格（设默认/删除）。
  * 面板自持封面域状态（拖拽悬停/加载失败标记/操作忙），经 store 函数直连主进程。
  */
 
 const busy = ref(false)
+
+/* ---------------- 全屏画廊 ---------------- */
+
+const galleryOpen = ref(false)
+const galleryIndex = ref(0)
+
+/** 点击大图进入全屏画廊：从当前默认封面位置开始浏览 */
+function openGallery() {
+  const list = covers.value
+  if (list.length === 0) return
+  const idx = list.findIndex((c) => c.path === selectedModel.value?.cover)
+  galleryIndex.value = idx >= 0 ? idx : 0
+  galleryOpen.value = true
+}
 
 /** 拖拽悬停高亮 */
 const dropActive = ref(false)
@@ -199,11 +214,12 @@ onBeforeUnmount(() => {
   <div v-if="selectedModel" class="detail-cover-col">
     <div
       class="detail-cover"
-      :class="{ 'drop-active': dropActive }"
-      title="可直接拖入图片文件作为预览图"
+      :class="{ 'drop-active': dropActive, 'can-zoom': covers.length > 0 }"
+      :title="covers.length > 0 ? '点击进入全屏画廊；也可直接拖入图片文件作为预览图' : '可直接拖入图片文件作为预览图'"
       @dragover="onDragOver"
       @dragleave="onDragLeave"
       @drop="onDropCover"
+      @click="openGallery"
     >
       <img
         v-if="coverSrc && !coverError"
@@ -255,6 +271,18 @@ onBeforeUnmount(() => {
         ><svg viewBox="0 0 16 16" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg></button>
       </div>
     </div>
+
+    <!-- 全屏画廊：删除/设默认复用面板既有动作（含确认与 busy） -->
+    <CoverGallery
+      v-if="galleryOpen && covers.length > 0"
+      :covers="covers"
+      :default-path="selectedModel.cover"
+      :initial-index="galleryIndex"
+      :busy="busy"
+      @close="galleryOpen = false"
+      @set-default="onSetDefault"
+      @delete="onDeleteCover"
+    />
   </div>
 </template>
 
@@ -282,6 +310,11 @@ onBeforeUnmount(() => {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+/* 有封面可浏览时：大图给出可进入画廊的放大镜指针 */
+.detail-cover.can-zoom img {
+  cursor: zoom-in;
 }
 
 /* 封面占位（.cover-placeholder/.cover-ext）为 main.css 公共类 */

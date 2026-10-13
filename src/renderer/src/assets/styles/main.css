@@ -90,8 +90,9 @@
   --dur-base: 200ms;
   --dur-slow: 340ms;
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
-  /* 弹层层级：详情 < Toast < 确认层 */
+  /* 弹层层级：详情 < 画廊 < Toast < 确认层 */
   --z-detail: 100;
+  --z-gallery: 150;
   --z-toast: 200;
   --z-confirm: 210;
   color-scheme: dark;

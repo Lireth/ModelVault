@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import CoverPanel from '../src/renderer/src/components/detail/CoverPanel.vue'
-import { state } from '../src/renderer/src/store/appStore'
+import { rejectConfirm, state } from '../src/renderer/src/store/appStore'
 import { setupComponentTest, settle } from './helpers/componentTest'
 
 /**
@@ -155,5 +155,59 @@ describe('CoverPanel 多文件拖入导入（OPT-9 回归）', () => {
     await dropPromise
     await settle()
     expect(wrapper.find('button.btn-primary').attributes('disabled')).toBeUndefined()
+  })
+})
+
+describe('CoverPanel 全屏画廊入口', () => {
+  /** 选中带两张封面的模型并打开画廊 */
+  async function mountWithGallery() {
+    selectModel({
+      cover: 'p1',
+      covers: [
+        { rel: 'c1', path: 'p1', url: 'u1' },
+        { rel: 'c2', path: 'p2', url: 'u2' }
+      ]
+    })
+    const wrapper = mount(CoverPanel, { attachTo: document.body })
+    await wrapper.find('.detail-cover').trigger('click')
+    await settle()
+    return wrapper
+  }
+
+  it('有封面时点击大图打开画廊（从默认封面起），Esc 关闭且详情保持选中', async () => {
+    const wrapper = await mountWithGallery()
+    const overlay = document.body.querySelector('.gallery-overlay')
+    expect(overlay).toBeTruthy()
+    expect(overlay.querySelector('.gallery-index').textContent).toBe('1 / 2')
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    )
+    await settle()
+    expect(document.body.querySelector('.gallery-overlay')).toBeNull()
+    expect(state.selectedId).toBe('m1')
+    wrapper.unmount()
+  })
+
+  it('画廊内 Delete 调出面板既有删除确认（不直接删除）', async () => {
+    const wrapper = await mountWithGallery()
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true })
+    )
+    await settle()
+    expect(state.confirm.visible).toBe(true)
+    expect(window.api.models.deleteCover).not.toHaveBeenCalled()
+    // 收敛挂起的确认 Promise，避免泄漏到后续用例
+    rejectConfirm()
+    await settle()
+    wrapper.unmount()
+  })
+
+  it('无封面时点击大图不打开画廊', async () => {
+    selectModel()
+    const wrapper = mount(CoverPanel, { attachTo: document.body })
+    await wrapper.find('.detail-cover').trigger('click')
+    await settle()
+    expect(document.body.querySelector('.gallery-overlay')).toBeNull()
+    wrapper.unmount()
   })
 })
