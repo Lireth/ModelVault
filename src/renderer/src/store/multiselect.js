@@ -162,6 +162,55 @@ export async function batchSetSubCategory(subCategory) {
 }
 
 /**
+ * 批量填入自动触发词（F3）：把各模型 safetensors 头部解析出的训练标签
+ * 候选（ss_tag_frequency 高频词）写入其触发词字段。触发词是 LoRA 的
+ * 「使用说明」，画图时找不到触发词是该品类最高频挫败点。
+ * 仅处理「触发词为空且有候选」的模型——绝不覆盖用户已有标注
+ * （与 sidecar 自动导入的「空字段才写入」同一原则）。
+ */
+export async function batchApplyTriggers() {
+  const ids = [...state.multiSelect.ids]
+  if (ids.length === 0 || state.multiSelect.busy) return
+  const byId = modelById.value
+  // 目标：有候选且当前无触发词的模型；其余静默跳过（汇总提示）
+  const targets = []
+  for (const id of ids) {
+    const m = byId.get(id)
+    const candidates = Array.isArray(m?.autoInfo?.triggerCandidates) ? m.autoInfo.triggerCandidates : []
+    if (!m || m.triggerWords || candidates.length === 0) continue
+    targets.push({ id, triggerWords: candidates.join(', ') })
+  }
+  if (targets.length === 0) {
+    toast('info', '选中模型均已有触发词或无自动解析候选')
+    return
+  }
+  state.multiSelect.busy = true
+  try {
+    const results = await Promise.allSettled(
+      targets.map(({ id, triggerWords }) =>
+        window.api.models.saveModelData({ id, triggerWords })
+      )
+    )
+    const metaMap = new Map()
+    let fail = 0
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled' && r.value?.meta) metaMap.set(targets[i].id, r.value.meta)
+      else fail += 1
+    })
+    const ok = applyMetaUpdates(metaMap, (meta) => ({
+      triggerWords: meta.triggerWords || '',
+      triggerWordsSource: meta.triggerWordsSource || ''
+    }))
+    const skipped = ids.length - targets.length
+    const suffix = skipped > 0 ? `（${skipped} 个已有触发词或无候选，未改动）` : ''
+    if (fail === 0) toast('success', `已为 ${ok} 个模型填入触发词${suffix}`)
+    else toast('warn', `触发词填入完成：成功 ${ok} 个，失败 ${fail} 个${suffix}`)
+  } finally {
+    state.multiSelect.busy = false
+  }
+}
+
+/**
  * 批量移入回收站（E4）：并发调用既有删除链路（含 sidecar 清理与元数据移除，
  * 主进程按文件独立处理、元数据走防抖原子持久化，可安全并发），全部 IPC
  * 结束后单趟移除已删除模型（O2）并统一提示。

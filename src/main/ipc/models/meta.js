@@ -1,6 +1,6 @@
-import { ipcMain } from 'electron'
 import logger from '../../logger'
 import { getModelMeta, setModelMeta } from '../../services/store'
+import { wrapHandler, checkModelId } from '../handler'
 
 /**
  * 元数据链路：详情页标注保存、快捷标记（收藏/NSFW/评分）。
@@ -29,10 +29,9 @@ export function mergeSaveModelData(existing, patch) {
 /** 注册元数据链路的 IPC 处理器 */
 export function registerMetaHandlers() {
   // 保存单个模型的元数据（备注名 / 推荐参数 / 备注 / 二级分类标签 / 触发词）
-  ipcMain.handle('models:saveModelData', (event, { id, alias, params, note, subCategory, triggerWords } = {}) => {
-    if (typeof id !== 'string' || !id) {
-      return { error: '无效的模型标识' }
-    }
+  wrapHandler('models:saveModelData', (event, { id, alias, params, note, subCategory, triggerWords } = {}) => {
+    const invalid = checkModelId(id)
+    if (invalid) return { error: invalid }
     // 合并已有元数据，避免覆盖丢失封面等未随本次请求传入的字段
     const existing = getModelMeta(id) || {}
     const merged = mergeSaveModelData(existing, { alias, params, note, subCategory })
@@ -47,13 +46,12 @@ export function registerMetaHandlers() {
     }
     logger.info(`模型元数据已保存: ${id}`)
     return { meta }
-  })
+  }, { errorPrefix: '元数据保存失败' })
 
   // 更新模型快捷标记（收藏/NSFW/评分；仅更新传入的字段，即时落盘）
-  ipcMain.handle('models:setMetaFlags', (event, { id, favorite, nsfw, rating } = {}) => {
-    if (typeof id !== 'string' || !id) {
-      return { error: '无效的模型标识' }
-    }
+  wrapHandler('models:setMetaFlags', (event, { id, favorite, nsfw, rating } = {}) => {
+    const invalid = checkModelId(id)
+    if (invalid) return { error: invalid }
     const patch = {}
     if (favorite !== undefined) {
       if (typeof favorite !== 'boolean') return { error: '无效的收藏状态' }
@@ -78,5 +76,5 @@ export function registerMetaHandlers() {
       return { error: '保存失败（模型需位于当前模型根目录内）' }
     }
     return { meta }
-  })
+  }, { errorPrefix: '标记保存失败' })
 }

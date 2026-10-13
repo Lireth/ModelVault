@@ -22,6 +22,7 @@
 // 状态单例、常量、纯函数
 export {
   state,
+  replaceSettings,
   MODEL_TYPES,
   SUB_CATEGORIES,
   LORA_TAGS,
@@ -82,6 +83,7 @@ export {
   batchNsfw,
   batchRating,
   batchSetSubCategory,
+  batchApplyTriggers,
   batchDeleteModels
 } from './multiselect'
 

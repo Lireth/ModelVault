@@ -1,4 +1,4 @@
-import { reactive } from 'vue'
+import { reactive, shallowReactive } from 'vue'
 // A-12 枚举/默认值单一来源（src/shared，渲染层经三级相对路径导入）：
 // 分类标签/排序/卡片尺寸/扫描扩展名/默认设置与主进程共用同一份纯数据定义
 import {
@@ -105,20 +105,34 @@ export function defaultSettings() {
   }
 }
 
-export const state = reactive({
+/**
+ * 全局响应式状态单例（O3 性能改造）：
+ * 顶层用 shallowReactive——数千模型的 models 数组元素不再深度代理，
+ * 大库下消除多层 Proxy 读取链与代理内存开销（项目更新模式本就是
+ * 「整体替换元素/数组」，深度代理并无必要）。
+ * 有嵌套变异的小集合（multiSelect.ids 的 push/splice、toasts、confirm
+ * 的逐字段赋值、settings 的深层字段写入如主题/卡片尺寸实时预览）
+ * 显式包 reactive 维持深响应——它们体量小，代理成本可忽略。
+ * models 的更新约定（必须遵守，否则浅响应下不触发界面更新）：
+ * - 元素级：state.models[i] = { ...old, patch }（第一层索引赋值）
+ * - 数组级：state.models = nextArray（整体替换）
+ * - 禁止：splice/push/sort 等原位变异与 Object.assign(元素, …)
+ */
+export const state = shallowReactive({
   folder: '',
   // 启动加载中（B8）：initApp 异步恢复上次的模型库期间为 true，
   // 防止「开始使用」引导页对已配置过文件夹的用户闪现
   booting: true,
   scanning: false,
   scanError: '',
-  progress: { dirs: 0, found: 0, current: '' },
+  progress: { dirs: 0, found: 0, current: '' }, // 每次整体替换，无需深响应
   lastScan: null, // { count, durationMs }
   models: [],
   // 筛选 / 排序（平铺字段始终为活动视图的镜像，B-02）
   typeFilter: 'all',
   subFilter: '', // LoRA 分类筛选（仅 typeFilter 为 lora 时生效）
   showFavoritesOnly: false, // 仅显示收藏的模型
+  minRating: 0, // 评分筛选（F1）：0 为不筛选，1-5 为仅显示 ≥N 星（会话态）
   search: '',
   sortBy: 'name', // name | type | size | mtime | favorite | rating
   sortAsc: true, // 排序方向：true 升序 / false 降序（收藏优先/按评分为固定语义排序，忽略方向，O1）
@@ -127,12 +141,23 @@ export const state = reactive({
   detailDirty: false, // 详情页表单有未保存的修改（由 ModelDetail 同步，切换/关闭前确认）
   // 多选批量操作（E4/E6）：ids 为选中模型 id 数组；busy 表示批量 IPC
   // 批量提交进行中（B6），期间按钮禁用、防连点重复提交
-  multiSelect: { active: false, ids: [], busy: false },
-  // 设置
-  settings: defaultSettings(),
+  multiSelect: reactive({ active: false, ids: [], busy: false }),
+  // 设置（深响应：主题/卡片尺寸实时预览等就地改深层字段）
+  settings: reactive(defaultSettings()),
   settingsOpen: false,
   // Toast
-  toasts: [],
-  // 自定义确认层（U4：替代阻塞且脱离主题的 window.confirm）
-  confirm: { visible: false, text: '', resolve: null }
+  toasts: reactive([]),
+  // 自定义确认层（U4：confirmDialog 逐字段赋值，需深响应）
+  confirm: reactive({ visible: false, text: '', resolve: null })
 })
+
+/**
+ * 就地整体替换应用设置（O3）：settings 的 reactive 包装不得被
+ * `state.settings = X` 整体替换绕开（替换后为 raw 对象，深层字段
+ * 赋值将失去响应）；统一经 Object.assign 就地合并，保持包装与
+ * 响应式依赖不变。
+ * @param {object} raw 新设置（通常为主进程规范化返回的完整设置）
+ */
+export function replaceSettings(raw) {
+  Object.assign(state.settings, raw)
+}

@@ -14,6 +14,7 @@ import { filteredModels as filteredFromModule } from '../src/renderer/src/store/
 const EXPECTED_EXPORTS = [
   // 状态与常量
   'state',
+  'replaceSettings',
   'MODEL_TYPES',
   'SUB_CATEGORIES',
   'LORA_TAGS',
@@ -70,6 +71,7 @@ const EXPECTED_EXPORTS = [
   'batchNsfw',
   'batchRating',
   'batchSetSubCategory',
+  'batchApplyTriggers',
   'batchDeleteModels',
   // 封面/详情保存
   'saveModelData',

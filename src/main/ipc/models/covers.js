@@ -1,10 +1,11 @@
-import { BrowserWindow, ipcMain } from 'electron'
+import { BrowserWindow } from 'electron'
 import logger from '../../logger'
 import { getModelMeta, relativizeCover, setModelMeta } from '../../services/store'
 import { deleteCoverFile, importCoverFromPath, pickAndSaveCover, saveClipboardImage } from '../../services/covers'
 import { getThumbPathDeferred } from '../../services/thumbs'
 import { toImageUrl } from '../../protocol'
 import { resolveCoverSafe, sendThumbReady, startThumbDrain, trackDeferredOwner } from './decorate'
+import { wrapHandler, checkModelId } from '../handler'
 
 /**
  * 封面链路：上传 / 粘贴 / 拖拽导入 / 设置默认 / 删除封面。
@@ -84,10 +85,9 @@ async function refreshCoverThumbnail(win, modelId, absCover) {
 /** 注册封面链路的 IPC 处理器 */
 export function registerCoverHandlers() {
   // 上传/添加模型封面图（追加到多封面列表，无默认时设为默认）
-  ipcMain.handle('models:uploadCover', async (event, { id } = {}) => {
-    if (typeof id !== 'string' || !id) {
-      return { error: '无效的模型标识' }
-    }
+  wrapHandler('models:uploadCover', async (event, { id } = {}) => {
+    const invalid = checkModelId(id)
+    if (invalid) return { error: invalid }
     const win = BrowserWindow.fromWebContents(event.sender)
     const result = await pickAndSaveCover(win)
     if (result.canceled) return { canceled: true }
@@ -98,13 +98,12 @@ export function registerCoverHandlers() {
     logger.info(`模型封面已添加: ${id}`)
     await refreshCoverThumbnail(win, id, applied.meta.cover ? resolveCoverSafe(applied.meta.cover) : '')
     return buildCoverResponse(result.cover, applied.meta)
-  })
+  }, { errorPrefix: '封面上传失败' })
 
   // 将剪贴板中的图片添加为模型预览图
-  ipcMain.handle('models:pasteCover', async (event, { id } = {}) => {
-    if (typeof id !== 'string' || !id) {
-      return { error: '无效的模型标识' }
-    }
+  wrapHandler('models:pasteCover', async (event, { id } = {}) => {
+    const invalid = checkModelId(id)
+    if (invalid) return { error: invalid }
     const result = await saveClipboardImage()
     if (result.error) return result
 
@@ -117,13 +116,12 @@ export function registerCoverHandlers() {
       applied.meta.cover ? resolveCoverSafe(applied.meta.cover) : ''
     )
     return buildCoverResponse(result.cover, applied.meta)
-  })
+  }, { errorPrefix: '封面粘贴失败' })
 
   // 设置默认封面（首页卡片显示的图片）
-  ipcMain.handle('models:setDefaultCover', async (event, { id, cover } = {}) => {
-    if (typeof id !== 'string' || !id || typeof cover !== 'string' || !cover) {
-      return { error: '无效的参数' }
-    }
+  wrapHandler('models:setDefaultCover', async (event, { id, cover } = {}) => {
+    const invalid = checkModelId(id) || (typeof cover === 'string' && cover ? '' : '无效的封面参数')
+    if (invalid) return { error: invalid }
     const existing = getModelMeta(id) || {}
     const covers = Array.isArray(existing.covers) ? existing.covers : []
     if (!covers.includes(cover)) {
@@ -140,13 +138,12 @@ export function registerCoverHandlers() {
       resolveCoverSafe(meta.cover)
     )
     return buildCoverResponse(resolveCoverSafe(cover), meta)
-  })
+  }, { errorPrefix: '默认封面设置失败' })
 
   // 删除单张封面（更新元数据默认封面，并删除物理文件）
-  ipcMain.handle('models:deleteCover', async (event, { id, cover } = {}) => {
-    if (typeof id !== 'string' || !id || typeof cover !== 'string' || !cover) {
-      return { error: '无效的参数' }
-    }
+  wrapHandler('models:deleteCover', async (event, { id, cover } = {}) => {
+    const invalid = checkModelId(id) || (typeof cover === 'string' && cover ? '' : '无效的封面参数')
+    if (invalid) return { error: invalid }
     const existing = getModelMeta(id) || {}
     const covers = Array.isArray(existing.covers) ? existing.covers : []
     if (!covers.includes(cover)) {
@@ -167,13 +164,12 @@ export function registerCoverHandlers() {
     if (abs) await deleteCoverFile(abs)
     logger.info(`封面已删除: ${id} -> ${cover}`)
     return buildCoverResponse(resolveCoverSafe(meta.cover), meta)
-  })
+  }, { errorPrefix: '封面删除失败' })
 
   // 拖拽导入封面：将外部图片文件复制到封面目录并追加到封面列表
-  ipcMain.handle('models:importCover', async (event, { id, path: source } = {}) => {
-    if (typeof id !== 'string' || !id) {
-      return { error: '无效的模型标识' }
-    }
+  wrapHandler('models:importCover', async (event, { id, path: source } = {}) => {
+    const invalid = checkModelId(id)
+    if (invalid) return { error: invalid }
     const result = await importCoverFromPath(source)
     if (result.error) return result
     const applied = appendCoverMeta(id, result.cover)
@@ -185,5 +181,5 @@ export function registerCoverHandlers() {
       applied.meta.cover ? resolveCoverSafe(applied.meta.cover) : ''
     )
     return buildCoverResponse(result.cover, applied.meta)
-  })
+  }, { errorPrefix: '封面导入失败' })
 }

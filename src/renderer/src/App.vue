@@ -9,6 +9,7 @@ import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import {
   acceptConfirm,
   applyThumbUpdates,
+  batchApplyTriggers,
   batchDeleteModels,
   batchFavorite,
   batchNsfw,
@@ -355,6 +356,12 @@ onUnmounted(() => {
             :title="`批量评 ${i} 星`"
             @click="batchRating(i)"
           >★</button>
+          <button
+            class="btn"
+            :disabled="!batchReady"
+            title="将各模型 safetensors 自动解析的训练标签候选批量填入触发词（已有触发词的模型不改动）"
+            @click="batchApplyTriggers"
+          >填触发词</button>
           <template v-if="multiSelectTags.length">
             <span class="batch-sep"></span>
             <span class="batch-label">标签</span>

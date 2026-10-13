@@ -1,5 +1,4 @@
-import { BrowserWindow, ipcMain } from 'electron'
-import fs from 'node:fs/promises'
+import { BrowserWindow } from 'electron'
 import logger from '../../logger'
 import { getSettings, relinkScannedMeta, updateSettings } from '../../services/store'
 import { scanModels } from '../../services/scanner'
@@ -9,6 +8,7 @@ import { syncWatcher } from '../../services/watcher'
 import { clearDeferredOwners, decorateModels, startThumbDrain } from './decorate'
 import { ensureRootStore } from './store'
 import { getDecorateCacheRoot, awaitThumbDrain, resetDecorateCache } from './model-state'
+import { wrapHandler, checkExistingDirectory } from '../handler'
 
 /**
  * 扫描链路：全量扫描模型目录（进度推送、可取消）与取消入口。
@@ -39,7 +39,7 @@ function isKnownLibrary(dir) {
 export function registerScanHandlers() {
   // 扫描模型目录（耗时操作，进度通过 models:scanProgress 事件推送，
   // 可经 models:cancelScan 取消）
-  ipcMain.handle('models:scan', async (event, { folder } = {}) => {
+  wrapHandler('models:scan', async (event, { folder } = {}) => {
     // 同步先检查并置位扫描状态：任何 await 之前完成，
     // 防止并发请求在事件循环间隙双重进入（B4）
     if (scanning) {
@@ -49,7 +49,7 @@ export function registerScanHandlers() {
     scanAbort = new AbortController()
     const signal = scanAbort.signal
     const startedAt = Date.now()
-    let root = ''
+    let root
 
     try {
       // 复用内存中的设置（B3）：应用启动时已 loadSettings，热路径无需重读磁盘，
@@ -60,13 +60,9 @@ export function registerScanHandlers() {
       }
       // 扫描目录必须是已存在的目录（C6）：防止任意字符串路径（如已删除目录、
       // 或误传文件/系统根）在 ensureRootStore 中创建 .modelvault 写入元数据
-      try {
-        const stat = await fs.stat(root)
-        if (!stat.isDirectory()) {
-          return { error: '模型文件夹不存在或不是目录' }
-        }
-      } catch {
-        return { error: '模型文件夹不存在或不是目录' }
+      const dirInvalid = await checkExistingDirectory(root, '模型文件夹不存在或不是目录')
+      if (dirInvalid) {
+        return { error: dirInvalid }
       }
       // 白名单校验（B1）：扫描目录必须已在模型库列表中。存在性校验只保证
       // 「路径可用」，不保证「用户想把这里当库」——无白名单时任意可写目录
@@ -154,21 +150,14 @@ export function registerScanHandlers() {
         // 本次扫描自动重新关联的移动/重命名模型数（A-02，渲染层据此提示）
         relinked: relinkResult.relinked
       }
-    } catch (err) {
-      if (err?.name === 'AbortError') {
-        logger.info(`扫描已取消: ${root}`)
-        return { canceled: true }
-      }
-      logger.error(`扫描失败: ${err.stack || err.message}`)
-      return { error: `扫描失败: ${err.message}` }
     } finally {
       scanning = false
       scanAbort = null
     }
-  })
+  }, { errorPrefix: '扫描失败' })
 
   // 取消进行中的扫描（经 AbortController 中止，扫描返回 { canceled: true }）
-  ipcMain.handle('models:cancelScan', () => {
+  wrapHandler('models:cancelScan', () => {
     if (scanning && scanAbort) {
       scanAbort.abort()
       return { ok: true }
@@ -179,7 +168,7 @@ export function registerScanHandlers() {
   // 局部增量扫描（A-03）：watcher 检出变更子树后，仅重扫这些子树并装饰返回。
   // 与全量扫描共用同一把 scanning 锁（互斥）；不做孤儿封面清理（全量扫描兜底）、
   // 不回写设置/不重启 watcher；重关联限定在受影响子树内。
-  ipcMain.handle('models:partialScan', async (event, { folder, dirs } = {}) => {
+  wrapHandler('models:partialScan', async (event, { folder, dirs } = {}) => {
     if (scanning) {
       return { error: '正在扫描中，请稍候' }
     }
@@ -212,11 +201,9 @@ export function registerScanHandlers() {
       logger.warn(`拒绝局部扫描模型库列表之外的目录: ${root}`)
       return { error: '该目录不在模型库列表中' }
     }
-    try {
-      const stat = await fs.stat(root)
-      if (!stat.isDirectory()) return { error: '模型文件夹不存在或不是目录' }
-    } catch {
-      return { error: '模型文件夹不存在或不是目录' }
+    const dirInvalid = await checkExistingDirectory(root, '模型文件夹不存在或不是目录')
+    if (dirInvalid) {
+      return { error: dirInvalid }
     }
 
     const startedAt = Date.now()
@@ -260,13 +247,9 @@ export function registerScanHandlers() {
         relinked: relinkResult.relinked,
         durationMs: Date.now() - startedAt
       }
-    } catch (err) {
-      if (err?.name === 'AbortError') return { canceled: true }
-      logger.error(`局部扫描失败: ${err.stack || err.message}`)
-      return { error: `局部扫描失败: ${err.message}` }
     } finally {
       scanning = false
       scanAbort = null
     }
-  })
+  }, { errorPrefix: '局部扫描失败' })
 }

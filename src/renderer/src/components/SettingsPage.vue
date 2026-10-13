@@ -7,6 +7,7 @@ import {
   closeSettings,
   confirmDialog,
   defaultSettings,
+  replaceSettings,
   revealModel,
   saveSettings,
   SCAN_EXTENSION_OPTIONS,
@@ -60,15 +61,20 @@ function fillForm() {
 
 /* ---------------- 脏数据保护（A9，与详情页 C8 标准一致） ---------------- */
 
-/** 打开时的表单值快照，作为脏检测基线 */
-let savedSnapshot = ''
+/**
+ * 打开时的表单字段快照，作为脏检测基线（O4：字段级快照取代全量
+ * JSON.stringify——excludeText 是多行 textarea 击键热路径，此前每次
+ * 击键都执行行解析 + Set 去重 + 数组排序 + 全对象序列化；字段比较
+ * O(1)，规范化只在保存时发生一次）。
+ */
+let savedSnapshot = null
 
-/** 当前表单值的规范化快照（保存时对 excludeDirs 做同样的解析归一） */
+/** 表单字段快照（excludeDirs 按原文记录：文本相同解析结果必相同） */
 function formSnapshotValue() {
-  return JSON.stringify({
+  return {
     autoScan: form.autoScan,
     autoRescan: form.autoRescan,
-    excludeDirs: parseExcludeDirs(),
+    excludeText: form.excludeText,
     theme: form.theme,
     cardSize: form.cardSize,
     sortBy: form.sortBy,
@@ -76,11 +82,27 @@ function formSnapshotValue() {
     showSize: form.showSize,
     showMtime: form.showMtime,
     showParams: form.showParams
-  })
+  }
 }
 
-/** 设置表单是否有未保存的修改 */
-const settingsDirty = computed(() => formSnapshotValue() !== savedSnapshot)
+/** 设置表单是否有未保存的修改（逐字段比较；响应式依赖收敛到具体字段） */
+const settingsDirty = computed(() => {
+  const s = savedSnapshot
+  if (!s) return false
+  return (
+    form.autoScan !== s.autoScan ||
+    form.autoRescan !== s.autoRescan ||
+    form.excludeText !== s.excludeText ||
+    form.theme !== s.theme ||
+    form.cardSize !== s.cardSize ||
+    form.sortBy !== s.sortBy ||
+    form.showSize !== s.showSize ||
+    form.showMtime !== s.showMtime ||
+    form.showParams !== s.showParams ||
+    form.scanExtensions.length !== s.scanExtensions.length ||
+    form.scanExtensions.slice().sort().some((e, i) => e !== s.scanExtensions[i])
+  )
+})
 
 /** 组件挂载时（settingsOpen 已为 true，watch 不会触发）以及后续打开时填充表单 */
 onMounted(() => {
@@ -245,7 +267,7 @@ async function onImportBackup() {
     // 避免恢复后用旧表单值保存，把刚恢复的设置覆盖回去
     const data = await window.api.models.loadStore().catch(() => null)
     if (data?.settings) {
-      state.settings = { ...defaultSettings(), ...data.settings }
+      replaceSettings({ ...defaultSettings(), ...data.settings })
       applyTheme(state.settings.theme)
       state.sortBy = state.settings.sortBy || state.sortBy
       state.sortAsc = state.settings.sortAsc !== false

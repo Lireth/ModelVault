@@ -160,10 +160,18 @@ function scheduleBroadcast(w, changedDirs = []) {
   }, w.debounceMs)
 }
 
-/** 是否存在可见（未最小化）的主窗口；无窗口/无法判定时按可见处理 */
+/**
+ * 是否存在可见（未隐藏且未最小化）的主窗口；无窗口/无法判定时按可见处理。
+ * O6 修复：Electron 最小化窗口 isVisible() 仍返回 true，仅判 isVisible 会使
+ * 「窗口最小化：跳过目录遍历，移动硬盘不被唤醒」（A-07b 目标）落空——
+ * 最小化挂后台时全树 readdir 照常执行。isMinimized 与 isVisible 双判。
+ */
 function windowsVisible() {
   return BrowserWindow.getAllWindows().some(
-    (win) => !win.isDestroyed() && (typeof win.isVisible !== 'function' || win.isVisible())
+    (win) =>
+      !win.isDestroyed() &&
+      (typeof win.isVisible !== 'function' || win.isVisible()) &&
+      (typeof win.isMinimized !== 'function' || !win.isMinimized())
   )
 }
 

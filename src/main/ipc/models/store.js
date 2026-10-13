@@ -1,5 +1,4 @@
-import { BrowserWindow, dialog, ipcMain } from 'electron'
-import fs from 'node:fs/promises'
+import { BrowserWindow, dialog } from 'electron'
 import logger from '../../logger'
 import {
   getMetaMapByAbsPath,
@@ -14,26 +13,15 @@ import {
 import { pruneOrphanCovers } from '../../services/covers'
 import { syncWatcher } from '../../services/watcher'
 import { awaitThumbDrain } from './model-state'
+import { wrapHandler, checkExistingDirectory } from '../handler'
 
 /**
  * 存储与设置链路：持久化数据加载、模型根目录选择、应用设置更新。
  * ensureRootStore 是全域切换关联存储的唯一入口（扫描与 loadStore 共用）。
+ * 目录存在性校验收敛于 ipc/handler.js 的 checkExistingDirectory（O2）：
+ * 拦截渲染进程经 settings:update 写入的任意字符串路径——若不做校验，
+ * 后续任意一次元数据写入即在该目录创建 .modelvault/（任意目录写入原语）。
  */
-
-/**
- * 校验路径是已存在的目录（与 models:scan 的目录校验同规则）。
- * 用于拦截渲染进程经 settings:update 写入的任意字符串路径：
- * 若不做校验，后续任意一次元数据写入即在该目录创建 .modelvault/，
- * 形成「任意目录写入」原语。
- */
-async function isExistingDirectory(p) {
-  try {
-    const stat = await fs.stat(p)
-    return stat.isDirectory()
-  } catch {
-    return false
-  }
-}
 
 /**
  * 确保指定根目录的关联存储已加载。
@@ -72,13 +60,17 @@ export function setupStoreErrorForwarding() {
 /** 注册存储与设置链路的 IPC 处理器 */
 export function registerStoreHandlers() {
   // 加载持久化数据（设置 + 当前模型根目录的元数据，键为绝对路径）
-  ipcMain.handle('models:loadStore', async () => {
+  wrapHandler('models:loadStore', async () => {
     const settings = await loadSettings()
     let metaMap = {}
     if (settings.modelsFolder) {
       // 已设置目录不存在（如磁盘离线/被移动）时不切换关联存储，
-      // 防止后续元数据写入在不存在的路径下重建目录树
-      if (await isExistingDirectory(settings.modelsFolder)) {
+      // 防止后续元数据写入在不存在的路径下重建目录树。
+      // checkExistingDirectory 返回空串表示存在（O2 助手语义）
+      const dirMissing = await checkExistingDirectory(settings.modelsFolder)
+      if (dirMissing) {
+        logger.warn(`已设置的模型目录不存在，跳过关联存储加载: ${settings.modelsFolder}`)
+      } else {
         await ensureRootStore(settings.modelsFolder)
         // 清理不再被元数据引用的孤儿封面文件
         await pruneOrphanCovers()
@@ -91,18 +83,16 @@ export function registerStoreHandlers() {
           settings.autoRescan === true,
           settings.excludeDirs || []
         )
-      } else {
-        logger.warn(`已设置的模型目录不存在，跳过关联存储加载: ${settings.modelsFolder}`)
       }
     }
     return {
       settings,
       models: metaMap
     }
-  })
+  }, { errorPrefix: '数据加载失败' })
 
   // 选择模型根目录
-  ipcMain.handle('models:chooseFolder', async (event) => {
+  wrapHandler('models:chooseFolder', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const result = await dialog.showOpenDialog(win, {
       title: '选择模型文件夹',
@@ -113,10 +103,10 @@ export function registerStoreHandlers() {
     await updateSettings({ modelsFolder: folder })
     logger.info(`模型目录已设置为: ${folder}`)
     return folder
-  })
+  }, { errorPrefix: '选择文件夹失败' })
 
   // 更新应用设置（通用/扫描/外观），返回规范化后的完整设置
-  ipcMain.handle('settings:update', async (event, patch = {}) => {
+  wrapHandler('settings:update', async (event, patch = {}) => {
     // modelsFolder / modelsFolders（E7 多根目录）的变更项必须是真实存在的目录：
     // 防止渲染进程写入任意路径后，经元数据写入在该目录创建 .modelvault
     // （任意目录写入原语）。与当前值相同的路径不重复校验：
@@ -136,9 +126,14 @@ export function registerStoreHandlers() {
       }
     }
     for (const folder of candidates) {
-      if (!currentKeys.has(folder.toLowerCase()) && !(await isExistingDirectory(folder))) {
+      if (currentKeys.has(folder.toLowerCase())) continue
+      const dirInvalid = await checkExistingDirectory(
+        folder,
+        `模型文件夹不存在或不是目录: ${folder}`
+      )
+      if (dirInvalid) {
         logger.warn(`拒绝设置不存在的模型目录: ${folder}`)
-        return { error: `模型文件夹不存在或不是目录: ${folder}` }
+        return { error: dirInvalid }
       }
     }
     await updateSettings(patch)
@@ -152,5 +147,5 @@ export function registerStoreHandlers() {
     )
     logger.info(`应用设置已更新: ${JSON.stringify(patch).slice(0, 200)}`)
     return { settings }
-  })
+  }, { errorPrefix: '设置保存失败' })
 }

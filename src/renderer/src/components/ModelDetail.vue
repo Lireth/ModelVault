@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import AutoInfoPanel from './detail/AutoInfoPanel.vue'
 import CoverPanel from './detail/CoverPanel.vue'
-import { PARAM_LIMITS, SAMPLERS, SCHEDULERS, PRECISIONS } from '../constants/modelParams'
+import { PARAM_LIMITS, SAMPLERS, SCHEDULERS, PRECISIONS, PARAM_PRESETS, matchParamPreset } from '../constants/modelParams'
 import {
   closeDetail,
   formatSize,
@@ -53,8 +53,8 @@ function fillForm(model) {
   form.triggerWords = model?.triggerWords || ''
   // 大模型自动标注为「基底模型」分类
   if (model?.type === 'checkpoint') form.subCategory = 'base'
-  // 脏检测基线快照（C8）：填充后与表单当前值对比
-  formSnapshot.value = JSON.stringify(form)
+  // 脏检测基线快照（C8）：填充后与表单当前值对比（字段快照，见 formDirty）
+  formSnapshot.value = { ...form }
 }
 
 /** 切换二级分类标签（再次点击取消标注）；基底模型为自动分类，不可手动更改 */
@@ -66,15 +66,28 @@ function toggleSubCategory(key) {
 /* ---------------- 表单脏数据保护（C8） ---------------- */
 
 /**
- * 填充后的表单快照（序列化值），用于脏检测。
+ * 填充后的表单快照（各字段值），用于脏检测。
  * 必须为 ref：plain 变量不参与响应式依赖追踪——保存后重置快照不会令
  * formDirty 重算（随后同 id 的引用替换又走「保留编辑」跳分支），
  * detailDirty 将残留 true，切换/关闭模型时误弹「有未保存修改」确认。
  */
-const formSnapshot = ref('')
+const formSnapshot = ref(null)
 
-/** 表单是否有未保存的修改（与最近一次填充/保存的值不一致） */
-const formDirty = computed(() => JSON.stringify(form) !== formSnapshot.value)
+/** 表单字段清单（脏检测用，与 form 的字段一一对应） */
+const FORM_KEYS = [
+  'alias', 'steps', 'cfgMin', 'cfgMax', 'sampler', 'scheduler', 'precision',
+  'resMin', 'resMax', 'note', 'subCategory', 'triggerWords'
+]
+
+/**
+ * 表单是否有未保存的修改（与最近一次填充/保存的值不一致）。
+ * O4：字段级比较取代全量 JSON.stringify——备注最长 2000 字符、触发词
+ * 1000 字符，此前每次击键都序列化整个表单；字段比较 O(12) 恒定，
+ * 响应式依赖也收敛到具体字段（击键只使对应字段的比较失效）。
+ */
+const formDirty = computed(() =>
+  FORM_KEYS.some((k) => form[k] !== formSnapshot.value?.[k])
+)
 
 watch(selectedModel, (m, old) => {
   // 同一模型的引用替换（收藏/评分、后台缩略图补齐）且表单有未保存编辑时
@@ -108,6 +121,28 @@ function onAutoApplyTriggers(words) {
   }
   form.triggerWords = words.join(', ')
   toast('success', '触发词已填入表单，点击「保存参数」生效')
+}
+
+/* ---------------- 推荐参数模板（F5） ---------------- */
+
+/** 按自动解析的基底模型匹配的模板（无 autoInfo/无匹配时为 null） */
+const autoPreset = computed(() => matchParamPreset(selectedModel.value?.autoInfo?.baseModel || ''))
+
+/**
+ * 将模板填入表单（不自动保存：填表后用户确认再点「保存参数」）。
+ * 按基底模型推荐的那个按钮高亮显示，其余模板可手动选用。
+ */
+function onApplyPreset(preset) {
+  const p = preset.params
+  form.steps = String(p.steps)
+  form.cfgMin = String(p.cfgMin)
+  form.cfgMax = String(p.cfgMax)
+  form.sampler = p.sampler
+  form.scheduler = p.scheduler
+  form.precision = p.precision
+  form.resMin = String(p.resMin)
+  form.resMax = String(p.resMax)
+  toast('success', `已填入 ${preset.label} 推荐模板，点击「保存参数」生效`)
 }
 
 /* ---------------- 收藏 / 评分 ---------------- */
@@ -250,7 +285,7 @@ async function onSave() {
     const saved = await saveModelData(model.id, payload)
     // 仅保存成功才以当前表单刷新基线（C8）；失败时保留脏标记，
     // 用户可重试，且切换/关闭模型时仍会收到未保存修改的确认
-    if (saved) formSnapshot.value = JSON.stringify(form)
+    if (saved) formSnapshot.value = { ...form }
   } catch (err) {
     toast('error', `保存失败: ${err.message}`)
   } finally {
@@ -347,7 +382,25 @@ async function onSave() {
               </dl>
             </div>
 
-            <h3>推荐参数</h3>
+            <h3 class="params-heading">
+              推荐参数
+              <!-- 模板一键填表（F5）：按基底模型推荐的按钮高亮，其余可手动选用 -->
+              <span class="preset-row">
+                <button
+                  v-for="p in PARAM_PRESETS"
+                  :key="p.key"
+                  class="preset-btn"
+                  :class="{ recommended: p.key === autoPreset?.key }"
+                  :title="
+                    p.key === autoPreset?.key
+                      ? `根据自动解析的基底模型（${selectedModel?.autoInfo?.baseModel}）推荐`
+                      : `填入 ${p.label} 常用参数模板`
+                  "
+                  type="button"
+                  @click="onApplyPreset(p)"
+                >{{ p.label }}</button>
+              </span>
+            </h3>
             <div class="form-grid">
               <label class="field">
                 <span>采样步数 (Sampling Steps)</span>
@@ -537,6 +590,42 @@ async function onSave() {
   color: var(--accent);
   letter-spacing: 1px;
   margin-top: 4px;
+}
+
+/* 推荐参数标题行：右侧内联模板按钮组（F5） */
+.params-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.preset-row {
+  display: flex;
+  gap: 6px;
+}
+
+.preset-btn {
+  font-size: 11px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.preset-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 按基底模型自动匹配到的推荐模板 */
+.preset-btn.recommended {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--bg-active);
 }
 
 /* ---------- 收藏 / 评分 ---------- */

@@ -3,6 +3,7 @@ import {
   acceptConfirm,
   allFilteredSelected,
   applyThumbUpdates,
+  batchApplyTriggers,
   batchDeleteModels,
   batchFavorite,
   batchSetSubCategory,
@@ -82,6 +83,7 @@ beforeEach(() => {
   state.typeFilter = 'all'
   state.subFilter = ''
   state.showFavoritesOnly = false
+  state.minRating = 0
   state.search = ''
   state.sortBy = 'name'
   state.sortAsc = true
@@ -90,7 +92,8 @@ beforeEach(() => {
   state.settingsOpen = false
   state.toasts.splice(0, state.toasts.length)
   if (state.confirm.resolve) state.confirm.resolve(false)
-  state.confirm = { visible: false, text: '', resolve: null }
+  // O3：state 为 shallowReactive，confirm 是内嵌深响应集合，就地表合并复位
+  Object.assign(state.confirm, { visible: false, text: '', resolve: null })
 })
 
 describe('partialScanModels 增量合并（A-03）', () => {
@@ -328,6 +331,59 @@ describe('筛选与排序（filteredModels）', () => {
     expect(filteredModels.value).toHaveLength(0)
     state.search = '新备注'
     expect(filteredModels.value.map((m) => m.id)).toEqual(['m1'])
+  })
+
+  it('评分筛选 ≥N 星（F1）：标注过的评分可反查，0 恢复全部', () => {
+    state.models = [
+      makeModel('low', { name: '低分', rating: 1 }),
+      makeModel('mid', { name: '中等', rating: 3 }),
+      makeModel('high', { name: '高分', rating: 5 }),
+      makeModel('none', { name: '未评分', rating: 0 })
+    ]
+    state.minRating = 3
+    // 默认名称排序（zh-CN）：高(gao) < 中(zhong)
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['high', 'mid'])
+    state.minRating = 5
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['high'])
+    state.minRating = 0
+    expect(filteredModels.value).toHaveLength(4)
+  })
+
+  it('隐藏 NSFW 模型（F1，持久化设置）：开启后列表整体过滤', () => {
+    state.models = [
+      makeModel('safe', { name: '普通', nsfw: false }),
+      makeModel('risky', { name: '标记', nsfw: true })
+    ]
+    expect(state.settings.hideNsfw).toBe(false)
+    expect(filteredModels.value).toHaveLength(2)
+    Object.assign(state.settings, { hideNsfw: true })
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['safe'])
+    Object.assign(state.settings, { hideNsfw: false })
+    expect(filteredModels.value).toHaveLength(2)
+  })
+
+  it('搜索域纳入 safetensors 自动解析信息（F2）：作者/基底模型/训练标签可命中', () => {
+    state.models = [
+      makeModel('lora1', {
+        name: '神秘模型',
+        autoInfo: { baseModel: 'sd_xl_base_1.0', author: 'KohyaStyle', triggerCandidates: ['masterpiece', 'best quality'] }
+      }),
+      makeModel('lora2', { name: '普通模型', autoInfo: null })
+    ]
+    // 按基底模型搜（「那个 SDXL 的 LoRA 在哪」；真实头部值形如 sd_xl_base_1.0，
+    // 搜索为子串匹配——搜「sd_xl」或「xl_base」均可命中）
+    state.search = 'sd_xl'
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['lora1'])
+    // 按作者搜
+    state.search = 'kohya'
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['lora1'])
+    // 按训练标签候选搜
+    state.search = 'masterpiece'
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['lora1'])
+    // 无 autoInfo 的模型不受空字段干扰
+    state.search = '普通'
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['lora2'])
+    state.search = ''
   })
 
   it('收藏优先排序：收藏在前，组内按名称；固定语义不响应方向翻转（O1）', () => {
@@ -630,6 +686,40 @@ describe('批量操作单次状态合并（O2）', () => {
     expect(api.models.deleteModel).toHaveBeenCalledTimes(1)
     expect(state.models).toHaveLength(0)
     expect(state.multiSelect.busy).toBe(false)
+  })
+
+  it('批量填入自动触发词（F3）：仅填空触发词且有候选的模型，绝不覆盖已有标注', async () => {
+    state.models = [
+      makeModel('fresh', { autoInfo: { triggerCandidates: ['tag-a', 'tag-b'] } }),
+      makeModel('owned', { triggerWords: '已有词', autoInfo: { triggerCandidates: ['tag-x'] } }),
+      makeModel('nocand', { autoInfo: null })
+    ]
+    state.multiSelect.ids = ['fresh', 'owned', 'nocand']
+    api.models.saveModelData.mockImplementation(({ triggerWords }) =>
+      Promise.resolve({ meta: { triggerWords, triggerWordsSource: '' } })
+    )
+
+    await batchApplyTriggers()
+
+    // 仅对「fresh」发起保存：已有触发词与无候选的模型跳过
+    expect(api.models.saveModelData).toHaveBeenCalledTimes(1)
+    expect(api.models.saveModelData.mock.calls[0][0]).toEqual({
+      id: 'fresh',
+      triggerWords: 'tag-a, tag-b'
+    })
+    // 本地列表同步填入结果，其余模型不受影响
+    expect(state.models[0].triggerWords).toBe('tag-a, tag-b')
+    expect(state.models[1].triggerWords).toBe('已有词')
+    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已为 1 个模型填入触发词'))).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('2 个已有触发词或无候选'))).toBe(true)
+  })
+
+  it('批量填入触发词：选中模型全部无可填时提示且零 IPC', async () => {
+    state.models = [makeModel('owned', { triggerWords: 'x' })]
+    state.multiSelect.ids = ['owned']
+    await batchApplyTriggers()
+    expect(api.models.saveModelData).not.toHaveBeenCalled()
+    expect(state.toasts.some((t) => t.text.includes('均已有触发词或无自动解析候选'))).toBe(true)
   })
 })
 

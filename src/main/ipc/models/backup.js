@@ -1,11 +1,12 @@
 import path from 'node:path'
-import { BrowserWindow, ipcMain } from 'electron'
+import { BrowserWindow } from 'electron'
 import logger from '../../logger'
 import { exportBackup, importBackup } from '../../services/backup'
 import { getCurrentRoot, reloadCurrentRootData } from '../../services/store'
 import { clearDeferredJobs } from '../../services/thumbs'
 import { resetDecorateCache, awaitThumbDrain } from './model-state'
 import { clearDeferredOwners } from './decorate'
+import { wrapHandler } from '../handler'
 
 /**
  * 备份与恢复链路（FEAT-3）：
@@ -16,7 +17,7 @@ import { clearDeferredOwners } from './decorate'
 /** 注册备份与恢复链路的 IPC 处理器 */
 export function registerBackupHandlers() {
   // 导出备份：返回 { path, sizeBytes, library, models, covers } / { canceled } / { error }
-  ipcMain.handle('models:exportBackup', async (event) => {
+  wrapHandler('models:exportBackup', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const res = await exportBackup(win)
     if (res.error) {
@@ -25,10 +26,10 @@ export function registerBackupHandlers() {
       logger.info(`备份已导出: ${res.path}（${res.models} 模型 / ${res.covers} 封面）`)
     }
     return res
-  })
+  }, { errorPrefix: '备份导出失败' })
 
   // 从备份恢复：返回 { settingsRestored, libraryRestored? } / { canceled } / { error }
-  ipcMain.handle('models:importBackup', async (event) => {
+  wrapHandler('models:importBackup', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const res = await importBackup(win)
     // 恢复目标为当前激活根时的善后（B1）：磁盘 store.json 已被整目录替换，
@@ -57,5 +58,5 @@ export function registerBackupHandlers() {
       logger.info(`备份已恢复: 设置=${res.settingsRestored} 库=${res.libraryRestored?.root || '无'}`)
     }
     return res
-  })
+  }, { errorPrefix: '备份恢复失败' })
 }

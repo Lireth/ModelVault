@@ -41,7 +41,8 @@ export async function deleteModel(id, opts = {}) {
     return false
   }
   const idx = state.models.findIndex((m) => m.id === id)
-  if (idx >= 0) state.models.splice(idx, 1)
+  // O3 约定：浅响应下原位 splice 不触发更新，须整体替换数组
+  if (idx >= 0) state.models = state.models.filter((m) => m.id !== id)
   if (state.selectedId === id) state.selectedId = null
   if (!opts.silent) toast('success', '模型已移入回收站')
   return true
@@ -49,32 +50,44 @@ export async function deleteModel(id, opts = {}) {
 
 /**
  * 导出当前（筛选后）模型列表到文件（E2）。
+ * in-flight 防重（O7）：导出含保存对话框与整列表 IPC，期间连点会重复
+ * 弹窗/重复写盘——busy 期间入口直接拦截。
  * @param {'csv'} format 导出格式
  */
+let exporting = false
 export async function exportModels(format) {
+  if (exporting) return
   const list = filteredModels.value
   if (list.length === 0) {
     toast('warn', '当前列表为空，无可导出的模型')
     return
   }
-  const rows = list.map((m) => ({
-    id: m.id,
-    name: m.name,
-    alias: m.alias || '',
-    type: m.type,
-    subCategory: m.subCategory || '',
-    favorite: m.favorite === true,
-    nsfw: m.nsfw === true,
-    rating: m.rating || 0,
-    triggerWords: m.triggerWords || '',
-    note: m.note || '',
-    size: m.size,
-    mtimeMs: m.mtimeMs,
-    // params 来自 reactive state，是 Proxy；Electron IPC 结构化序列化不支持
-    // Proxy，直接传会抛 "An object could not be cloned"，需拷贝为普通对象
-    params: m.params ? { ...m.params } : null
-  }))
+  exporting = true
   try {
+    const rows = list.map((m) => ({
+      id: m.id,
+      name: m.name,
+      alias: m.alias || '',
+      type: m.type,
+      subCategory: m.subCategory || '',
+      favorite: m.favorite === true,
+      nsfw: m.nsfw === true,
+      rating: m.rating || 0,
+      triggerWords: m.triggerWords || '',
+      note: m.note || '',
+      size: m.size,
+      mtimeMs: m.mtimeMs,
+      relDir: m.relDir || '',
+      covers: Array.isArray(m.covers) ? m.covers.length : 0,
+      // F4 扩列：基底模型/作者来自 safetensors 自动解析，随行携带
+      autoInfo:
+        m.autoInfo
+          ? { baseModel: m.autoInfo.baseModel || '', author: m.autoInfo.author || '' }
+          : null,
+      // params 来自 reactive state，是 Proxy；Electron IPC 结构化序列化不支持
+      // Proxy，直接传会抛 "An object could not be cloned"，需拷贝为普通对象
+      params: m.params ? { ...m.params } : null
+    }))
     const res = await window.api.models.exportList({ format, rows })
     if (res.canceled) return
     if (res.error) {
@@ -84,6 +97,8 @@ export async function exportModels(format) {
     toast('success', `已导出 ${res.count} 个模型：${res.path}`)
   } catch (err) {
     toast('error', `导出失败: ${err.message}`)
+  } finally {
+    exporting = false
   }
 }
 

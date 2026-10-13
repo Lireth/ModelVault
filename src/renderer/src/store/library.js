@@ -1,4 +1,4 @@
-import { state, defaultSettings } from './state'
+import { state, defaultSettings, replaceSettings } from './state'
 import { toast } from './toast'
 
 /**
@@ -11,7 +11,7 @@ export async function initApp() {
   try {
     const data = await window.api.models.loadStore()
     state.folder = data.settings?.modelsFolder || ''
-    state.settings = { ...defaultSettings(), ...data.settings }
+    replaceSettings({ ...defaultSettings(), ...data.settings })
     applyTheme(state.settings.theme)
     // 应用默认排序方式与方向
     if (state.settings.sortBy) state.sortBy = state.settings.sortBy
@@ -60,7 +60,7 @@ export async function saveSettings(patch) {
     return false
   }
   if (res?.settings) {
-    state.settings = res.settings
+    replaceSettings(res.settings)
     applyTheme(state.settings.theme)
   }
   return true
@@ -171,13 +171,16 @@ export function cancelScan() {
  */
 export function applyThumbUpdates(updates) {
   if (!Array.isArray(updates)) return
-  // 建 id→索引 Map（B5）：批量更新避免逐条 O(n) findIndex 的 O(n×m) 开销；
-  // 就地合并（Object.assign）不替换数组元素引用，避免触发 selectedModel
-  // 重算进而引发详情页 watch 无谓重填
+  // 建 id→索引 Map（B5）：批量更新避免逐条 O(n) findIndex 的 O(n×m) 开销。
+  // O3 约定：浅响应下 Object.assign 原位变异不触发更新，须元素级替换；
+  // 替换会使 selectedModel 指向新引用，但详情页 watch 有 formDirty 保护
+  // （有编辑时跳过重填），无编辑时重填等值无副作用
   const indexById = new Map(state.models.map((m, i) => [m.id, i]))
   for (const { id, coverUrl } of updates) {
     if (!coverUrl) continue
     const idx = indexById.get(id)
-    if (idx !== undefined) Object.assign(state.models[idx], { coverUrl })
+    if (idx !== undefined) {
+      state.models[idx] = { ...state.models[idx], coverUrl }
+    }
   }
 }

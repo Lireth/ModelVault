@@ -49,9 +49,12 @@ export function makeComponentApiMock() {
   }
 }
 
-/** 复位渲染层全局状态（与组件行为相关的字段；口径与 appStore.test.js 一致） */
+/** 复位渲染层全局状态（与组件行为相关的字段；口径与 appStore.test.js 一致）。
+ *  O3 后 state 为 shallowReactive：multiSelect/settings/confirm 是内嵌深响应
+ *  集合，整体替换会换成 raw 对象丢失深层响应，须就地表合并复位 */
 function resetStoreState() {
   state.folder = ''
+  state.booting = false
   state.scanning = false
   state.scanError = ''
   state.progress = { dirs: 0, found: 0, current: '' }
@@ -59,16 +62,17 @@ function resetStoreState() {
   state.typeFilter = 'all'
   state.subFilter = ''
   state.showFavoritesOnly = false
+  state.minRating = 0
   state.search = ''
   state.sortBy = 'name'
   state.sortAsc = true
   state.selectedId = null
   state.detailDirty = false
-  state.multiSelect = { active: false, ids: [] }
+  Object.assign(state.multiSelect, { active: false, ids: [], busy: false })
   state.settingsOpen = false
-  state.settings = defaultSettings()
+  Object.assign(state.settings, defaultSettings())
   state.toasts.splice(0, state.toasts.length)
-  state.confirm = { visible: false, text: '', resolve: null }
+  Object.assign(state.confirm, { visible: false, text: '', resolve: null })
 }
 
 /**

@@ -7,6 +7,7 @@ import {
   chooseFolder,
   exportModels,
   removeRoot,
+  saveSettings,
   scanModels,
   openSettings,
   switchRoot
@@ -37,6 +38,16 @@ function selectType(key) {
 
 function onScanClick() {
   if (!state.scanning) scanModels()
+}
+
+/**
+ * 切换「隐藏 NSFW 模型」（F1，持久化偏好）：
+ * 保存成功后 state.settings 随主进程规范化结果同步，:checked 响应式生效；
+ * 失败时手动回滚 checkbox（v-model 会绕过保存链直接改内存，故用受控勾选）
+ */
+async function onToggleHideNsfw(e) {
+  const ok = await saveSettings({ hideNsfw: e.target.checked })
+  if (!ok) e.target.checked = !e.target.checked
 }
 </script>
 
@@ -119,6 +130,36 @@ function onScanClick() {
           </button>
         </li>
       </ul>
+    </div>
+
+    <!-- 评分筛选 + NSFW 开关（F1）：用户标注过的评分/NSFW 可反查 -->
+    <div class="side-section">
+      <h3>筛选</h3>
+      <div class="rating-filter" title="仅显示评分达到 N 星的模型">
+        <button
+          class="rating-btn"
+          :class="{ active: state.minRating === 0 }"
+          title="显示全部评分"
+          @click="state.minRating = 0"
+        >全部</button>
+        <button
+          v-for="i in 5"
+          :key="i"
+          class="rating-btn"
+          :class="{ active: state.minRating === i }"
+          :title="`仅显示 ${i} 星及以上`"
+          @click="state.minRating = i"
+        >★{{ i }}+</button>
+      </div>
+      <label class="nsfw-toggle" title="在列表中隐藏标记为 NSFW 的模型（卡片仍可在详情页查看）">
+        <input
+          type="checkbox"
+          :checked="state.settings.hideNsfw === true"
+          aria-label="隐藏 NSFW 模型"
+          @change="onToggleHideNsfw"
+        />
+        <span>隐藏 NSFW 模型</span>
+      </label>
     </div>
 
     <!-- 设置按钮：固定在侧边栏最底部，宽度自适应侧边栏 -->
@@ -313,6 +354,50 @@ function onScanClick() {
   text-align: center;
 }
 
+/* ---------- 评分筛选 + NSFW 开关（F1） ---------- */
+.rating-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.rating-btn {
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.rating-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.rating-btn.active {
+  border-color: var(--accent);
+  background: var(--bg-active);
+  color: var(--accent);
+}
+
+.nsfw-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.nsfw-toggle input {
+  accent-color: var(--accent);
+}
+
 /* ---------- 操作按钮区（模型文件夹与分类之间） ---------- */
 .action-section {
   display: flex;
@@ -366,7 +451,9 @@ function onScanClick() {
   .type-label,
   .type-count,
   .side-section h3,
-  .action-section {
+  .action-section,
+  .rating-filter,
+  .nsfw-toggle {
     display: none;
   }
   .type-item {

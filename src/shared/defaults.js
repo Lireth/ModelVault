@@ -18,5 +18,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   showSize: true,
   showMtime: true,
   showParams: true,
-  autoRescan: false
+  autoRescan: false,
+  // 隐藏 NSFW 模型（F1）：首页列表整体过滤掉 nsfw 标记的模型，持久化偏好
+  hideNsfw: false
 })

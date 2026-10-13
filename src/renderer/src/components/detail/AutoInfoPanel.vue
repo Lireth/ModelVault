@@ -12,10 +12,9 @@ import { selectedModel } from '../../store/appStore'
 /** safetensors 头部自动解析信息（仅 .safetensors 且含有效元信息时非空） */
 const autoInfo = computed(() => selectedModel.value?.autoInfo || null)
 
-/** 触发词候选（来自训练集高频标签，仅 LoRA 提供填入，需用户确认后保存） */
-const autoTriggerCandidates = computed(() =>
-  selectedModel.value?.type === 'lora' ? autoInfo.value?.triggerCandidates || [] : []
-)
+/** 触发词候选（来自训练集高频标签 ss_tag_frequency，需用户确认后保存）。
+ *  F3 修正：不限 LoRA——不少 Checkpoint 同样内嵌训练标签，此前被静默丢弃 */
+const autoTriggerCandidates = computed(() => autoInfo.value?.triggerCandidates || [])
 
 function applyResolution() {
   const a = autoInfo.value

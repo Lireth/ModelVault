@@ -17,6 +17,8 @@ const TYPE_ORDER = Object.fromEntries(MODEL_TYPES.map((t, i) => [t.key, i]))
  * 误匹配。模型对象仅在元数据更新/批量同步/重扫时被整体替换——替换后
  * 新对象自然缓存未命中并重建，未变更模型跨多次按键复用，避免每次搜索
  * 对全库每个模型重复调用 4~5 次 toLowerCase 与 SUB_MAP 查找。
+ * F2 扩展：safetensors 自动解析信息（作者/基底模型/训练标签候选）一并
+ * 纳入搜索域——数据在扫描装饰阶段已随模型对象携带，此前解析了却搜不到。
  */
 const searchHaystackCache = new WeakMap()
 
@@ -30,6 +32,14 @@ function searchHaystack(m) {
     const info = SUB_MAP[m.subCategory]
     if (info) parts.push(info.label)
   }
+  if (m.autoInfo) {
+    // 作者与基底模型是高频检索词（"那个 SDXL 的 LoRA 在哪"）；
+    // 训练标签候选（ss_tag_frequency 高频词）是内容检索的自然入口
+    parts.push(m.autoInfo.author, m.autoInfo.baseModel, m.autoInfo.title)
+    if (Array.isArray(m.autoInfo.triggerCandidates)) {
+      parts.push(...m.autoInfo.triggerCandidates)
+    }
+  }
   hay = parts
     .filter(Boolean)
     .join('\n')
@@ -41,16 +51,19 @@ function searchHaystack(m) {
 /** 筛选 + 搜索 + 排序后的模型列表 */
 export const filteredModels = computed(() => {
   const keyword = state.search.trim().toLowerCase()
-  const { typeFilter, subFilter, showFavoritesOnly } = state
+  const { typeFilter, subFilter, showFavoritesOnly, minRating } = state
+  const hideNsfw = state.settings.hideNsfw === true
   // LoRA 分类筛选：仅选中 LoRA 分类且指定了子分类时生效
   const checkSub = typeFilter === 'lora' && subFilter
-  // 单趟完成分类/子分类/收藏/关键词过滤（O3）：合并原四段 filter，
+  // 单趟完成分类/子分类/收藏/评分/NSFW/关键词过滤（O3）：合并原四段 filter，
   // 消除中间数组分配；无筛选条件时仅做一次遍历拷贝
   const list = []
   for (const m of state.models) {
     if (typeFilter !== 'all' && m.type !== typeFilter) continue
     if (checkSub && m.subCategory !== subFilter) continue
     if (showFavoritesOnly && !m.favorite) continue
+    if (minRating > 0 && m.rating < minRating) continue
+    if (hideNsfw && m.nsfw) continue
     if (keyword && !searchHaystack(m).includes(keyword)) continue
     list.push(m)
   }
