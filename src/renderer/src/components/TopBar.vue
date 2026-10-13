@@ -85,26 +85,6 @@ onBeforeUnmount(() => {
   <!-- 标题栏：整行可拖动移动窗口；右上角为原生窗口控件（WCO） -->
   <header class="titlebar">
     <div class="brand">
-      <!-- 品牌标识：渐变宝匣 + 极光光晕（纯装饰，品牌名已表意） -->
-      <span class="brand-logo" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <defs>
-            <linearGradient id="mv-brand-grad" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="#5aa3fa" />
-              <stop offset="1" stop-color="#b18cff" />
-            </linearGradient>
-          </defs>
-          <rect x="2.5" y="2.5" width="19" height="19" rx="5.5" fill="url(#mv-brand-grad)" />
-          <path
-            d="M7 8.5 12 16 17 8.5"
-            fill="none"
-            stroke="#0d1420"
-            stroke-width="2.2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </span>
       <span class="brand-name">模匣</span>
       <span class="brand-en">ModelVault</span>
     </div>
@@ -155,13 +135,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* 品牌标识：与文字基线对齐 + 极光光晕 */
-.brand-logo {
-  display: inline-flex;
-  align-self: center;
-  filter: drop-shadow(0 0 6px rgba(90, 163, 250, 0.45)) drop-shadow(0 0 14px rgba(177, 140, 255, 0.25));
-}
-
 /* 窄屏操作入口（OPT-1）：默认隐藏，<900px 时显示（断点与 Sidebar.vue 联动） */
 .narrow-actions {
   display: none;
