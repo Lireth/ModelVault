@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import {
+  dupeCountById,
   formatSize,
   multiSelectIdSet,
   openDetail,
@@ -80,6 +81,9 @@ const mtimeText = computed(() => {
   const d = new Date(props.model.mtimeMs)
   return d.toLocaleDateString('zh-CN')
 })
+
+/** 重复组成员数（F9）：同哈希同大小的文件数，>1 时卡片角标提示 */
+const dupeCount = computed(() => dupeCountById.value.get(props.model.id) || 0)
 </script>
 
 <template>
@@ -127,6 +131,18 @@ const mtimeText = computed(() => {
         class="suspect-badge"
         title="文件疑似损坏（结构校验失败或 0 字节），建议重新下载或删除"
       >⚠ 损坏</span>
+      <!-- 重复角标（F9）：同哈希同大小的文件存在多份 -->
+      <span
+        v-if="dupeCount > 1"
+        class="dupe-badge"
+        :title="`存在 ${dupeCount} 份完全相同的文件（SHA256 一致），可在侧栏「仅看重复」筛选后清理`"
+      >重复 ×{{ dupeCount }}</span>
+      <!-- 禁用角标（F10）：.disabled 后缀，绘画工具不加载 -->
+      <span
+        v-if="model.disabled"
+        class="disabled-badge"
+        title="已禁用（文件名带 .disabled 后缀，绘画工具不加载；右键可启用）"
+      >已禁用</span>
       <span v-if="subTag" class="sub-badge" :style="{ color: subTag.color, borderColor: subTag.color }">
         {{ subTag.label }}
       </span>
@@ -335,6 +351,33 @@ const mtimeText = computed(() => {
   background: var(--warning, #e6a700);
   padding: 2px 8px;
   border-radius: 999px;
+}
+
+/* 重复角标（F9）：左下偏上，警示色描边 */
+.dupe-badge {
+  position: absolute;
+  bottom: 34px;
+  left: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+/* 禁用角标（F10）：左下角，中性色 */
+.disabled-badge {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--overlay);
+  padding: 2px 8px;
+  border-radius: 999px;
+  z-index: 1;
 }
 
 .card-body {

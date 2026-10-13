@@ -10,6 +10,7 @@ import ToastHost from './components/ToastHost.vue'
 import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import {
   allFilteredSelected,
+  applyHashUpdates,
   applyThumbUpdates,
   batchDeleteModels,
   batchFavorite,
@@ -69,6 +70,8 @@ async function onSortDirChange() {
 let unsubscribeProgress = null
 let unsubscribeMenu = null
 let unsubscribeThumbs = null
+let unsubscribeHashProgress = null
+let unsubscribeHashReady = null
 let unsubscribeStoreError = null
 let unsubscribeFsChanged = null
 
@@ -238,6 +241,13 @@ onMounted(async () => {
   unsubscribeThumbs = window.api.models.onThumbsReady(({ updates }) => {
     applyThumbUpdates(updates)
   })
+  // 订阅哈希批算进度与完成事件（F9：完成后就地更新 hash，重复分组重算）
+  unsubscribeHashProgress = window.api.models.onHashProgress?.((progress) => {
+    state.hashProgress = progress
+  })
+  unsubscribeHashReady = window.api.models.onHashReady?.(({ updates }) => {
+    applyHashUpdates(updates)
+  })
   // 订阅持久化落盘失败事件（B1/C7）：元数据与设置的落盘都在保存响应之后异步发生，
   // 失败须提示用户重试，否则磁盘错误时静默丢失
   unsubscribeStoreError = window.api.models.onStoreError(({ message }) => {
@@ -256,6 +266,8 @@ onUnmounted(() => {
   unsubscribeProgress?.()
   unsubscribeMenu?.()
   unsubscribeThumbs?.()
+  unsubscribeHashProgress?.()
+  unsubscribeHashReady?.()
   unsubscribeStoreError?.()
   unsubscribeFsChanged?.()
 })

@@ -211,6 +211,37 @@ export async function batchApplyTriggers() {
 }
 
 /**
+ * 批量禁用/启用（F10）：逐个调用 toggleDisabled 改名（主进程按文件独立
+ * 处理，顺序执行避免同目录大量并发 rename），全部完成后重扫刷新列表
+ * （文件 id 全部已变）并统一提示。禁用是可逆操作（去后缀即恢复）。
+ * @param {boolean} disabled 目标状态
+ */
+export async function batchToggleDisabled(disabled) {
+  const ids = [...state.multiSelect.ids]
+  if (ids.length === 0 || state.multiSelect.busy) return
+  state.multiSelect.busy = true
+  let ok = 0
+  let fail = 0
+  try {
+    for (const id of ids) {
+      const res = await window.api.models.toggleDisabled(id, disabled).catch(() => null)
+      if (res && !res.error) ok += 1
+      else fail += 1
+    }
+    if (ok > 0) {
+      // id 已全部变化，整表重扫收敛（含元数据键已即时迁移的验证）
+      const { scanModels } = await import('./library')
+      if (!state.scanning) await scanModels()
+    }
+    const label = disabled ? '禁用' : '启用'
+    if (fail === 0) toast('success', `已${label} ${ok} 个模型`)
+    else toast('warn', `${label}完成：成功 ${ok} 个，失败 ${fail} 个`)
+  } finally {
+    state.multiSelect.busy = false
+  }
+}
+
+/**
  * 批量移入回收站（E4）：并发调用既有删除链路（含 sidecar 清理与元数据移除，
  * 主进程按文件独立处理、元数据走防抖原子持久化，可安全并发），全部 IPC
  * 结束后单趟移除已删除模型（O2）并统一提示。

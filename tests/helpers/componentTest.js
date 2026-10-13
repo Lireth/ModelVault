@@ -63,6 +63,10 @@ function resetStoreState() {
   state.subFilter = ''
   state.showFavoritesOnly = false
   state.minRating = 0
+  state.suspectOnly = false
+  state.dupeOnly = false
+  state.hashing = false
+  state.hashProgress = { done: 0, total: 0, current: '' }
   state.search = ''
   state.sortBy = 'name'
   state.sortAsc = true

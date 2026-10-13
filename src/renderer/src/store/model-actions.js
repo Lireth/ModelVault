@@ -213,6 +213,20 @@ export async function handleMenuAction(id, action) {
     case 'toggleFavorite':
       await toggleFavorite(id)
       break
+    case 'disableModel':
+      await toggleDisabledModel(id, true)
+      break
+    case 'enableModel':
+      await toggleDisabledModel(id, false)
+      break
+    case 'moveModel':
+      await moveModelTo(id)
+      break
+    case 'hashModel': {
+      const m = state.models.find((x) => x.id === id)
+      if (m) await hashModels([{ id, mtimeMs: m.mtimeMs }])
+      break
+    }
     case 'deleteModel': {
       const m = state.models.find((x) => x.id === id)
       if (!m) break
@@ -223,4 +237,101 @@ export async function handleMenuAction(id, action) {
     default:
       break
   }
+}
+
+/* ---------------- 文件操作（批次 4：禁用/移动/哈希） ---------------- */
+
+/**
+ * 加/去 .disabled 后缀（F10）：成功后重扫刷新列表（文件 id 已变；
+ * watcher 自动重扫开启时也会触发，手动重扫兜底 autoRescan 关闭的场景）
+ * @param {string} id 模型 id
+ * @param {boolean} disabled 目标状态
+ */
+export async function toggleDisabledModel(id, disabled) {
+  let res
+  try {
+    res = await window.api.models.toggleDisabled(id, disabled)
+  } catch (err) {
+    toast('error', `禁用/启用失败: ${err.message}`)
+    return false
+  }
+  if (res?.error) {
+    toast('error', res.error)
+    return false
+  }
+  toast('success', disabled ? '已禁用（文件名加 .disabled 后缀，绘画工具不再加载）' : '已启用')
+  if (!state.scanning) await refreshAfterFileChange()
+  return true
+}
+
+/**
+ * 库内移动模型（F11）：目标目录经主进程原生对话框选择，
+ * 元数据随键迁移，成功后重扫刷新
+ * @param {string} id 模型 id
+ */
+export async function moveModelTo(id) {
+  let res
+  try {
+    res = await window.api.models.moveModelTo(id)
+  } catch (err) {
+    toast('error', `移动失败: ${err.message}`)
+    return false
+  }
+  if (res?.canceled) return false
+  if (res?.error) {
+    toast('error', res.error)
+    return false
+  }
+  toast('success', `已移动到 ${res.path}`)
+  if (!state.scanning) await refreshAfterFileChange()
+  return true
+}
+
+/** 文件改名/移动后的列表刷新：文件 id 已变，整表重扫是最可靠的收敛方式 */
+async function refreshAfterFileChange() {
+  const { scanModels } = await import('./library')
+  await scanModels()
+}
+
+/**
+ * 计算模型 SHA256（F9）：models 为 [{ id, mtimeMs }] 精简清单（单模型
+ * 菜单触发传 1 项，全库查重传全部）。进行中置 state.hashing，完成后
+ * 主进程推送 hashReady 就地更新 hash 字段，重复分组随之重算。
+ * @param {Array<{id: string, mtimeMs: number}>} models
+ */
+export async function hashModels(models) {
+  if (state.hashing) {
+    toast('warn', '正在计算哈希中')
+    return
+  }
+  const list = (models || []).filter((m) => m && typeof m.id === 'string' && Number.isFinite(m.mtimeMs))
+  if (list.length === 0) return
+  state.hashing = true
+  state.hashProgress = { done: 0, total: list.length, current: '' }
+  try {
+    const res = await window.api.models.hashLibrary(list)
+    if (res?.error) {
+      toast('error', res.error)
+      return
+    }
+    if (res.canceled) {
+      toast('info', `哈希计算已取消（本次完成 ${res.computed} 个）`)
+    } else if (list.length === 1) {
+      toast('success', '哈希计算完成')
+    } else {
+      const skipped = res.skipped > 0 ? `（${res.skipped} 个已有有效哈希，跳过）` : ''
+      toast('success', `哈希计算完成：${res.computed} 个模型${skipped}，可在侧栏「仅看重复」筛选完全重复的文件`)
+    }
+  } catch (err) {
+    toast('error', `哈希计算失败: ${err.message}`)
+  } finally {
+    state.hashing = false
+  }
+}
+
+/** 取消进行中的哈希批算（已算部分保留） */
+export function cancelHash() {
+  window.api.models.cancelHash().catch((err) => {
+    toast('error', `取消哈希失败: ${err.message}`)
+  })
 }

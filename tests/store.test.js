@@ -13,6 +13,7 @@ import {
   loadSettings,
   reloadCurrentRootData,
   removeModelMeta,
+  renameModelMeta,
   resolveCover,
   saveStoreNow,
   setDataRoot,
@@ -140,6 +141,22 @@ describe('路径关联', () => {
     expect(removeModelMeta(abs)).toBe(true)
     expect(getModelMeta(abs)).toBeNull()
     expect(removeModelMeta(abs)).toBe(false)
+  })
+
+  it('改名/移动后元数据键整体迁移：标注与哈希履历无缝跟随（F10/F11）', async () => {
+    const oldAbs = await touchModel('move-old.safetensors')
+    setModelMeta(oldAbs, { alias: '跟着走', rating: 5, hash: 'f'.repeat(64), hashMtime: 123 })
+    const newAbs = path.join(root, 'move-new.safetensors.disabled')
+    expect(renameModelMeta(oldAbs, newAbs)).toBe(true)
+    // 旧键消失，新键携带全部标注（含哈希履历）
+    expect(getModelMeta(oldAbs)).toBeNull()
+    const moved = getModelMeta(newAbs)
+    expect(moved?.alias).toBe('跟着走')
+    expect(moved?.rating).toBe(5)
+    expect(moved?.hash).toBe('f'.repeat(64))
+    // 无旧数据/越界目标返回 false
+    expect(renameModelMeta(path.join(root, 'none.safetensors'), path.join(root, 'x.safetensors'))).toBe(false)
+    expect(renameModelMeta(newAbs, 'D:\\库外\\x.safetensors')).toBe(false)
   })
 })
 

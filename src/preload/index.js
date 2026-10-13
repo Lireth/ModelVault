@@ -28,7 +28,11 @@ const VALID_INVOKE_CHANNELS = [
   'models:reveal',
   'models:exportList',
   'models:exportBackup',
-  'models:importBackup'
+  'models:importBackup',
+  'models:hashLibrary',
+  'models:cancelHash',
+  'models:toggleDisabled',
+  'models:moveModelTo'
 ]
 
 const VALID_RECEIVE_CHANNELS = [
@@ -36,7 +40,9 @@ const VALID_RECEIVE_CHANNELS = [
   'models:menuAction',
   'models:thumbsReady',
   'models:storeError',
-  'models:fsChanged'
+  'models:fsChanged',
+  'models:hashProgress',
+  'models:hashReady'
 ]
 
 /** 带白名单校验的 invoke（所有便捷方法的统一入口） */
@@ -141,7 +147,22 @@ const api = {
     /** 订阅后台缩略图生成完成事件（updates: [{ id, coverUrl }]），返回取消监听函数 */
     onThumbsReady: (listener) => subscribe('models:thumbsReady', listener),
     /** 订阅右键菜单动作事件，返回取消监听函数 */
-    onMenuAction: (listener) => subscribe('models:menuAction', listener)
+    onMenuAction: (listener) => subscribe('models:menuAction', listener),
+    /**
+     * 全库 SHA256 后台批算（F9）：models 为 [{ id, mtimeMs }] 精简清单，
+     * 返回 { computed, skipped, canceled } 或 { error }
+     */
+    hashLibrary: (models) => invokeValidated('models:hashLibrary', { models }),
+    /** 取消进行中的哈希批算（已算部分保留），返回 { ok } */
+    cancelHash: () => invokeValidated('models:cancelHash'),
+    /** 加/去 .disabled 后缀（F10），返回 { path } 或 { error } */
+    toggleDisabled: (id, disabled) => invokeValidated('models:toggleDisabled', { id, disabled }),
+    /** 库内移动模型（F11，目标目录经原生对话框选择），返回 { path } / { canceled } / { error } */
+    moveModelTo: (id) => invokeValidated('models:moveModelTo', { id }),
+    /** 订阅哈希批算进度（{ done, total, current }），返回取消监听函数 */
+    onHashProgress: (listener) => subscribe('models:hashProgress', listener),
+    /** 订阅哈希完成批量更新（{ updates: [{ id, hash }] }），返回取消监听函数 */
+    onHashReady: (listener) => subscribe('models:hashReady', listener)
   }
 }
 

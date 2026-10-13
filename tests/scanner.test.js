@@ -77,6 +77,32 @@ describe('scanModels', () => {
     await fs.rm(root, { recursive: true, force: true })
   })
 
+  it('.disabled 后缀文件放行：保留真实扩展名与 disabled 标记，名称剥离双重后缀（F10）', async () => {
+    await fs.writeFile(path.join(root, 'off-lora.safetensors.disabled'), 'x')
+    await fs.writeFile(path.join(root, 'lora', 'off-lora.safetensors.disabled'), 'x')
+    // 非模型主扩展名的 .disabled 不放行
+    await fs.writeFile(path.join(root, 'junk.txt.disabled'), 'x')
+    try {
+      const { models } = await scanModels(root, undefined, {})
+      const disabled = models.filter((m) => m.disabled)
+      expect(disabled).toHaveLength(2)
+      const rootOne = disabled.find((m) => path.dirname(m.id) === root)
+      expect(rootOne.name).toBe('off-lora')
+      expect(rootOne.ext).toBe('.safetensors')
+      // lora 目录下的禁用文件：文件夹分类照常生效（真实扩展名参与分类链）
+      const loraOne = disabled.find((m) => path.dirname(m.id) === path.join(root, 'lora'))
+      expect(loraOne.type).toBe('lora')
+      // 无 disabled 字段的常规模型不受影响
+      const normal = models.find((m) => m.id === path.join(root, 'a.safetensors'))
+      expect(normal.disabled).toBe(false)
+      expect(models.some((m) => m.id.endsWith('junk.txt.disabled'))).toBe(false)
+    } finally {
+      await fs.rm(path.join(root, 'off-lora.safetensors.disabled'), { force: true })
+      await fs.rm(path.join(root, 'lora', 'off-lora.safetensors.disabled'), { force: true })
+      await fs.rm(path.join(root, 'junk.txt.disabled'), { force: true })
+    }
+  })
+
   it('递归扫描：扩展名过滤 + 排除目录 + 分类标注', async () => {
     const { models, errors, dirCount } = await scanModels(root, undefined, {
       excludeDirs: ['temp']

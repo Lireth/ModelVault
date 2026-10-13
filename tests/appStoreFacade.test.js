@@ -48,9 +48,14 @@ const EXPECTED_EXPORTS = [
   'scanModels',
   'cancelScan',
   'applyThumbUpdates',
+  'applyHashUpdates',
   // 派生
   'filteredModels',
   'typeCounts',
+  // 查找/重复分组派生（F9）
+  'modelById',
+  'dupeIdSet',
+  'dupeCountById',
   // 详情
   'selectedModel',
   'openDetail',
@@ -72,6 +77,7 @@ const EXPECTED_EXPORTS = [
   'batchRating',
   'batchSetSubCategory',
   'batchApplyTriggers',
+  'batchToggleDisabled',
   'batchDeleteModels',
   // 封面/详情保存
   'saveModelData',
@@ -88,7 +94,12 @@ const EXPECTED_EXPORTS = [
   'setNsfw',
   'setRating',
   'showContextMenu',
-  'handleMenuAction'
+  'handleMenuAction',
+  // 文件操作（批次 4）
+  'toggleDisabledModel',
+  'moveModelTo',
+  'hashModels',
+  'cancelHash'
 ]
 
 describe('appStore 门面导出契约（A-04）', () => {

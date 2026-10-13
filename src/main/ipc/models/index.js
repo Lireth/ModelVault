@@ -3,6 +3,7 @@ import { registerScanHandlers } from './scan'
 import { registerMetaHandlers } from './meta'
 import { registerCoverHandlers } from './covers'
 import { registerMiscHandlers } from './misc'
+import { registerFilesHandlers } from './files'
 import { registerBackupHandlers } from './backup'
 
 /**
@@ -20,5 +21,6 @@ export function registerModelIpcHandlers() {
   registerMetaHandlers()
   registerCoverHandlers()
   registerMiscHandlers()
+  registerFilesHandlers()
   registerBackupHandlers()
 }

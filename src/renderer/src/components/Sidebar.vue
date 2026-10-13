@@ -4,8 +4,10 @@ import {
   MODEL_TYPES,
   state,
   typeCounts,
+  cancelHash,
   chooseFolder,
   exportModels,
+  hashModels,
   removeRoot,
   saveSettings,
   scanModels,
@@ -38,6 +40,12 @@ function selectType(key) {
 
 function onScanClick() {
   if (!state.scanning) scanModels()
+}
+
+/** 全库查重（F9）：后台计算缺失/过期的 SHA256，完成后可「仅看重复」 */
+function onHashClick() {
+  if (state.hashing || !state.models.length) return
+  hashModels(state.models.map((m) => ({ id: m.id, mtimeMs: m.mtimeMs })))
 }
 
 /**
@@ -74,6 +82,27 @@ async function onToggleHideNsfw(e) {
         <button class="btn action-btn" title="将当前列表导出为 CSV 文件（可被 Excel 打开）" :disabled="!state.models.length" @click="exportModels('csv')">
           导出 CSV
         </button>
+        <!-- 全库查重（F9）：计算 SHA256 并标记完全重复的文件 -->
+        <button
+          class="btn action-btn"
+          style="grid-column: 1 / -1"
+          :title="state.hashing
+            ? `正在计算哈希：${state.hashProgress.done}/${state.hashProgress.total}`
+            : '计算全库 SHA256 并按内容标记完全重复的文件（大文件较多时耗时较长，可随时取消）'"
+          :disabled="!state.models.length || state.hashing"
+          @click="onHashClick"
+        >
+          {{ state.hashing
+            ? `哈希中 ${state.hashProgress.done}/${state.hashProgress.total}…`
+            : '查重' }}
+        </button>
+        <button
+          v-if="state.hashing"
+          class="btn action-btn"
+          style="grid-column: 1 / -1"
+          title="停止哈希计算（已完成的部分保留）"
+          @click="cancelHash"
+        >取消哈希</button>
       </div>
     </div>
 
@@ -168,6 +197,15 @@ async function onToggleHideNsfw(e) {
           aria-label="仅显示疑似损坏的模型"
         />
         <span>仅看疑似损坏</span>
+      </label>
+      <!-- 重复筛选（F9）：依赖「查重」已计算的 SHA256 -->
+      <label class="nsfw-toggle" title="仅显示与库内其他文件 SHA256 完全一致的模型（须先执行「查重」）">
+        <input
+          v-model="state.dupeOnly"
+          type="checkbox"
+          aria-label="仅显示完全重复的模型"
+        />
+        <span>仅看重复文件</span>
       </label>
     </div>
 

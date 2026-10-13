@@ -56,11 +56,15 @@ export {
   removeRoot,
   scanModels,
   cancelScan,
-  applyThumbUpdates
+  applyThumbUpdates,
+  applyHashUpdates
 } from './library'
 
 // 筛选派生
 export { filteredModels, typeCounts } from './filter'
+
+// 查找/重复分组派生（F9）
+export { modelById, dupeIdSet, dupeCountById } from './selectors'
 
 // 局部增量扫描详情
 export { selectedModel, openDetail, closeDetail } from './detail'
@@ -84,6 +88,7 @@ export {
   batchRating,
   batchSetSubCategory,
   batchApplyTriggers,
+  batchToggleDisabled,
   batchDeleteModels
 } from './multiselect'
 
@@ -97,7 +102,7 @@ export {
   importCoversFromDrop
 } from './covers-store'
 
-// 单模型操作/即时标注/右键菜单/导出
+// 单模型操作/即时标注/右键菜单/导出/文件操作（批次 4）
 export {
   revealModel,
   deleteModel,
@@ -106,5 +111,9 @@ export {
   setNsfw,
   setRating,
   showContextMenu,
-  handleMenuAction
+  handleMenuAction,
+  toggleDisabledModel,
+  moveModelTo,
+  hashModels,
+  cancelHash
 } from './model-actions'

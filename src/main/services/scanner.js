@@ -18,6 +18,9 @@ export const MODEL_EXTENSIONS = MODEL_EXTENSION_SET
 /** 支持的图片扩展名（用于封面/预览图识别） */
 export const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'])
 
+/** 禁用后缀（F10）：加在完整文件名之后，WebUI/ComfyUI 生态不再加载该文件 */
+const DISABLED_SUFFIX = '.disabled'
+
 /** 最大递归深度（相对模型根），避免目录环或异常深层结构拖慢扫描 */
 const MAX_DEPTH = 8
 
@@ -151,6 +154,16 @@ export async function scanModels(root, onProgress, options = {}) {
         continue
       }
       if (!entry.isFile()) continue
+      // F10：.disabled 后缀放行（WebUI 生态「禁用而非删除」的通行做法）。
+      // 主扩展名（去掉 .disabled 后）须仍是所扫描的模型类型；ext 保留真实
+      // 模型扩展名，使分类、封面与 safetensors 装饰链照常工作
+      if (name.toLowerCase().endsWith(DISABLED_SUFFIX)) {
+        const stem = name.slice(0, -DISABLED_SUFFIX.length)
+        const baseExt = path.extname(stem).toLowerCase()
+        if (!extensions.has(baseExt)) continue
+        fileEntries.push({ fullPath, name, relChild, ext: baseExt, disabled: true })
+        continue
+      }
       if (!extensions.has(path.extname(name).toLowerCase())) continue
       fileEntries.push({ fullPath, name, relChild })
     }
@@ -167,11 +180,13 @@ export async function scanModels(root, onProgress, options = {}) {
           return
         }
         const stat = s.value
-        const ext = path.extname(f.name).toLowerCase()
+        const ext = f.ext || path.extname(f.name).toLowerCase()
         models.push({
           id: f.fullPath,
-          name: path.basename(f.name, ext),
+          // disabled 文件名含双重后缀（x.safetensors.disabled），一并剥离
+          name: path.basename(f.name, ext + (f.disabled ? DISABLED_SUFFIX : '')),
           ext,
+          disabled: f.disabled === true,
           type: classifyModel(rel ? rel.split('/') : [], f.name),
           folder: dir,
           relDir: rel,

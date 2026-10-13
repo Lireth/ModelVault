@@ -8,9 +8,11 @@ import {
   batchNsfw,
   batchRating,
   batchSetSubCategory,
+  batchToggleDisabled,
   exitMultiSelect,
   filteredModels,
   multiSelectTags,
+  multiSelectedModels,
   state,
   toggleSelectAllFiltered
 } from '../store/appStore'
@@ -24,6 +26,11 @@ import {
 /** 批量操作可用：有选中且无进行中的批量提交 */
 const batchReady = computed(
   () => state.multiSelect.ids.length > 0 && !state.multiSelect.busy
+)
+
+/** 选中模型是否全部处于禁用态（决定按钮显示「禁用」还是「启用」，F10） */
+const batchAllDisabled = computed(() =>
+  multiSelectedModels.value.length > 0 && multiSelectedModels.value.every((m) => m.disabled === true)
 )
 </script>
 
@@ -69,6 +76,12 @@ const batchReady = computed(
       >{{ t.label }}</button>
     </template>
     <span class="batch-sep"></span>
+    <button
+      class="btn"
+      :disabled="!batchReady"
+      :title="batchAllDisabled ? '去掉 .disabled 后缀，绘画工具恢复加载' : '加 .disabled 后缀，绘画工具不再加载（可随时恢复）'"
+      @click="batchToggleDisabled(!batchAllDisabled)"
+    >{{ batchAllDisabled ? '启用' : '禁用' }}</button>
     <button class="btn btn-danger" :disabled="!batchReady" @click="batchDeleteModels">移入回收站</button>
     <button class="btn" :disabled="state.multiSelect.busy" @click="exitMultiSelect">退出多选</button>
   </div>

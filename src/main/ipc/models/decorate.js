@@ -275,6 +275,9 @@ async function decorateOne(model, usedThumbs) {
     triggerWordsSource: meta.triggerWordsSource || '',
     // 结构疑似损坏（F6）：0 字节或 safetensors 头部不可解析
     suspect,
+    // 文件 SHA256（F9）：空串表示尚未计算；已算值随装饰缓存复用，
+    // 渲染层据此做重复分组展示
+    hash: meta.hash || '',
     autoInfo
   }
   // 写入装饰缓存（容量超限时按插入顺序淘汰最旧条目，C4 共享工具）

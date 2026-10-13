@@ -41,6 +41,11 @@ export function paramSummaryFromMeta(params) {
   return parts.join(', ')
 }
 
+/** 路径是否为 .disabled 后缀的禁用模型（F10，大小写不敏感） */
+export function isDisabledPath(p) {
+  return typeof p === 'string' && p.toLowerCase().endsWith('.disabled')
+}
+
 /** 注册其他模型操作链路的 IPC 处理器 */
 export function registerMiscHandlers() {
   // 删除模型文件（移入回收站）并清理关联元数据与同名 sidecar 文件
@@ -98,6 +103,16 @@ export function registerMiscHandlers() {
       items.push({ label: '复制触发词', click: () => clipboard.writeText(meta.triggerWords) })
     }
     items.push(
+      { type: 'separator' },
+      // 禁用/启用（F10）：加/去 .disabled 后缀，绘画工具不再加载该文件
+      {
+        label: isDisabledPath(id) ? '启用此模型' : '禁用此模型',
+        click: () => send(isDisabledPath(id) ? 'enableModel' : 'disableModel')
+      },
+      // 库内移动（F11）
+      { label: '移动到…', click: () => send('moveModel') },
+      // 单模型哈希（F9）：菜单内直接计算，结果随 hashReady 就地更新
+      { label: '计算 SHA256 哈希', click: () => send('hashModel') },
       { type: 'separator' },
       { label: meta.favorite ? '取消收藏' : '收藏', click: () => send('toggleFavorite') },
       { label: '移入回收站', click: () => send('deleteModel') }

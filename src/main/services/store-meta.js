@@ -141,6 +141,28 @@ export function removeModelMeta(modelId) {
 }
 
 /**
+ * 模型文件改名/移动后整体迁移元数据键（F10 禁用后缀 / F11 库内移动）：
+ * 键以相对路径关联，绝对路径变了键就失效——重扫时 relink 的 R1/R2
+ * 能自愈大多数场景，但改名 .disabled 会使扩展名变化导致两条规则都
+ * 不命中；主动迁移保证标注（含哈希履历）即时无缝跟随。
+ * @param {string} oldId 旧绝对路径
+ * @param {string} newId 新绝对路径
+ * @returns {boolean} 迁移成功返回 true（无旧数据/越界返回 false）
+ */
+export function renameModelMeta(oldId, newId) {
+  if (!data) return false
+  const oldKey = toRelKey(oldId)
+  const newKey = toRelKey(newId)
+  if (!oldKey || !newKey || oldKey === newKey) return false
+  const meta = data.models[oldKey]
+  if (!meta) return false
+  data.models[newKey] = meta
+  delete data.models[oldKey]
+  scheduleSave()
+  return true
+}
+
+/**
  * 加载当前根目录的关联存储数据。
  * store.json 不存在时创建空数据，并尝试从旧版全局存储迁移属于该目录的记录。
  */

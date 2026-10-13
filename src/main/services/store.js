@@ -59,6 +59,7 @@ export {
   getMetaMapByAbsPath,
   setModelMeta,
   removeModelMeta,
+  renameModelMeta,
   relinkScannedMeta,
   scheduleSave,
   saveStoreNow,
