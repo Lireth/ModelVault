@@ -162,7 +162,7 @@ onBeforeUnmount(() => {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 10px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-md);
 }
 
 .menu-item {

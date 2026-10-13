@@ -343,7 +343,7 @@ async function onToggleHideNsfw(e) {
 }
 
 .all-dot {
-  background: linear-gradient(135deg, #4f9cf9, #b18cff);
+  background: var(--accent-grad);
 }
 
 .type-label {

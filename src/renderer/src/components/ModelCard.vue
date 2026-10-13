@@ -337,8 +337,8 @@ const mtimeText = computed(() => {
   right: 8px;
   font-size: 10px;
   font-weight: 700;
-  color: #fff;
-  background: var(--warning, #e6a700);
+  color: var(--on-bright);
+  background: var(--warning);
   padding: 2px 8px;
   border-radius: 999px;
 }

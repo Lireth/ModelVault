@@ -322,7 +322,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(6, 9, 12, 0.55);
+  background: var(--overlay-thumb);
   color: #fff;
   font-size: 14px;
   font-weight: 600;
@@ -403,7 +403,7 @@ onBeforeUnmount(() => {
   height: 18px;
   border: none;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--overlay-thumb);
   color: #fff;
   font-size: 10px;
   line-height: 1;

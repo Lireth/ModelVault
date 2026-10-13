@@ -566,7 +566,7 @@ async function onSave() {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(6, 9, 12, 0.6);
+  background: var(--overlay-strong);
   backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
@@ -584,7 +584,7 @@ async function onSave() {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-lg);
 }
 
 .detail-header {
@@ -652,10 +652,10 @@ async function onSave() {
 .suspect-warn {
   font-size: 12px;
   padding: 8px 12px;
-  border: 1px solid var(--warning, #e6a700);
+  border: 1px solid var(--warning);
   border-radius: 8px;
   background: var(--bg);
-  color: var(--warning, #e6a700);
+  color: var(--warning);
 }
 
 .detail-form-col h3 {

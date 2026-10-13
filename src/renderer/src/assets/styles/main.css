@@ -9,6 +9,8 @@
   --text: #e6eaee;
   --text-muted: #8a97a5;
   --accent: #4f9cf9;
+  /* 强调色 hover 态：暗色混黑加深，浅色主题覆盖为混白提亮 */
+  --accent-hover: color-mix(in srgb, var(--accent) 88%, #000);
   --danger: #e5484d;
   /* 警示色（F6 疑似损坏角标/警示条） */
   --warning: #e6a700;
@@ -83,6 +85,7 @@ html.light {
   --text: #24292f;
   --text-muted: #6a7683;
   --accent: #2f7fe0;
+  --accent-hover: color-mix(in srgb, var(--accent) 88%, #fff);
   --danger: #d93036;
   /* 浅色主题用更深的警示色保证在白色背景上的可读性 */
   --warning: #b98200;
@@ -214,11 +217,13 @@ button {
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
+/* 弃用 filter:brightness（GPU 合成层开销 + 浅色主题提亮方向不对），改混色 */
 .btn-primary:hover:not(:disabled) {
-  filter: brightness(1.1);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 /* 危险操作按钮（批量删除等）：自 App.vue 迁入全局（多组件共用） */

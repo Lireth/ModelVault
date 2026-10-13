@@ -47,7 +47,7 @@ import { dismissToast, state } from '../store/appStore'
   border-radius: 10px;
   padding: 10px 16px;
   font-size: 13px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-sm);
   max-width: 70vw;
   /* host 容器为 pointer-events:none 防挡点击，toast 自身恢复以支持关闭按钮（U6） */
   pointer-events: auto;
@@ -82,9 +82,9 @@ import { dismissToast, state } from '../store/appStore'
   color: var(--on-bright);
 }
 
-.toast-success .toast-icon { background: #3ddc97; }
+.toast-success .toast-icon { background: var(--success); }
 .toast-error .toast-icon { background: var(--danger); color: #fff; }
-.toast-warn .toast-icon { background: #ffb86b; }
+.toast-warn .toast-icon { background: var(--warning-soft); }
 .toast-info .toast-icon { background: var(--accent); color: #fff; }
 
 .toast-enter-active,

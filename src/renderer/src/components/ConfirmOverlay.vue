@@ -85,7 +85,7 @@ watch(
   padding: 20px 24px;
   min-width: 320px;
   max-width: 480px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-md);
 }
 
 .confirm-text {
