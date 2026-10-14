@@ -92,7 +92,7 @@ describe('shared/defaults', () => {
     const expectedKeys = [
       'modelsFolder', 'modelsFolders', 'autoScan', 'excludeDirs', 'theme', 'accentColor',
       'cardSize', 'viewMode', 'sortBy', 'sortAsc', 'scanExtensions',
-      'showSize', 'showMtime', 'showParams', 'autoRescan', 'savedViews'
+      'showSize', 'showMtime', 'showParams', 'civitaiEnabled', 'autoRescan', 'savedViews'
     ].sort()
     expect(Object.keys(DEFAULT_SETTINGS).sort()).toEqual(expectedKeys)
   })

@@ -35,7 +35,8 @@ const form = reactive({
   scanExtensions: [],
   showSize: true,
   showMtime: true,
-  showParams: true
+  showParams: true,
+  civitaiEnabled: true
 })
 
 /** 打开设置页时记录已保存值，用于关闭时还原预览 */
@@ -61,6 +62,7 @@ function fillForm() {
   form.showSize = state.settings.showSize !== false
   form.showMtime = state.settings.showMtime !== false
   form.showParams = state.settings.showParams !== false
+  form.civitaiEnabled = state.settings.civitaiEnabled !== false
   // 填充完成后建立脏检测基线（A9）：此后表单值与快照不一致即为脏
   savedSnapshot = formSnapshotValue()
   loadAppInfo()
@@ -89,7 +91,8 @@ function formSnapshotValue() {
     scanExtensions: [...form.scanExtensions].sort(),
     showSize: form.showSize,
     showMtime: form.showMtime,
-    showParams: form.showParams
+    showParams: form.showParams,
+    civitaiEnabled: form.civitaiEnabled
   }
 }
 
@@ -108,6 +111,7 @@ const settingsDirty = computed(() => {
     form.showSize !== s.showSize ||
     form.showMtime !== s.showMtime ||
     form.showParams !== s.showParams ||
+    form.civitaiEnabled !== s.civitaiEnabled ||
     form.scanExtensions.length !== s.scanExtensions.length ||
     form.scanExtensions.slice().sort().some((e, i) => e !== s.scanExtensions[i])
   )
@@ -332,7 +336,8 @@ async function onSave() {
       scanExtensions: [...form.scanExtensions],
       showSize: form.showSize,
       showMtime: form.showMtime,
-      showParams: form.showParams
+      showParams: form.showParams,
+      civitaiEnabled: form.civitaiEnabled
     })
     if (!ok) return
     // 默认排序方式立即生效
@@ -394,6 +399,14 @@ async function onSave() {
             <span class="setting-desc">模型文件夹内容变化（新增/删除/修改文件）后自动重新扫描，关联存储写入不会触发</span>
           </div>
           <input v-model="form.autoRescan" type="checkbox" class="switch" />
+        </label>
+
+        <label class="setting-row switch-row">
+          <div class="setting-info">
+            <span class="setting-title">Civitai 在线识别</span>
+            <span class="setting-desc">在模型详情页提供 Civitai 识别（按文件哈希查询）与一键补全空缺信息；仅点击时访问网络，关闭后隐藏相关入口</span>
+          </div>
+          <input v-model="form.civitaiEnabled" type="checkbox" class="switch" />
         </label>
       </div>
 

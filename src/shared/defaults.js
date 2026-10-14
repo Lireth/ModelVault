@@ -23,6 +23,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   showSize: true,
   showMtime: true,
   showParams: true,
+  // Civitai 在线识别（详情页按文件哈希反查模型页并一键补全空缺信息）；
+  // 仅用户点击识别/补全时发起网络请求，无后台流量
+  civitaiEnabled: true,
   autoRescan: false,
   // 智能视图（组合筛选收藏）：{id, name, search, typeFilter, subFilter,
   //   showFavoritesOnly, sortBy, sortAsc} 快照数组，侧栏一键切换

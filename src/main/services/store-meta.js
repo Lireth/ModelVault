@@ -114,6 +114,13 @@ function normalizeModelMeta(raw) {
     // mtime 一致则重启后无需重新计算大文件哈希
     hash: typeof raw.hash === 'string' && /^[0-9a-f]{64}$/i.test(raw.hash) ? raw.hash.toLowerCase() : '',
     hashMtime: Number.isFinite(raw.hashMtime) ? raw.hashMtime : 0,
+    // Civitai 在线识别结果（识别成功时由 models:civitaiIdentify 写入）：
+    // 模型页面 URL（仅放行 civitai.com 页面链接，渲染层经外链白名单打开）
+    civitaiUrl:
+      typeof raw.civitaiUrl === 'string' &&
+      /^https:\/\/civitai\.com\/models\/\d+/.test(raw.civitaiUrl)
+        ? raw.civitaiUrl
+        : '',
     params: {
       steps: Number.isFinite(params.steps) ? params.steps : null,
       // CFG 为区间字段；兼容旧版单值 cfg（迁移为 min = max = 旧值）

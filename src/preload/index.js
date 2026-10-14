@@ -30,7 +30,9 @@ const VALID_INVOKE_CHANNELS = [
   'models:exportBackup',
   'models:importBackup',
   'models:toggleDisabled',
-  'models:moveModelTo'
+  'models:moveModelTo',
+  'models:civitaiIdentify',
+  'models:civitaiComplete'
 ]
 
 const VALID_RECEIVE_CHANNELS = [
@@ -147,7 +149,18 @@ const api = {
     /** 加/去 .disabled 后缀（F10），返回 { path } 或 { error } */
     toggleDisabled: (id, disabled) => invokeValidated('models:toggleDisabled', { id, disabled }),
     /** 库内移动模型（F11，目标目录经原生对话框选择），返回 { path } / { canceled } / { error } */
-    moveModelTo: (id) => invokeValidated('models:moveModelTo', { id })
+    moveModelTo: (id) => invokeValidated('models:moveModelTo', { id }),
+    /**
+     * Civitai 在线识别（按文件 SHA256 反查），返回
+     * { found: true, url, info, meta } / { found: false } / { error }。
+     * 大文件哈希计算可能耗时数十秒，调用方需提供忙碌提示
+     */
+    civitaiIdentify: (id) => invokeValidated('models:civitaiIdentify', { id }),
+    /**
+     * Civitai 一键补全（仅填充空缺的触发词/备注），返回
+     * { found: true, applied: string[], meta } / { found: false } / { error }
+     */
+    civitaiComplete: (id) => invokeValidated('models:civitaiComplete', { id })
   }
 }
 

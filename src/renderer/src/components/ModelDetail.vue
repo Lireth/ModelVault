@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import AutoInfoPanel from './detail/AutoInfoPanel.vue'
+import CivitaiPanel from './detail/CivitaiPanel.vue'
 import CoverPanel from './detail/CoverPanel.vue'
 import { PARAM_LIMITS, SAMPLERS, SCHEDULERS, PRECISIONS, PARAM_PRESETS, matchParamPreset } from '../constants/modelParams'
 import {
@@ -369,6 +370,9 @@ async function onSave() {
           <div class="detail-form-col">
             <!-- 文件元数据（safetensors 头部自动解析）：仅展示 + 一键填入表单（AutoInfoPanel，C1） -->
             <AutoInfoPanel @apply-resolution="onAutoApplyResolution" @apply-triggers="onAutoApplyTriggers" />
+
+            <!-- Civitai 在线识别：URL 展示 + 一键补全空缺信息（开关见设置页） -->
+            <CivitaiPanel />
 
             <!-- 收藏 / 评分 -->
             <div class="flags-row">

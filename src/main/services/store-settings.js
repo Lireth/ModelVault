@@ -115,6 +115,7 @@ export function normalizeSettings(raw) {
     showSize: typeof raw.showSize === 'boolean' ? raw.showSize : base.showSize,
     showMtime: typeof raw.showMtime === 'boolean' ? raw.showMtime : base.showMtime,
     showParams: typeof raw.showParams === 'boolean' ? raw.showParams : base.showParams,
+    civitaiEnabled: raw.civitaiEnabled !== false,
     autoRescan: raw.autoRescan === true,
     savedViews: normalizeSavedViews(raw.savedViews)
   }

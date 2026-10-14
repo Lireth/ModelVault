@@ -96,6 +96,9 @@ const EXPECTED_EXPORTS = [
   'setDefaultCover',
   'deleteCover',
   'importCoversFromDrop',
+  // Civitai 在线识别与一键补全
+  'civitaiIdentify',
+  'civitaiComplete',
   // 单模型操作
   'revealModel',
   'deleteModel',
