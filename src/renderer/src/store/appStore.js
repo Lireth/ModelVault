@@ -116,7 +116,7 @@ export {
 } from './covers-store'
 
 // Civitai 在线识别与一键补全
-export { civitaiIdentify, civitaiComplete } from './civitai-store'
+export { civitaiIdentify, civitaiComplete, civitaiImportImages } from './civitai-store'
 
 // 单模型操作/即时标注/右键菜单/导出/文件操作（批次 4）
 export {

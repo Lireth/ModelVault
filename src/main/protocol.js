@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import logger from './logger'
 import { isValidImageFile } from './services/covers'
 import { getCurrentRoot } from './services/store'
+import { isAllowedCivitaiImageUrl, fetchCivitaiImage } from './services/civitai'
 
 /**
  * 自定义图片协议 mvimg://
@@ -12,15 +13,27 @@ import { getCurrentRoot } from './services/store'
  * 兼容开发（http://localhost）与生产（file://）两种页面来源，
  * 且无需放宽 CSP 或开启 Node 能力。
  * 用法：mvimg://local/<encodeURIComponent(绝对路径)>
+ *
+ * 自定义图片协议 civimg://
+ * 用于在渲染进程中显示 Civitai 示例图（远程 CDN 图片）：渲染进程直连
+ * image.civitai.com 受 CSP/系统代理/Cloudflare 反爬等多重因素影响易失败，
+ * 统一经主进程 net.fetch 代理（与识别/下载同一网络栈），并强制
+ * 「https + 官方 CDN 域名白名单」校验。用法：
+ * civimg://remote/<encodeURIComponent(图片 https URL)>
  */
 
 const SCHEME = 'mvimg'
+const CIV_SCHEME = 'civimg'
 
 /** 必须在 app ready 之前调用 */
 export function registerImageScheme() {
   protocol.registerSchemesAsPrivileged([
     {
       scheme: SCHEME,
+      privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+    },
+    {
+      scheme: CIV_SCHEME,
       privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
     }
   ])
@@ -123,8 +136,15 @@ function withCacheHeaders(upstream, immutable) {
   })
 }
 
-/** 在 app ready 之后调用，注册协议处理器 */
+/** 在 app ready 之后调用，注册协议处理器（mvimg 本地图 + civimg 远程代理） */
 export function registerImageProtocolHandler() {
+  registerMvimgHandler()
+  registerCivimgHandler()
+  logger.info(`自定义协议 ${SCHEME}:// 与 ${CIV_SCHEME}:// 注册完成`)
+}
+
+/** mvimg:// 处理器：本地受控图片 */
+function registerMvimgHandler() {
   protocol.handle(SCHEME, async (request) => {
     try {
       const url = new URL(request.url)
@@ -162,7 +182,54 @@ export function registerImageProtocolHandler() {
       return new Response('Internal Error', { status: 500 })
     }
   })
-  logger.info(`自定义协议 ${SCHEME}:// 注册完成`)
+}
+
+/**
+ * civimg:// 处理器：Civitai 示例图远程代理。
+ * 渲染进程 <img> 请求经主进程 net.fetch 转发（与识别/下载同一网络栈，
+ * 自动继承系统代理），目标 URL 强制命中 CDN 域名白名单。
+ */
+function registerCivimgHandler() {
+  protocol.handle(CIV_SCHEME, async (request) => {
+    try {
+      const url = new URL(request.url)
+      if (url.host !== 'remote') {
+        return new Response('Bad Request', { status: 400 })
+      }
+      let target
+      try {
+        target = decodeURIComponent(url.pathname.replace(/^\/+/, ''))
+      } catch {
+        return new Response('Bad Request', { status: 400 })
+      }
+      if (!isAllowedCivitaiImageUrl(target)) {
+        logger.warn(`civimg 协议拒绝非白名单图片地址: ${target.slice(0, 200)}`)
+        return new Response('Forbidden', { status: 403 })
+      }
+      const upstream = await fetchCivitaiImage(target)
+      if (!upstream.ok) {
+        logger.warn(`civimg 上游响应异常（HTTP ${upstream.status}）: ${target.slice(0, 200)}`)
+        return new Response('Upstream Error', { status: 502 })
+      }
+      // 远程图内容一般不可变，按天缓存减轻 CDN 与代理压力
+      const headers = new Headers(upstream.headers)
+      headers.set('Cache-Control', 'public, max-age=86400')
+      return new Response(upstream.body, {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        headers
+      })
+    } catch (err) {
+      logger.error(`civimg 协议处理失败: ${err.message}`)
+      return new Response('Internal Error', { status: 500 })
+    }
+  })
+}
+
+/** 由 Civitai 图片 https URL 构造渲染进程可用的 civimg 代理 URL */
+export function toCivImageUrl(remoteUrl) {
+  if (!remoteUrl) return ''
+  return `${CIV_SCHEME}://remote/${encodeURIComponent(remoteUrl)}`
 }
 
 /** 由本地图片绝对路径构造渲染进程可用的 mvimg URL */

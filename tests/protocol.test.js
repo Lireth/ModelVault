@@ -44,7 +44,10 @@ beforeEach(async () => {
   roots.push(root)
   setDataRoot(root)
   registerImageProtocolHandler()
-  const call = vi.mocked(protocol.handle).mock.calls.pop()
+  // registerImageProtocolHandler 现同时注册 mvimg 与 civimg 两个处理器，按 scheme 精确选取
+  const call = vi
+    .mocked(protocol.handle)
+    .mock.calls.find(([scheme]) => scheme === 'mvimg')
   handler = call?.[1]
   expect(typeof handler).toBe('function')
 })
@@ -167,5 +170,63 @@ describe('toImageUrl', () => {
   it('空路径返回空串', () => {
     expect(toImageUrl('')).toBe('')
     expect(toImageUrl(null)).toBe('')
+  })
+})
+
+describe('civimg 协议（Civitai 示例图远程代理）', () => {
+  let civHandler
+
+  beforeEach(async () => {
+    // registerImageProtocolHandler 已在上方 beforeEach 执行，按 scheme 选取 civimg 处理器
+    const call = vi
+      .mocked(protocol.handle)
+      .mock.calls.find(([scheme]) => scheme === 'civimg')
+    civHandler = call?.[1]
+    expect(typeof civHandler).toBe('function')
+  })
+
+  /** 构造 civimg 请求（与渲染进程 civimg://remote/<encodeURIComponent(url)> 格式一致） */
+  const makeCivRequest = (url) => ({ url: `civimg://remote/${encodeURIComponent(url)}` })
+
+  it('非 remote host 的请求返回 400', async () => {
+    const res = await civHandler({ url: 'civimg://evil/some-url' })
+    expect(res.status).toBe(400)
+  })
+
+  it('非白名单域名（伪装 CDN 主机）返回 403，且不发起网络请求', async () => {
+    const res = await civHandler(makeCivRequest('https://evil.com/a.jpeg'))
+    expect(res.status).toBe(403)
+    expect(net.fetch).not.toHaveBeenCalled()
+  })
+
+  it('白名单 CDN 图片经 net.fetch 代理放行，附加按天缓存头', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response('img-bytes', { status: 200, headers: { 'Content-Type': 'image/jpeg' } })
+    )
+    const target = 'https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/uuid/original=true/1.jpeg'
+    const res = await civHandler(makeCivRequest(target))
+    expect(res.status).toBe(200)
+    expect(vi.mocked(net.fetch)).toHaveBeenCalledWith(
+      target,
+      expect.objectContaining({ headers: expect.objectContaining({ Referer: 'https://civitai.com/' }) })
+    )
+    expect(res.headers.get('Cache-Control')).toContain('max-age=86400')
+  })
+
+  it('上游响应失败返回 502', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(new Response('', { status: 403 }))
+    const res = await civHandler(makeCivRequest('https://image.civitai.com/a.jpeg'))
+    expect(res.status).toBe(502)
+  })
+})
+
+describe('toCivImageUrl', () => {
+  it('构造 civimg://remote/ 前缀并 encodeURIComponent 编码图片 URL', async () => {
+    const { toCivImageUrl } = await import('../src/main/protocol')
+    expect(toCivImageUrl('https://image.civitai.com/a.jpeg?x=1')).toBe(
+      `civimg://remote/${encodeURIComponent('https://image.civitai.com/a.jpeg?x=1')}`
+    )
+    expect(toCivImageUrl('')).toBe('')
+    expect(toCivImageUrl(null)).toBe('')
   })
 })

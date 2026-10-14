@@ -11,6 +11,8 @@ import { wrapHandler, checkModelId } from '../handler'
  * 封面链路：上传 / 粘贴 / 拖拽导入 / 设置默认 / 删除封面。
  * 所有成功路径统一返回 { cover, coverUrl, covers, meta } 结构
  * （项目约定，渲染进程按此结构更新，与 preload 注释保持一致）。
+ * appendCoverMeta/buildCoverResponse/refreshCoverThumbnail 导出供
+ * Civitai 示例图导入链路复用（同一封面结构与缩略图刷新约定）。
  */
 
 /** 由元数据构造渲染进程使用的封面列表（含绝对路径与 mvimg URL） */
@@ -26,7 +28,7 @@ export function coverListFromMeta(meta) {
  * @param {string} absCover 操作后的默认封面绝对路径（可为空串）
  * @param {object} meta 操作后的完整元数据
  */
-function buildCoverResponse(absCover, meta) {
+export function buildCoverResponse(absCover, meta) {
   const coverUrl = absCover ? toImageUrl(absCover) : ''
   return {
     cover: absCover,
@@ -40,7 +42,7 @@ function buildCoverResponse(absCover, meta) {
  * 将新封面文件追加到模型的封面列表（去重）。
  * 若尚无默认封面，则将新图设为默认（首页第一张默认显示）。
  */
-function appendCoverMeta(id, absCover) {
+export function appendCoverMeta(id, absCover) {
   const coverRel = relativizeCover(absCover)
   if (!coverRel) {
     return { error: '封面保存位置异常，无法关联到当前模型文件夹' }
@@ -66,7 +68,7 @@ function appendCoverMeta(id, absCover) {
  * @param {string} modelId 模型绝对路径
  * @param {string} absCover 默认封面绝对路径（空串时跳过）
  */
-async function refreshCoverThumbnail(win, modelId, absCover) {
+export async function refreshCoverThumbnail(win, modelId, absCover) {
   if (!absCover) return
   try {
     trackDeferredOwner(modelId, absCover)

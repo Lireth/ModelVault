@@ -12,6 +12,7 @@ vi.mock('electron', () => ({
 
 import {
   civitaiCompletePatch,
+  isAllowedCivitaiImageUrl,
   normalizeVersionInfo,
   stripHtml
 } from '../src/main/services/civitai'
@@ -51,6 +52,59 @@ describe('normalizeVersionInfo', () => {
   it('trainedWords 非数组时容错为空列表', () => {
     const info = normalizeVersionInfo({ id: 1, modelId: 2, trainedWords: 'not-array' })
     expect(info.trainedWords).toEqual([])
+  })
+
+  it('示例图仅保留静态图片，携带尺寸与 NSFW 标记；非白名单域名留待下载时拦截', () => {
+    const info = normalizeVersionInfo({
+      id: 1,
+      modelId: 2,
+      images: [
+        { type: 'image', url: 'https://image.civitai.com/a.jpeg', width: 512, height: 768, nsfw: false },
+        { type: 'video', url: 'https://image.civitai.com/b.mp4', width: 512, height: 768 },
+        { type: 'image', url: 'http://image.civitai.com/c.jpeg', width: 1, height: 1 },
+        { type: 'image', url: 'https://evil.com/d.jpeg', width: 1, height: 1, nsfw: true },
+        null,
+        { type: 'image', width: 1, height: 1 }
+      ]
+    })
+    // https 前缀的静态图均保留（域名白名单在 downloadCivitaiImage 强制），
+    // http/视频/坏数据剔除
+    expect(info.images).toEqual([
+      { url: 'https://image.civitai.com/a.jpeg', width: 512, height: 768, nsfw: false },
+      { url: 'https://evil.com/d.jpeg', width: 1, height: 1, nsfw: true }
+    ])
+  })
+
+  it('示例图按 API 顺序截断至 30 张', () => {
+    const imgs = Array.from({ length: 40 }, (_, i) => ({
+      type: 'image',
+      url: `https://image.civitai.com/${i}.jpeg`,
+      width: 1,
+      height: 1
+    }))
+    expect(normalizeVersionInfo({ id: 1, modelId: 2, images: imgs }).images).toHaveLength(30)
+  })
+
+  it('nsfwLevel 数组非空视为 NSFW', () => {
+    const info = normalizeVersionInfo({
+      id: 1,
+      modelId: 2,
+      images: [{ type: 'image', url: 'https://image.civitai.com/x.jpeg', nsfwLevel: ['X'] }]
+    })
+    expect(info.images[0].nsfw).toBe(true)
+  })
+})
+
+describe('isAllowedCivitaiImageUrl', () => {
+  it('仅放行 https 协议的 Civitai CDN 主机', () => {
+    expect(isAllowedCivitaiImageUrl('https://image.civitai.com/a.jpeg')).toBe(true)
+    expect(isAllowedCivitaiImageUrl('http://image.civitai.com/a.jpeg')).toBe(false)
+    expect(isAllowedCivitaiImageUrl('https://evil.com/a.jpeg')).toBe(false)
+    // 子域伪装与用户信息段伪装均拒绝（真实主机不匹配）
+    expect(isAllowedCivitaiImageUrl('https://image.civitai.com.evil.com/a.jpeg')).toBe(false)
+    expect(isAllowedCivitaiImageUrl('https://image.civitai.com@evil.com/a.jpeg')).toBe(false)
+    expect(isAllowedCivitaiImageUrl('not-a-url')).toBe(false)
+    expect(isAllowedCivitaiImageUrl(null)).toBe(false)
   })
 })
 

@@ -49,10 +49,20 @@ export async function hasImageMagic(filePath) {
     const { bytesRead } = await fh.read(buf, 0, 12, 0)
     if (bytesRead === 0) return false
     // 未读满 12 字节时剩余字节保持 0，不会误匹配任何魔数
-    return IMAGE_MAGIC.some((test) => test(buf))
+    return isImageBuffer(buf)
   } finally {
     await fh.close()
   }
+}
+
+/**
+ * 按文件头魔数校验内存中的字节是否为真实图片（下载内容与文件路径入口共用）。
+ * @param {Buffer} buf 文件头字节（12 字节以内即可判定）
+ * @returns {boolean}
+ */
+export function isImageBuffer(buf) {
+  if (!buf || buf.length === 0) return false
+  return IMAGE_MAGIC.some((test) => test(buf))
 }
 
 /**
@@ -99,6 +109,41 @@ export async function importCoverFromPath(source) {
   } catch (err) {
     logger.error(`封面保存失败: ${err.message}`)
     return { error: `封面保存失败: ${err.message}` }
+  }
+}
+
+/**
+ * 将内存中的图片字节保存到关联存储的封面目录（Civitai 示例图导入入口）。
+ * 扩展名 + 魔数 + 大小三重校验，与 importCoverFromPath 同一安全标准。
+ * @param {Buffer} buf 图片字节
+ * @param {string} ext 文件扩展名（含点，如 '.jpg'，须在 IMAGE_EXTENSIONS 内）
+ * @returns {Promise<{cover: string} | {error: string}>} cover 为保存后的绝对路径
+ */
+export async function saveCoverBuffer(buf, ext) {
+  const normalizedExt = typeof ext === 'string' ? ext.toLowerCase() : ''
+  if (!buf || !Buffer.isBuffer(buf) || buf.length === 0) {
+    return { error: '无效的图片内容' }
+  }
+  if (!IMAGE_EXTENSIONS.has(normalizedExt)) {
+    return { error: '不支持的图片格式' }
+  }
+  if (buf.length > MAX_COVER_BYTES) {
+    return {
+      error: `图片文件过大（上限 ${Math.floor(MAX_COVER_BYTES / 1024 / 1024)}MB）`
+    }
+  }
+  if (!isImageBuffer(buf)) {
+    return { error: '文件内容不是有效的图片，已拒绝导入' }
+  }
+  try {
+    await fs.mkdir(getCoversDir(), { recursive: true })
+    const dest = path.join(getCoversDir(), `${Date.now()}-civitai${normalizedExt}`)
+    await fs.writeFile(dest, buf)
+    logger.info(`Civitai 示例图已保存: ${dest}`)
+    return { cover: dest }
+  } catch (err) {
+    logger.error(`Civitai 示例图保存失败: ${err.message}`)
+    return { error: `示例图保存失败: ${err.message}` }
   }
 }
 

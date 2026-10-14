@@ -14,8 +14,44 @@ import { net } from 'electron'
 const CIVITAI_API_BASE = 'https://civitai.com/api/v1'
 /** 请求超时（ms），与 updater.js 一致 */
 const REQUEST_TIMEOUT_MS = 15000
+/** 图片下载超时（ms）：示例图普遍数 MB，放宽到 30s */
+const IMAGE_TIMEOUT_MS = 30000
 /** 流式哈希的读取块大小（8MB：大文件吞吐与内存占用的平衡点） */
 const HASH_CHUNK_SIZE = 8 * 1024 * 1024
+/** 识别结果携带的示例图上限（Civitai 热门模型可达数百张，UI 无需全量） */
+const MAX_IMAGES = 30
+/** 示例图下载大小上限（与封面导入同一量级） */
+const MAX_IMAGE_BYTES = 50 * 1024 * 1024
+
+/**
+ * Civitai 示例图 CDN 域名白名单：API 响应中的图片 URL 不可信，
+ * 下载入口仅放行官方 CDN 主机（防 SSRF/任意文件落盘）。
+ */
+const CIVITAI_IMAGE_HOSTS = new Set(['image.civitai.com'])
+
+/**
+ * 校验示例图 URL 是否允许下载（纯函数，便于单测）：
+ * 必须 https 协议且主机命中 Civitai CDN 白名单。
+ * @param {unknown} url 待校验 URL
+ * @returns {boolean}
+ */
+export function isAllowedCivitaiImageUrl(url) {
+  try {
+    const parsed = new URL(String(url))
+    return parsed.protocol === 'https:' && CIVITAI_IMAGE_HOSTS.has(parsed.host)
+  } catch {
+    return false
+  }
+}
+
+/** 下载响应的 Content-Type → 封面文件扩展名 */
+const MIME_EXT = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'image/bmp': '.bmp'
+}
 
 /**
  * 流式计算文件 SHA256（hex 小写）。
@@ -90,8 +126,10 @@ export async function fetchCivitaiVersionByHash(hash) {
 /**
  * 由 by-hash 端点响应构造规范化信息与页面 URL（纯函数，便于单测）。
  * 页面链接格式与 Civitai 官方一致：/models/{modelId}?modelVersionId={versionId}。
+ * 示例图仅保留静态图片（视频/混合媒体剔除），按 API 默认顺序（热度）截断。
  * @param {object} raw API 响应 JSON
- * @returns {object|null} { url, modelName, versionName, baseModel, trainedWords, description }
+ * @returns {object|null} { url, modelName, versionName, baseModel, trainedWords,
+ *   description, images: [{url, width, height, nsfw}] }
  */
 export function normalizeVersionInfo(raw) {
   if (!raw || typeof raw !== 'object') return null
@@ -101,13 +139,26 @@ export function normalizeVersionInfo(raw) {
   const trainedWords = Array.isArray(raw.trainedWords)
     ? raw.trainedWords.filter((w) => typeof w === 'string' && w.trim()).map((w) => w.trim())
     : []
+  const images = Array.isArray(raw.images)
+    ? raw.images
+        .filter((img) => img && typeof img === 'object' && img.type === 'image' &&
+          typeof img.url === 'string' && img.url.startsWith('https://'))
+        .slice(0, MAX_IMAGES)
+        .map((img) => ({
+          url: img.url,
+          width: Number.isFinite(img.width) ? img.width : 0,
+          height: Number.isFinite(img.height) ? img.height : 0,
+          nsfw: img.nsfw === true || (Array.isArray(img.nsfwLevel) && img.nsfwLevel.length > 0)
+        }))
+    : []
   return {
     url: `https://civitai.com/models/${modelId}?modelVersionId=${versionId}`,
     modelName: typeof raw.model?.name === 'string' ? raw.model.name : '',
     versionName: typeof raw.name === 'string' ? raw.name : '',
     baseModel: typeof raw.baseModel === 'string' ? raw.baseModel : '',
     trainedWords,
-    description: typeof raw.description === 'string' ? raw.description : ''
+    description: typeof raw.description === 'string' ? raw.description : '',
+    images
   }
 }
 
@@ -159,4 +210,65 @@ export function civitaiCompletePatch(meta, info) {
     }
   }
   return { patch, applied: Object.keys(patch) }
+}
+
+/**
+ * 发起 Civitai 图片请求（协议代理与导入下载共用）：
+ * 不自定义 UA（保持 Electron 的 Chromium 默认 UA，规避 CDN 反爬挑战），
+ * 携带 Referer 与 Accept 提高直连成功率。
+ * @param {string} url 已通过 isAllowedCivitaiImageUrl 校验的图片地址
+ * @returns {Promise<Response>}
+ */
+export function fetchCivitaiImage(url) {
+  return net.fetch(url, {
+    headers: {
+      Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      Referer: 'https://civitai.com/'
+    },
+    signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS)
+  })
+}
+
+/**
+ * 下载 Civitai 示例图并做内容校验（仅下载白名单 CDN 的图片）。
+ * 返回图片字节与按 Content-Type 推断的扩展名，落盘由封面保存层负责。
+ * @param {string} url 图片 URL（必须命中 isAllowedCivitaiImageUrl）
+ * @returns {Promise<{buf: Buffer, ext: string} | {error: string}>}
+ */
+export async function downloadCivitaiImage(url) {
+  if (!isAllowedCivitaiImageUrl(url)) {
+    return { error: '图片地址不在 Civitai CDN 白名单内，已拒绝下载' }
+  }
+  let response
+  try {
+    response = await fetchCivitaiImage(url)
+  } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      return { error: '图片下载超时' }
+    }
+    return { error: `图片下载失败: ${err.message}` }
+  }
+  if (!response.ok) {
+    return { error: `图片下载失败（HTTP ${response.status}）` }
+  }
+  let buf
+  try {
+    buf = Buffer.from(await response.arrayBuffer())
+  } catch (err) {
+    return { error: `图片内容读取失败: ${err.message}` }
+  }
+  if (buf.length === 0) {
+    return { error: '图片内容为空' }
+  }
+  if (buf.length > MAX_IMAGE_BYTES) {
+    return { error: `图片过大（上限 ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)}MB）` }
+  }
+  // 内容校验：按响应 Content-Type 推断扩展名，URL 路径扩展名兜底
+  const mime = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
+  let ext = MIME_EXT[mime] || ''
+  if (!ext) {
+    const m = new URL(url).pathname.match(/\.(jpe?g|png|webp|gif|bmp)$/i)
+    ext = m ? `.${m[1].toLowerCase().replace('jpeg', 'jpg')}` : '.jpg'
+  }
+  return { buf, ext }
 }

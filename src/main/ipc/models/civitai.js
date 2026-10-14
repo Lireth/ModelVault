@@ -1,22 +1,36 @@
 import fs from 'node:fs/promises'
+import { BrowserWindow } from 'electron'
 import logger from '../../logger'
 import { getModelMeta, setModelMeta } from '../../services/store'
+import { saveCoverBuffer } from '../../services/covers'
 import {
   civitaiCompletePatch,
   computeFileHash,
+  downloadCivitaiImage,
   fetchCivitaiVersionByHash
 } from '../../services/civitai'
+import {
+  appendCoverMeta,
+  buildCoverResponse,
+  refreshCoverThumbnail
+} from './covers'
+import { resolveCoverSafe } from './decorate'
 import { wrapHandler, checkModelIdInRoot } from '../handler'
 
 /**
  * Civitai 在线识别链路：
  * - identify：按文件 SHA256 反查 Civitai 模型版本，成功时把页面 URL 写入
- *   元数据（civitaiUrl）并回传识别信息；
+ *   元数据（civitaiUrl）并回传识别信息（含示例图列表）；
  * - complete：重新反查后对空缺字段（触发词/备注）生成补丁并落盘，
- *   绝不覆盖用户已有标注。
+ *   绝不覆盖用户已有标注；
+ * - importImages：下载勾选的 Civitai 示例图（仅官方 CDN 白名单）并追加
+ *   到模型封面列表（复用封面上传的落盘/关联/缩略图刷新链路）。
  * 大文件哈希计算可能耗时数十秒，渲染层需提供忙碌提示；哈希结果缓存于
  * 元数据的 hash/hashMtime 字段（文件未变更时免重算，与 relink 履书共用）。
  */
+
+/** 单次导入的示例图数量上限 */
+const MAX_IMPORT_IMAGES = 20
 
 /**
  * 确保拿到模型文件当前有效的 SHA256（命中 hashMtime 缓存时零读取），
@@ -63,7 +77,8 @@ export function registerCivitaiHandlers() {
         versionName: res.info.versionName,
         baseModel: res.info.baseModel,
         trainedWords: res.info.trainedWords,
-        description: res.info.description
+        description: res.info.description,
+        images: res.info.images
       },
       meta: saved || null
     }
@@ -92,4 +107,51 @@ export function registerCivitaiHandlers() {
       }
     }
   }, { errorPrefix: 'Civitai 补全失败' })
+
+  // 示例图导入：下载勾选的图片（仅 Civitai CDN 白名单域名）并追加到封面列表。
+  // 逐张串行下载/落盘/关联；单张失败不中断整批，结果按图反馈
+  wrapHandler('models:civitaiImportImages', async (event, { id, images } = {}) => {
+    const invalid = checkModelIdInRoot(id)
+    if (invalid) return { error: invalid }
+    if (!Array.isArray(images) || images.length === 0) {
+      return { error: '未选择要导入的示例图' }
+    }
+    if (images.length > MAX_IMPORT_IMAGES) {
+      return { error: `单次最多导入 ${MAX_IMPORT_IMAGES} 张示例图` }
+    }
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const failed = []
+    let added = 0
+    let lastMeta = null
+    for (const item of images) {
+      const url = item && typeof item.url === 'string' ? item.url : ''
+      const dl = await downloadCivitaiImage(url)
+      if (dl.error) {
+        failed.push({ url, error: dl.error })
+        continue
+      }
+      const saved = await saveCoverBuffer(dl.buf, dl.ext)
+      if (saved.error) {
+        failed.push({ url, error: saved.error })
+        continue
+      }
+      const applied = appendCoverMeta(id, saved.cover)
+      if (applied.error) {
+        failed.push({ url, error: applied.error })
+        continue
+      }
+      added += 1
+      lastMeta = applied.meta
+    }
+    if (added === 0) {
+      return { error: failed[0]?.error || '示例图导入失败', failed }
+    }
+    logger.info(`Civitai 示例图导入完成: ${id}（成功 ${added} / 失败 ${failed.length}）`)
+    await refreshCoverThumbnail(win, id, resolveCoverSafe(lastMeta.cover))
+    return {
+      added,
+      failed,
+      ...buildCoverResponse(resolveCoverSafe(lastMeta.cover), lastMeta)
+    }
+  }, { errorPrefix: '示例图导入失败' })
 }

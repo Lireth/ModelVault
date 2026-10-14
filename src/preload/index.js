@@ -32,7 +32,8 @@ const VALID_INVOKE_CHANNELS = [
   'models:toggleDisabled',
   'models:moveModelTo',
   'models:civitaiIdentify',
-  'models:civitaiComplete'
+  'models:civitaiComplete',
+  'models:civitaiImportImages'
 ]
 
 const VALID_RECEIVE_CHANNELS = [
@@ -160,7 +161,14 @@ const api = {
      * Civitai 一键补全（仅填充空缺的触发词/备注），返回
      * { found: true, applied: string[], meta } / { found: false } / { error }
      */
-    civitaiComplete: (id) => invokeValidated('models:civitaiComplete', { id })
+    civitaiComplete: (id) => invokeValidated('models:civitaiComplete', { id }),
+    /**
+     * 导入 Civitai 示例图为模型封面（images: [{url}]，仅限 Civitai CDN，
+     * 单次上限 20 张），返回 { added, failed, cover, coverUrl, covers, meta }
+     * 或 { error }
+     */
+    civitaiImportImages: (id, images) =>
+      invokeValidated('models:civitaiImportImages', { id, images })
   }
 }
 

@@ -99,6 +99,7 @@ const EXPECTED_EXPORTS = [
   // Civitai 在线识别与一键补全
   'civitaiIdentify',
   'civitaiComplete',
+  'civitaiImportImages',
   // 单模型操作
   'revealModel',
   'deleteModel',
