@@ -272,6 +272,33 @@ describe('确认层（U4）', () => {
     await expect(first).resolves.toBe(false)
     await expect(second).resolves.toBe(true)
   })
+
+  it('确认后 state.confirm 保持响应式代理（回归：整体替换致第二次弹窗失效）', async () => {
+    const { isReactive, nextTick, watch } = await import('vue')
+    const changes = []
+    const stop = watch(
+      () => state.confirm.visible,
+      (v) => changes.push(v)
+    )
+    // 第一轮确认：acceptConfirm 曾用原始对象整体替换 state.confirm，
+    // shallowReactive 不深代理 → 后续逐字段赋值失去响应性，弹窗不再显示
+    const p1 = confirmDialog('第一轮')
+    await nextTick() // 等待监听 flush，否则同 tick 内 true→false 被去重
+    expect(changes).toEqual([true])
+    acceptConfirm()
+    await expect(p1).resolves.toBe(true)
+    await nextTick()
+    expect(changes).toEqual([true, false])
+    expect(isReactive(state.confirm)).toBe(true)
+    // 第二轮（回归点）：visible 逐字段赋值必须仍触发响应（渲染层据此显示弹窗）
+    const p2 = confirmDialog('第二轮')
+    await nextTick()
+    expect(changes).toEqual([true, false, true])
+    expect(state.confirm.visible).toBe(true)
+    stop()
+    rejectConfirm()
+    await expect(p2).resolves.toBe(false)
+  })
 })
 
 describe('Toast 通知', () => {

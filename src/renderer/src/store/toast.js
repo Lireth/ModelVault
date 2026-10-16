@@ -40,12 +40,19 @@ export function confirmDialog(text) {
 /** 确认层按钮回调（U4） */
 export function acceptConfirm() {
   const resolve = state.confirm.resolve
-  state.confirm = { visible: false, text: '', resolve: null }
+  // 逐字段赋值而非整体替换：state.confirm 是 reactive 代理，整体替换会以
+  // 原始对象覆盖代理（shallowReactive 不做深代理），后续 confirmDialog 的
+  // 逐字段赋值将失去响应性——第二次及以后的确认弹窗不再显示（await 永久挂起）
+  state.confirm.visible = false
+  state.confirm.text = ''
+  state.confirm.resolve = null
   resolve?.(true)
 }
 
 export function rejectConfirm() {
   const resolve = state.confirm.resolve
-  state.confirm = { visible: false, text: '', resolve: null }
+  state.confirm.visible = false
+  state.confirm.text = ''
+  state.confirm.resolve = null
   resolve?.(false)
 }
