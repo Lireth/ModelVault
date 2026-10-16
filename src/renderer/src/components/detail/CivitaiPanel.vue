@@ -121,7 +121,12 @@ async function importSelected() {
   if (!model.value || selectedUrls.size === 0 || importing.value) return
   importing.value = true
   try {
-    const picked = images.value.filter((img) => selectedUrls.has(img.url))
+    // 勾选对象来自识别结果（contextBridge 返回值 + Vue ref 深层响应式代理），
+    // Electron IPC 结构化序列化不支持 Proxy，直接传会抛
+    // "An object could not be cloned"；主进程仅读取 url，拷贝为普通对象再过 IPC
+    const picked = images.value
+      .filter((img) => selectedUrls.has(img.url))
+      .map((img) => ({ url: img.url }))
     const res = await civitaiImportImages(model.value.id, picked)
     if (!res.error) selectedUrls.clear()
   } finally {
