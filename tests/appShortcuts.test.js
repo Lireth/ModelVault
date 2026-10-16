@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach, beforeAll } from 'vitest'
+import { describe, it, expect, afterEach, beforeAll, beforeEach } from 'vitest'
 import { nextTick } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import App from '../src/renderer/src/App.vue'
-import { state, defaultSettings, rejectConfirm } from '../src/renderer/src/store/appStore'
+import { state, defaultSettings, rejectConfirm, replaceModels } from '../src/renderer/src/store/appStore'
 import { setupComponentTest } from './helpers/componentTest'
 
 /**
@@ -32,6 +32,36 @@ beforeAll(() => {
 
 let wrapper = null
 
+/**
+ * 用例间状态复位（与 appStore.test.js 同一口径）：
+ * state 为模块级单例，前面的用例会残留 search/multiSelect/确认层等
+ * 状态（如「设置页 Esc 让位」用例断言保留 search='lora'），不复位则
+ * 后续用例的 Ctrl+A 全选数量与 Ctrl+D 批量目标随执行顺序漂移，
+ * CI 高并行慢环境下表现为偶发断言失败。
+ */
+beforeEach(() => {
+  state.folder = ''
+  state.booting = false
+  state.scanning = false
+  state.scanError = ''
+  replaceModels([])
+  state.typeFilter = 'all'
+  state.subFilter = ''
+  state.showFavoritesOnly = false
+  state.search = ''
+  state.sortBy = 'name'
+  state.sortAsc = true
+  state.viewMode = 'grid'
+  state.selectedId = null
+  state.detailDirty = false
+  state.settingsOpen = false
+  state.toasts.splice(0, state.toasts.length)
+  // 挂起的确认 Promise 先收敛，再就地表合并复位（O3 浅响应约定）
+  if (state.confirm.resolve) state.confirm.resolve(false)
+  Object.assign(state.confirm, { visible: false, text: '', resolve: null })
+  Object.assign(state.multiSelect, { active: false, ids: [], busy: false })
+})
+
 /** 挂载 App（initApp 经桩 loadStore 拿到默认设置，不触发扫描） */
 async function mountApp() {
   window.api.models.loadStore.mockResolvedValue({ settings: defaultSettings() })
@@ -39,6 +69,12 @@ async function mountApp() {
   // Ctrl+F 的 focus 断言需要元素 isConnected
   wrapper = mount(App, { attachTo: document.body })
   await flushPromises()
+  // CI 高并行慢环境下 flushPromises 未必覆盖 initApp 全链：轮询等待
+  // 启动完成标志（B8），避免初始化与用例准备交错
+  for (let i = 0; i < 200 && state.booting; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  expect(state.booting).toBe(false)
   return wrapper
 }
 
@@ -52,10 +88,11 @@ afterEach(() => {
 /** 准备已选文件夹 + 两个模型的网格场景（搜索框与网格均渲染） */
 async function setupGrid(wrapper) {
   state.folder = 'D:\\models'
-  state.models = [
+  // O3：models 数组级更新须经 replaceModels（直接赋值落入 raw 数组丢响应）
+  replaceModels([
     { id: 'D:\\models\\a.safetensors', name: 'a', type: 'checkpoint', size: 10, mtimeMs: 1, favorite: false, nsfw: false, rating: 0, alias: '', note: '', subCategory: 'base', triggerWords: '', coverUrl: '', covers: [] },
     { id: 'D:\\models\\b.safetensors', name: 'b', type: 'lora', size: 20, mtimeMs: 2, favorite: false, nsfw: false, rating: 0, alias: '', note: '', subCategory: '', triggerWords: '', coverUrl: '', covers: [] }
-  ]
+  ])
   await nextTick()
   return wrapper.find('.search-box input').element
 }
