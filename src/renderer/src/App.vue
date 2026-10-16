@@ -288,6 +288,9 @@ onUnmounted(() => {
   window.removeEventListener('drop', onWindowDrop)
   window.removeEventListener('keydown', onGlobalKeydown)
   clearTimeout(fsChangedTimer)
+  // 搜索防抖定时器：回调为裸闭包（写 state.search），卸载后若仍到期
+  // 会滞后覆写全局搜索词（测试中跨用例竞态的根源）
+  clearTimeout(searchTimer)
   unsubscribeProgress?.()
   unsubscribeMenu?.()
   unsubscribeThumbs?.()
