@@ -33,7 +33,8 @@ const VALID_INVOKE_CHANNELS = [
   'models:moveModelTo',
   'models:civitaiIdentify',
   'models:civitaiComplete',
-  'models:civitaiImportImages'
+  'models:civitaiImportImages',
+  'models:warmupHash'
 ]
 
 const VALID_RECEIVE_CHANNELS = [
@@ -168,7 +169,12 @@ const api = {
      * 或 { error }
      */
     civitaiImportImages: (id, images) =>
-      invokeValidated('models:civitaiImportImages', { id, images })
+      invokeValidated('models:civitaiImportImages', { id, images }),
+    /**
+     * 预热模型哈希（Civitai 识别加速）：详情页打开时调用，后台计算该模型
+     * 的 SHA256 并写入元数据缓存，入队即返回 { ok }，不等待计算完成
+     */
+    warmupHash: (id) => invokeValidated('models:warmupHash', { id })
   }
 }
 

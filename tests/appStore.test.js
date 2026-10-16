@@ -56,6 +56,7 @@ function makeApiMock() {
       deleteCover: vi.fn(),
       importCover: vi.fn(),
       partialScan: vi.fn(),
+      warmupHash: vi.fn(() => Promise.resolve({ ok: true })),
       onScanProgress: vi.fn(() => () => {}),
       onMenuAction: vi.fn(() => () => {}),
       onThumbsReady: vi.fn(() => () => {}),

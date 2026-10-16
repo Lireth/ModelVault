@@ -12,6 +12,7 @@ import {
 } from '../../services/store'
 import { pruneOrphanCovers } from '../../services/covers'
 import { syncWatcher } from '../../services/watcher'
+import { requestHashWarmup } from '../../services/hash-warmup'
 import { awaitThumbDrain } from './model-state'
 import { wrapHandler, checkExistingDirectory } from '../handler'
 
@@ -75,6 +76,9 @@ export function registerStoreHandlers() {
         // 清理不再被元数据引用的孤儿封面文件
         await pruneOrphanCovers()
         metaMap = getMetaMapByAbsPath()
+        // 启动后后台预热缺失的模型哈希（Civitai 识别加速）：仅入队，
+        // 由预热服务延迟逐个处理，已缓存/文件缺失的条目消费时秒级跳过
+        requestHashWarmup(Object.keys(metaMap))
         // 目录监控启动路径闭合（OPT-19）：启动时若 autoScan 关闭则不会触发扫描，
         // 此前 watcher 仅在扫描/设置更新时同步，导致 autoRescan 开启却静默不生效；
         // 此处按设置补一次同步（同根同状态时为幂等刷新）

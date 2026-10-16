@@ -5,10 +5,10 @@ import { getModelMeta, setModelMeta } from '../../services/store'
 import { saveCoverBuffer } from '../../services/covers'
 import {
   civitaiCompletePatch,
-  computeFileHash,
   downloadCivitaiImage,
   fetchCivitaiVersionByHash
 } from '../../services/civitai'
+import { computeAndCacheHash, requestHashWarmup } from '../../services/hash-warmup'
 import {
   appendCoverMeta,
   buildCoverResponse,
@@ -34,7 +34,8 @@ const MAX_IMPORT_IMAGES = 20
 
 /**
  * 确保拿到模型文件当前有效的 SHA256（命中 hashMtime 缓存时零读取），
- * 新计算的结果回写元数据缓存。
+ * 未命中时经预热服务统一入口计算（与后台预热共享进行中任务，同一模型
+ * 同 mtime 只读盘计算一次，结果回写元数据缓存）。
  * @param {string} id 模型绝对路径
  * @param {object} meta 当前元数据（可为空对象）
  * @param {number} mtimeMs 文件当前 mtime
@@ -44,11 +45,9 @@ async function ensureHash(id, meta, mtimeMs) {
   if (meta.hash && meta.hashMtime === mtimeMs) {
     return { hash: meta.hash, meta }
   }
-  const hash = await computeFileHash(id)
-  // 重读最新元数据后再写缓存：哈希计算期间用户可能已并发保存其他字段
-  const latest = getModelMeta(id) || meta
-  const updated = setModelMeta(id, { ...latest, hash, hashMtime: mtimeMs }) || latest
-  return { hash, meta: updated }
+  const hash = await computeAndCacheHash(id, mtimeMs)
+  // 重读最新元数据：哈希计算期间用户可能已并发保存其他字段
+  return { hash, meta: getModelMeta(id) || meta }
 }
 
 /** 注册 Civitai 识别链路的 IPC 处理器 */
@@ -154,4 +153,13 @@ export function registerCivitaiHandlers() {
       ...buildCoverResponse(resolveCoverSafe(lastMeta.cover), lastMeta)
     }
   }, { errorPrefix: '示例图导入失败' })
+
+  // 哈希预热（详情页打开时由渲染层触发）：优先入队并立即开始后台计算，
+  // 用户随后点击识别时哈希多半已缓存，识别秒回。入队即返回，不等待计算。
+  wrapHandler('models:warmupHash', (event, { id } = {}) => {
+    const invalid = checkModelIdInRoot(id)
+    if (invalid) return { error: invalid }
+    requestHashWarmup([id], { priority: true })
+    return { ok: true }
+  })
 }

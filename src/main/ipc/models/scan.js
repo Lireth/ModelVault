@@ -5,6 +5,7 @@ import { scanModels } from '../../services/scanner'
 import { pruneOrphanCovers } from '../../services/covers'
 import { clearDeferredJobs } from '../../services/thumbs'
 import { syncWatcher } from '../../services/watcher'
+import { pauseHashWarmup, requestHashWarmup, resumeHashWarmup } from '../../services/hash-warmup'
 import { clearDeferredOwners, decorateModels, startThumbDrain } from './decorate'
 import { ensureRootStore } from './store'
 import { getDecorateCacheRoot, awaitThumbDrain, resetDecorateCache } from './model-state'
@@ -49,6 +50,8 @@ export function registerScanHandlers() {
     scanAbort = new AbortController()
     const signal = scanAbort.signal
     const startedAt = Date.now()
+    // 扫描期间暂停后台哈希预热取队（正在计算的单个文件不中断），结束后恢复
+    pauseHashWarmup()
     let root
 
     try {
@@ -137,6 +140,11 @@ export function registerScanHandlers() {
       // 响应先返回，缺失的缩略图由后台队列补齐（完成后推送 thumbsReady 更新）
       startThumbDrain(win)
 
+      // 后台预热缺失的模型哈希（Civitai 识别加速）：缓存缺失的条目按
+      // mtime 逐个计算回写，已缓存/文件缺失的条目消费时秒级跳过；
+      // 扫描刚结束磁盘繁忙，预热服务延迟启动
+      requestHashWarmup(decorated.map((m) => m.id))
+
       // 扫描成功后与 settings.modelsFolder 保持一致（C6）：
       // 显式传入 folder 的扫描也持久化根目录，与 models:chooseFolder 行为闭环
       await updateSettings({ modelsFolder: root })
@@ -157,6 +165,7 @@ export function registerScanHandlers() {
     } finally {
       scanning = false
       scanAbort = null
+      resumeHashWarmup()
     }
   }, { errorPrefix: '扫描失败' })
 
@@ -215,6 +224,8 @@ export function registerScanHandlers() {
     const abort = new AbortController()
     scanAbort = abort
     const signal = abort.signal
+    // 与全量扫描一致：扫描期间暂停后台哈希预热取队，结束后恢复
+    pauseHashWarmup()
     try {
       await ensureRootStore(root)
       const appSettings = getSettings()
@@ -242,6 +253,9 @@ export function registerScanHandlers() {
       // 装饰中新登记的缩略图任务经既有后台链生成并推送
       startThumbDrain(win)
 
+      // 受影响子树的哈希预热（同全量扫描，Civitai 识别加速）
+      requestHashWarmup(decorated.map((m) => m.id))
+
       logger.info(
         `局部扫描完成：${subDirs.length} 个子树 → ${decorated.length} 个模型 / 重关联 ${relinkResult.relinked} 个`
       )
@@ -255,6 +269,7 @@ export function registerScanHandlers() {
     } finally {
       scanning = false
       scanAbort = null
+      resumeHashWarmup()
     }
   }, { errorPrefix: '局部扫描失败' })
 }
