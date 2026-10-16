@@ -8,6 +8,7 @@ import {
   batchCivitaiImages,
   batchDeleteModels,
   batchFavorite,
+  batchToggleDisabled,
   batchSetSubCategory,
   confirmDialog,
   deleteModel,
@@ -20,6 +21,7 @@ import {
   partialScanModels,
   rejectConfirm,
   replaceModels,
+  requestBatchCancel,
   saveSettings,
   scanModels,
   selectedModel,
@@ -48,6 +50,7 @@ function makeApiMock() {
       cancelScan: vi.fn(() => Promise.resolve({ ok: false })),
       chooseFolder: vi.fn(),
       setMetaFlags: vi.fn(),
+      toggleDisabled: vi.fn(),
       deleteModel: vi.fn(),
       popupMenu: vi.fn(),
       reveal: vi.fn(),
@@ -96,6 +99,8 @@ beforeEach(() => {
   state.selectedId = null
   state.detailDirty = false
   state.settingsOpen = false
+  // O3：multiSelect 为内嵌深响应集合，就地表合并复位（含批量取消标志）
+  Object.assign(state.multiSelect, { active: false, ids: [], busy: false, progress: '', cancelRequested: false })
   state.toasts.splice(0, state.toasts.length)
   if (state.confirm.resolve) state.confirm.resolve(false)
   // O3：state 为 shallowReactive，confirm 是内嵌深响应集合，就地表合并复位
@@ -854,6 +859,57 @@ describe('批量操作单次状态合并（O2）', () => {
     expect(api.models.civitaiIdentify).not.toHaveBeenCalled()
     expect(api.models.civitaiImportImages).not.toHaveBeenCalled()
     expect(state.toasts.some((t) => t.text.includes('均已有示例图'))).toBe(true)
+  })
+})
+
+describe('批量取消（Esc 请求取消，串行批量提前收尾）', () => {
+  it('requestBatchCancel 仅在 busy 期间置位', () => {
+    state.multiSelect.busy = false
+    requestBatchCancel()
+    expect(state.multiSelect.cancelRequested).toBe(false)
+    state.multiSelect.busy = true
+    requestBatchCancel()
+    expect(state.multiSelect.cancelRequested).toBe(true)
+  })
+
+  it('批量禁用进行中请求取消：循环提前收尾、标志位 finally 复位、提示已完成数', async () => {
+    state.models = [makeModel('a'), makeModel('b'), makeModel('c')]
+    state.multiSelect.ids = ['a', 'b', 'c']
+    state.multiSelect.busy = false
+    state.scanning = true // 跳过禁用后的整表重扫（该链路由 scanner/watcher 测试覆盖）
+    let calls = 0
+    api.models.toggleDisabled.mockImplementation(() => {
+      calls += 1
+      if (calls === 1) requestBatchCancel() // 第一个完成后按 Esc 请求取消（busy 已置位的真实路径）
+      return Promise.resolve({ ok: true })
+    })
+
+    await batchToggleDisabled(true)
+
+    expect(calls).toBe(1) // 第二轮循环顶部检查取消标志，提前 break
+    expect(state.multiSelect.busy).toBe(false)
+    expect(state.multiSelect.cancelRequested).toBe(false)
+    expect(state.toasts.some((t) => t.text.includes('已取消（完成 1/3）'))).toBe(true)
+  })
+
+  it('批量识别进行中请求取消：已完成部分保存并提示进度', async () => {
+    state.models = [makeModel('a'), makeModel('b'), makeModel('c')]
+    state.multiSelect.ids = ['a', 'b', 'c']
+    let calls = 0
+    api.models.civitaiIdentify.mockImplementation(() => {
+      calls += 1
+      if (calls === 2) requestBatchCancel() // 识别完第二个后请求取消
+      return Promise.resolve({ found: true, meta: { civitaiUrl: 'https://civitai.com/models/x' } })
+    })
+
+    await batchCivitaiIdentify()
+
+    expect(calls).toBe(2)
+    expect(state.multiSelect.cancelRequested).toBe(false)
+    expect(state.toasts.some((t) => t.text.includes('识别已取消（完成 2/3）'))).toBe(true)
+    // 已识别部分已保存：a/b 的 civitaiUrl 已写入
+    expect(state.models.find((m) => m.id === 'a').civitaiUrl).toBe('https://civitai.com/models/x')
+    expect(state.models.find((m) => m.id === 'b').civitaiUrl).toBe('https://civitai.com/models/x')
   })
 })
 

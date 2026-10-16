@@ -189,6 +189,45 @@ describe('VirtualModelList 键盘导航与行激活', () => {
     expect(state.selectedId).toBeNull()
     wrapper.unmount()
   })
+
+  it('Ctrl+点击行：非多选模式进入多选并选中，不打开详情', async () => {
+    const models = makeModels(5)
+    state.models = models
+    const { wrapper } = mountInScroller(models)
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-model-id="m1"]').trigger('click', { ctrlKey: true })
+    expect(state.multiSelect.active).toBe(true)
+    expect(state.multiSelect.ids).toEqual(['m1'])
+    expect(state.selectedId).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('多选模式 Ctrl+点击切换选中；Shift+点击按锚点范围选中', async () => {
+    const models = makeModels(5)
+    state.models = models
+    state.multiSelect.active = true
+    const { wrapper } = mountInScroller(models)
+    await wrapper.vm.$nextTick()
+    const row = wrapper.find('[data-model-id="m1"]')
+    await row.trigger('click', { ctrlKey: true })
+    expect(state.multiSelect.ids).toEqual(['m1'])
+    // Ctrl+点击已设锚 m1：Shift+点击 m3 选中 m1..m3 范围（store 层语义在 multiselect.test.js 覆盖）
+    await wrapper.find('[data-model-id="m3"]').trigger('click', { shiftKey: true })
+    expect(state.multiSelect.ids).toEqual(['m1', 'm2', 'm3'])
+    wrapper.unmount()
+  })
+
+  it('Shift+点击行：非多选模式进入多选并选中', async () => {
+    const models = makeModels(5)
+    state.models = models
+    const { wrapper } = mountInScroller(models)
+    await wrapper.vm.$nextTick()
+    await wrapper.find('[data-model-id="m2"]').trigger('click', { shiftKey: true })
+    expect(state.multiSelect.active).toBe(true)
+    expect(state.multiSelect.ids).toEqual(['m2'])
+    expect(state.selectedId).toBeNull()
+    wrapper.unmount()
+  })
 })
 
 describe('VirtualModelList 焦点行快捷动作', () => {

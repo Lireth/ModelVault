@@ -24,6 +24,7 @@ import {
   saveSettings,
   scanModels,
   partialScanModels,
+  requestBatchCancel,
   SORT_OPTIONS,
   sortDirectional,
   state,
@@ -211,7 +212,14 @@ function onGlobalKeydown(e) {
     if (!detailOpen) {
       // 多选为模式态，优先退出；再次 Esc 才轮到清空搜索词
       if (state.multiSelect.active) {
-        exitMultiSelect()
+        // 长耗时批量进行中：Esc 先请求取消而非直接退出多选（防误退丢上下文），
+        // 批量收尾后再次 Esc 才退出
+        if (state.multiSelect.busy) {
+          requestBatchCancel()
+          toast('info', '已请求取消批量操作，完成后可再次按 Esc 退出多选')
+        } else {
+          exitMultiSelect()
+        }
         e.preventDefault()
         return
       }

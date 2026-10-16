@@ -59,7 +59,7 @@ beforeEach(() => {
   // 挂起的确认 Promise 先收敛，再就地表合并复位（O3 浅响应约定）
   if (state.confirm.resolve) state.confirm.resolve(false)
   Object.assign(state.confirm, { visible: false, text: '', resolve: null })
-  Object.assign(state.multiSelect, { active: false, ids: [], busy: false })
+  Object.assign(state.multiSelect, { active: false, ids: [], busy: false, cancelRequested: false })
 })
 
 /** 挂载 App（initApp 经桩 loadStore 拿到默认设置，不触发扫描） */
@@ -151,6 +151,27 @@ describe('App 全局快捷键（B-03）', () => {
 
     press('Escape')
     expect(state.search).toBe('')
+  })
+
+  it('多选批量进行中按 Esc：请求取消而非退出多选，busy 结束后再次 Esc 才退出', async () => {
+    const wrapper = await mountApp()
+    await setupGrid(wrapper)
+    state.search = 'lora'
+    state.multiSelect.active = true
+    state.multiSelect.ids = ['a', 'b']
+    state.multiSelect.busy = true
+
+    press('Escape')
+    expect(state.multiSelect.active).toBe(true) // 不退出多选（防误退丢上下文）
+    expect(state.multiSelect.cancelRequested).toBe(true) // 请求取消当前批量
+    expect(state.search).toBe('lora')
+
+    // 批量收尾（标志位由批量操作 finally 复位）后再次 Esc 正常退出
+    state.multiSelect.busy = false
+    state.multiSelect.cancelRequested = false
+    press('Escape')
+    expect(state.multiSelect.active).toBe(false)
+    expect(state.search).toBe('lora')
   })
 
   it('设置页打开时 Esc 让位设置页关闭逻辑，不清空面板背后的搜索词', async () => {

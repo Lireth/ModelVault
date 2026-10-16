@@ -7,10 +7,12 @@ import {
   formatSize,
   multiSelectIdSet,
   openDetail,
+  selectRangeTo,
   showContextMenu,
   state,
   subCategoryInfo,
   toggleFavorite,
+  toggleMultiSelectMode,
   toggleSelect,
   typeInfo
 } from '../store/appStore'
@@ -103,6 +105,32 @@ function ratingText(m) {
 function onRowActivate(m) {
   if (state.multiSelect.active) toggleSelect(m.id)
   else openDetail(m.id)
+}
+
+/**
+ * 鼠标点击行（修饰键语义，与 ModelCard.onCardClick 同一约定；键盘
+ * Enter/Space 恒走 onRowActivate 默认语义）：
+ * - Ctrl+点击：非多选模式进入多选并选中该行；多选模式下等同普通点击
+ * - Shift+点击：多选模式从锚点范围选中（替换选区）；非多选模式进入多选并选中
+ */
+function onRowClick(m, e) {
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault()
+    if (!state.multiSelect.active) toggleMultiSelectMode()
+    toggleSelect(m.id)
+    return
+  }
+  if (e.shiftKey) {
+    e.preventDefault()
+    if (!state.multiSelect.active) {
+      toggleMultiSelectMode()
+      toggleSelect(m.id)
+    } else {
+      selectRangeTo(m.id)
+    }
+    return
+  }
+  onRowActivate(m)
 }
 
 function onContextMenu(m) {
@@ -309,7 +337,7 @@ onBeforeUnmount(() => {
           :aria-pressed="state.multiSelect.active ? selectedSet.has(m.id) : undefined"
           :aria-label="`查看模型 ${displayName(m)} 的详情`"
           :data-model-id="m.id"
-          @click="onRowActivate(m)"
+          @click="onRowClick(m, $event)"
           @keydown.enter.prevent="onRowActivate(m)"
           @keydown.space.prevent="onRowActivate(m)"
           @contextmenu.prevent="onContextMenu(m)"

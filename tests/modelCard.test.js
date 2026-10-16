@@ -66,6 +66,44 @@ describe('ModelCard 卡片激活', () => {
   })
 })
 
+describe('ModelCard 修饰键点击（多选交互增强）', () => {
+  it('Ctrl+点击：非多选模式进入多选并选中，不打开详情', async () => {
+    const wrapper = mountCard(makeModel('m1'))
+    await wrapper.find('.model-card').trigger('click', { ctrlKey: true })
+    expect(state.multiSelect.active).toBe(true)
+    expect(state.multiSelect.ids).toEqual(['m1'])
+    expect(state.selectedId).toBeNull()
+  })
+
+  it('多选模式下 Ctrl+点击等同普通点击切换选中', async () => {
+    state.multiSelect.active = true
+    const wrapper = mountCard(makeModel('m1'))
+    await wrapper.find('.model-card').trigger('click', { ctrlKey: true })
+    expect(state.multiSelect.ids).toEqual(['m1'])
+    await wrapper.find('.model-card').trigger('click', { ctrlKey: true })
+    expect(state.multiSelect.ids).toEqual([])
+    expect(state.selectedId).toBeNull()
+  })
+
+  it('Shift+点击：非多选模式进入多选并选中', async () => {
+    const wrapper = mountCard(makeModel('m1'))
+    await wrapper.find('.model-card').trigger('click', { shiftKey: true })
+    expect(state.multiSelect.active).toBe(true)
+    expect(state.multiSelect.ids).toEqual(['m1'])
+    expect(state.selectedId).toBeNull()
+  })
+
+  it('多选模式下 Shift+点击走范围选择路径（无锚点时退化为切换）', async () => {
+    state.multiSelect.active = true
+    const wrapper = mountCard(makeModel('m1'))
+    // 组件级单卡片场景无锚点（store 层锚点语义在 multiselect.test.js 覆盖），
+    // 此处验证修饰键分支确实路由到了范围选择（退化行为与普通切换一致）
+    await wrapper.find('.model-card').trigger('click', { shiftKey: true })
+    expect(state.multiSelect.ids).toEqual(['m1'])
+    expect(state.selectedId).toBeNull()
+  })
+})
+
 describe('ModelCard 收藏按钮键盘行为（OPT-3 回归）', () => {
   /**
    * 说明：jsdom 不会把 Enter/Space 按键合成为按钮原生 click（真实浏览器会）。

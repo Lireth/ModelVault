@@ -79,6 +79,8 @@ const EXPECTED_EXPORTS = [
   'toggleMultiSelectMode',
   'exitMultiSelect',
   'toggleSelect',
+  'selectRangeTo',
+  'invertSelectionFiltered',
   'allFilteredSelected',
   'toggleSelectAllFiltered',
   'batchFavorite',
@@ -90,6 +92,7 @@ const EXPECTED_EXPORTS = [
   'batchDeleteModels',
   'batchCivitaiIdentify',
   'batchCivitaiImages',
+  'requestBatchCancel',
   // 封面/详情保存
   'saveModelData',
   'uploadCover',

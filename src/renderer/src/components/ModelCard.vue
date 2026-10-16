@@ -6,10 +6,12 @@ import {
   formatSize,
   multiSelectIdSet,
   openDetail,
+  selectRangeTo,
   showContextMenu,
   state,
   subCategoryInfo,
   toggleFavorite,
+  toggleMultiSelectMode,
   toggleSelect,
   typeInfo
 } from '../store/appStore'
@@ -141,6 +143,32 @@ function onCardActivate() {
   else openDetail(props.model.id)
 }
 
+/**
+ * 鼠标点击（修饰键语义，与文件管理器对齐；键盘 Enter/Space 恒走
+ * onCardActivate 默认语义，避免与网格方向键导航等键盘流冲突）：
+ * - Ctrl+点击：非多选模式进入多选并选中该项；多选模式下等同普通点击
+ * - Shift+点击：多选模式从锚点范围选中（替换选区）；非多选模式进入多选并选中
+ */
+function onCardClick(e) {
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault()
+    if (!state.multiSelect.active) toggleMultiSelectMode()
+    toggleSelect(props.model.id)
+    return
+  }
+  if (e.shiftKey) {
+    e.preventDefault()
+    if (!state.multiSelect.active) {
+      toggleMultiSelectMode()
+      toggleSelect(props.model.id)
+    } else {
+      selectRangeTo(props.model.id)
+    }
+    return
+  }
+  onCardActivate()
+}
+
 /** 收藏/取消收藏（click 与键盘 Enter/Space 均在模板层阻断冒泡，避免打开详情页，OPT-3） */
 function onToggleFavorite() {
   toggleFavorite(props.model.id)
@@ -176,7 +204,7 @@ const mtimeText = computed(() => formatDate(props.model.mtimeMs))
     role="button"
     :aria-pressed="state.multiSelect.active ? selected : undefined"
     :aria-label="`查看模型 ${displayName} 的详情`"
-    @click="onCardActivate"
+    @click="onCardClick"
     @keydown.enter.prevent="onCardActivate"
     @keydown.space.prevent="onCardActivate"
     @contextmenu.prevent="onContextMenu"

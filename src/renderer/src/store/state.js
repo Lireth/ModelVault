@@ -150,8 +150,9 @@ export const state = shallowReactive({
   warmup: { active: false, id: '', percent: 0, hashedBytes: 0, totalBytes: 0, done: 0, remaining: 0 },
   // 多选批量操作（E4/E6）：ids 为选中模型 id 数组；busy 表示批量 IPC
   // 批量提交进行中（B6），期间按钮禁用、防连点重复提交；
-  // progress 为长耗时批量操作（批量识别/取示例图）的逐个进度文案，空串回退「处理中…」
-  multiSelect: reactive({ active: false, ids: [], busy: false, progress: '' }),
+  // progress 为长耗时批量操作（批量识别/取示例图）的逐个进度文案，空串回退「处理中…」；
+  // cancelRequested 为用户请求取消当前串行批量（Esc 触发），串行循环每轮检查后提前收尾
+  multiSelect: reactive({ active: false, ids: [], busy: false, progress: '', cancelRequested: false }),
   // 设置（深响应：主题/卡片尺寸实时预览等就地改深层字段）
   settings: reactive(defaultSettings()),
   settingsOpen: false,

@@ -93,6 +93,8 @@ export {
   toggleMultiSelectMode,
   exitMultiSelect,
   toggleSelect,
+  selectRangeTo,
+  invertSelectionFiltered,
   allFilteredSelected,
   toggleSelectAllFiltered,
   batchFavorite,
@@ -103,7 +105,8 @@ export {
   batchToggleDisabled,
   batchDeleteModels,
   batchCivitaiIdentify,
-  batchCivitaiImages
+  batchCivitaiImages,
+  requestBatchCancel
 } from './multiselect'
 
 // 详情数据保存与封面操作

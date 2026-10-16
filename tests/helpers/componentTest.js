@@ -1,5 +1,5 @@
 import { beforeEach, vi } from 'vitest'
-import { defaultSettings, replaceModels, state } from '../../src/renderer/src/store/appStore'
+import { defaultSettings, exitMultiSelect, replaceModels, state } from '../../src/renderer/src/store/appStore'
 
 /**
  * 渲染层组件测试通用装配（OPT-16 测试基建）：
@@ -69,7 +69,10 @@ function resetStoreState() {
   state.sortAsc = true
   state.selectedId = null
   state.detailDirty = false
-  Object.assign(state.multiSelect, { active: false, ids: [], busy: false, progress: '' })
+  Object.assign(state.multiSelect, { busy: false, progress: '', cancelRequested: false })
+  // active/ids 经 exitMultiSelect 复位：顺带清掉 store 模块级的 Shift
+  // 范围选择锚点（非响应式记忆，整体赋值复位无法触达）
+  exitMultiSelect()
   state.settingsOpen = false
   Object.assign(state.settings, defaultSettings())
   state.toasts.splice(0, state.toasts.length)
