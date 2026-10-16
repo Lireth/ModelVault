@@ -15,9 +15,10 @@
 - **列表导出**：当前筛选结果一键导出 CSV（带 BOM，Excel 直接打开），含备注、推荐参数、收藏/评分等全部标注
 - **应用内检查更新**：设置页一键查询 GitHub Releases 最新版本，有更新时提供下载页直达链接
 - **推荐参数**：为每个模型保存采样步数、CFG 区间、采样器、调度器、精度、推荐分辨率区间与备注
+- **Civitai 在线识别**：详情页按文件 SHA256 反查 Civitai 模型版本，识别成功展示模型页链接并支持**一键补全**空缺的触发词与备注（绝不覆盖已有标注）；可勾选识别到的示例图批量下载导入为模型封面；哈希结果持久缓存并由后台队列**预热**（启动/扫描后自动预计算，打开详情页优先处理当前模型），配合详情页实时进度标识，首次识别也可秒级返回
 - **关联存储**：模型的封面、推荐参数、备注等用户数据统一保存在所选模型根目录的 `.modelvault/` 文件夹内，按相对路径关联，随文件夹移动/复制保持关联；不同根目录数据相互独立；库内移动/重命名模型文件后，重扫时按确定性规则**自动重关联**元数据（双向唯一才绑定，宁可不绑也绝不绑错）
 - **数据备份**：一键将应用设置与当前模型库的标注（备注/参数/收藏/评分）及封面打包为 zip，可随时恢复到任意模型文件夹（缩略图缓存不纳入；覆盖恢复时旧数据自动留 .bak 并仅保留最新一份）
-- **体验细节**：亮/暗主题切换（同步原生标题栏颜色）、卡片尺寸/展示内容配置、窗口尺寸与位置记忆、原生标题栏 + 自定义拖拽区
+- **体验细节**：亮/暗主题切换（同步原生标题栏颜色）与强调色预设/自定义、卡片尺寸/展示内容配置、窗口尺寸与位置记忆、原生标题栏 + 自定义拖拽区
 
 ## 界面展示
 
@@ -91,6 +92,8 @@ ModelVault/
 │   │   │       ├── covers.js     #   封面链路（上传/粘贴/拖拽/设默认/删除）
 │   │   │       ├── meta.js       #   元数据链路（标注保存/快捷标记）
 │   │   │       ├── misc.js       #   文件管理/右键菜单/复制参数/CSV 导出
+│   │   │       ├── files.js      #   模型文件操作（.disabled 标记/库内移动）
+│   │   │       ├── civitai.js    #   Civitai 在线识别（识别/补全/示例图导入/哈希预热入口）
 │   │   │       ├── backup.js     #   数据备份与恢复
 │   │   │       ├── store.js      #   存储与设置链路（loadStore/chooseFolder/settings:update）
 │   │   │       └── model-state.js#   跨模块状态（装饰缓存/缩略图后台任务）
@@ -111,6 +114,8 @@ ModelVault/
 │   │       ├── thumbs.js         # 封面缩略图缓存（扫描后异步生成）
 │   │       ├── backup.js         # 备份打包/恢复（zip）
 │   │       ├── updater.js        # 应用内检查更新（GitHub Releases）
+│   │       ├── civitai.js        # Civitai API 客户端（流式 SHA256/反查/图片下载白名单）
+│   │       ├── hash-warmup.js    # 模型哈希后台预热（串行队列/去重/进度事件）
 │   │       └── safetensors.js    # safetensors 头部解析（kohya/modelspec 训练元信息）
 │   ├── preload/
 │   │   └── index.js              # 预加载脚本：contextBridge + IPC 通道白名单
@@ -121,7 +126,8 @@ ModelVault/
 │           ├── error-report.js   # 渲染进程错误上报链路（四类来源收敛 + 同类节流）
 │           ├── App.vue           # 根组件（整体布局、空状态、事件订阅）
 │           ├── constants/
-│           │   └── modelParams.js# 推荐参数常量（采样器/调度器/精度/取值范围）
+│           │   ├── modelParams.js# 推荐参数常量（采样器/调度器/精度/取值范围）
+│           │   └── accents.js     # 强调色预设（深/浅双主题变体 + 自定义色校验）
 │           ├── store/            # 全局响应式状态仓库（按功能域拆分模块）
 │           │   ├── appStore.js   #   门面（聚合导出，调用方无感知）
 │           │   ├── state.js      #   响应式状态与常量
@@ -133,6 +139,8 @@ ModelVault/
 │           │   ├── meta-apply.js    # 元数据保存与应用
 │           │   ├── detail.js        # 详情弹层状态
 │           │   ├── covers-store.js  # 封面操作
+│           │   ├── civitai-store.js # Civitai 识别/补全/示例图导入
+│           │   ├── saved-views.js   # 智能视图（组合筛选收藏）
 │           │   ├── selectors.js     # 派生数据（类型统计等）
 │           │   ├── format.js        # 展示格式化工具
 │           │   └── toast.js         # 轻提示
@@ -144,7 +152,8 @@ ModelVault/
 │           │   ├── ModelDetail.vue       # 详情弹层：封面管理 + 参数表单 + 文件管理
 │           │   ├── detail/
 │           │   │   ├── CoverPanel.vue    # 详情页封面管理面板
-│           │   │   └── AutoInfoPanel.vue # safetensors 自动解析信息面板
+│           │   │   ├── AutoInfoPanel.vue # safetensors 自动解析信息面板
+│           │   │   └── CivitaiPanel.vue  # Civitai 在线识别面板（识别/补全/示例图采集）
 │           │   ├── SettingsPage.vue      # 设置页（占据模型预览区）
 │           │   └── ToastHost.vue         # 轻提示通知
 │           └── assets/styles/    # 全局样式
@@ -160,7 +169,9 @@ ModelVault/
 | --------------------------- | ----------------------------------------------- |
 | `npm start` / `npm run dev` | 启动开发模式（主进程/渲染进程热重载）           |
 | `npm run build`             | 编译主进程、preload、渲染进程到 `out/`          |
+| `npm run lint`              | ESLint 代码检查（flat config，错误级规则）      |
 | `npm test`                  | 运行单元测试（vitest，`test:watch` 为监视模式） |
+| `npm run test:coverage`     | 运行单元测试并生成覆盖率报告（含防退化阈值门禁） |
 | `npm run preview`           | 以生产构建产物启动应用预览                      |
 | `npm run dist`              | 编译并打包单文件便携版 EXE 到 `dist/{version}/` |
 | `npm run dist:dir`          | 编译并生成免安装目录（快速验证打包结果）        |
@@ -218,7 +229,7 @@ const api = {
 
 单元测试位于 `tests/`：
 
-- **主进程纯逻辑与 IPC handler**：扫描分类、元数据规范化与重关联、原子写入、目录监控（watcher）、备份恢复、协议安全、主题、退出清理等（node 环境）；
+- **主进程纯逻辑与 IPC handler**：扫描分类、元数据规范化与重关联、原子写入、目录监控（watcher）、备份恢复、Civitai 识别纯函数与哈希预热队列、协议安全、主题、退出清理等（node 环境）；
 - **渲染层 store**：`tests/appStore.test.js` 及按域拆分的模块测试（筛选/排序/批量操作/增量扫描合并等）；
 - **渲染层组件交互**：`modelCard` / `topBar` / `sidebar` / `settingsPage` / `modelDetail` / `virtualModelGrid` / `coverPanel` 等组件测试，基于 `@vue/test-utils` + jsdom（文件头 `// @vitest-environment jsdom` 声明 DOM 环境，通用装配见 `tests/helpers/componentTest.js`）。
 
@@ -226,7 +237,7 @@ Electron API 在 `tests/setup.js` 中统一 mock。新增纯函数模块或组�
 
 ### CI 与发版
 
-- `.github/workflows/ci.yml`：push 到 main / PR 时运行质量门禁（Node 22/24 矩阵：单元测试 → 三端编译 → 产物完整性校验 → 覆盖率归档）
+- `.github/workflows/ci.yml`：push 到 main / PR 时运行质量门禁（Node 22/24 矩阵：ESLint → 单元测试（覆盖率报告仅在 Node 22 基准腿生成，测试失败自动重试一次以规避时序类用例的环境抖动）→ 三端编译 → 产物完整性校验 → 覆盖率归档）
 - `.github/workflows/release.yml`：推送 `v*` 标签（版本号须与 `package.json` 一致）触发 Windows 打包，自动创建 GitHub Release 并附加 EXE 与 SHA256 校验和；支持 `workflow_dispatch` 手动构建演练（不发布）
 
 ## 打包说明
@@ -242,6 +253,7 @@ Electron API 在 `tests/setup.js` 中统一 mock。新增纯函数模块或组�
 - `contextIsolation: true` + `nodeIntegration: false` + `sandbox: true`，渲染进程无 Node 能力
 - preload 仅暴露白名单通道（执行层校验），防止任意 IPC 调用
 - `mvimg://` 图片协议仅允许访问当前模型根目录内的文件（路径越界返回 403）
+- `civimg://` 远程图片代理协议仅放行 Civitai 官方 CDN 域名白名单（https 强制，防 SSRF/任意下载）
 - 渲染进程导航请求一律拦截，外部链接通过系统浏览器打开
 - 模型删除移入系统回收站（非永久删除），封面删除有路径越界防护
 - 扫描根目录白名单校验（拒绝扫描外部目录）；封面导入有图片魔数校验与大小超限预检
