@@ -8,8 +8,6 @@ import {
   batchCivitaiImages,
   batchDeleteModels,
   batchFavorite,
-  batchNsfw,
-  batchRating,
   batchSetSubCategory,
   confirmDialog,
   deleteModel,

@@ -303,7 +303,7 @@ async function identifySequentially(ids, label) {
     const id = ids[i]
     const m = byId.get(id)
     state.multiSelect.progress = `${label} ${i + 1}/${ids.length}：${m?.alias || m?.name || ''}`
-    let res = null
+    let res
     try {
       res = await window.api.models.civitaiIdentify(id)
     } catch {
