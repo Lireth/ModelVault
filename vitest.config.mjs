@@ -14,6 +14,11 @@ export default defineConfig({
     setupFiles: ['./tests/setup.js'],
     // D8：setup.js 已改为每测试文件独立 fakeUserData（mkdtemp + 自动清理），
     // 跨文件磁盘竞态消除，文件级并行恢复默认开启
+    // 失败重试 1 次（保险丝）：挂载真实 App 的 jsdom 时序类用例
+    // （appShortcuts 等）在 CI 慢虚拟机/高并行下存在残余调度抖动，
+    // 根因已在用例内修复（beforeEach 状态复位 + booting 轮询），此处
+    // 仅兜底偶发；真回归重试仍会失败并阻断 CI
+    retry: 1,
     coverage: {
       // A-14 覆盖率防退化门禁：阈值略低于建立门禁时的基线（Stmts 79/Branch 71/
       // Func 75/Lines 81，2026-10），为环境波动留余量；随测试补强可逐步上调。

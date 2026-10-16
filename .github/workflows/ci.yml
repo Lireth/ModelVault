@@ -68,8 +68,15 @@ jobs:
       - name: ESLint 代码检查
         run: npm run lint
 
+      # 覆盖率统计的 instrumentation 有明显开销：仅在 Node 22 基准腿生成
+      # 报告并归档；Node 24 兼容性腿跑普通测试，缩短矩阵总时长
       - name: 运行单元测试（含覆盖率统计，D6）
+        if: matrix.node == '22'
         run: npm run test:coverage
+
+      - name: 运行单元测试（Node 24 兼容性腿）
+        if: matrix.node == '24'
+        run: npm test
 
       - name: 编译主进程 / preload / 渲染进程
         run: npm run build
