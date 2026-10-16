@@ -6,7 +6,7 @@ import {
   LORA_TAG_DEFS,
   CHECKPOINT_TAG_DEFS
 } from '../../../shared/model-categories'
-import { SORT_OPTION_DEFS, CARD_SIZE_DEFS, VIEW_MODE_DEFS } from '../../../shared/app-enums'
+import { SORT_OPTION_DEFS, CARD_SIZE_DEFS } from '../../../shared/app-enums'
 import { MODEL_EXTENSIONS as SHARED_SCAN_EXTS } from '../../../shared/model-extensions'
 import { DEFAULT_SETTINGS } from '../../../shared/defaults'
 
@@ -68,9 +68,6 @@ export const CARD_SIZE_PRESETS = {
 
 /** 卡片尺寸档位选项（设置页展示用；A-12 单一来源 shared/app-enums.js） */
 export const CARD_SIZE_OPTIONS = CARD_SIZE_DEFS
-
-/** 首页视图模式选项（网格/列表；A-12 单一来源 shared/app-enums.js） */
-export const VIEW_MODE_OPTIONS = VIEW_MODE_DEFS
 
 /** 可勾选的扫描文件类型选项（A-12 单一来源 shared/model-extensions.js） */
 export const SCAN_EXTENSION_OPTIONS = SHARED_SCAN_EXTS

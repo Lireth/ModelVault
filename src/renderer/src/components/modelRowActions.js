@@ -36,7 +36,7 @@ export function handleModelActionKey(e, ctx) {
  * Delete 删除焦点模型：确认后走既有删除链路（移入回收站 + 关联数据清理），
  * 成功后焦点顺延到原位置项（越界取前一项），避免焦点丢回 body 中断键盘流。
  */
-export async function deleteFocusedModel(id, { models, indexById, focusModel }) {
+async function deleteFocusedModel(id, { models, indexById, focusModel }) {
   const idx = indexById.get(id)
   const m = idx !== undefined ? models[idx] : null
   if (!m) return

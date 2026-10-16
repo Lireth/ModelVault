@@ -45,8 +45,5 @@ export const ACCENT_PRESETS = [
   }
 ]
 
-/** 默认强调色预设 key（与 DEFAULT_SETTINGS.accentColor 一致） */
-export const DEFAULT_ACCENT_KEY = 'blue'
-
 /** 自定义颜色值格式（accentColor 设置项允许预设 key 或 #rrggbb） */
 export const CUSTOM_ACCENT_RE = /^#[0-9a-fA-F]{6}$/

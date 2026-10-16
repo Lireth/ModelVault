@@ -86,7 +86,7 @@ function normalizeSavedViews(raw) {
 }
 
 /** 规范化应用设置：仅接受已知字段并校验类型 */
-export function normalizeSettings(raw) {
+function normalizeSettings(raw) {
   const base = defaultSettings()
   if (!raw || typeof raw !== 'object') return base
   const excludeDirs = Array.isArray(raw.excludeDirs)

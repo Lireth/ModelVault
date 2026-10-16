@@ -109,7 +109,7 @@ async function isAllowedPath(realPath) {
  * @param {string} realPath 已 realpath 归一的绝对路径
  * @returns {boolean}
  */
-export function isImmutableAssetPath(realPath) {
+function isImmutableAssetPath(realPath) {
   if (typeof realPath !== 'string' || !realPath) return false
   const normalized = realPath.replace(/\\/g, '/').toLowerCase()
   return (
@@ -224,12 +224,6 @@ function registerCivimgHandler() {
       return new Response('Internal Error', { status: 500 })
     }
   })
-}
-
-/** 由 Civitai 图片 https URL 构造渲染进程可用的 civimg 代理 URL */
-export function toCivImageUrl(remoteUrl) {
-  if (!remoteUrl) return ''
-  return `${CIV_SCHEME}://remote/${encodeURIComponent(remoteUrl)}`
 }
 
 /** 由本地图片绝对路径构造渲染进程可用的 mvimg URL */

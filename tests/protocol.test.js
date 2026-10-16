@@ -219,14 +219,3 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
     expect(res.status).toBe(502)
   })
 })
-
-describe('toCivImageUrl', () => {
-  it('构造 civimg://remote/ 前缀并 encodeURIComponent 编码图片 URL', async () => {
-    const { toCivImageUrl } = await import('../src/main/protocol')
-    expect(toCivImageUrl('https://image.civitai.com/a.jpeg?x=1')).toBe(
-      `civimg://remote/${encodeURIComponent('https://image.civitai.com/a.jpeg?x=1')}`
-    )
-    expect(toCivImageUrl('')).toBe('')
-    expect(toCivImageUrl(null)).toBe('')
-  })
-})

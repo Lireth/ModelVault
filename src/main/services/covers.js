@@ -60,7 +60,7 @@ export async function hasImageMagic(filePath) {
  * @param {Buffer} buf 文件头字节（12 字节以内即可判定）
  * @returns {boolean}
  */
-export function isImageBuffer(buf) {
+function isImageBuffer(buf) {
   if (!buf || buf.length === 0) return false
   return IMAGE_MAGIC.some((test) => test(buf))
 }

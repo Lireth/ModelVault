@@ -41,8 +41,8 @@ export function paramSummaryFromMeta(params) {
   return parts.join(', ')
 }
 
-/** 路径是否为 .disabled 后缀的禁用模型（F10，大小写不敏感） */
-export function isDisabledPath(p) {
+/** 路径是否为 .disabled 后缀的禁用模型（F10，大小写不敏感；仅本模块使用） */
+function isDisabledPath(p) {
   return typeof p === 'string' && p.toLowerCase().endsWith('.disabled')
 }
 

@@ -31,7 +31,6 @@ export {
   SORT_OPTIONS,
   CARD_SIZE_PRESETS,
   CARD_SIZE_OPTIONS,
-  VIEW_MODE_OPTIONS,
   SCAN_EXTENSION_OPTIONS,
   sortDirectional,
   tagsForType,

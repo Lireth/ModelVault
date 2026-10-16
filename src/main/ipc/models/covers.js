@@ -16,7 +16,7 @@ import { wrapHandler, checkModelId } from '../handler'
  */
 
 /** 由元数据构造渲染进程使用的封面列表（含绝对路径与 mvimg URL） */
-export function coverListFromMeta(meta) {
+function coverListFromMeta(meta) {
   return (meta?.covers || []).map((rel) => {
     const abs = resolveCoverSafe(rel)
     return { rel, path: abs, url: abs ? toImageUrl(abs) : '' }
