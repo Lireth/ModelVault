@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import AutoInfoPanel from './detail/AutoInfoPanel.vue'
 import CivitaiPanel from './detail/CivitaiPanel.vue'
 import CoverPanel from './detail/CoverPanel.vue'
-import { PARAM_LIMITS, SAMPLERS, SCHEDULERS, PRECISIONS, PARAM_PRESETS, matchParamPreset } from '../constants/modelParams'
+import { PARAM_LIMITS, SAMPLERS, SCHEDULERS, PRECISIONS } from '../constants/modelParams'
 import {
   closeDetail,
   revealModel,
@@ -121,28 +121,6 @@ function onAutoApplyTriggers(words) {
   }
   form.triggerWords = words.join(', ')
   toast('success', '触发词已填入表单，点击「保存参数」生效')
-}
-
-/* ---------------- 推荐参数模板（F5） ---------------- */
-
-/** 按自动解析的基底模型匹配的模板（无 autoInfo/无匹配时为 null） */
-const autoPreset = computed(() => matchParamPreset(selectedModel.value?.autoInfo?.baseModel || ''))
-
-/**
- * 将模板填入表单（不自动保存：填表后用户确认再点「保存参数」）。
- * 按基底模型推荐的那个按钮高亮显示，其余模板可手动选用。
- */
-function onApplyPreset(preset) {
-  const p = preset.params
-  form.steps = String(p.steps)
-  form.cfgMin = String(p.cfgMin)
-  form.cfgMax = String(p.cfgMax)
-  form.sampler = p.sampler
-  form.scheduler = p.scheduler
-  form.precision = p.precision
-  form.resMin = String(p.resMin)
-  form.resMax = String(p.resMax)
-  toast('success', `已填入 ${preset.label} 推荐模板，点击「保存参数」生效`)
 }
 
 /* ---------------- 收藏 / 评分 ---------------- */
@@ -441,25 +419,7 @@ async function onSave() {
               该文件疑似损坏（结构校验失败或 0 字节），在绘画工具中加载可能失败，建议重新下载或移入回收站。
             </div>
 
-            <h3 class="params-heading">
-              推荐参数
-              <!-- 模板一键填表（F5）：按基底模型推荐的按钮高亮，其余可手动选用 -->
-              <span class="preset-row">
-                <button
-                  v-for="p in PARAM_PRESETS"
-                  :key="p.key"
-                  class="preset-btn"
-                  :class="{ recommended: p.key === autoPreset?.key }"
-                  :title="
-                    p.key === autoPreset?.key
-                      ? `根据自动解析的基底模型（${selectedModel?.autoInfo?.baseModel}）推荐`
-                      : `填入 ${p.label} 常用参数模板`
-                  "
-                  type="button"
-                  @click="onApplyPreset(p)"
-                >{{ p.label }}</button>
-              </span>
-            </h3>
+            <h3>推荐参数</h3>
             <div class="form-grid">
               <label class="field">
                 <span>采样步数 (Sampling Steps)</span>
@@ -644,42 +604,6 @@ async function onSave() {
   color: var(--accent);
   letter-spacing: 1px;
   margin-top: 4px;
-}
-
-/* 推荐参数标题行：右侧内联模板按钮组（F5） */
-.params-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.preset-row {
-  display: flex;
-  gap: 6px;
-}
-
-.preset-btn {
-  font-size: 11px;
-  padding: 3px 12px;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--bg) 55%, transparent);
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all var(--dur-fast) var(--ease-out);
-}
-
-.preset-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-/* 按基底模型自动匹配到的推荐模板 */
-.preset-btn.recommended {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--bg-active);
 }
 
 /* ---------- 收藏 / 评分 ---------- */

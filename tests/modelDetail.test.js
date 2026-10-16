@@ -282,44 +282,6 @@ describe('ModelDetail 关闭保护与快捷操作', () => {
   })
 })
 
-describe('推荐参数模板（F5）', () => {
-  it('按基底模型名匹配模板：大小写不敏感、变体名归入 SDXL 系、无匹配返回 null', async () => {
-    const { matchParamPreset } = await import('../src/renderer/src/constants/modelParams')
-    expect(matchParamPreset('SD_XL_base_1.0')?.key).toBe('sdxl')
-    expect(matchParamPreset('pony_v6')?.key).toBe('sdxl')
-    expect(matchParamPreset('illustrious-xl')?.key).toBe('sdxl')
-    expect(matchParamPreset('SD 1.5')?.key).toBe('sd15')
-    expect(matchParamPreset('v1-5')?.key).toBe('sd15')
-    expect(matchParamPreset('flux.1-dev')?.key).toBe('flux')
-    expect(matchParamPreset('未知基底')).toBeNull()
-    expect(matchParamPreset('')).toBeNull()
-    expect(matchParamPreset(null)).toBeNull()
-  })
-
-  it('点击模板按钮一键填表：匹配基底模型的按钮高亮推荐', async () => {
-    selectModel({ autoInfo: { baseModel: 'sd_xl_base_1.0', triggerCandidates: [] } })
-    const wrapper = mountDetail()
-    await flushPromises()
-
-    const btns = wrapper.findAll('.preset-btn')
-    expect(btns).toHaveLength(3)
-    // 基底模型为 SDXL：对应按钮带 recommended 类
-    const sdxlBtn = btns.find((b) => b.text() === 'SDXL')
-    expect(sdxlBtn).toBeDefined()
-    expect(sdxlBtn?.classes()).toContain('recommended')
-
-    await sdxlBtn?.trigger('click')
-    await settle()
-    // 模板值进入表单（保存前仅填表，不自动落盘）
-    expect(wrapper.find('input[list="sampler-list"]').element.value).toBe('dpm++ 2m')
-    expect(wrapper.find('input[list="scheduler-list"]').element.value).toBe('karras')
-    expect(state.detailDirty).toBe(true)
-    // 未点保存：不发起保存 IPC
-    expect(window.api.models.saveModelData).not.toHaveBeenCalled()
-    wrapper.unmount()
-  })
-})
-
 describe('焦点管理与健康警示（O10/F6）', () => {
   it('打开详情焦点移入面板，关闭后归还触发元素（键盘用户不丢焦点）', async () => {
     // 组件常驻挂载（与真实应用一致）：先挂载（无选中），焦点 watch 在
