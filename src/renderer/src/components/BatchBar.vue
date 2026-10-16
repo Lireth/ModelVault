@@ -205,6 +205,12 @@ onUnmounted(() => {
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
   box-shadow: 0 4px 20px color-mix(in srgb, var(--accent) 10%, transparent);
+  /* 层叠修复：backdrop-filter 使本栏成为独立层叠上下文，「更多」下拉的
+     z-index 只在栏内生效；不提升本栏层级时，DOM 顺序靠后的模型清单
+     （sticky 表头 z-index: 2）会盖住下拉菜单。relative + z-index 让整栏
+     高于清单兄弟元素，仍低于全局弹层（确认层/Toast） */
+  position: relative;
+  z-index: 30;
 }
 
 /* 分组容器：组内间距略小于组间（组间由分隔线 + gap 承担） */
