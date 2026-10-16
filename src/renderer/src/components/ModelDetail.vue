@@ -6,7 +6,6 @@ import CoverPanel from './detail/CoverPanel.vue'
 import { PARAM_LIMITS, SAMPLERS, SCHEDULERS, PRECISIONS, PARAM_PRESETS, matchParamPreset } from '../constants/modelParams'
 import {
   closeDetail,
-  formatSize,
   revealModel,
   saveModelData,
   selectedModel,
@@ -429,20 +428,12 @@ async function onSave() {
               </div>
             </template>
 
-            <!-- 备注名（占一半宽度）+ 文件信息（右侧） -->
+            <!-- 备注名（卡片显示名） -->
             <h3>备注名</h3>
-            <div class="alias-row">
-              <label class="field alias-field">
-                <span>自定义显示名称（为空时显示文件名）</span>
-                <input v-model="form.alias" type="text" maxlength="100" :placeholder="selectedModel.name" />
-              </label>
-              <dl class="file-info">
-                <dt>文件大小</dt>
-                <dd>{{ formatSize(selectedModel.size) }}</dd>
-                <dt>所在目录</dt>
-                <dd class="path" :title="selectedModel.folder">{{ selectedModel.relDir || selectedModel.folder }}</dd>
-              </dl>
-            </div>
+            <label class="field">
+              <span>自定义显示名称（为空时显示文件名）</span>
+              <input v-model="form.alias" type="text" maxlength="100" :placeholder="selectedModel.name" />
+            </label>
 
             <!-- 健康检查警示（F6）：下载损坏/中断的模型提前可见，避免使用时才发现 -->
             <div v-if="selectedModel.suspect" class="suspect-warn alert-warning" role="alert">
@@ -481,6 +472,13 @@ async function onSave() {
                   <input v-model="form.cfgMax" type="number" :min="PARAM_LIMITS.cfg.min" :max="PARAM_LIMITS.cfg.max" step="0.5" placeholder="最大，如 8" />
                 </div>
               </label>
+              <label class="field range-field">
+                <span>推荐分辨率（宽 = 高，px）</span>
+                <div class="range-inputs">
+                  <input v-model="form.resMin" type="number" :min="PARAM_LIMITS.res.min" :max="PARAM_LIMITS.res.max" placeholder="最小，如 512" />
+                  <input v-model="form.resMax" type="number" :min="PARAM_LIMITS.res.min" :max="PARAM_LIMITS.res.max" placeholder="最大，如 1024" />
+                </div>
+              </label>
               <label class="field">
                 <span>采样器 (Sampler)</span>
                 <input v-model="form.sampler" list="sampler-list" placeholder="选择或输入采样器" />
@@ -501,18 +499,6 @@ async function onSave() {
                 <datalist id="precision-list">
                   <option v-for="p in PRECISIONS" :key="p" :value="p" />
                 </datalist>
-              </label>
-            </div>
-
-            <h3>推荐分辨率区间</h3>
-            <div class="form-grid">
-              <label class="field">
-                <span>最小分辨率（宽 = 高，px）</span>
-                <input v-model="form.resMin" type="number" :min="PARAM_LIMITS.res.min" :max="PARAM_LIMITS.res.max" placeholder="如 512" />
-              </label>
-              <label class="field">
-                <span>最大分辨率（宽 = 高，px）</span>
-                <input v-model="form.resMax" type="number" :min="PARAM_LIMITS.res.min" :max="PARAM_LIMITS.res.max" placeholder="如 1024" />
               </label>
             </div>
 
@@ -630,28 +616,6 @@ async function onSave() {
   gap: 20px;
   padding: 20px;
   overflow-y: auto;
-}
-
-.file-info {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 6px 12px;
-  font-size: var(--font-xs);
-  background: color-mix(in srgb, var(--bg) 55%, transparent);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  padding: 12px;
-}
-
-.file-info dt {
-  color: var(--text-muted);
-}
-
-.file-info dd {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
 }
 
 /* 右侧表单列 */
@@ -884,28 +848,6 @@ async function onSave() {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 12px;
-}
-
-/* 备注名 + 文件信息行：底部对齐（信息框底部与备注名输入框底部平齐） */
-.alias-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px;
-}
-
-/* 备注名占该层一半宽度 */
-.alias-field {
-  width: 50%;
-  min-width: 240px;
-  flex-shrink: 0;
-}
-
-.alias-row .file-info {
-  flex: 1;
-  min-width: 0;
-  /* 与备注名输入框高度贴近，避免视觉上过度下沉 */
-  padding: 8px 12px;
 }
 
 .field {
