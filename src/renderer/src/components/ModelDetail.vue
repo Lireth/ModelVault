@@ -367,7 +367,7 @@ async function onSave() {
                 class="nsfw-toggle"
                 :class="{ active: selectedModel.nsfw }"
                 type="button"
-                :title="selectedModel.nsfw ? '取消 NSFW 标记' : '标记为 NSFW（首页预览图将模糊展示）'"
+                :title="selectedModel.nsfw ? '取消 NSFW 标记' : '标记为 NSFW（首页预览图将模糊展示，可在设置中关闭）'"
                 @click="onToggleNsfw"
               >NSFW</button>
               <div class="rating" title="点击星标评分，再次点击当前星标清除">

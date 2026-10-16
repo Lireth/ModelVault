@@ -248,3 +248,36 @@ describe('库统计区（F7）', () => {
     wrapper.unmount()
   })
 })
+
+describe('SettingsPage NSFW 示例图模糊开关', () => {
+  it('开关默认开启；关闭后保存载荷携带 nsfwBlur: false', async () => {
+    window.api.settings.update.mockImplementation((patch) =>
+      Promise.resolve({ settings: { ...state.settings, ...patch } })
+    )
+    const wrapper = await mountSettings()
+    const row = wrapper
+      .findAll('.switch-row')
+      .find((r) => r.text().includes('NSFW 示例图模糊'))
+    expect(row).toBeTruthy()
+    const sw = row.find('input.switch')
+    expect(sw.element.checked).toBe(true) // 默认开启（与既有模糊行为一致）
+    await sw.setValue(false)
+    const saveBtn = wrapper.findAll('button').find((b) => b.text() === '保存')
+    await saveBtn.trigger('click')
+    await flushPromises()
+    expect(window.api.settings.update).toHaveBeenCalledWith(
+      expect.objectContaining({ nsfwBlur: false })
+    )
+    wrapper.unmount()
+  })
+
+  it('已保存设置关闭模糊时表单回填 false（重启后开关状态保持）', async () => {
+    state.settings.nsfwBlur = false
+    const wrapper = await mountSettings()
+    const row = wrapper
+      .findAll('.switch-row')
+      .find((r) => r.text().includes('NSFW 示例图模糊'))
+    expect(row.find('input.switch').element.checked).toBe(false)
+    wrapper.unmount()
+  })
+})

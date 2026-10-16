@@ -104,6 +104,30 @@ describe('ModelCard 修饰键点击（多选交互增强）', () => {
   })
 })
 
+describe('ModelCard NSFW 模糊开关', () => {
+  it('nsfw 模型默认模糊（设置 nsfwBlur 默认开启）且显示红色 NSFW 角标', () => {
+    const wrapper = mountCard(makeModel('m1', { nsfw: true, coverUrl: 'mvimg://thumb/a.png' }))
+    expect(wrapper.find('.cover img').classes()).toContain('blurred')
+    expect(wrapper.find('.nsfw-badge').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('设置关闭模糊后 nsfw 模型封面不再模糊，红色 NSFW 角标保留', () => {
+    state.settings.nsfwBlur = false
+    const wrapper = mountCard(makeModel('m1', { nsfw: true, coverUrl: 'mvimg://thumb/a.png' }))
+    expect(wrapper.find('.cover img').classes()).not.toContain('blurred')
+    expect(wrapper.find('.nsfw-badge').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('非 nsfw 模型不受开关影响，始终不模糊', () => {
+    state.settings.nsfwBlur = true
+    const wrapper = mountCard(makeModel('m1', { nsfw: false, coverUrl: 'mvimg://thumb/a.png' }))
+    expect(wrapper.find('.cover img').classes()).not.toContain('blurred')
+    wrapper.unmount()
+  })
+})
+
 describe('ModelCard 收藏按钮键盘行为（OPT-3 回归）', () => {
   /**
    * 说明：jsdom 不会把 Enter/Space 按键合成为按钮原生 click（真实浏览器会）。

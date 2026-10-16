@@ -226,7 +226,7 @@ const mtimeText = computed(() => formatDate(props.model.mtimeMs))
         :alt="model.name"
         loading="lazy"
         draggable="false"
-        :class="{ blurred: model.nsfw }"
+        :class="{ blurred: model.nsfw && state.settings.nsfwBlur }"
         @error="coverError = true"
       />
       <div v-else class="cover-placeholder">
@@ -239,7 +239,7 @@ const mtimeText = computed(() => formatDate(props.model.mtimeMs))
           <img
             :key="cycleUrl"
             :src="cycleUrl"
-            :class="{ blurred: model.nsfw }"
+            :class="{ blurred: model.nsfw && state.settings.nsfwBlur }"
             alt=""
             draggable="false"
             @error="onCycleImgError(cycleList[cycleIdx])"
@@ -417,7 +417,8 @@ const mtimeText = computed(() => formatDate(props.model.mtimeMs))
   display: block;
 }
 
-/* NSFW 模型：首页预览图模糊展示（详情页正常显示） */
+/* NSFW 模型：首页预览图模糊展示（详情页正常显示）；受设置 nsfwBlur 控制，
+ * 关闭后清单页仅显示红色 NSFW 标记 */
 .cover img.blurred {
   filter: blur(14px);
   transform: scale(1.1); /* 放大避免模糊边缘露出原图 */
