@@ -277,3 +277,180 @@ export async function batchDeleteModels() {
     state.multiSelect.busy = false
   }
 }
+
+/* ---------------- 批量 Civitai 识别与示例图采集 ---------------- */
+
+/** 批量取示例图时每个模型导入的张数上限（识别结果按热度排序，取最前的几张） */
+const BATCH_CIVITAI_IMAGES_PER_MODEL = 4
+
+/**
+ * 逐个串行识别模型集合（批量识别/取示例图共用）：
+ * 复用单模型 civitaiIdentify IPC（哈希已在扫描期后台预热缓存，未命中才现场计算；
+ * 串行避免多 GB 文件并发哈希的磁盘抖动与 Civitai API 压力）。
+ * 识别期间更新 state.multiSelect.progress 供批量栏显示逐个进度。
+ * found=false（哈希未被 Civitai 收录，如自训模型）不算失败，计入 notFound。
+ * @param {string[]} ids 模型 id 列表
+ * @param {string} label 进度文案前缀（如「识别中」）
+ * @returns {Promise<{metas: Map<string, object>, notFound: number, failed: number}>}
+ *   metas 为识别成功模型 id → 最新元数据（含 civitaiUrl）
+ */
+async function identifySequentially(ids, label) {
+  const byId = modelById.value
+  const metas = new Map()
+  let notFound = 0
+  let failed = 0
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i]
+    const m = byId.get(id)
+    state.multiSelect.progress = `${label} ${i + 1}/${ids.length}：${m?.alias || m?.name || ''}`
+    let res = null
+    try {
+      res = await window.api.models.civitaiIdentify(id)
+    } catch {
+      failed += 1
+      continue
+    }
+    if (res.error) {
+      failed += 1
+      continue
+    }
+    if (!res.found) {
+      notFound += 1
+      continue
+    }
+    if (res.meta) metas.set(id, res.meta)
+  }
+  state.multiSelect.progress = ''
+  return { metas, notFound, failed }
+}
+
+/**
+ * 批量 Civitai 识别：对选中模型逐个按文件哈希反查 Civitai 并保存模型页链接。
+ * 结果经 applyMetaUpdates 单趟同步 civitaiUrl（O2）；未收录与失败仅计入汇总提示。
+ */
+export async function batchCivitaiIdentify() {
+  const ids = [...state.multiSelect.ids]
+  if (ids.length === 0 || state.multiSelect.busy) return
+  state.multiSelect.busy = true
+  try {
+    const { metas, notFound, failed } = await identifySequentially(ids, '识别中')
+    const ok = applyMetaUpdates(metas, (meta) => ({ civitaiUrl: meta.civitaiUrl || '' }))
+    const parts = []
+    if (notFound > 0) parts.push(`未收录 ${notFound} 个`)
+    if (failed > 0) parts.push(`失败 ${failed} 个`)
+    const text = `Civitai 识别完成：成功 ${ok} 个${parts.length ? `，${parts.join('，')}` : ''}`
+    // 有成功即算完成（未收录不是失败）；存在失败则 warn 提醒查看
+    if (ok > 0) toast(failed > 0 ? 'warn' : 'success', text)
+    else toast('info', text)
+  } finally {
+    state.multiSelect.busy = false
+    state.multiSelect.progress = ''
+  }
+}
+
+/**
+ * 批量获取示例图：对没有示例图的选中模型逐个「识别 + 导入前
+ * BATCH_CIVITAI_IMAGES_PER_MODEL 张示例图」（下载/落盘/关联在主进程复用
+ * 单模型导入链路）。跳过已有封面的模型——批量场景无法逐张勾选，重复导入
+ * 会产生冗余封面，与「空缺才补」原则一致；识别顺带写入 civitaiUrl。
+ */
+export async function batchCivitaiImages() {
+  const ids = [...state.multiSelect.ids]
+  if (ids.length === 0 || state.multiSelect.busy) return
+  const byId = modelById.value
+  const targets = []
+  let skippedHasCover = 0
+  for (const id of ids) {
+    const m = byId.get(id)
+    if (!m) continue
+    if (m.hasManualCover) {
+      skippedHasCover += 1
+      continue
+    }
+    targets.push(id)
+  }
+  if (targets.length === 0) {
+    toast('info', '选中模型均已有示例图，未做改动')
+    return
+  }
+  state.multiSelect.busy = true
+  try {
+    const metas = new Map()
+    let okModels = 0
+    let addedTotal = 0
+    let notFound = 0
+    let failed = 0
+    for (let i = 0; i < targets.length; i++) {
+      const id = targets[i]
+      const m = byId.get(id)
+      state.multiSelect.progress = `获取示例图 ${i + 1}/${targets.length}：${m?.alias || m?.name || ''}`
+      // 识别（主进程顺带保存 civitaiUrl），失败计入 failed
+      let res = null
+      try {
+        res = await window.api.models.civitaiIdentify(id)
+      } catch {
+        failed += 1
+        continue
+      }
+      if (res.error) {
+        failed += 1
+        continue
+      }
+      if (res.meta) metas.set(id, res.meta)
+      const images = Array.isArray(res.info?.images) ? res.info.images : []
+      if (!res.found || images.length === 0) {
+        notFound += 1
+        continue
+      }
+      // IPC 结构化序列化不支持响应式 Proxy，仅传普通 {url}（与详情页导入同一处理）
+      const picked = images
+        .slice(0, BATCH_CIVITAI_IMAGES_PER_MODEL)
+        .map((img) => ({ url: img.url }))
+        .filter((img) => img.url)
+      if (picked.length === 0) {
+        notFound += 1
+        continue
+      }
+      let imp = null
+      try {
+        imp = await window.api.models.civitaiImportImages(id, picked)
+      } catch {
+        failed += 1
+        continue
+      }
+      if (!imp || imp.error) {
+        failed += 1
+        continue
+      }
+      okModels += 1
+      addedTotal += imp.added || 0
+      // 封面结果就地同步（串行逐个应用，量级小；结构与 covers-store 同一约定）
+      const idx = state.models.findIndex((mm) => mm.id === id)
+      if (idx >= 0) {
+        state.models[idx] = {
+          ...state.models[idx],
+          cover: imp.cover,
+          coverUrl: imp.coverUrl,
+          covers: imp.covers || [],
+          hasManualCover: (imp.covers || []).length > 0
+        }
+      }
+    }
+    applyMetaUpdates(metas, (meta) => ({ civitaiUrl: meta.civitaiUrl || '' }))
+    const parts = []
+    if (skippedHasCover > 0) parts.push(`已有示例图跳过 ${skippedHasCover} 个`)
+    if (notFound > 0) parts.push(`未收录或无示例图 ${notFound} 个`)
+    if (failed > 0) parts.push(`失败 ${failed} 个`)
+    if (okModels > 0) {
+      const text =
+        `已为 ${okModels} 个模型添加共 ${addedTotal} 张示例图` +
+        (parts.length ? `（${parts.join('，')}）` : '')
+      toast(failed > 0 ? 'warn' : 'success', text)
+    } else {
+      toast('info', `未导入任何示例图：${parts.join('，') || '没有可导入的模型'}`)
+    }
+  } finally {
+    state.multiSelect.busy = false
+    state.multiSelect.progress = ''
+  }
+}

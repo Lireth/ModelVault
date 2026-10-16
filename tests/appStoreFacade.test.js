@@ -88,6 +88,8 @@ const EXPECTED_EXPORTS = [
   'batchApplyTriggers',
   'batchToggleDisabled',
   'batchDeleteModels',
+  'batchCivitaiIdentify',
+  'batchCivitaiImages',
   // 封面/详情保存
   'saveModelData',
   'uploadCover',

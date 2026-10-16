@@ -69,7 +69,7 @@ function resetStoreState() {
   state.sortAsc = true
   state.selectedId = null
   state.detailDirty = false
-  Object.assign(state.multiSelect, { active: false, ids: [], busy: false })
+  Object.assign(state.multiSelect, { active: false, ids: [], busy: false, progress: '' })
   state.settingsOpen = false
   Object.assign(state.settings, defaultSettings())
   state.toasts.splice(0, state.toasts.length)

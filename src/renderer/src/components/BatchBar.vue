@@ -3,6 +3,8 @@ import { computed } from 'vue'
 import {
   allFilteredSelected,
   batchApplyTriggers,
+  batchCivitaiIdentify,
+  batchCivitaiImages,
   batchDeleteModels,
   batchFavorite,
   batchNsfw,
@@ -42,7 +44,7 @@ const batchAllDisabled = computed(() =>
       @click="toggleSelectAllFiltered"
     >{{ allFilteredSelected ? '取消全选' : '全选' }}</button>
     <span class="batch-count">已选 {{ state.multiSelect.ids.length }}</span>
-    <span v-if="state.multiSelect.busy" class="batch-busy">处理中…</span>
+    <span v-if="state.multiSelect.busy" class="batch-busy">{{ state.multiSelect.progress || '处理中…' }}</span>
     <span class="batch-sep"></span>
     <button class="btn" :disabled="!batchReady" @click="batchFavorite(true)">收藏</button>
     <button class="btn" :disabled="!batchReady" @click="batchFavorite(false)">取消收藏</button>
@@ -63,6 +65,21 @@ const batchAllDisabled = computed(() =>
       title="将各模型 safetensors 自动解析的训练标签候选批量填入触发词（已有触发词的模型不改动）"
       @click="batchApplyTriggers"
     >填触发词</button>
+    <!-- Civitai 批量操作：与详情页面板同一功能开关（设置页 civitaiEnabled） -->
+    <template v-if="state.settings.civitaiEnabled">
+      <button
+        class="btn"
+        :disabled="!batchReady"
+        title="逐个按文件哈希在 Civitai 反查模型版本并保存链接（大文件哈希已预热缓存，未收录的自动跳过）"
+        @click="batchCivitaiIdentify"
+      >识别 Civitai</button>
+      <button
+        class="btn"
+        :disabled="!batchReady"
+        title="为没有示例图的选中模型从 Civitai 导入前 4 张示例图作为封面（已有示例图的模型跳过，避免重复导入）"
+        @click="batchCivitaiImages"
+      >获取示例图</button>
+    </template>
     <template v-if="multiSelectTags.length">
       <span class="batch-sep"></span>
       <span class="batch-label">标签</span>

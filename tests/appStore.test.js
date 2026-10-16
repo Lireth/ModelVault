@@ -4,8 +4,12 @@ import {
   allFilteredSelected,
   applyThumbUpdates,
   batchApplyTriggers,
+  batchCivitaiIdentify,
+  batchCivitaiImages,
   batchDeleteModels,
   batchFavorite,
+  batchNsfw,
+  batchRating,
   batchSetSubCategory,
   confirmDialog,
   deleteModel,
@@ -55,6 +59,8 @@ function makeApiMock() {
       setDefaultCover: vi.fn(),
       deleteCover: vi.fn(),
       importCover: vi.fn(),
+      civitaiIdentify: vi.fn(),
+      civitaiImportImages: vi.fn(),
       partialScan: vi.fn(),
       warmupHash: vi.fn(() => Promise.resolve({ ok: true })),
       onScanProgress: vi.fn(() => () => {}),
@@ -760,6 +766,96 @@ describe('批量操作单次状态合并（O2）', () => {
     await batchApplyTriggers()
     expect(api.models.saveModelData).not.toHaveBeenCalled()
     expect(state.toasts.some((t) => t.text.includes('均已有触发词或无自动解析候选'))).toBe(true)
+  })
+
+  it('批量 Civitai 识别：串行逐个调用，未收录不算失败，civitaiUrl 单趟同步', async () => {
+    state.models = [makeModel('a'), makeModel('b'), makeModel('c')]
+    state.multiSelect.ids = ['a', 'b', 'c']
+    api.models.civitaiIdentify.mockImplementation((id) => {
+      if (id === 'a') return Promise.resolve({ found: true, meta: { civitaiUrl: 'https://civitai.com/models/1' } })
+      if (id === 'b') return Promise.resolve({ found: false })
+      return Promise.reject(new Error('网络断开'))
+    })
+    await batchCivitaiIdentify()
+    // 逐个串行调用（而非并发）
+    expect(api.models.civitaiIdentify).toHaveBeenCalledTimes(3)
+    expect(api.models.civitaiIdentify.mock.calls.map((c) => c[0])).toEqual(['a', 'b', 'c'])
+    // 识别成功者同步 civitaiUrl，未收录/失败者保持空串
+    expect(state.models[0].civitaiUrl).toBe('https://civitai.com/models/1')
+    expect(state.models[1].civitaiUrl).toBeUndefined()
+    expect(state.models[2].civitaiUrl).toBeUndefined()
+    // 汇总提示含未收录与失败统计
+    expect(state.toasts.some((t) => t.type === 'warn' && t.text.includes('成功 1 个'))).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('未收录 1 个'))).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('失败 1 个'))).toBe(true)
+    // 批量结束后忙碌与进度复位
+    expect(state.multiSelect.busy).toBe(false)
+    expect(state.multiSelect.progress).toBe('')
+  })
+
+  it('批量 Civitai 识别：识别期间更新逐个进度文案', async () => {
+    state.models = [makeModel('a'), makeModel('b')]
+    state.multiSelect.ids = ['a', 'b']
+    const seen = []
+    api.models.civitaiIdentify.mockImplementation(() => {
+      seen.push(state.multiSelect.progress)
+      return Promise.resolve({ found: false })
+    })
+    await batchCivitaiIdentify()
+    expect(seen).toEqual(['识别中 1/2：a', '识别中 2/2：b'])
+  })
+
+  it('批量获取示例图：仅处理无封面模型，取前 4 张并同步封面状态', async () => {
+    const coversRsp = {
+      cover: 'D:\\m\\.modelvault\\covers\\1.png',
+      coverUrl: 'mvimg:///1.png',
+      covers: [
+        { rel: 'covers/1.png', path: 'D:\\m\\1.png', url: 'mvimg:///1.png' }
+      ]
+    }
+    state.models = [
+      makeModel('nocover'),
+      makeModel('hascover', { hasManualCover: true, covers: [{ rel: 'covers/x.png' }] })
+    ]
+    state.multiSelect.ids = ['nocover', 'hascover']
+    api.models.civitaiIdentify.mockImplementation((id) =>
+      id === 'nocover'
+        ? Promise.resolve({
+            found: true,
+            meta: { civitaiUrl: 'https://civitai.com/models/9' },
+            info: { images: [{ url: 'u1' }, { url: 'u2' }, { url: 'u3' }, { url: 'u4' }, { url: 'u5' }, { url: 'u6' }] }
+          })
+        : Promise.resolve({ found: false })
+    )
+    api.models.civitaiImportImages.mockResolvedValue({ added: 4, ...coversRsp })
+
+    await batchCivitaiImages()
+
+    // 已有封面的模型完全跳过（识别与导入均不调用）
+    expect(api.models.civitaiIdentify).toHaveBeenCalledTimes(1)
+    expect(api.models.civitaiIdentify).toHaveBeenCalledWith('nocover')
+    // 单模型最多取前 4 张（BATCH_CIVITAI_IMAGES_PER_MODEL）
+    expect(api.models.civitaiImportImages).toHaveBeenCalledTimes(1)
+    expect(api.models.civitaiImportImages).toHaveBeenCalledWith('nocover', [
+      { url: 'u1' }, { url: 'u2' }, { url: 'u3' }, { url: 'u4' }
+    ])
+    // 封面结果与 civitaiUrl 同步到本地列表
+    const m = state.models.find((mm) => mm.id === 'nocover')
+    expect(m.hasManualCover).toBe(true)
+    expect(m.cover).toBe(coversRsp.cover)
+    expect(m.covers).toEqual(coversRsp.covers)
+    expect(m.civitaiUrl).toBe('https://civitai.com/models/9')
+    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已为 1 个模型添加共 4 张示例图'))).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('已有示例图跳过 1 个'))).toBe(true)
+  })
+
+  it('批量获取示例图：选中模型均已有封面时提示且零 IPC', async () => {
+    state.models = [makeModel('a', { hasManualCover: true, covers: [{ rel: 'covers/a.png' }] })]
+    state.multiSelect.ids = ['a']
+    await batchCivitaiImages()
+    expect(api.models.civitaiIdentify).not.toHaveBeenCalled()
+    expect(api.models.civitaiImportImages).not.toHaveBeenCalled()
+    expect(state.toasts.some((t) => t.text.includes('均已有示例图'))).toBe(true)
   })
 })
 

@@ -101,7 +101,9 @@ export {
   batchSetSubCategory,
   batchApplyTriggers,
   batchToggleDisabled,
-  batchDeleteModels
+  batchDeleteModels,
+  batchCivitaiIdentify,
+  batchCivitaiImages
 } from './multiselect'
 
 // 详情数据保存与封面操作
