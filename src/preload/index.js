@@ -42,7 +42,8 @@ const VALID_RECEIVE_CHANNELS = [
   'models:menuAction',
   'models:thumbsReady',
   'models:storeError',
-  'models:fsChanged'
+  'models:fsChanged',
+  'models:warmupProgress'
 ]
 
 /** 带白名单校验的 invoke（所有便捷方法的统一入口） */
@@ -146,6 +147,8 @@ const api = {
     onStoreError: (listener) => subscribe('models:storeError', listener),
     /** 订阅后台缩略图生成完成事件（updates: [{ id, coverUrl }]），返回取消监听函数 */
     onThumbsReady: (listener) => subscribe('models:thumbsReady', listener),
+    /** 订阅后台哈希预热进度事件（快照: { active, id, percent, hashedBytes, totalBytes, done, remaining }） */
+    onWarmupProgress: (listener) => subscribe('models:warmupProgress', listener),
     /** 订阅右键菜单动作事件，返回取消监听函数 */
     onMenuAction: (listener) => subscribe('models:menuAction', listener),
     /** 加/去 .disabled 后缀（F10），返回 { path } 或 { error } */

@@ -91,6 +91,7 @@ let unsubscribeMenu = null
 let unsubscribeThumbs = null
 let unsubscribeStoreError = null
 let unsubscribeFsChanged = null
+let unsubscribeWarmup = null
 
 /** 目录变更自动重扫的二级防抖（主进程 3s 静默期后此处再缓冲 1s，E8） */
 let fsChangedTimer = null
@@ -274,6 +275,11 @@ onMounted(async () => {
   })
   // 订阅目录变更事件（E8）：autoRescan 开启时自动重扫
   unsubscribeFsChanged = window.api.models.onFsChanged?.(onFsChanged)
+  // 订阅后台哈希预热进度事件（Civitai 识别加速）：整体替换快照，
+  // 详情页 Civitai 面板按当前模型 id 匹配展示
+  unsubscribeWarmup = window.api.models.onWarmupProgress?.((progress) => {
+    state.warmup = progress
+  })
   await initApp()
 })
 
@@ -287,6 +293,7 @@ onUnmounted(() => {
   unsubscribeThumbs?.()
   unsubscribeStoreError?.()
   unsubscribeFsChanged?.()
+  unsubscribeWarmup?.()
 })
 </script>
 

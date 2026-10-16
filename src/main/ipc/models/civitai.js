@@ -8,7 +8,7 @@ import {
   downloadCivitaiImage,
   fetchCivitaiVersionByHash
 } from '../../services/civitai'
-import { computeAndCacheHash, requestHashWarmup } from '../../services/hash-warmup'
+import { computeAndCacheHash, requestHashWarmup, setWarmupProgressListener } from '../../services/hash-warmup'
 import {
   appendCoverMeta,
   buildCoverResponse,
@@ -161,5 +161,21 @@ export function registerCivitaiHandlers() {
     if (invalid) return { error: invalid }
     requestHashWarmup([id], { priority: true })
     return { ok: true }
+  })
+}
+
+/**
+ * 注册预热进度的跨窗口广播（与 setupStoreErrorForwarding 同一副作用注册模式）：
+ * 预热在主进程后台进行，进度快照经 models:warmupProgress 事件推送渲染进程，
+ * 渲染层据此在详情页展示当前模型的哈希进度标识。
+ * 副作用注册：仅可由 registerModelIpcHandlers 调用时触发，严禁漂移到模块 import 时。
+ */
+export function setupWarmupProgressForwarding() {
+  setWarmupProgressListener((progress) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('models:warmupProgress', progress)
+      }
+    }
   })
 }

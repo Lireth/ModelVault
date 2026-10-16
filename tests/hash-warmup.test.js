@@ -28,6 +28,7 @@ import {
   requestHashWarmup,
   resetHashWarmupForTests,
   resumeHashWarmup,
+  setWarmupProgressListener,
   whenWarmupIdle
 } from '../src/main/services/hash-warmup'
 import { getModelMeta, loadData, setDataRoot, setModelMeta } from '../src/main/services/store'
@@ -43,6 +44,7 @@ const roots = []
 beforeEach(async () => {
   vi.clearAllMocks()
   resetHashWarmupForTests()
+  setWarmupProgressListener(null)
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-warmup-'))
   roots.push(root)
   setDataRoot(root)
@@ -194,5 +196,53 @@ describe('扫描期间暂停/恢复', () => {
     expect(computeFileHash).toHaveBeenCalledTimes(2)
     expect(getModelMeta(a).hash).toBe(fakeHash(7))
     expect(getModelMeta(b).hash).toBe(fakeHash(7))
+  })
+})
+
+describe('进度事件推送', () => {
+  /** 临时挂载监听器并收集事件（afterEach 前手动还原） */
+  function collectEvents() {
+    const events = []
+    setWarmupProgressListener((p) => events.push(p))
+    return events
+  }
+
+  it('computeAndCacheHash 推送开始/进度/完成事件（含百分比与字节数）', async () => {
+    const events = collectEvents()
+    const id = await makeModel('e1.safetensors')
+    computeFileHash.mockImplementation(async (_p, _s, onProgress) => {
+      onProgress(100, 200) // 50% 时刻（首个 tick 不节流，必达）
+      onProgress(200, 200) // 该 tick 被节流吞掉（间隔 < 300ms）
+      return fakeHash(8)
+    })
+    await computeAndCacheHash(id, 1000)
+    // 事件序列：开始（active）→ 进度 tick → 完成（inactive）
+    expect(events.length).toBe(3)
+    expect(events[0]).toMatchObject({ active: true, id, percent: 0 })
+    expect(events[1]).toMatchObject({ active: true, id, percent: 50, hashedBytes: 100, totalBytes: 200 })
+    expect(events[2]).toMatchObject({ active: false, id })
+  })
+
+  it('预热队列消费时推送队列计数（done 递增 / remaining 递减，清空后归零）', async () => {
+    const events = collectEvents()
+    const a = await makeModel('e2.safetensors')
+    const b = await makeModel('e3.safetensors')
+    computeFileHash.mockResolvedValue(fakeHash(9))
+    requestHashWarmup([a, b], { delayMs: 0 })
+    await whenWarmupIdle()
+    // 入队事件（remaining=2）→ 完成事件（done=2, remaining=0）→ 清空事件（done=2）
+    expect(events[0]).toMatchObject({ active: false, done: 0, remaining: 2 })
+    const afterDrain = events.filter((e) => e.done === 2 && e.remaining === 0)
+    expect(afterDrain.length).toBeGreaterThanOrEqual(1)
+    // 队列清空后 done 归零，供下一轮批量从 0 计数
+    expect(events[events.length - 1]).toMatchObject({ active: false, done: 2, remaining: 0 })
+  })
+
+  it('未注册监听器时推送静默忽略，不影响预热', async () => {
+    const id = await makeModel('e4.safetensors')
+    computeFileHash.mockResolvedValue(fakeHash(10))
+    requestHashWarmup([id], { delayMs: 0 })
+    await whenWarmupIdle()
+    expect(getModelMeta(id).hash).toBe(fakeHash(10))
   })
 })

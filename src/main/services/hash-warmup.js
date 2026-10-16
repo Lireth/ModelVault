@@ -27,6 +27,58 @@ import { computeFileHash } from './civitai'
 /** 普通入队后的延迟启动间隔（ms）：避开扫描刚结束/缩略图生成的 I/O 高峰 */
 const WARMUP_DELAY_MS = 3000
 
+/** 进度事件节流间隔（ms）：哈希每块（8MB）回调一次，高频事件须限流 */
+const PROGRESS_INTERVAL_MS = 300
+
+/** 进度事件推送监听（由 IPC 层经 setWarmupProgressListener 注册并广播渲染进程） */
+let progressListener = null
+
+/**
+ * 注册预热进度监听（与 setStoreSaveErrorListener 同一副作用注册模式）：
+ * 监听器收到的快照形状为
+ * { active, id, percent, hashedBytes, totalBytes, done, remaining }。
+ * @param {(progress: object) => void} [fn] 进度快照回调（传空清除）
+ */
+export function setWarmupProgressListener(fn) {
+  progressListener = typeof fn === 'function' ? fn : null
+}
+
+/** 本轮队列已消费的模型数（队列清空后归零，新一轮批量从 0 计数） */
+let doneCount = 0
+
+/** 上次节流推送时间（ms 时间戳） */
+let lastEmitAt = 0
+
+/**
+ * 推送一次进度快照（拼入实时队列计数；节流仅作用于高频的哈希块回调，
+ * 状态跃迁经 force 立即送达）。
+ * @param {object} snap 当前计算的温度快照 { active, id, percent, hashedBytes, totalBytes }
+ * @param {boolean} [force] 跳过节流立即推送
+ */
+function emitProgress(snap, force = false) {
+  if (!progressListener) return
+  const now = Date.now()
+  // 节流仅在普通 tick 之间生效：状态跃迁（force）不占用节流窗口，
+  // 避免开始事件把随后的首个进度 tick 吞掉
+  if (!force) {
+    if (now - lastEmitAt < PROGRESS_INTERVAL_MS) return
+    lastEmitAt = now
+  }
+  try {
+    progressListener({
+      active: snap.active,
+      id: snap.id,
+      percent: snap.percent,
+      hashedBytes: snap.hashedBytes,
+      totalBytes: snap.totalBytes,
+      done: doneCount,
+      remaining: queue.length
+    })
+  } catch {
+    // 进度推送失败不影响预热本身
+  }
+}
+
 /** 待预热队列（FIFO；优先任务 unshift 插队） */
 const queue = []
 /** 队列去重集合（与 queue 同步维护） */
@@ -54,11 +106,25 @@ export function computeAndCacheHash(id, mtimeMs) {
   const current = inflight.get(id)
   if (current && current.mtimeMs === mtimeMs) return current.promise
   const promise = (async () => {
-    const hash = await computeFileHash(id)
-    // 写盘前重读最新元数据：哈希计算期间用户可能已并发保存其他字段
-    const latest = getModelMeta(id) || {}
-    setModelMeta(id, { ...latest, hash, hashMtime: mtimeMs })
-    return hash
+    // 本次计算的进度快照（识别与预热链路共用，事件按 id 供渲染层匹配）
+    const snap = { active: true, id, percent: 0, hashedBytes: 0, totalBytes: 0 }
+    try {
+      emitProgress(snap, true)
+      const hash = await computeFileHash(id, undefined, (hashedBytes, totalBytes) => {
+        snap.hashedBytes = hashedBytes
+        snap.totalBytes = totalBytes
+        snap.percent = totalBytes > 0 ? Math.min(100, Math.round((hashedBytes / totalBytes) * 100)) : 0
+        emitProgress(snap)
+      })
+      // 写盘前重读最新元数据：哈希计算期间用户可能已并发保存其他字段
+      const latest = getModelMeta(id) || {}
+      setModelMeta(id, { ...latest, hash, hashMtime: mtimeMs })
+      return hash
+    } finally {
+      // 完成即熄灭本快照（active=false），渲染层据此清除当前模型的进度标识
+      snap.active = false
+      emitProgress(snap, true)
+    }
   })()
   const entry = { mtimeMs, promise }
   inflight.set(id, entry)
@@ -92,6 +158,8 @@ export function requestHashWarmup(ids, opts = {}) {
     added = true
   }
   if (!added) return
+  // 队列计数变化立即广播（渲染层可显示排队数）
+  emitProgress({ active: false, id: '', percent: 0, hashedBytes: 0, totalBytes: 0 }, true)
   scheduleDrain(priority ? 0 : opts.delayMs ?? WARMUP_DELAY_MS)
 }
 
@@ -129,6 +197,8 @@ async function drain() {
     while (queue.length > 0 && !paused) {
       const id = queue.shift()
       queued.delete(id)
+      // 出队即计消费（缓存命中/文件缺失的跳过条目同样计入，保持计数连贯）
+      doneCount += 1
       if (inflight.has(id)) continue
       let mtimeMs
       try {
@@ -146,6 +216,11 @@ async function drain() {
       } catch (err) {
         logger.warn(`后台哈希预热失败: ${id} ${err.message}`)
       }
+    }
+    if (queue.length === 0 && doneCount > 0) {
+      // 本轮批量清空：先广播最终计数，再归零供下一轮从 0 计数
+      emitProgress({ active: false, id: '', percent: 0, hashedBytes: 0, totalBytes: 0 }, true)
+      doneCount = 0
     }
   } finally {
     draining = false
@@ -168,6 +243,8 @@ export function resetHashWarmupForTests() {
   inflight.clear()
   paused = false
   draining = false
+  doneCount = 0
+  lastEmitAt = 0
   if (drainTimer) {
     clearTimeout(drainTimer)
     drainTimer = null

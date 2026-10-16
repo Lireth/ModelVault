@@ -148,6 +148,9 @@ export const state = shallowReactive({
   // 详情
   selectedId: null,
   detailDirty: false, // 详情页表单有未保存的修改（由 ModelDetail 同步，切换/关闭前确认）
+  // 后台哈希预热进度（Civitai 识别加速）：事件推送整体替换快照，无需深响应。
+  // 形状与主进程 hash-warmup 的进度事件一致
+  warmup: { active: false, id: '', percent: 0, hashedBytes: 0, totalBytes: 0, done: 0, remaining: 0 },
   // 多选批量操作（E4/E6）：ids 为选中模型 id 数组；busy 表示批量 IPC
   // 批量提交进行中（B6），期间按钮禁用、防连点重复提交
   multiSelect: reactive({ active: false, ids: [], busy: false }),

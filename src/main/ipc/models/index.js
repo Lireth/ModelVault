@@ -5,7 +5,7 @@ import { registerCoverHandlers } from './covers'
 import { registerMiscHandlers } from './misc'
 import { registerFilesHandlers } from './files'
 import { registerBackupHandlers } from './backup'
-import { registerCivitaiHandlers } from './civitai'
+import { registerCivitaiHandlers, setupWarmupProgressForwarding } from './civitai'
 
 /**
  * models 域 IPC 处理器聚合入口（对外签名与行为不变）。
@@ -17,6 +17,8 @@ import { registerCivitaiHandlers } from './civitai'
 export function registerModelIpcHandlers() {
   // 元数据落盘失败广播（B1）必须最先注册：任何 handler 触发保存前监听须已就位
   setupStoreErrorForwarding()
+  // 预热进度广播注册（预热任务可能在任意 handler 前后台启动）
+  setupWarmupProgressForwarding()
   registerStoreHandlers()
   registerScanHandlers()
   registerMetaHandlers()

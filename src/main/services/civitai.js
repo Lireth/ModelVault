@@ -58,13 +58,16 @@ const MIME_EXT = {
  * 模型文件普遍 1-10GB，必须分块读取避免一次性载入内存。
  * @param {string} filePath 文件绝对路径
  * @param {import('electron').AbortSignal} [signal] 取消信号（可选）
+ * @param {(hashedBytes: number, totalBytes: number) => void} [onProgress]
+ *   哈希进度回调（可选，每块读取后触发；预热链路据此推送进度标识）
  * @returns {Promise<string>} 64 位十六进制哈希
  */
-export async function computeFileHash(filePath, signal) {
+export async function computeFileHash(filePath, signal, onProgress) {
   const handle = await fs.open(filePath, 'r')
   try {
     const hash = createHash('sha256')
     const buffer = Buffer.alloc(HASH_CHUNK_SIZE)
+    const totalBytes = (await handle.stat()).size
     let position = 0
     for (;;) {
       if (signal?.aborted) {
@@ -76,6 +79,9 @@ export async function computeFileHash(filePath, signal) {
       if (bytesRead === 0) break
       hash.update(buffer.subarray(0, bytesRead))
       position += bytesRead
+      if (typeof onProgress === 'function') {
+        onProgress(position, totalBytes)
+      }
     }
     return hash.digest('hex')
   } finally {

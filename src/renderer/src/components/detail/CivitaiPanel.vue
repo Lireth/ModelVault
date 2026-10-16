@@ -4,6 +4,7 @@ import {
   civitaiComplete,
   civitaiIdentify,
   civitaiImportImages,
+  formatSize,
   selectedModel,
   state
 } from '../../store/appStore'
@@ -29,6 +30,22 @@ const importing = ref(false)
 const model = computed(() => selectedModel.value)
 /** 已识别：详情页展示模型页链接 */
 const identified = computed(() => !!model.value?.civitaiUrl)
+
+/* ---------------- 后台哈希预热进度（主进程事件推送，按模型 id 匹配） ---------------- */
+
+/** 当前模型正在计算的哈希进度快照（无则 null） */
+const modelWarmup = computed(() => {
+  const w = state.warmup
+  return w?.active && w.id === model.value?.id ? w : null
+})
+
+/** 哈希进度文案（含百分比与已哈希/总字节数；无进行中预热为空串） */
+const hashProgressText = computed(() => {
+  const w = modelWarmup.value
+  if (!w) return ''
+  const size = w.totalBytes > 0 ? `（${formatSize(w.hashedBytes)} / ${formatSize(w.totalBytes)}）` : ''
+  return `正在计算文件哈希 ${w.percent}%${size}`
+})
 
 /* ---------------- 示例图采集 ---------------- */
 
@@ -216,8 +233,16 @@ async function importSelected() {
         >{{ identifying ? '识别中…' : '识别 Civitai 模型' }}</button>
       </div>
       <span v-if="identifying" class="civitai-hint">
-        正在计算文件哈希并查询 Civitai，大文件可能耗时较长…
+        {{ hashProgressText || '正在计算文件哈希并查询 Civitai，大文件可能耗时较长…' }}
       </span>
+      <template v-else-if="modelWarmup">
+        <div class="civitai-warmup">
+          <span class="civitai-hint">{{ hashProgressText }}，后台预热中，识别时将直接复用</span>
+          <div class="civitai-warmup-bar">
+            <div class="civitai-warmup-fill" :style="{ width: `${modelWarmup.percent}%` }"></div>
+          </div>
+        </div>
+      </template>
       <span v-else-if="lastResult === 'notfound'" class="civitai-hint">
         未在 Civitai 找到匹配的模型（自训或其他来源的模型无法识别）
       </span>
@@ -275,6 +300,27 @@ async function importSelected() {
 .civitai-hint {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* 后台哈希预热进度（细进度条 + 百分比文案） */
+.civitai-warmup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.civitai-warmup-bar {
+  height: 3px;
+  border-radius: var(--radius-full, 999px);
+  background: color-mix(in srgb, var(--bg-card) 80%, transparent);
+  overflow: hidden;
+}
+
+.civitai-warmup-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.3s ease;
 }
 
 /* 示例图勾选网格 */
