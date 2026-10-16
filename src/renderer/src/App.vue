@@ -316,9 +316,6 @@ onUnmounted(() => {
           <button class="scan-error-retry" @click="scanModels">重试</button>
         </div>
 
-        <!-- 多选批量操作栏（E4/E6，O9 拆分为 BatchBar 组件）：位于搜索行下方 -->
-        <BatchBar />
-
         <!-- 搜索 + 排序：位于模型清单上方（选择文件夹后显示） -->
         <div v-if="state.folder" class="search-row">
           <div class="search-box" title="搜索名称、备注名、备注与分类标签">
@@ -456,6 +453,10 @@ onUnmounted(() => {
               </select>
             </label>
           </div>
+
+          <!-- 多选批量操作栏（E4/E6，O9 拆分为 BatchBar 组件）：
+               位于多选开关所在的结果行与模型清单之间，靠近操作对象 -->
+          <BatchBar />
 
           <!-- 空结果（有筛选条件时保留结果栏，便于切换分类/取消收藏筛选/清空搜索） -->
           <div v-if="filteredModels.length === 0" class="empty-state">
