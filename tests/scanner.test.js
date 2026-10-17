@@ -5,6 +5,7 @@ import path from 'node:path'
 import {
   civitaiImportPatch,
   classifyModel,
+  classifySubCategory,
   findSidecarCivitaiInfo,
   findSidecarPreview,
   findSidecarText,
@@ -15,6 +16,7 @@ import {
 /**
  * scanner.js 单元测试：
  * - classifyModel 分类规则（文件夹优先 + 文件名关键词兜底 + 优先级顺序）
+ * - classifySubCategory 自动分类标签（文件夹名匹配 7 个标签）
  * - scanModels 递归扫描（扩展名过滤、排除目录、进度回调）
  * - findSidecarPreview 同名预览图查找
  */
@@ -44,6 +46,41 @@ describe('classifyModel', () => {
     expect(classifyModel(['downloads'], 'text-encoder.bin')).toBe('text_encoder')
     expect(classifyModel(['downloads'], 'sdxl-base.safetensors')).toBe('checkpoint')
     expect(classifyModel(['downloads'], 'just-a-model.safetensors')).toBe('other')
+  })
+})
+
+describe('classifySubCategory 自动分类标签', () => {
+  it('中文文件夹名命中对应标签', () => {
+    expect(classifySubCategory(['loras', '角色'])).toBe('role')
+    expect(classifySubCategory(['风格'])).toBe('style')
+    expect(classifySubCategory(['models', '概念'])).toBe('concept')
+    expect(classifySubCategory(['服饰'])).toBe('outfit')
+    expect(classifySubCategory(['背景'])).toBe('background')
+    expect(classifySubCategory(['姿势'])).toBe('pose')
+    expect(classifySubCategory(['工具'])).toBe('tool')
+  })
+
+  it('英文文件夹名（忽略大小写）命中对应标签', () => {
+    expect(classifySubCategory(['lora', 'Role'])).toBe('role')
+    expect(classifySubCategory(['STYLE'])).toBe('style')
+    expect(classifySubCategory(['Background'])).toBe('background')
+  })
+
+  it('从直接父文件夹向根方向逐级匹配，取最近的命中段', () => {
+    // 直接父命中优先
+    expect(classifySubCategory(['角色', '风格'])).toBe('style')
+    // 直接父未命中时向根方向回溯
+    expect(classifySubCategory(['角色', 'lora', 'sub'])).toBe('role')
+  })
+
+  it('未命中返回空串（不分配标签）', () => {
+    expect(classifySubCategory([])).toBe('')
+    expect(classifySubCategory(['lora'])).toBe('')
+    expect(classifySubCategory(['downloads', 'misc'])).toBe('')
+  })
+
+  it('文件夹名两侧空白容忍（trim 后匹配）', () => {
+    expect(classifySubCategory([' 角色 '])).toBe('role')
   })
 })
 

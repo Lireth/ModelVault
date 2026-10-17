@@ -84,16 +84,25 @@ describe('ModelDetail 表单填充与脏检测（C8）', () => {
     wrapper.unmount()
   })
 
-  it('大模型自动标注为「基底模型」且不可手动更改', async () => {
-    selectModel({ type: 'checkpoint' })
+  it('分类标签只读展示：大模型自动标注为基底模型，不可点击更改', async () => {
+    selectModel({ type: 'checkpoint', subCategory: 'base' })
     const wrapper = mountDetail()
     await flushPromises()
     const locked = wrapper.findAll('.subcat-chip.locked')
     expect(locked).toHaveLength(1)
     expect(locked[0].text()).toBe('基底模型')
-    // 点击不改变表单值（locked 分支直接 return）
+    // 点击不产生任何表单修改（只读展示，无点击处理器）
     await locked[0].trigger('click')
     expect(state.detailDirty).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('分类标签只读展示：未分配时显示自动匹配提示', async () => {
+    selectModel({ type: 'lora', subCategory: '' })
+    const wrapper = mountDetail()
+    await flushPromises()
+    expect(wrapper.findAll('.subcat-chip')).toHaveLength(0)
+    expect(wrapper.text()).toContain('未分配')
     wrapper.unmount()
   })
 
@@ -176,13 +185,12 @@ describe('ModelDetail 参数校验与保存', () => {
     await wrapper.find('input[maxlength="100"]').setValue('新备注名')
     await saveBtn(wrapper).trigger('click')
     await settle()
-    // 载荷：LoRA 携带触发词；非数值参数为空值
+    // 载荷：LoRA 携带触发词，分类标签不再由详情页提交（自动分配）；非数值参数为空值
     expect(window.api.models.saveModelData).toHaveBeenCalledWith({
       id: 'm1',
       alias: '新备注名',
       params: { steps: null, cfgMin: null, cfgMax: null, sampler: '', scheduler: '', precision: '', resMin: null, resMax: null },
       note: '',
-      subCategory: '',
       triggerWords: '1girl, solo'
     })
     // store 已用响应 meta 更新本地列表，脏基线刷新

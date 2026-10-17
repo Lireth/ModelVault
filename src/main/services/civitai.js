@@ -169,6 +169,58 @@ export function normalizeVersionInfo(raw) {
 }
 
 /**
+ * 由 Civitai 模型页 URL 提取模型 id（纯函数，便于单测）：
+ * 仅接受 https://civitai.com/models/{数字id} 形式（与元数据层
+ * civitaiUrl 的写入校验同源），可选尾段（slug/query）忽略。
+ * @param {string} url Civitai 模型页 URL
+ * @returns {string|null} 模型 id 字符串，格式不符返回 null
+ */
+export function parseCivitaiModelId(url) {
+  if (typeof url !== 'string') return null
+  const m = url.match(/^https:\/\/civitai\.com\/models\/(\d+)(?:[/?#]|$)/)
+  return m ? m[1] : null
+}
+
+/**
+ * 按 Civitai 模型 id 查询模型信息中的类型字段（一键分配标签用）。
+ * Civitai 的 model.type（Character/Style/Concept/Clothing/Background/Pose/Tool 等）
+ * 即官网的模型分类，映射为本地标签由 shared/model-categories.civitaiTypeToTag 完成。
+ * @param {string} modelId Civitai 模型 id（parseCivitaiModelId 的结果）
+ * @returns {Promise<{found: boolean, type?: string, error?: string}>}
+ *   found=false 且无 error 表示 id 不存在或已下架（不是失败）
+ */
+export async function fetchCivitaiModelType(modelId) {
+  let response
+  try {
+    response = await net.fetch(`${CIVITAI_API_BASE}/models/${modelId}`, {
+      headers: { 'User-Agent': 'ModelVault', Accept: 'application/json' },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    })
+  } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      return { found: false, error: '请求超时，请检查网络后重试' }
+    }
+    return { found: false, error: `网络请求失败: ${err.message}` }
+  }
+  if (response.status === 404) {
+    return { found: false }
+  }
+  if (!response.ok) {
+    return { found: false, error: `Civitai 查询失败（HTTP ${response.status}）` }
+  }
+  let raw
+  try {
+    raw = await response.json()
+  } catch (err) {
+    return { found: false, error: `响应解析失败: ${err.message}` }
+  }
+  if (!raw || typeof raw !== 'object' || typeof raw.type !== 'string' || !raw.type.trim()) {
+    return { found: false, error: '响应数据格式异常' }
+  }
+  return { found: true, type: raw.type.trim() }
+}
+
+/**
  * 剥离 Civitai 描述中的 HTML 标签并压缩空白（描述为富文本 HTML，
  * 备注为纯文本；实体仅处理常见命名实体，其余由浏览器渲染时自然容错）。
  * 纯函数，便于单测。

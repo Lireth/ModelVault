@@ -6,8 +6,11 @@ import { saveCoverBuffer } from '../../services/covers'
 import {
   civitaiCompletePatch,
   downloadCivitaiImage,
-  fetchCivitaiVersionByHash
+  fetchCivitaiModelType,
+  fetchCivitaiVersionByHash,
+  parseCivitaiModelId
 } from '../../services/civitai'
+import { civitaiTypeToTag } from '../../../shared/model-categories'
 import { computeAndCacheHash, requestHashWarmup, setWarmupProgressListener } from '../../services/hash-warmup'
 import {
   appendCoverMeta,
@@ -106,6 +109,35 @@ export function registerCivitaiHandlers() {
       }
     }
   }, { errorPrefix: 'Civitai 补全失败' })
+
+  // 一键分配标签（按 Civitai 模型类型）：读取已保存的模型页链接，
+  // 查询 Civitai 类型并映射为本地分类标签写盘。无链接/类型未映射的模型
+  // 不做改动（渲染层汇总提示）；映射成功时覆盖已有标签（分配语义）。
+  wrapHandler('models:civitaiCategory', async (event, { id } = {}) => {
+    const invalid = checkModelIdInRoot(id)
+    if (invalid) return { error: invalid }
+    const meta = getModelMeta(id) || {}
+    if (!meta.civitaiUrl) {
+      return { skipped: true }
+    }
+    const modelId = parseCivitaiModelId(meta.civitaiUrl)
+    if (!modelId) {
+      return { skipped: true, reason: 'invalid-url' }
+    }
+    const res = await fetchCivitaiModelType(modelId)
+    if (res.error) return { error: res.error }
+    if (!res.found) return { found: false }
+    const tag = civitaiTypeToTag(res.type)
+    if (!tag) {
+      // Civitai 类型不属于 7 个分类标签（Lora/Checkpoint 等）：保持现状
+      return { found: true, unmapped: true, type: res.type }
+    }
+    // 写盘前重读最新元数据，避免覆盖查询期间的用户并发保存
+    const latest = getModelMeta(id) || meta
+    const saved = setModelMeta(id, { ...latest, subCategory: tag })
+    logger.info(`Civitai 分类标签分配: ${id} -> ${tag}（${res.type}）`)
+    return { found: true, subCategory: tag, type: res.type, meta: saved || null }
+  }, { errorPrefix: 'Civitai 分类标签分配失败' })
 
   // 示例图导入：下载勾选的图片（仅 Civitai CDN 白名单域名）并追加到封面列表。
   // 逐张串行下载/落盘/关联；单张失败不中断整批，结果按图反馈

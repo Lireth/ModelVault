@@ -129,6 +129,32 @@ describe('decorateModels 元数据装饰', () => {
     expect(decorated.autoInfo).toBeNull()
   })
 
+  it('自动标签合成：lora 的文件夹标签优先于元数据标签', async () => {
+    const abs = path.join(root, 'role-lora.safetensors')
+    await fs.writeFile(abs, 'x')
+    setModelMeta(abs, { subCategory: 'style' })
+    const model = makeModel(abs, { type: 'lora', folderSubCategory: 'role' })
+    const [decorated] = await decorateModels([model])
+    expect(decorated.subCategory).toBe('role')
+  })
+
+  it('自动标签合成：lora 无文件夹标签时回退元数据标签（Civitai 分配结果保留）', async () => {
+    const abs = path.join(root, 'style-lora.safetensors')
+    await fs.writeFile(abs, 'x')
+    setModelMeta(abs, { subCategory: 'style' })
+    const model = makeModel(abs, { type: 'lora', folderSubCategory: '' })
+    const [decorated] = await decorateModels([model])
+    expect(decorated.subCategory).toBe('style')
+  })
+
+  it('自动标签合成：非 lora 类型忽略文件夹标签（checkpoint 仍自动 base）', async () => {
+    const abs = path.join(root, 'ck.safetensors')
+    await fs.writeFile(abs, 'x')
+    const model = makeModel(abs, { type: 'checkpoint', folderSubCategory: 'role' })
+    const [decorated] = await decorateModels([model])
+    expect(decorated.subCategory).toBe('base')
+  })
+
   it('增量缓存：mtime 与元数据签名未变时复用上次装饰结果', async () => {
     const abs = path.join(root, 'd.safetensors')
     await fs.writeFile(abs, 'x')

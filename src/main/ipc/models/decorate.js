@@ -269,8 +269,12 @@ async function decorateOne(model, usedThumbs) {
     // NSFW 标记：首页卡片预览图模糊展示（详情页正常展示）
     nsfw: meta.nsfw === true,
     rating: meta.rating || 0,
-    // 大模型自动标注为「基底模型」分类（未手动标注时默认生效）
-    subCategory: meta.subCategory || (model.type === 'checkpoint' ? 'base' : ''),
+    // 分类标签合成（自动标签，无手选入口）：
+    // 文件夹自动标签（仅 lora）> Civitai 分配/meta 值 > 大模型基底模型
+    subCategory:
+      (model.type === 'lora' && model.folderSubCategory) ||
+      meta.subCategory ||
+      (model.type === 'checkpoint' ? 'base' : ''),
     triggerWords: meta.triggerWords || '',
     // 触发词来源（'sidecar'/'civitai' 时详情页显示自动导入提示，F8）
     triggerWordsSource: meta.triggerWordsSource || '',

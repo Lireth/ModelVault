@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { abortError } from '../utils'
 import { MODEL_EXTENSION_SET } from '../../shared/model-extensions'
+import { folderNameToTag } from '../../shared/model-categories'
 
 /**
  * 模型扫描模块：递归遍历用户选择的模型根目录，
@@ -68,6 +69,22 @@ export function classifyModel(relSegments, fileName) {
     if (rule.re.test(fileName)) return rule.type
   }
   return 'other'
+}
+
+/**
+ * 按文件夹名推断自动分类标签（角色/风格/概念/服饰/背景/姿势/工具）：
+ * 从直接父文件夹段向根方向逐级查找，第一个命中的段决定标签——
+ * 兼容「loras/角色/」与「角色/子目录/」两种层级组织。无命中返回空串
+ * （不分配标签）。结果是扫描派生字段（与 type 同级），不写入元数据。
+ * @param {string[]} relSegments 相对目录段（已按 '/' 拆分）
+ * @returns {string} 分类标签 key 或 ''
+ */
+export function classifySubCategory(relSegments) {
+  for (let i = relSegments.length - 1; i >= 0; i--) {
+    const tag = folderNameToTag(relSegments[i])
+    if (tag) return tag
+  }
+  return ''
 }
 
 /**
@@ -188,6 +205,8 @@ export async function scanModels(root, onProgress, options = {}) {
           ext,
           disabled: f.disabled === true,
           type: classifyModel(rel ? rel.split('/') : [], f.name),
+          // 自动分类标签：按文件夹名匹配（装饰层与 meta.subCategory 合成生效）
+          folderSubCategory: classifySubCategory(rel ? rel.split('/') : []),
           folder: dir,
           relDir: rel,
           size: stat.size,

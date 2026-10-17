@@ -9,7 +9,8 @@ import {
   batchDeleteModels,
   batchFavorite,
   batchToggleDisabled,
-  batchSetSubCategory,
+  batchAssignCivitaiTags,
+  batchOrganizeByTags,
   confirmDialog,
   deleteModel,
   dismissToast,
@@ -61,6 +62,8 @@ function makeApiMock() {
       deleteCover: vi.fn(),
       importCover: vi.fn(),
       civitaiIdentify: vi.fn(),
+      civitaiCategory: vi.fn(),
+      organizeByTags: vi.fn(),
       civitaiImportImages: vi.fn(),
       partialScan: vi.fn(),
       warmupHash: vi.fn(() => Promise.resolve({ ok: true })),
@@ -616,30 +619,55 @@ describe('批量操作单次状态合并（O2）', () => {
     expect(state.toasts.some((t) => t.type === 'warn' && t.text.includes('成功 2 个，失败 1 个'))).toBe(true)
   })
 
-  it('批量设置标签：按 {id, subCategory} 调 IPC 并单趟同步标签字段', async () => {
-    state.models = [makeModel('a', { type: 'other' }), makeModel('c', { type: 'other' })]
-    state.multiSelect.ids = ['a', 'c']
-    api.models.saveModelData.mockImplementation(() =>
-      Promise.resolve({
-        meta: { subCategory: 'controlnet', params: null, alias: '', note: '', triggerWords: '' }
-      })
+  it('一键分配标签：确认后逐个按 Civitai 类型分配并单趟同步标签字段', async () => {
+    state.models = [makeModel('a'), makeModel('b')]
+    state.multiSelect.ids = ['a', 'b']
+    api.models.civitaiCategory.mockImplementation((id) =>
+      id === 'a'
+        ? Promise.resolve({ found: true, subCategory: 'role', meta: { subCategory: 'role' } })
+        : Promise.resolve({ skipped: true })
     )
-    await batchSetSubCategory('controlnet')
-    expect(api.models.saveModelData).toHaveBeenCalledTimes(2)
-    expect(api.models.saveModelData).toHaveBeenCalledWith({ id: 'a', subCategory: 'controlnet' })
-    expect(api.models.saveModelData).toHaveBeenCalledWith({ id: 'c', subCategory: 'controlnet' })
-    expect(state.models.map((m) => m.subCategory)).toEqual(['controlnet', 'controlnet'])
-    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已为 2 个模型设置标签'))).toBe(true)
+    const p = batchAssignCivitaiTags()
+    acceptConfirm()
+    await p
+    expect(api.models.civitaiCategory).toHaveBeenCalledTimes(2)
+    expect(state.models.find((m) => m.id === 'a').subCategory).toBe('role')
+    expect(
+      state.toasts.some((t) => t.type === 'success' && t.text.includes('成功 1 个') && t.text.includes('无 Civitai 链接 1 个'))
+    ).toBe(true)
   })
 
-  it('批量设置标签：失败不逐个弹错误 toast，仅汇总提示', async () => {
-    state.models = [makeModel('a', { type: 'other' }), makeModel('c', { type: 'other' })]
-    state.multiSelect.ids = ['a', 'c']
-    api.models.saveModelData.mockRejectedValue(new Error('保存失败'))
-    const toastCountBefore = state.toasts.length
-    await batchSetSubCategory('embedding')
-    expect(state.toasts.length - toastCountBefore).toBe(1)
-    expect(state.toasts[0].type).toBe('warn')
+  it('一键分配标签：确认层拒绝时不发起任何 IPC', async () => {
+    state.models = [makeModel('a')]
+    state.multiSelect.ids = ['a']
+    const p = batchAssignCivitaiTags()
+    rejectConfirm()
+    await p
+    expect(api.models.civitaiCategory).not.toHaveBeenCalled()
+  })
+
+  it('一键移动文件：已标注模型按标签提交移动并整表重扫，未标注的不参与', async () => {
+    state.models = [
+      makeModel('a', { subCategory: 'role' }),
+      makeModel('b', { subCategory: '' }),
+      makeModel('c', { subCategory: 'base' })
+    ]
+    state.multiSelect.ids = ['a', 'b', 'c']
+    state.scanning = true // 跳过移动后的整表重扫（该链路由 scanner/watcher 测试覆盖）
+    api.models.organizeByTags.mockResolvedValue({ moved: 1, failed: [], skipped: [] })
+    const p = batchOrganizeByTags()
+    acceptConfirm()
+    await p
+    expect(api.models.organizeByTags).toHaveBeenCalledWith([{ id: 'a', subCategory: 'role' }])
+    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已移动 1 个模型'))).toBe(true)
+  })
+
+  it('一键移动文件：选中模型均未分配标签时提示且不发起 IPC', async () => {
+    state.models = [makeModel('a', { subCategory: '' })]
+    state.multiSelect.ids = ['a']
+    await batchOrganizeByTags()
+    expect(api.models.organizeByTags).not.toHaveBeenCalled()
+    expect(state.toasts.some((t) => t.text.includes('均未分配分类标签'))).toBe(true)
   })
 
   it('批量删除：确认后单趟移除并清理 selectedId 与选区', async () => {

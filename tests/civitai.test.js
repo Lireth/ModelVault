@@ -10,19 +10,94 @@ vi.mock('electron', () => ({
   net: { fetch: vi.fn() }
 }))
 
+import { civitaiTypeToTag } from '../src/shared/model-categories'
 import {
   civitaiCompletePatch,
+  fetchCivitaiModelType,
   isAllowedCivitaiImageUrl,
   normalizeVersionInfo,
+  parseCivitaiModelId,
   stripHtml
 } from '../src/main/services/civitai'
+import { net } from 'electron'
 
 /**
- * civitai.js 单元测试（纯函数部分，不触网）：
+ * civitai.js 单元测试（纯函数 + 类型查询，不真实触网）：
  * - normalizeVersionInfo：by-hash 响应规范化与页面 URL 拼装、坏数据容错
+ * - parseCivitaiModelId：模型页 URL 的 id 提取
+ * - fetchCivitaiModelType：按模型 id 查询类型（mock net.fetch）
+ * - civitaiTypeToTag：Civitai 类型 → 本地标签映射
  * - stripHtml：描述富文本转纯文本（换行保留、实体解码）
  * - civitaiCompletePatch：仅补空缺字段（触发词/备注），不覆盖用户标注
  */
+
+describe('parseCivitaiModelId', () => {
+  it('从模型页 URL 提取数字 id（含 slug 与 query 变体）', () => {
+    expect(parseCivitaiModelId('https://civitai.com/models/12345')).toBe('12345')
+    expect(parseCivitaiModelId('https://civitai.com/models/12345/some-name')).toBe('12345')
+    expect(parseCivitaiModelId('https://civitai.com/models/12345?modelVersionId=678')).toBe('12345')
+  })
+
+  it('非模型页 URL 或坏数据返回 null', () => {
+    expect(parseCivitaiModelId('https://civitai.com/models/abc')).toBe(null)
+    expect(parseCivitaiModelId('https://evil.com/models/123')).toBe(null)
+    expect(parseCivitaiModelId('not-a-url')).toBe(null)
+    expect(parseCivitaiModelId('')).toBe(null)
+    expect(parseCivitaiModelId(null)).toBe(null)
+  })
+})
+
+describe('fetchCivitaiModelType', () => {
+  it('命中时返回模型类型', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response(JSON.stringify({ id: 123, type: 'Character', name: 'Some Model' }), { status: 200 })
+    )
+    const res = await fetchCivitaiModelType('123')
+    expect(res).toEqual({ found: true, type: 'Character' })
+  })
+
+  it('404 视为未收录（非错误）', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(new Response('', { status: 404 }))
+    const res = await fetchCivitaiModelType('123')
+    expect(res).toEqual({ found: false })
+  })
+
+  it('非 2xx 返回错误信息', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(new Response('', { status: 500 }))
+    const res = await fetchCivitaiModelType('123')
+    expect(res.found).toBe(false)
+    expect(res.error).toContain('HTTP 500')
+  })
+
+  it('响应缺 type 字段视为数据异常', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response(JSON.stringify({ id: 123 }), { status: 200 })
+    )
+    const res = await fetchCivitaiModelType('123')
+    expect(res.found).toBe(false)
+    expect(res.error).toContain('格式异常')
+  })
+})
+
+describe('civitaiTypeToTag', () => {
+  it('七类 Civitai 类型映射到本地标签（忽略大小写与空白）', () => {
+    expect(civitaiTypeToTag('Character')).toBe('role')
+    expect(civitaiTypeToTag('character')).toBe('role')
+    expect(civitaiTypeToTag(' Style ')).toBe('style')
+    expect(civitaiTypeToTag('Concept')).toBe('concept')
+    expect(civitaiTypeToTag('Clothing')).toBe('outfit')
+    expect(civitaiTypeToTag('Background')).toBe('background')
+    expect(civitaiTypeToTag('Pose')).toBe('pose')
+    expect(civitaiTypeToTag('Tool')).toBe('tool')
+  })
+
+  it('其余类型（Lora/Checkpoint 等）与坏输入不映射', () => {
+    expect(civitaiTypeToTag('Lora')).toBe('')
+    expect(civitaiTypeToTag('Checkpoint')).toBe('')
+    expect(civitaiTypeToTag('')).toBe('')
+    expect(civitaiTypeToTag(null)).toBe('')
+  })
+})
 
 describe('normalizeVersionInfo', () => {
   it('由 modelId + versionId 拼装官方页面 URL，并提取展示字段', () => {

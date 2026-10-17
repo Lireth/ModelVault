@@ -13,6 +13,7 @@ import {
   setRating,
   showContextMenu,
   state,
+  subCategoryInfo,
   tagsForType,
   toast,
   toggleFavorite
@@ -32,7 +33,6 @@ const form = reactive({
   resMin: '',
   resMax: '',
   note: '',
-  subCategory: '',
   triggerWords: ''
 })
 
@@ -49,19 +49,13 @@ function fillForm(model) {
   form.resMin = Number.isFinite(p.resMin) ? p.resMin : ''
   form.resMax = Number.isFinite(p.resMax) ? p.resMax : ''
   form.note = model?.note || ''
-  form.subCategory = model?.subCategory || ''
   form.triggerWords = model?.triggerWords || ''
-  // 大模型自动标注为「基底模型」分类
-  if (model?.type === 'checkpoint') form.subCategory = 'base'
   // 脏检测基线快照（C8）：填充后与表单当前值对比（字段快照，见 formDirty）
   formSnapshot.value = { ...form }
 }
 
-/** 切换二级分类标签（再次点击取消标注）；基底模型为自动分类，不可手动更改 */
-function toggleSubCategory(key) {
-  if (selectedModel.value?.type === 'checkpoint') return
-  form.subCategory = form.subCategory === key ? '' : key
-}
+/** 当前生效的分类标签展示信息（自动分配：文件夹名 / Civitai 类型 / 大模型基底） */
+const currentSubInfo = computed(() => subCategoryInfo(selectedModel.value?.subCategory))
 
 /* ---------------- 表单脏数据保护（C8） ---------------- */
 
@@ -76,7 +70,7 @@ const formSnapshot = ref(null)
 /** 表单字段清单（脏检测用，与 form 的字段一一对应） */
 const FORM_KEYS = [
   'alias', 'steps', 'cfgMin', 'cfgMax', 'sampler', 'scheduler', 'precision',
-  'resMin', 'resMax', 'note', 'subCategory', 'triggerWords'
+  'resMin', 'resMax', 'note', 'triggerWords'
 ]
 
 /**
@@ -298,9 +292,7 @@ async function onSave() {
     const payload = {
       alias: form.alias.trim(),
       params,
-      note: form.note,
-      // LoRA 与其他模型的分类标签随保存落盘；checkpoint 由主进程自动标注为基底模型
-      subCategory: ['other', 'lora'].includes(model.type) ? form.subCategory : ''
+      note: form.note
     }
     // 触发词仅 LoRA 详情页提供编辑
     if (model.type === 'lora') payload.triggerWords = form.triggerWords
@@ -383,26 +375,19 @@ async function onSave() {
               </div>
             </div>
 
-            <!-- 分类标签：LoRA / Checkpoint / 其他模型可标注 -->
+            <!-- 分类标签：自动分配（所在文件夹名 / Civitai 类型 / 大模型基底），只读展示 -->
             <template v-if="tagsForType(selectedModel.type)">
               <h3>{{ selectedModel.type === 'other' ? '二级分类标签' : '分类标签' }}</h3>
               <div class="subcat-group">
-                <button
-                  v-for="sc in tagsForType(selectedModel.type)"
-                  :key="sc.key"
-                  class="subcat-chip"
-                  :class="{ active: form.subCategory === sc.key, locked: selectedModel.type === 'checkpoint' }"
-                  :style="form.subCategory === sc.key ? { borderColor: sc.color, color: sc.color } : {}"
-                  type="button"
-                  :title="selectedModel.type === 'checkpoint' ? '大模型自动标注为基底模型' : ''"
-                  @click="toggleSubCategory(sc.key)"
-                >
-                  {{ sc.label }}
-                </button>
-                <span v-if="selectedModel.type !== 'checkpoint'" class="subcat-hint">
-                  标注后显示在首页卡片上，点击已选标签可取消
+                <span
+                  v-if="currentSubInfo"
+                  class="subcat-chip locked"
+                  :style="{ borderColor: currentSubInfo.color, color: currentSubInfo.color }"
+                >{{ currentSubInfo.label }}</span>
+                <span v-else class="subcat-hint">
+                  未分配（可在文件所在文件夹按标签命名自动匹配，或使用批量栏「Civitai 分配标签」）
                 </span>
-                <span v-else class="subcat-hint">大模型自动标注为基底模型</span>
+                <span v-if="selectedModel.type === 'checkpoint'" class="subcat-hint">大模型自动标注为基底模型</span>
               </div>
             </template>
 

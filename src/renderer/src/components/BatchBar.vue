@@ -2,19 +2,19 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
   allFilteredSelected,
+  batchAssignCivitaiTags,
   batchApplyTriggers,
   batchCivitaiIdentify,
   batchCivitaiImages,
   batchDeleteModels,
   batchFavorite,
   batchNsfw,
+  batchOrganizeByTags,
   batchRating,
-  batchSetSubCategory,
   batchToggleDisabled,
   exitMultiSelect,
   filteredModels,
   invertSelectionFiltered,
-  multiSelectTags,
   multiSelectedModels,
   state,
   toggleSelectAllFiltered
@@ -154,23 +154,25 @@ onUnmounted(() => {
             class="bb-menu-item"
             role="menuitem"
             :disabled="!batchReady"
+            title="按已保存的 Civitai 链接查询模型类型并分配分类标签（character→角色、style→风格、concept→概念、clothing→服饰、background→背景、pose→姿势、tool→工具；无链接的模型跳过，已有标签会被覆盖）"
+            @click="runMore(batchAssignCivitaiTags)"
+          >Civitai 分配标签</button>
+          <button
+            class="bb-menu-item"
+            role="menuitem"
+            :disabled="!batchReady"
             title="为没有示例图的选中模型从 Civitai 导入前 4 张示例图作为封面（已有示例图的模型跳过，避免重复导入）"
             @click="runMore(batchCivitaiImages)"
           >获取示例图</button>
         </template>
-        <template v-if="multiSelectTags.length">
-          <div class="bb-menu-label">标签</div>
-          <button
-            v-for="t in multiSelectTags"
-            :key="t.key"
-            class="bb-menu-item"
-            role="menuitem"
-            :style="batchReady ? { borderColor: t.color, color: t.color } : {}"
-            :disabled="!batchReady"
-            @click="runMore(batchSetSubCategory, t.key)"
-          >{{ t.label }}</button>
-        </template>
         <div class="bb-menu-label">文件</div>
+        <button
+          class="bb-menu-item"
+          role="menuitem"
+          :disabled="!batchReady"
+          title="在模型库根目录创建 7 个分类文件夹（已有的不动），把已分配标签的模型移动到对应文件夹（元数据自动迁移）"
+          @click="runMore(batchOrganizeByTags)"
+        >一键移动文件</button>
         <button
           class="bb-menu-item"
           role="menuitem"

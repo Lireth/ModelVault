@@ -1,9 +1,10 @@
 import { computed } from 'vue'
-import { state, replaceModels, tagsForType } from './state'
+import { state, replaceModels } from './state'
 import { toast, confirmDialog } from './toast'
 import { applyMetaUpdates } from './meta-apply'
 import { filteredModels } from './filter'
 import { modelById } from './selectors'
+import { LORA_TAG_KEYS } from '../../../shared/model-categories'
 
 /**
  * 多选批量操作（E4/E6，A-04 自 appStore.js 拆出）。
@@ -26,19 +27,12 @@ export const multiSelectedModels = computed(() => {
   return out
 })
 
-/** 选中模型的类型是否一致（批量设置分类标签仅在类型一致且可标注时提供） */
+/** 选中模型的类型是否一致（仅 re-export 保留，供上层判断选区构成） */
 export const multiSelectUniformType = computed(() => {
   const sel = multiSelectedModels.value
   if (sel.length === 0) return null
   const type = sel[0].type
   return sel.every((m) => m.type === type) ? type : null
-})
-
-/** 批量编辑可用的分类标签（仅 other/lora 支持手动标注；checkpoint 为自动基底分类） */
-export const multiSelectTags = computed(() => {
-  const type = multiSelectUniformType.value
-  if (type !== 'other' && type !== 'lora') return []
-  return tagsForType(type) || []
 })
 
 /** 进入/退出多选模式（退出时清空选择） */
@@ -199,34 +193,125 @@ export function batchRating(rating) {
 }
 
 /**
- * 批量设置分类标签（E6）：直连 saveModelData IPC（校验与合并保存在主进程
- * 服务端管线，其余字段不受影响），并发逐个调用；结果收集为 Map 后经
- * applyMetaUpdates 单趟同步本地状态（O2）。
- * @param {string} subCategory 分类标签 key
+ * 一键分配标签（Civitai）：对选中模型逐个按已保存的 Civitai 链接查询模型
+ * 类型并映射为本地分类标签（character→角色、style→风格、concept→概念、
+ * clothing→服饰、background→背景、pose→姿势、tool→工具），映射成功时
+ * 覆盖已有标签（分配语义）。串行执行避免 Civitai API 压力，期间更新
+ * state.multiSelect.progress；无链接/未映射/失败的模型计入汇总提示。
  */
-export async function batchSetSubCategory(subCategory) {
+export async function batchAssignCivitaiTags() {
   const ids = [...state.multiSelect.ids]
   if (ids.length === 0 || state.multiSelect.busy) return
+  if (
+    !(await confirmDialog(
+      `将按 Civitai 模型类型为选中的 ${ids.length} 个模型分配分类标签（已有标签会被覆盖）。继续吗？`
+    ))
+  ) {
+    return
+  }
   state.multiSelect.busy = true
   try {
-    const results = await Promise.allSettled(
-      ids.map((id) => window.api.models.saveModelData({ id, subCategory }))
-    )
-    const metaMap = new Map()
-    let fail = 0
-    results.forEach((r, i) => {
-      if (r.status === 'fulfilled' && r.value?.meta) metaMap.set(ids[i], r.value.meta)
-      else fail += 1
-    })
-    const ok = applyMetaUpdates(metaMap, (meta) => ({
-      params: meta.params,
-      alias: meta.alias || '',
-      note: meta.note,
-      subCategory: meta.subCategory || '',
-      triggerWords: meta.triggerWords || ''
+    const byId = modelById.value
+    const metas = new Map()
+    let skippedNoUrl = 0
+    let unmapped = 0
+    let notFound = 0
+    let failed = 0
+    for (let i = 0; i < ids.length; i++) {
+      if (state.multiSelect.cancelRequested) break
+      const id = ids[i]
+      const m = byId.get(id)
+      state.multiSelect.progress = `分配标签 ${i + 1}/${ids.length}：${m?.alias || m?.name || ''}`
+      let res
+      try {
+        res = await window.api.models.civitaiCategory(id)
+      } catch {
+        failed += 1
+        continue
+      }
+      if (res.error) {
+        failed += 1
+        continue
+      }
+      if (res.skipped) {
+        skippedNoUrl += 1
+        continue
+      }
+      if (!res.found) {
+        notFound += 1
+        continue
+      }
+      if (res.unmapped) {
+        unmapped += 1
+        continue
+      }
+      if (res.meta) metas.set(id, res.meta)
+    }
+    const ok = applyMetaUpdates(metas, (meta) => ({
+      subCategory: meta.subCategory || ''
     }))
-    if (fail === 0) toast('success', `已为 ${ok} 个模型设置标签`)
-    else toast('warn', `标签设置完成：成功 ${ok} 个，失败 ${fail} 个`)
+    const done = ok + skippedNoUrl + unmapped + notFound + failed
+    const parts = []
+    if (skippedNoUrl > 0) parts.push(`无 Civitai 链接 ${skippedNoUrl} 个（可先「识别 Civitai」补链接）`)
+    if (unmapped > 0) parts.push(`类型未映射 ${unmapped} 个`)
+    if (notFound > 0) parts.push(`未收录 ${notFound} 个`)
+    if (failed > 0) parts.push(`失败 ${failed} 个`)
+    if (done < ids.length) {
+      toast('warn', `标签分配已取消（完成 ${done}/${ids.length}）：已完成部分已保存`)
+      return
+    }
+    if (ok > 0) toast(failed > 0 ? 'warn' : 'success', `标签分配完成：成功 ${ok} 个${parts.length ? `，${parts.join('，')}` : ''}`)
+    else toast('info', `未分配任何标签：${parts.join('，') || '没有可处理的模型'}`)
+  } finally {
+    state.multiSelect.busy = false
+    state.multiSelect.progress = ''
+    state.multiSelect.cancelRequested = false
+  }
+}
+
+/**
+ * 一键移动文件（自动标签整理）：把选中模型中已分配分类标签的移动到
+ * 模型库根目录对应标签文件夹（主进程自动创建缺失的 7 个标签文件夹，
+ * 已存在的不动），元数据键随移动即时迁移。移动后 id 全部变化，
+ * 整表重扫收敛；移动后文件夹名与标签一致，自动标签保持稳定。
+ */
+export async function batchOrganizeByTags() {
+  const ids = [...state.multiSelect.ids]
+  if (ids.length === 0 || state.multiSelect.busy) return
+  const byId = modelById.value
+  const moves = []
+  for (const id of ids) {
+    const m = byId.get(id)
+    if (m && LORA_TAG_KEYS.has(m.subCategory)) {
+      moves.push({ id, subCategory: m.subCategory })
+    }
+  }
+  if (moves.length === 0) {
+    toast('info', '选中模型均未分配分类标签，未做改动')
+    return
+  }
+  if (
+    !(await confirmDialog(
+      `将在模型库根目录创建 7 个分类文件夹（已有的不动），并把 ${moves.length} 个已标注模型移动到对应文件夹（元数据自动迁移）。继续吗？`
+    ))
+  ) {
+    return
+  }
+  state.multiSelect.busy = true
+  try {
+    const res = await window.api.models.organizeByTags(moves).catch(() => null)
+    if (!res || res.error) {
+      toast('error', `一键移动失败: ${res?.error || '未知错误'}`)
+      return
+    }
+    // id 已变化，整表重扫收敛（含元数据键已即时迁移的验证）
+    const { scanModels } = await import('./library')
+    if (!state.scanning) await scanModels()
+    const parts = []
+    if (res.failed?.length > 0) parts.push(`失败 ${res.failed.length} 个`)
+    if (res.skipped?.length > 0) parts.push(`跳过 ${res.skipped.length} 个`)
+    if (res.moved > 0) toast(res.failed?.length > 0 ? 'warn' : 'success', `已移动 ${res.moved} 个模型到对应分类文件夹${parts.length ? `（${parts.join('，')}）` : ''}`)
+    else toast('info', `未移动任何模型：${parts.join('，') || '无需移动'}`)
   } finally {
     state.multiSelect.busy = false
   }

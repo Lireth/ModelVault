@@ -31,7 +31,9 @@ const VALID_INVOKE_CHANNELS = [
   'models:importBackup',
   'models:toggleDisabled',
   'models:moveModelTo',
+  'models:organizeByTags',
   'models:civitaiIdentify',
+  'models:civitaiCategory',
   'models:civitaiComplete',
   'models:civitaiImportImages',
   'models:warmupHash'
@@ -156,11 +158,23 @@ const api = {
     /** 库内移动模型（F11，目标目录经原生对话框选择），返回 { path } / { canceled } / { error } */
     moveModelTo: (id) => invokeValidated('models:moveModelTo', { id }),
     /**
+     * 一键移动文件（自动标签整理）：moves 为 [{ id, subCategory }]，主进程在
+     * 模型库根目录创建 7 个分类文件夹并移动已分配标签的模型（元数据键同步
+     * 迁移），返回 { moved, failed: [{id, error}], skipped: [{id, reason}] } 或 { error }
+     */
+    organizeByTags: (moves) => invokeValidated('models:organizeByTags', { moves }),
+    /**
      * Civitai 在线识别（按文件 SHA256 反查），返回
      * { found: true, url, info, meta } / { found: false } / { error }。
      * 大文件哈希计算可能耗时数十秒，调用方需提供忙碌提示
      */
     civitaiIdentify: (id) => invokeValidated('models:civitaiIdentify', { id }),
+    /**
+     * Civitai 一键分配标签（按已保存链接查询模型类型并映射分类标签），
+     * 返回 { found: true, subCategory, meta } / { found: true, unmapped: true }
+     * / { skipped: true } / { found: false } / { error }
+     */
+    civitaiCategory: (id) => invokeValidated('models:civitaiCategory', { id }),
     /**
      * Civitai 一键补全（仅填充空缺的触发词/备注），返回
      * { found: true, applied: string[], meta } / { found: false } / { error }
