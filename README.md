@@ -128,15 +128,16 @@ npm start
 - 打包配置见 `electron-builder.yml`（portable 单文件便携版，x64），产物为 `dist/{version}/ModelVault-{version}.exe`
 - 单文件 EXE 运行时不在其所在目录生成任何文件：设置与日志保存在 `%APPDATA%\modelvault\`，模型元数据保存在用户选择的模型文件夹
 - 首次启动需解压到系统临时目录，启动速度略慢于常规安装版；Windows 10+ 可直接运行，无额外运行时依赖
-- 如需更换应用图标，替换 `build/icon.ico`（256×256 及以上；可运行 `node scripts/generate-icon.mjs` 重新生成默认图标）
+- 如需更换应用图标，替换 `build/icon.ico`（需包含 256×256 及以上尺寸）；也可临时放置 512×512 以上的正方形 `icon.png` 到 `build/`，运行 `node scripts/generate-icon.mjs` 生成多尺寸 ico（源图不入库）
 
 ## 项目结构
 
 ```
 ModelVault/
+├── build/                        # 打包资源：应用图标 icon.ico
 ├── image/                        # 软件界面截图（README 展示用）
 ├── .github/workflows/            # CI 质量门禁（ci.yml）+ 标签发布构建（release.yml）
-├── scripts/                      # 工具脚本（默认图标生成 / CSP 检查）
+├── scripts/                      # 工具脚本（应用图标生成 / CSP 检查）
 ├── src/
 │   ├── shared/                   # 主/渲染进程共享常量（分类标签/扩展名/默认设置/枚举）
 │   ├── main/                     # 主进程

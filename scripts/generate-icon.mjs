@@ -1,101 +1,141 @@
-import { writeFileSync, mkdirSync } from 'node:fs'
-import { deflateSync } from 'node:zlib'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { inflateSync, deflateSync } from 'node:zlib'
 
 /**
- * 应用图标生成脚本（D7）：产出 build/icon.ico（256×256，PNG 压缩格式 ICO）。
- * 设计：「模匣 / 模型保险箱」隐喻——深色圆角底板上的白色保险箱轮廓，
- * 中心为强调色（品牌蓝）转盘。512×512 渲染后 2× 盒式滤波降采样抗锯齿。
+ * 应用图标生成脚本（D7）：读取 build/icon.png（源图，建议 512×512 以上），
+ * 缩放出多尺寸（16–256）后打包为 build/icon.ico（PNG 压缩条目，Vista+ 支持）。
+ * 支持源图格式：8-bit、非隔行、灰度(0)/RGB(2)/RGBA(6) PNG。
  * 重新生成：node scripts/generate-icon.mjs
  */
 
-const SIZE = 256 // ico 逻辑尺寸
-const SS = 2 // 超采样倍率
-const N = SIZE * SS // 渲染尺寸 512
+const SIZES = [16, 24, 32, 48, 64, 128, 256]
+const SOURCE = 'build/icon.png'
+const TARGET = 'build/icon.ico'
 
-/* ---------------- 几何与配色 ---------------- */
+/* ---------------- PNG 解码（8-bit 非隔行，color type 0/2/6） ---------------- */
 
-// 背景垂直渐变（深蓝灰）
-const BG_TOP = [38, 44, 56]
-const BG_BOTTOM = [22, 26, 34]
-// 前景
-const FG = [242, 245, 249] // 白色箱体轮廓 / 转盘环
-const ACCENT = [79, 156, 249] // 品牌蓝转盘核心（与 UI --accent 一致）
-
-/** 点 (x,y) 是否在圆角矩形内 */
-function inRoundRect(x, y, x0, y0, x1, y1, r) {
-  if (x < x0 || x > x1 || y < y0 || y > y1) return false
-  const cx = Math.max(x0 + r, Math.min(x, x1 - r))
-  const cy = Math.max(y0 + r, Math.min(y, y1 - r))
-  const dx = x - cx
-  const dy = y - cy
-  return dx * dx + dy * dy <= r * r
-}
-
-/** 点 (x,y) 是否在圆环内（半径 [R - t, R]） */
-function inRing(x, y, cx, cy, R, t) {
-  const dx = x - cx
-  const dy = y - cy
-  const d2 = dx * dx + dy * dy
-  const outer = R
-  const inner = R - t
-  return d2 <= outer * outer && d2 >= inner * inner
-}
-
-/**
- * 计算渲染坐标下像素颜色（RGBA，预乘前的直通色）。
- * @returns {[number, number, number, number]}
- */
-function shade(x, y) {
-  // 背景圆角底板
-  if (!inRoundRect(x, y, 0, 0, N, N, 112)) return [0, 0, 0, 0]
-  const t = y / N
-  const bg = [
-    Math.round(BG_TOP[0] + (BG_BOTTOM[0] - BG_TOP[0]) * t),
-    Math.round(BG_TOP[1] + (BG_BOTTOM[1] - BG_TOP[1]) * t),
-    Math.round(BG_TOP[2] + (BG_BOTTOM[2] - BG_TOP[2]) * t)
-  ]
-  // 保险箱箱体轮廓：白色圆角方框
-  const boxR = 46
-  const boxStroke = 24
-  if (
-    inRoundRect(x, y, 128, 128, N - 128, N - 128, boxR) &&
-    !inRoundRect(x, y, 128 + boxStroke, 128 + boxStroke, N - 128 - boxStroke, N - 128 - boxStroke, boxR)
-  ) {
-    return [...FG, 255]
-  }
-  // 转盘：白色圆环 + 品牌蓝核心
-  if (inRing(x, y, N / 2, N / 2, 60, 13)) return [...FG, 255]
-  const dx = x - N / 2
-  const dy = y - N / 2
-  if (dx * dx + dy * dy <= 28 * 28) return [...ACCENT, 255]
-  return [...bg, 255]
-}
-
-/* ---------------- 渲染 + 降采样 ---------------- */
-
-const rgba = Buffer.alloc(SIZE * SIZE * 4)
-for (let y = 0; y < SIZE; y++) {
-  for (let x = 0; x < SIZE; x++) {
-    let r = 0
-    let g = 0
-    let b = 0
-    let a = 0
-    for (let sy = 0; sy < SS; sy++) {
-      for (let sx = 0; sx < SS; sx++) {
-        const [pr, pg, pb, pa] = shade(x * SS + sx + 0.5, y * SS + sy + 0.5)
-        r += pr
-        g += pg
-        b += pb
-        a += pa
-      }
+/** 校验并解析 chunk 流，返回 { width, height, colorType, idat } */
+function parsePNG(buf) {
+  const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  if (!buf.subarray(0, 8).equals(sig)) throw new Error('不是有效的 PNG 文件')
+  let width = 0
+  let height = 0
+  let colorType = 0
+  const idat = []
+  let pos = 8
+  while (pos < buf.length) {
+    const len = buf.readUInt32BE(pos)
+    const type = buf.toString('ascii', pos + 4, pos + 8)
+    const data = buf.subarray(pos + 8, pos + 8 + len)
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0)
+      height = data.readUInt32BE(4)
+      if (data[8] !== 8)
+        throw new Error(`不支持的位深 ${data[8]}（仅支持 8-bit）`)
+      colorType = data[9]
+      if (![0, 2, 6].includes(colorType))
+        throw new Error(`不支持的颜色类型 ${colorType}（仅支持灰度/RGB/RGBA）`)
+      if (data[12] !== 0) throw new Error('不支持隔行扫描（interlace）PNG')
+    } else if (type === 'IDAT') {
+      idat.push(data)
+    } else if (type === 'IEND') {
+      break
     }
-    const n = SS * SS
-    const o = (y * SIZE + x) * 4
-    rgba[o] = Math.round(r / n)
-    rgba[o + 1] = Math.round(g / n)
-    rgba[o + 2] = Math.round(b / n)
-    rgba[o + 3] = Math.round(a / n)
+    pos += 12 + len
   }
+  if (!width || !height || idat.length === 0)
+    throw new Error('PNG 缺少 IHDR/IDAT 数据')
+  return { width, height, colorType, idat: Buffer.concat(idat) }
+}
+
+/** Paeth 预测器（PNG filter type 4） */
+function paeth(a, b, c) {
+  const p = a + b - c
+  const pa = Math.abs(p - a)
+  const pb = Math.abs(p - b)
+  const pc = Math.abs(p - c)
+  return pa <= pb && pa <= pc ? a : pb <= pc ? b : c
+}
+
+/** 解码为 RGBA8 缓冲 */
+function decodePNG(buf) {
+  const { width, height, colorType, idat } = parsePNG(buf)
+  const channels = colorType === 6 ? 4 : colorType === 2 ? 3 : 1
+  const stride = width * channels
+  const raw = inflateSync(idat)
+  if (raw.length !== (stride + 1) * height)
+    throw new Error('PNG 像素数据长度不符')
+
+  const rgba = Buffer.alloc(width * height * 4)
+  const prev = Buffer.alloc(stride)
+  const line = Buffer.alloc(stride)
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * (stride + 1)
+    const filter = raw[rowStart]
+    raw.copy(line, 0, rowStart + 1, rowStart + 1 + stride)
+    for (let x = 0; x < stride; x++) {
+      const a = x >= channels ? line[x - channels] : 0
+      const b = prev[x]
+      const c = x >= channels ? prev[x - channels] : 0
+      let v = line[x]
+      if (filter === 1) v = (v + a) & 0xff
+      else if (filter === 2) v = (v + b) & 0xff
+      else if (filter === 3) v = (v + ((a + b) >> 1)) & 0xff
+      else if (filter === 4) v = (v + paeth(a, b, c)) & 0xff
+      line[x] = v
+    }
+    for (let x = 0; x < width; x++) {
+      const o = (y * width + x) * 4
+      rgba[o] = colorType === 0 ? line[x] : line[x * channels]
+      rgba[o + 1] =
+        colorType === 0 ? line[x] : line[x * channels + (channels > 1 ? 1 : 0)]
+      rgba[o + 2] =
+        colorType === 0 ? line[x] : line[x * channels + (channels > 1 ? 2 : 0)]
+      rgba[o + 3] = colorType === 6 ? line[x * channels + 3] : 255
+    }
+    line.copy(prev)
+  }
+  return { rgba, width, height }
+}
+
+/* ---------------- 盒式降采样（面积加权平均，抗锯齿） ---------------- */
+
+function resize(rgba, sw, sh, dw, dh) {
+  const out = Buffer.alloc(dw * dh * 4)
+  for (let dy = 0; dy < dh; dy++) {
+    const sy0 = (dy * sh) / dh
+    const sy1 = ((dy + 1) * sh) / dh
+    for (let dx = 0; dx < dw; dx++) {
+      const sx0 = (dx * sw) / dw
+      const sx1 = ((dx + 1) * sw) / dw
+      let r = 0
+      let g = 0
+      let b = 0
+      let a = 0
+      let area = 0
+      for (let sy = Math.floor(sy0); sy < Math.ceil(sy1); sy++) {
+        const wy = Math.min(sy + 1, sy1) - Math.max(sy, sy0)
+        if (wy <= 0) continue
+        for (let sx = Math.floor(sx0); sx < Math.ceil(sx1); sx++) {
+          const wx = Math.min(sx + 1, sx1) - Math.max(sx, sx0)
+          if (wx <= 0) continue
+          const w = wx * wy
+          const o = (sy * sw + sx) * 4
+          r += rgba[o] * w
+          g += rgba[o + 1] * w
+          b += rgba[o + 2] * w
+          a += rgba[o + 3] * w
+          area += w
+        }
+      }
+      const o = (dy * dw + dx) * 4
+      out[o] = Math.round(r / area)
+      out[o + 1] = Math.round(g / area)
+      out[o + 2] = Math.round(b / area)
+      out[o + 3] = Math.round(a / area)
+    }
+  }
+  return out
 }
 
 /* ---------------- PNG 编码（RGBA8） ---------------- */
@@ -145,27 +185,44 @@ function encodePNG(rgbaBuf, size) {
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     pngChunk('IHDR', ihdr),
     pngChunk('IDAT', deflateSync(raw)),
-    pngChunk('IEND', Buffer.alloc(0))
+    pngChunk('IEND', Buffer.alloc(0)),
   ])
 }
 
 /* ---------------- ICO 容器（PNG 压缩条目，Vista+ 支持） ---------------- */
 
-const png = encodePNG(rgba, SIZE)
+const { rgba, width, height } = decodePNG(readFileSync(SOURCE))
+const pngs = SIZES.map((size) => ({
+  size,
+  png: encodePNG(resize(rgba, width, height, size, size), size),
+}))
+
 const header = Buffer.alloc(6)
 header.writeUInt16LE(0, 0) // reserved
 header.writeUInt16LE(1, 2) // type: icon
-header.writeUInt16LE(1, 4) // count
-const entry = Buffer.alloc(16)
-entry[0] = 0 // width: 0 表示 256
-entry[1] = 0 // height
-entry[2] = 0 // 调色板数
-entry[3] = 0 // reserved
-entry.writeUInt16LE(1, 4) // planes
-entry.writeUInt16LE(32, 6) // bpp
-entry.writeUInt32LE(png.length, 8)
-entry.writeUInt32LE(22, 12) // 数据偏移 = 6 + 16
+header.writeUInt16LE(pngs.length, 4) // count
+const entries = []
+let offset = 6 + 16 * pngs.length
+for (const { size, png } of pngs) {
+  const entry = Buffer.alloc(16)
+  const dim = size >= 256 ? 0 : size // 0 表示 256
+  entry[0] = dim // width
+  entry[1] = dim // height
+  entry[2] = 0 // 调色板数
+  entry[3] = 0 // reserved
+  entry.writeUInt16LE(1, 4) // planes
+  entry.writeUInt16LE(32, 6) // bpp
+  entry.writeUInt32LE(png.length, 8)
+  entry.writeUInt32LE(offset, 12)
+  entries.push(entry)
+  offset += png.length
+}
 
 mkdirSync('build', { recursive: true })
-writeFileSync('build/icon.ico', Buffer.concat([header, entry, png]))
-console.log('已生成 build/icon.ico（256×256）')
+writeFileSync(
+  TARGET,
+  Buffer.concat([header, ...entries, ...pngs.map((p) => p.png)]),
+)
+console.log(
+  `已生成 ${TARGET}（${pngs.map((p) => p.size).join('/')}，源图 ${width}×${height}）`,
+)

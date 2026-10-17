@@ -22,5 +22,7 @@ win:
     - target: portable
       arch:
         - x64
+  # 应用图标（多尺寸 ICO，含 256×256）
+  icon: build/icon.ico
   # 产物名随 package.json 的 version 自动变化，避免发版漏改
   artifactName: ${productName}-${version}.exe

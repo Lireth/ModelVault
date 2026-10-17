@@ -91,6 +91,10 @@ export async function createMainWindow() {
     options.x = state.x
     options.y = state.y
   }
+  // 开发模式下显式指定窗口/任务栏图标（打包后窗口自动使用 exe 内嵌图标，无需设置）
+  if (!app.isPackaged) {
+    options.icon = path.join(app.getAppPath(), 'build/icon.ico')
+  }
 
   mainWindow = new BrowserWindow(options)
   if (state?.maximized) mainWindow.maximize()
