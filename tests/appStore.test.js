@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   acceptConfirm,
   allFilteredSelected,
+  applyHashUpdate,
   applyThumbUpdates,
   batchApplyTriggers,
   batchCivitaiIdentify,
@@ -14,6 +15,9 @@ import {
   confirmDialog,
   deleteModel,
   dismissToast,
+  duplicateGroups,
+  duplicateIdSet,
+  duplicateWastedBytes,
   filteredModels,
   formatSize,
   importCoversFromDrop,
@@ -1093,6 +1097,98 @@ describe('applyThumbUpdates', () => {
     state.models = [makeModel('m1', { coverUrl: 'orig' })]
     applyThumbUpdates([{ id: 'm1' }])
     expect(state.models[0].coverUrl).toBe('orig')
+  })
+})
+
+describe('重复模型检测与筛选（FEAT-1）', () => {
+  /** 注入两重复组 + 干扰项：A 组（p1/p2 同哈希，p2 评分更高）、B 组（q1/q2 同哈希）、s 独立。
+   * 须经 replaceModels 注入（包 shallowReactive）——applyHashUpdate 走元素级
+   * 索引替换，裸数组赋值会令其失去响应性（state.js 更新约定） */
+  function seedDupes() {
+    replaceModels([
+      makeModel('p1', { hash: 'a'.repeat(64), size: 100, mtimeMs: 1, rating: 0 }),
+      makeModel('p2', { hash: 'a'.repeat(64), size: 100, mtimeMs: 2, rating: 4 }),
+      makeModel('q1', { hash: 'b'.repeat(64), size: 50, mtimeMs: 1 }),
+      makeModel('q2', { hash: 'b'.repeat(64), size: 50, mtimeMs: 2 }),
+      makeModel('s', { hash: '', size: 5 })
+    ])
+  }
+
+  it('按哈希分组：仅保留成员数大于 1 的组，冗余空间按 (n-1)×大小 计', () => {
+    seedDupes()
+    expect(duplicateGroups.value).toHaveLength(2)
+    expect(duplicateGroups.value[0]).toMatchObject({
+      hash: 'a'.repeat(64),
+      wastedBytes: 100
+    })
+    expect(duplicateGroups.value[0].models.map((m) => m.id)).toEqual(['p1', 'p2'])
+    // 无哈希的独立模型不入组
+    expect(duplicateIdSet.value.has('s')).toBe(false)
+    expect(duplicateWastedBytes.value).toBe(150)
+  })
+
+  it('重复筛选：仅保留组内成员；哈希回填后分组即时出现（渐进可用）', () => {
+    seedDupes()
+    state.showDuplicatesOnly = true
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['p1', 'p2', 'q1', 'q2'])
+
+    // 独立模型的哈希经预热完成事件回填为与 p1 相同 → 立即进入重复组
+    // （先就地对齐文件大小，满足「同哈希文件大小一致」的现实前提）
+    state.models[4] = { ...state.models[4], size: 100 }
+    applyHashUpdate({ active: false, id: 's', hash: 'a'.repeat(64) })
+    expect(state.models.find((m) => m.id === 's').hash).toBe('a'.repeat(64))
+    expect(duplicateGroups.value[0].models.map((m) => m.id)).toEqual(['p1', 'p2', 's'])
+    // a 组 3 成员冗余 2×100，b 组 2 成员冗余 1×50
+    expect(duplicateWastedBytes.value).toBe(250)
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['p1', 'p2', 's', 'q1', 'q2'])
+  })
+
+  it('重复筛选下按哈希稳定排序聚拢同组（组内保持既有排序结果）', () => {
+    seedDupes()
+    state.showDuplicatesOnly = true
+    // mtime 排序制造 A/B 组交错（q2 mtime 3 > p2 2 > q1 1.5 > p1 1）：
+    // sortBy=mtime 的基础比较器为「新在前」，sortAsc=true 不翻转 → 纯 mtime
+    // 降序为 q2/p2/q1/p1（A/B 交错）；重复筛选下按哈希稳定排序聚拢为
+    // a 组（p2/p1）在前、b 组（q2/q1）在后，组内 mtime 降序保持
+    replaceModels([
+      makeModel('p1', { hash: 'a'.repeat(64), size: 100, mtimeMs: 1 }),
+      makeModel('p2', { hash: 'a'.repeat(64), size: 100, mtimeMs: 2 }),
+      makeModel('q1', { hash: 'b'.repeat(64), size: 50, mtimeMs: 1.5 }),
+      makeModel('q2', { hash: 'b'.repeat(64), size: 50, mtimeMs: 3 })
+    ])
+    state.sortBy = 'mtime'
+    state.sortAsc = true
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['p2', 'p1', 'q2', 'q1'])
+  })
+
+  it('applyHashUpdate：进行中事件与未知 id 忽略，同值幂等不替换元素', () => {
+    seedDupes()
+    const sIdx = 4 // s 为 seedDupes 的最后一个模型
+    const before = state.models[sIdx]
+    // 进行中事件（active=true）不回填
+    applyHashUpdate({ active: true, id: 's', hash: 'c'.repeat(64) })
+    expect(state.models[sIdx].hash).toBe('')
+    // 未知 id 忽略
+    applyHashUpdate({ active: false, id: 'no-such', hash: 'c'.repeat(64) })
+    // 空 hash 忽略
+    applyHashUpdate({ active: false, id: 's', hash: '' })
+    expect(state.models[sIdx]).toBe(before)
+    // 首次回填：元素级整体替换
+    applyHashUpdate({ active: false, id: 's', hash: 'c'.repeat(64) })
+    const afterFirst = state.models[sIdx]
+    expect(afterFirst).not.toBe(before)
+    expect(afterFirst.hash).toBe('c'.repeat(64))
+    // 同值幂等：引用不变（避免无意义的响应式失效）
+    applyHashUpdate({ active: false, id: 's', hash: 'c'.repeat(64) })
+    expect(state.models[sIdx]).toBe(afterFirst)
+  })
+
+  it('关闭重复筛选后视图恢复全量（筛选随开关生效与退出）', () => {
+    seedDupes()
+    state.showDuplicatesOnly = true
+    expect(filteredModels.value).toHaveLength(4)
+    state.showDuplicatesOnly = false
+    expect(filteredModels.value).toHaveLength(5)
   })
 })
 

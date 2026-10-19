@@ -49,22 +49,62 @@ function searchHaystack(m) {
 }
 
 /**
+ * 重复模型分组（FEAT-1，F9 闭环）：按文件 SHA256 分组，仅保留成员数 > 1 的组。
+ * 哈希来源两路：扫描装饰携带（缓存命中，decorate.js 已随模型下发）+ 后台预热
+ * 完成事件回填（library.applyHashUpdate，渐进可用无需重扫）。同哈希文件大小
+ * 必然一致，组内可释放空间 = (成员数 - 1) × 单文件大小。
+ */
+export const duplicateGroups = computed(() => {
+  const byHash = new Map()
+  for (const m of state.models) {
+    if (!m.hash) continue
+    const list = byHash.get(m.hash)
+    if (list) list.push(m)
+    else byHash.set(m.hash, [m])
+  }
+  const groups = []
+  for (const [hash, models] of byHash) {
+    if (models.length > 1) {
+      groups.push({ hash, models, wastedBytes: models[0].size * (models.length - 1) })
+    }
+  }
+  return groups
+})
+
+/** 重复组内全部模型 id 集合（O4：筛选与卡片角标 O(1) 命中） */
+export const duplicateIdSet = computed(() => {
+  const set = new Set()
+  for (const g of duplicateGroups.value) {
+    for (const m of g.models) set.add(m.id)
+  }
+  return set
+})
+
+/** 冗余副本可释放空间合计（各组 wastedBytes 之和） */
+export const duplicateWastedBytes = computed(() =>
+  duplicateGroups.value.reduce((sum, g) => sum + g.wastedBytes, 0)
+)
+
+/**
  * 筛选 + 搜索后的未排序列表（过滤层，模块私有）。
  * 与排序分层缓存（P4 性能优化）：切换排序方式/方向时本层 computed 命中缓存，
  * 跳过全量 O(n) 过滤与搜索域匹配，仅重排即可。
- * 单趟完成分类/子分类/收藏/关键词过滤（O3）：合并原多段 filter，
+ * 单趟完成分类/子分类/收藏/重复/关键词过滤（O3）：合并原多段 filter，
  * 消除中间数组分配；无筛选条件时仅做一次遍历拷贝。
  */
 const filteredUnsorted = computed(() => {
   const keyword = state.search.trim().toLowerCase()
-  const { typeFilter, subFilter, showFavoritesOnly } = state
+  const { typeFilter, subFilter, showFavoritesOnly, showDuplicatesOnly } = state
   // LoRA 分类筛选：仅选中 LoRA 分类且指定了子分类时生效
   const checkSub = typeFilter === 'lora' && subFilter
+  // 重复筛选仅在开启时读取命中集合（关闭路径零额外开销）
+  const dupes = showDuplicatesOnly ? duplicateIdSet.value : null
   const list = []
   for (const m of state.models) {
     if (typeFilter !== 'all' && m.type !== typeFilter) continue
     if (checkSub && m.subCategory !== subFilter) continue
     if (showFavoritesOnly && !m.favorite) continue
+    if (dupes && !dupes.has(m.id)) continue
     if (keyword && !searchHaystack(m).includes(keyword)) continue
     list.push(m)
   }
@@ -102,6 +142,12 @@ export const filteredModels = computed(() => {
   // 排序方向（U2）：sortAsc=false 时翻转当前结果；
   // 收藏优先/按评分为固定语义排序（收藏/高分恒在前），翻转会反转语义，故不响应（O1）
   if (!state.sortAsc && sortDirectional(state.sortBy)) list.reverse()
+  // 重复筛选（FEAT-1）：按哈希稳定排序把同组模型聚拢为相邻块（组间无语义
+  // 顺序），组内相对顺序保持上方排序结果——散落的同组文件会破坏「逐组清理」
+  // 的浏览流。筛选语义下此排序随筛选开启/关闭自动生效与退出
+  if (state.showDuplicatesOnly) {
+    list.sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0))
+  }
   return list
 })
 

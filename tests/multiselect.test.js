@@ -4,6 +4,7 @@ import {
   exitMultiSelect,
   invertSelectionFiltered,
   replaceModels,
+  selectRedundantDuplicates,
   selectRangeTo,
   state,
   toggleMultiSelectMode,
@@ -177,6 +178,55 @@ describe('反选（invertSelectionFiltered）', () => {
     invertSelectionFiltered()
     // 筛选内 [c,d] 全未选 → 全选；筛选外已选 a 保留
     expect(state.multiSelect.ids).toEqual([id('c'), id('d'), id('a')])
+  })
+})
+
+describe('重复清理选择（selectRedundantDuplicates，FEAT-1）', () => {
+  /** 注入两个重复组 + 独立模型：x 组（哈希 h1）、y 组（哈希 h2）、z 独立 */
+  function seedDupes() {
+    replaceModels([
+      { id: id('x1'), name: 'x1', type: 'lora', size: 100, mtimeMs: 1, favorite: false, rating: 0, hash: 'h1', covers: [] },
+      { id: id('x2'), name: 'x2', type: 'lora', size: 100, mtimeMs: 2, favorite: false, rating: 4, hash: 'h1', covers: [] },
+      { id: id('x3'), name: 'x3', type: 'lora', size: 100, mtimeMs: 3, favorite: true, rating: 0, hash: 'h1', covers: [] },
+      { id: id('y1'), name: 'y1', type: 'lora', size: 50, mtimeMs: 1, favorite: false, rating: 0, hash: 'h2', covers: [] },
+      { id: id('y2'), name: 'y2', type: 'lora', size: 50, mtimeMs: 2, favorite: false, rating: 0, hash: 'h2', covers: [] },
+      { id: id('z'), name: 'z', type: 'lora', size: 10, mtimeMs: 1, favorite: true, rating: 5, hash: 'h3', covers: [] }
+    ])
+  }
+
+  it('每组保留最优一份（评分高优先），其余冗余项加入多选', () => {
+    seedDupes()
+    const n = selectRedundantDuplicates()
+    // x 组保留 x2（评分 4）；y 组评分/收藏相同，保留更新的 y2；z 独立不参与
+    expect(n).toBe(3)
+    expect(state.multiSelect.active).toBe(true)
+    expect(state.multiSelect.ids).toEqual([id('x1'), id('x3'), id('y1')])
+  })
+
+  it('评分与收藏相同时保留最新文件（mtime 新者优先）', () => {
+    replaceModels([
+      { id: id('a1'), name: 'a1', type: 'lora', size: 10, mtimeMs: 5, favorite: true, rating: 2, hash: 'h1', covers: [] },
+      { id: id('a2'), name: 'a2', type: 'lora', size: 10, mtimeMs: 9, favorite: true, rating: 2, hash: 'h1', covers: [] }
+    ])
+    expect(selectRedundantDuplicates()).toBe(1)
+    expect(state.multiSelect.ids).toEqual([id('a1')])
+  })
+
+  it('已进入多选时保留模式态，仅替换选区', () => {
+    seedDupes()
+    state.multiSelect.active = true
+    toggleSelect(id('z'))
+    selectRedundantDuplicates()
+    expect(state.multiSelect.active).toBe(true)
+    expect(state.multiSelect.ids).toEqual([id('x1'), id('x3'), id('y1')])
+  })
+
+  it('无重复组时不动作、不进入多选', () => {
+    seedModels(['a', 'b'])
+    const n = selectRedundantDuplicates()
+    expect(n).toBe(0)
+    expect(state.multiSelect.active).toBe(false)
+    expect(state.multiSelect.ids).toEqual([])
   })
 })
 

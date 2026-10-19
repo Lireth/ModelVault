@@ -2,7 +2,7 @@ import { computed } from 'vue'
 import { state, replaceModels } from './state'
 import { toast, confirmDialog } from './toast'
 import { applyMetaUpdates } from './meta-apply'
-import { filteredModels } from './filter'
+import { filteredModels, duplicateGroups } from './filter'
 import { modelById } from './selectors'
 import { LORA_TAG_KEYS } from '../../../shared/model-categories'
 
@@ -128,6 +128,50 @@ export function invertSelectionFiltered() {
     if (!filteredSet.value.has(id)) inverted.push(id)
   }
   state.multiSelect.ids = inverted
+}
+
+/* ---------------- 重复清理辅助（FEAT-1） ---------------- */
+
+/**
+ * 组内「最优保留」比较：a 是否优于 b。
+ * 语义：评分高 > 已收藏 > 文件最新（下载/修改时间）；同哈希文件大小必然
+ * 一致，无需参与；id 兜底保证完全平手时的确定性。
+ */
+function betterDuplicate(a, b) {
+  if (a.rating !== b.rating) return a.rating > b.rating
+  if (a.favorite !== b.favorite) return a.favorite
+  if (a.mtimeMs !== b.mtimeMs) return a.mtimeMs > b.mtimeMs
+  return a.id < b.id
+}
+
+/**
+ * 重复清理向导入口（FEAT-1）：为每个重复组保留最优一份，其余（冗余副本）
+ * 全部加入多选——用户复核后经既有批量删除（移入回收站并清理关联数据）
+ * 完成清理。进入多选但保留模式状态；无重复组时不动作。
+ * @returns {number} 加入多选的冗余副本数量
+ */
+export function selectRedundantDuplicates() {
+  const groups = duplicateGroups.value
+  if (groups.length === 0) return 0
+  const keep = new Set()
+  for (const g of groups) {
+    let best = g.models[0]
+    for (const m of g.models) {
+      if (betterDuplicate(m, best)) best = m
+    }
+    keep.add(best.id)
+  }
+  const redundant = []
+  for (const g of groups) {
+    for (const m of g.models) {
+      if (!keep.has(m.id)) redundant.push(m.id)
+    }
+  }
+  if (redundant.length === 0) return 0
+  if (!state.multiSelect.active) state.multiSelect.active = true
+  state.multiSelect.ids = redundant
+  clearSelectionAnchor()
+  return redundant.length
 }
 
 /* ---------------- 批量取消（Esc 防误退：长批量先取消而非退出多选） ---------------- */

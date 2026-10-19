@@ -218,9 +218,10 @@ describe('进度事件推送', () => {
     await computeAndCacheHash(id, 1000)
     // 事件序列：开始（active）→ 进度 tick → 完成（inactive）
     expect(events.length).toBe(3)
-    expect(events[0]).toMatchObject({ active: true, id, percent: 0 })
+    expect(events[0]).toMatchObject({ active: true, id, percent: 0, hash: '' })
     expect(events[1]).toMatchObject({ active: true, id, percent: 50, hashedBytes: 100, totalBytes: 200 })
-    expect(events[2]).toMatchObject({ active: false, id })
+    // FEAT-1：完成事件携带算得的哈希，渲染层据此回填模型对象
+    expect(events[2]).toMatchObject({ active: false, id, hash: fakeHash(8) })
   })
 
   it('预热队列消费时推送队列计数（done 递增 / remaining 递减，清空后归零）', async () => {

@@ -271,3 +271,21 @@ export function applyThumbUpdates(updates) {
     if (next !== state.models[idx]) state.models[idx] = next
   }
 }
+
+/**
+ * 应用后台哈希预热的完成事件（FEAT-1）：预热链路为缺失哈希的模型计算
+ * SHA256 后经 warmupProgress 推送（active=false 且携带 hash），此处回填到
+ * 对应模型对象——重复检测（filter.duplicateGroups）据此渐进可用，无需等待
+ * 下次扫描。已在扫描装饰中携带哈希的模型不会产生完成事件，无冲突。
+ * @param {{active?: boolean, id?: string, hash?: string}} progress 预热进度快照
+ */
+export function applyHashUpdate(progress) {
+  if (!progress || progress.active !== false) return
+  const { id, hash } = progress
+  if (!id || !hash) return
+  const idx = state.models.findIndex((m) => m.id === id)
+  if (idx < 0 || state.models[idx].hash === hash) return
+  // O3 约定：浅响应下元素级整体替换（替换会使 selectedModel 指向新引用，
+  // 详情页 formDirty 保护与缩略图回填路径一致）
+  state.models[idx] = { ...state.models[idx], hash }
+}

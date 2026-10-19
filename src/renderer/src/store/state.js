@@ -139,6 +139,9 @@ export const state = shallowReactive({
   typeFilter: 'all',
   subFilter: '', // LoRA 分类筛选（仅 typeFilter 为 lora 时生效）
   showFavoritesOnly: false, // 仅显示收藏的模型
+  // 仅显示重复模型（FEAT-1）：文件 SHA256 完全一致（与其他模型互为副本）。
+  // 哈希由后台预热渐进就绪，开启前以「重复」筛选入口上的计数为准
+  showDuplicatesOnly: false,
   search: '',
   sortBy: 'name', // name | type | size | mtime | favorite | rating
   sortAsc: true, // 排序方向：true 升序 / false 降序（收藏优先/按评分为固定语义排序，忽略方向，O1）

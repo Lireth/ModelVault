@@ -59,11 +59,18 @@ export {
   removeRoot,
   scanModels,
   cancelScan,
-  applyThumbUpdates
+  applyThumbUpdates,
+  applyHashUpdate
 } from './library'
 
-// 筛选派生
-export { filteredModels, typeCounts } from './filter'
+// 筛选派生（含重复模型分组，FEAT-1）
+export {
+  filteredModels,
+  typeCounts,
+  duplicateGroups,
+  duplicateIdSet,
+  duplicateWastedBytes
+} from './filter'
 
 // 智能视图（组合筛选收藏）
 export {
@@ -96,6 +103,7 @@ export {
   invertSelectionFiltered,
   allFilteredSelected,
   toggleSelectAllFiltered,
+  selectRedundantDuplicates,
   batchFavorite,
   batchNsfw,
   batchRating,

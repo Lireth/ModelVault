@@ -11,13 +11,17 @@ import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import VirtualModelList from './components/VirtualModelList.vue'
 import {
   allFilteredSelected,
+  applyHashUpdate,
   applyThumbUpdates,
   batchDeleteModels,
   batchFavorite,
   cancelScan,
   chooseFolder,
+  duplicateIdSet,
+  duplicateWastedBytes,
   exitMultiSelect,
   filteredModels,
+  formatSize,
   handleMenuAction,
   initApp,
   LORA_TAGS,
@@ -25,6 +29,7 @@ import {
   scanModels,
   partialScanModels,
   requestBatchCancel,
+  selectRedundantDuplicates,
   SORT_OPTIONS,
   sortDirectional,
   state,
@@ -85,6 +90,17 @@ async function onSortDirChange() {
 async function onToggleViewMode() {
   state.viewMode = state.viewMode === 'grid' ? 'list' : 'grid'
   await saveSettings({ viewMode: state.viewMode })
+}
+
+/* ---------------- 重复模型检测（FEAT-1，F9 闭环） ---------------- */
+
+/** 重复模型数（重复组内全部成员；0 表示当前无可见的重复项，隐藏筛选入口） */
+const duplicateCount = computed(() => duplicateIdSet.value.size)
+
+/** 重复清理：每组保留最优一份，冗余副本加入多选，交由用户复核后批量删除 */
+function onSelectRedundant() {
+  const n = selectRedundantDuplicates()
+  if (n > 0) toast('info', `已选中 ${n} 个冗余副本，复核后按 Delete 移入回收站`)
 }
 
 let unsubscribeProgress = null
@@ -284,9 +300,11 @@ onMounted(async () => {
   // 订阅目录变更事件（E8）：autoRescan 开启时自动重扫
   unsubscribeFsChanged = window.api.models.onFsChanged?.(onFsChanged)
   // 订阅后台哈希预热进度事件（Civitai 识别加速）：整体替换快照，
-  // 详情页 Civitai 面板按当前模型 id 匹配展示
+  // 详情页 Civitai 面板按当前模型 id 匹配展示；完成事件携带的哈希经
+  // applyHashUpdate 回填模型对象（FEAT-1 重复检测渐进可用）
   unsubscribeWarmup = window.api.models.onWarmupProgress?.((progress) => {
     state.warmup = progress
+    applyHashUpdate(progress)
   })
   await initApp()
 })
@@ -444,6 +462,32 @@ onUnmounted(() => {
             >
               <svg viewBox="0 0 24 24" width="11" height="11" :fill="state.showFavoritesOnly ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z" /></svg>
               收藏
+            </button>
+            <!-- 重复筛选（FEAT-1）：仅显示与其他模型文件完全相同（SHA256 一致）的模型。
+                 哈希由后台预热渐进就绪，无可见重复项时隐藏入口 -->
+            <button
+              v-if="duplicateCount > 0"
+              class="fav-filter"
+              :class="{ active: state.showDuplicatesOnly }"
+              :title="
+                state.showDuplicatesOnly
+                  ? '显示全部模型'
+                  : `仅显示重复模型（${duplicateCount} 个，冗余副本占 ${formatSize(duplicateWastedBytes)}）`
+              "
+              @click="state.showDuplicatesOnly = !state.showDuplicatesOnly"
+            >
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 4H6a2 2 0 0 0-2 2v10" /></svg>
+              重复 {{ duplicateCount }}
+            </button>
+            <!-- 重复清理（FEAT-1）：重复筛选开启时提供「保留最优、选中冗余」的一键辅助，
+                 交由既有批量删除（回收站）完成清理 -->
+            <button
+              v-if="state.showDuplicatesOnly && duplicateCount > 0"
+              class="fav-filter"
+              title="每个重复组自动保留最优一份（评分高/已收藏/最新优先），其余加入多选待删除"
+              @click="onSelectRedundant"
+            >
+              选中冗余项
             </button>
             <!-- 多选模式开关（E4） -->
             <button

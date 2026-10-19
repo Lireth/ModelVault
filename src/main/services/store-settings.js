@@ -130,6 +130,8 @@ function normalizeSavedViews(raw) {
       typeFilter: typeof v.typeFilter === 'string' ? v.typeFilter.slice(0, 20) : 'all',
       subFilter: typeof v.subFilter === 'string' ? v.subFilter.slice(0, 50) : '',
       showFavoritesOnly: v.showFavoritesOnly === true,
+      // 重复模型筛选（FEAT-1）：旧视图缺省该字段时为 false
+      showDuplicatesOnly: v.showDuplicatesOnly === true,
       sortBy: SORT_BY_KEYS.has(v.sortBy) ? v.sortBy : 'name',
       sortAsc: typeof v.sortAsc === 'boolean' ? v.sortAsc : true
     })

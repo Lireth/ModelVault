@@ -4,6 +4,7 @@ import {
   formatDate,
   formatParamSummary,
   formatSize,
+  duplicateIdSet,
   multiSelectIdSet,
   openDetail,
   selectRangeTo,
@@ -221,6 +222,9 @@ const subTag = computed(() => {
 const paramSummary = computed(() => formatParamSummary(props.model.params))
 
 const mtimeText = computed(() => formatDate(props.model.mtimeMs))
+
+/** 重复模型（FEAT-1）：文件 SHA256 与其他模型完全一致（O4 集合命中） */
+const isDuplicate = computed(() => duplicateIdSet.value.has(props.model.id))
 </script>
 
 <template>
@@ -285,6 +289,13 @@ const mtimeText = computed(() => formatDate(props.model.mtimeMs))
       </div>
       <span class="type-badge" :style="{ background: info.color }">{{ info.label }}</span>
       <span v-if="model.nsfw" class="nsfw-badge">NSFW</span>
+      <!-- 重复角标（FEAT-1）：文件内容与其他模型完全相同；与 NSFW 同在左下角时右移避让 -->
+      <span
+        v-if="isDuplicate"
+        class="dupe-badge"
+        :class="{ offset: model.nsfw }"
+        title="文件内容与其他模型完全相同（SHA256 一致），可通过「重复」筛选清理冗余副本"
+      >重复</span>
       <!-- 健康检查角标（F6）：0 字节或 safetensors 头部不可解析的疑似损坏文件 -->
       <span
         v-if="model.suspect"
@@ -547,6 +558,23 @@ const mtimeText = computed(() => formatDate(props.model.mtimeMs))
   background: var(--danger);
   padding: 2px 8px;
   border-radius: var(--radius-full);
+}
+
+/* 重复角标（FEAT-1）：与 NSFW 同处左下角，NSFW 存在时右移避让 */
+.dupe-badge {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--on-bright);
+  background: var(--warning);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+
+.dupe-badge.offset {
+  left: 64px;
 }
 
 /* 疑似损坏角标（F6）：位于封面右下角，警示色 */

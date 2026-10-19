@@ -340,3 +340,36 @@ describe('ModelCard 封面悬停轮播', () => {
     wrapper.unmount()
   })
 })
+
+describe('ModelCard 重复角标（FEAT-1）', () => {
+  /** 注入一对同哈希模型并挂载其一的卡片 */
+  function mountWithDupes(extra = {}) {
+    const a = makeModel('d1', { hash: 'h', ...extra })
+    const b = makeModel('d2', { hash: 'h', ...extra })
+    state.models = [a, b]
+    return mount(ModelCard, { props: { model: a } })
+  }
+
+  it('哈希与其他模型相同时显示「重复」角标', async () => {
+    const wrapper = mountWithDupes()
+    await settle()
+    expect(wrapper.find('.dupe-badge').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('NSFW 并存时重复角标带避让类（右移）', async () => {
+    const wrapper = mountWithDupes({ nsfw: true })
+    await settle()
+    expect(wrapper.find('.dupe-badge').classes()).toContain('offset')
+    wrapper.unmount()
+  })
+
+  it('独立模型（哈希无同伴）不显示重复角标', async () => {
+    const a = makeModel('d1', { hash: 'h' })
+    state.models = [a]
+    const wrapper = mount(ModelCard, { props: { model: a } })
+    await settle()
+    expect(wrapper.find('.dupe-badge').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})

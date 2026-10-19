@@ -36,7 +36,10 @@ let progressListener = null
 /**
  * 注册预热进度监听（与 setStoreSaveErrorListener 同一副作用注册模式）：
  * 监听器收到的快照形状为
- * { active, id, percent, hashedBytes, totalBytes, done, remaining }。
+ * { active, id, percent, hashedBytes, totalBytes, done, remaining, hash }。
+ * hash 仅在单个模型的计算完成事件（active=false 且 id 非空）携带有效值，
+ * 渲染层据此把新算得的哈希回填到对应模型对象（FEAT-1 重复检测渐进可用，
+ * 无需等待下次扫描）。
  * @param {(progress: object) => void} [fn] 进度快照回调（传空清除）
  */
 export function setWarmupProgressListener(fn) {
@@ -72,7 +75,8 @@ function emitProgress(snap, force = false) {
       hashedBytes: snap.hashedBytes,
       totalBytes: snap.totalBytes,
       done: doneCount,
-      remaining: queue.length
+      remaining: queue.length,
+      hash: snap.hash || ''
     })
   } catch {
     // 进度推送失败不影响预热本身
@@ -106,8 +110,9 @@ export function computeAndCacheHash(id, mtimeMs) {
   const current = inflight.get(id)
   if (current && current.mtimeMs === mtimeMs) return current.promise
   const promise = (async () => {
-    // 本次计算的进度快照（识别与预热链路共用，事件按 id 供渲染层匹配）
-    const snap = { active: true, id, percent: 0, hashedBytes: 0, totalBytes: 0 }
+    // 本次计算的进度快照（识别与预热链路共用，事件按 id 供渲染层匹配；
+    // hash 完成后回填，随完成事件送达渲染层——FEAT-1 重复检测数据源）
+    const snap = { active: true, id, percent: 0, hashedBytes: 0, totalBytes: 0, hash: '' }
     try {
       emitProgress(snap, true)
       const hash = await computeFileHash(id, undefined, (hashedBytes, totalBytes) => {
@@ -116,6 +121,7 @@ export function computeAndCacheHash(id, mtimeMs) {
         snap.percent = totalBytes > 0 ? Math.min(100, Math.round((hashedBytes / totalBytes) * 100)) : 0
         emitProgress(snap)
       })
+      snap.hash = hash
       // 写盘前重读最新元数据：哈希计算期间用户可能已并发保存其他字段
       const latest = getModelMeta(id) || {}
       setModelMeta(id, { ...latest, hash, hashMtime: mtimeMs })

@@ -53,9 +53,13 @@ const EXPECTED_EXPORTS = [
   'scanModels',
   'cancelScan',
   'applyThumbUpdates',
+  'applyHashUpdate',
   // 派生
   'filteredModels',
   'typeCounts',
+  'duplicateGroups',
+  'duplicateIdSet',
+  'duplicateWastedBytes',
   // 智能视图（组合筛选收藏）
   'savedViews',
   'activeSavedViewId',
@@ -82,6 +86,7 @@ const EXPECTED_EXPORTS = [
   'invertSelectionFiltered',
   'allFilteredSelected',
   'toggleSelectAllFiltered',
+  'selectRedundantDuplicates',
   'batchFavorite',
   'batchNsfw',
   'batchRating',

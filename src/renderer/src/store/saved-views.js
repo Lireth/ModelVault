@@ -26,6 +26,7 @@ function snapshotFilters() {
     typeFilter: state.typeFilter,
     subFilter: state.subFilter,
     showFavoritesOnly: state.showFavoritesOnly,
+    showDuplicatesOnly: state.showDuplicatesOnly,
     sortBy: state.sortBy,
     sortAsc: state.sortAsc
   }
@@ -38,6 +39,8 @@ function viewMatchesCurrent(v) {
     v.typeFilter === state.typeFilter &&
     v.subFilter === state.subFilter &&
     v.showFavoritesOnly === state.showFavoritesOnly &&
+    // 旧视图缺省该字段时按 false 参与（=== true 与 undefined 比较）
+    (v.showDuplicatesOnly === true) === state.showDuplicatesOnly &&
     v.sortBy === state.sortBy &&
     v.sortAsc === state.sortAsc
   )
@@ -55,6 +58,7 @@ export function viewSummary(v) {
   if (v.typeFilter && v.typeFilter !== 'all') parts.push(typeInfo(v.typeFilter).label)
   if (v.subFilter) parts.push(subCategoryInfo(v.subFilter)?.label || v.subFilter)
   if (v.showFavoritesOnly) parts.push('仅收藏')
+  if (v.showDuplicatesOnly) parts.push('仅重复')
   if (v.search) parts.push(`搜索“${v.search}”`)
   if (parts.length === 0) parts.push('全部模型')
   const sort = SORT_OPTIONS.find((s) => s.key === v.sortBy)
@@ -109,6 +113,8 @@ export async function applySavedView(id) {
   if (!v) return
   state.search = v.search
   state.showFavoritesOnly = v.showFavoritesOnly
+  // 旧视图缺省该字段时回退 false（=== true 规避 undefined）
+  state.showDuplicatesOnly = v.showDuplicatesOnly === true
   state.sortBy = v.sortBy
   state.sortAsc = v.sortAsc
   // typeFilter 变更会触发 filter.js 的 watcher 清空 subFilter（flush 在微任务）：

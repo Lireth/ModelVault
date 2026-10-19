@@ -463,6 +463,7 @@ describe('应用设置规范化', () => {
           typeFilter: 'lora',
           subFilter: 'role',
           showFavoritesOnly: true,
+          showDuplicatesOnly: true,
           sortBy: 'mtime',
           sortAsc: false
         },
@@ -483,6 +484,7 @@ describe('应用设置规范化', () => {
       typeFilter: 'lora',
       subFilter: 'role',
       showFavoritesOnly: true,
+      showDuplicatesOnly: true,
       sortBy: 'mtime',
       sortAsc: false
     })
@@ -493,6 +495,7 @@ describe('应用设置规范化', () => {
       typeFilter: 'all',
       subFilter: '',
       showFavoritesOnly: false,
+      showDuplicatesOnly: false,
       sortBy: 'name',
       sortAsc: true
     })
