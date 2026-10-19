@@ -58,9 +58,11 @@ export function folderNameToTag(name) {
 }
 
 /**
- * Civitai 模型类型 → 本地分类标签 key 映射（一键分配标签规则）：
- * Civitai API 的 model.type（Character/Style/Concept/Clothing/Background/Pose/Tool）
- * 对应本地 LoRA 分类标签；其余类型（Lora/Checkpoint 等）不映射。
+ * Civitai 分类名 → 本地分类标签 key 映射（一键分配标签规则）：
+ * Civitai 的 7 类分类（Character/Style/Concept/Clothing/Background/Pose/Tool）
+ * 对应本地 LoRA 分类标签；API 的 model.type 只有 Lora/Checkpoint 等模型
+ * 种类（实测不携带上述分类），分类实际挂在 model.tags 里（pose 为复数
+ * 形式 poses），故 poses 作为 pose 的别名入表。
  */
 export const CIVITAI_TYPE_TO_TAG = new Map([
   ['character', 'role'],
@@ -69,6 +71,7 @@ export const CIVITAI_TYPE_TO_TAG = new Map([
   ['clothing', 'outfit'],
   ['background', 'background'],
   ['pose', 'pose'],
+  ['poses', 'pose'],
   ['tool', 'tool']
 ])
 
@@ -81,4 +84,20 @@ export const CIVITAI_TYPE_TO_TAG = new Map([
 export function civitaiTypeToTag(type) {
   if (typeof type !== 'string') return ''
   return CIVITAI_TYPE_TO_TAG.get(type.trim().toLowerCase()) || ''
+}
+
+/**
+ * Civitai 模型 tags 数组 → 本地分类标签 key（纯函数，便于单测）：
+ * 按 tags 原始顺序取第一个能映射的分类 tag（character/style/concept/
+ * clothing/background/poses/tool 等）；未命中返回空串。
+ * @param {unknown} tags Civitai 模型的 tags 字符串数组
+ * @returns {string} 分类标签 key 或 ''
+ */
+export function civitaiTagsToTag(tags) {
+  if (!Array.isArray(tags)) return ''
+  for (const t of tags) {
+    const tag = civitaiTypeToTag(t)
+    if (tag) return tag
+  }
+  return ''
 }

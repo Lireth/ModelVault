@@ -182,11 +182,11 @@ export function parseCivitaiModelId(url) {
 }
 
 /**
- * 按 Civitai 模型 id 查询模型信息中的类型字段（一键分配标签用）。
- * Civitai 的 model.type（Character/Style/Concept/Clothing/Background/Pose/Tool 等）
- * 即官网的模型分类，映射为本地标签由 shared/model-categories.civitaiTypeToTag 完成。
+ * 按 Civitai 模型 id 查询模型信息（一键分配标签用）。
+ * API 的 model.type 只有 Lora/Checkpoint 等模型种类，character/style 等
+ * 7 类分类挂在 model.tags 里，一并返回供映射层回退查询。
  * @param {string} modelId Civitai 模型 id（parseCivitaiModelId 的结果）
- * @returns {Promise<{found: boolean, type?: string, error?: string}>}
+ * @returns {Promise<{found: boolean, type?: string, tags?: string[], error?: string}>}
  *   found=false 且无 error 表示 id 不存在或已下架（不是失败）
  */
 export async function fetchCivitaiModelType(modelId) {
@@ -217,7 +217,10 @@ export async function fetchCivitaiModelType(modelId) {
   if (!raw || typeof raw !== 'object' || typeof raw.type !== 'string' || !raw.type.trim()) {
     return { found: false, error: '响应数据格式异常' }
   }
-  return { found: true, type: raw.type.trim() }
+  const tags = Array.isArray(raw.tags)
+    ? raw.tags.filter((t) => typeof t === 'string' && t.trim()).map((t) => t.trim())
+    : []
+  return { found: true, type: raw.type.trim(), tags }
 }
 
 /**

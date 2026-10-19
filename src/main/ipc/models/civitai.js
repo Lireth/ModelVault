@@ -10,7 +10,7 @@ import {
   fetchCivitaiVersionByHash,
   parseCivitaiModelId
 } from '../../services/civitai'
-import { civitaiTypeToTag } from '../../../shared/model-categories'
+import { civitaiTagsToTag, civitaiTypeToTag } from '../../../shared/model-categories'
 import { computeAndCacheHash, requestHashWarmup, setWarmupProgressListener } from '../../services/hash-warmup'
 import {
   appendCoverMeta,
@@ -110,9 +110,11 @@ export function registerCivitaiHandlers() {
     }
   }, { errorPrefix: 'Civitai 补全失败' })
 
-  // 一键分配标签（按 Civitai 模型类型）：读取已保存的模型页链接，
-  // 查询 Civitai 类型并映射为本地分类标签写盘。无链接/类型未映射的模型
-  // 不做改动（渲染层汇总提示）；映射成功时覆盖已有标签（分配语义）。
+  // 一键分配标签（按 Civitai 分类）：读取已保存的模型页链接，查询 Civitai
+  // 模型信息并映射为本地分类标签写盘。Civitai API 的 type 字段只有
+  // Lora/Checkpoint 等模型种类，character/style 等 7 类分类挂在 tags 里，
+  // 故先查 type 再回退 tags。无链接/未映射/失败的模型不做改动（渲染层
+  // 汇总提示）；映射成功时覆盖已有标签（分配语义）。
   wrapHandler('models:civitaiCategory', async (event, { id } = {}) => {
     const invalid = checkModelIdInRoot(id)
     if (invalid) return { error: invalid }
@@ -127,9 +129,9 @@ export function registerCivitaiHandlers() {
     const res = await fetchCivitaiModelType(modelId)
     if (res.error) return { error: res.error }
     if (!res.found) return { found: false }
-    const tag = civitaiTypeToTag(res.type)
+    const tag = civitaiTypeToTag(res.type) || civitaiTagsToTag(res.tags)
     if (!tag) {
-      // Civitai 类型不属于 7 个分类标签（Lora/Checkpoint 等）：保持现状
+      // Civitai 模型的 type/tags 均不属于 7 个分类标签：保持现状
       return { found: true, unmapped: true, type: res.type }
     }
     // 写盘前重读最新元数据，避免覆盖查询期间的用户并发保存

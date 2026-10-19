@@ -10,7 +10,7 @@ vi.mock('electron', () => ({
   net: { fetch: vi.fn() }
 }))
 
-import { civitaiTypeToTag } from '../src/shared/model-categories'
+import { civitaiTagsToTag, civitaiTypeToTag } from '../src/shared/model-categories'
 import {
   civitaiCompletePatch,
   fetchCivitaiModelType,
@@ -48,12 +48,23 @@ describe('parseCivitaiModelId', () => {
 })
 
 describe('fetchCivitaiModelType', () => {
-  it('命中时返回模型类型', async () => {
+  it('命中时返回模型类型与 tags（分类实际挂在 tags 里）', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({ id: 123, type: 'LORA', name: 'Some Model', tags: ['character', 'foo'] }),
+        { status: 200 }
+      )
+    )
+    const res = await fetchCivitaiModelType('123')
+    expect(res).toEqual({ found: true, type: 'LORA', tags: ['character', 'foo'] })
+  })
+
+  it('响应无 tags 字段时返回空数组', async () => {
     vi.mocked(net.fetch).mockResolvedValue(
       new Response(JSON.stringify({ id: 123, type: 'Character', name: 'Some Model' }), { status: 200 })
     )
     const res = await fetchCivitaiModelType('123')
-    expect(res).toEqual({ found: true, type: 'Character' })
+    expect(res).toEqual({ found: true, type: 'Character', tags: [] })
   })
 
   it('404 视为未收录（非错误）', async () => {
@@ -96,6 +107,23 @@ describe('civitaiTypeToTag', () => {
     expect(civitaiTypeToTag('Checkpoint')).toBe('')
     expect(civitaiTypeToTag('')).toBe('')
     expect(civitaiTypeToTag(null)).toBe('')
+  })
+})
+
+describe('civitaiTagsToTag', () => {
+  it('按 tags 顺序取第一个可映射的分类 tag（含 poses 复数形式）', () => {
+    expect(civitaiTagsToTag(['character', 'zenless zone zero'])).toBe('role')
+    expect(civitaiTagsToTag(['illustrious', 'lora', 'tool', 'breasts slider'])).toBe('tool')
+    expect(civitaiTagsToTag(['poses'])).toBe('pose')
+    expect(civitaiTagsToTag(['Breasts Squeeze', 'poses'])).toBe('pose')
+    expect(civitaiTagsToTag(['style', 'character'])).toBe('style')
+  })
+
+  it('无可映射分类或坏输入返回空串', () => {
+    expect(civitaiTagsToTag(['lora', 'nsfw'])).toBe('')
+    expect(civitaiTagsToTag([])).toBe('')
+    expect(civitaiTagsToTag(null)).toBe('')
+    expect(civitaiTagsToTag('character')).toBe('')
   })
 })
 
