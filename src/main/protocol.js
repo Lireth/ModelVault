@@ -3,9 +3,15 @@ import { pathToFileURL } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
 import logger from './logger'
-import { isValidImageFile } from './services/covers'
+import { isValidImageFile, isImageBuffer } from './services/covers'
 import { getCurrentRoot } from './services/store'
 import { isAllowedCivitaiImageUrl, fetchCivitaiImage } from './services/civitai'
+import {
+  civCacheContentType,
+  getCivImageFromCache,
+  removeCivImageCache,
+  saveCivImageCache
+} from './services/civ-cache'
 
 /**
  * 自定义图片协议 mvimg://
@@ -185,9 +191,11 @@ function registerMvimgHandler() {
 }
 
 /**
- * civimg:// 处理器：Civitai 示例图远程代理。
- * 渲染进程 <img> 请求经主进程 net.fetch 转发（与识别/下载同一网络栈，
- * 自动继承系统代理），目标 URL 强制命中 CDN 域名白名单。
+ * civimg:// 处理器：Civitai 示例图远程代理（含持久磁盘缓存，O-5）。
+ * 渲染进程 <img> 请求经主进程处理：命中磁盘缓存（civ-cache，URL 哈希命名）
+ * 且内容通过图片魔数校验时直接由磁盘服务（离线可回看、重复浏览零网络）；
+ * 未命中经 net.fetch 拉取（与识别/下载同一网络栈，自动继承系统代理），
+ * 目标 URL 强制命中 CDN 域名白名单，成功拉取的图片内容回写磁盘缓存。
  */
 function registerCivimgHandler() {
   protocol.handle(CIV_SCHEME, async (request) => {
@@ -206,15 +214,34 @@ function registerCivimgHandler() {
         logger.warn(`civimg 协议拒绝非白名单图片地址: ${target.slice(0, 200)}`)
         return new Response('Forbidden', { status: 403 })
       }
+      // 缓存命中路径：魔数校验失败（半写/损坏/被篡改）时删除条目自愈并回源
+      const cached = await getCivImageFromCache(target)
+      if (cached) {
+        if (isImageBuffer(cached)) {
+          const headers = new Headers()
+          const mime = civCacheContentType(target)
+          if (mime) headers.set('Content-Type', mime)
+          // 内容来自本地缓存且 URL 即键，与远程回源路径同等下发按天缓存
+          headers.set('Cache-Control', 'public, max-age=86400')
+          return new Response(cached, { status: 200, headers })
+        }
+        await removeCivImageCache(target)
+      }
       const upstream = await fetchCivitaiImage(target)
       if (!upstream.ok) {
         logger.warn(`civimg 上游响应异常（HTTP ${upstream.status}）: ${target.slice(0, 200)}`)
         return new Response('Upstream Error', { status: 502 })
       }
+      // 回源成功：整体读入后回写磁盘缓存（best-effort，失败不影响返回）。
+      // 仅缓存真实图片内容——魔数不符的字节（上游异常页等）不入缓存
+      const buf = Buffer.from(await upstream.arrayBuffer())
+      if (isImageBuffer(buf)) {
+        await saveCivImageCache(target, buf)
+      }
       // 远程图内容一般不可变，按天缓存减轻 CDN 与代理压力
       const headers = new Headers(upstream.headers)
       headers.set('Cache-Control', 'public, max-age=86400')
-      return new Response(upstream.body, {
+      return new Response(buf, {
         status: upstream.status,
         statusText: upstream.statusText,
         headers
