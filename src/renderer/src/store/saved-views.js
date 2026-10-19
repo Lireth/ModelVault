@@ -1,14 +1,15 @@
 import { computed, nextTick } from 'vue'
 import { SORT_OPTIONS, sortDirectional, state, subCategoryInfo, typeInfo } from './state'
+import { BASE_FAMILIES } from '../../../shared/model-categories'
 import { saveSettings } from './library'
 import { toast } from './toast'
 
 /**
  * 智能视图（组合筛选收藏）：
- * 将当前「搜索词 + 分类 + LoRA 子分类 + 收藏筛选 + 排序」组合保存为命名视图，
- * 侧栏一键切换。视图是平铺筛选字段的命名快照——state 平铺字段始终为
- * 活动视图的镜像（B-02 约定），应用视图即整体覆写这些字段，不引入额外
- * 派生筛选态；视图列表持久化在应用设置（settings.savedViews）。
+ * 将当前「搜索词 + 分类 + LoRA 子分类 + 基底模型 + 收藏筛选 + 排序」组合
+ * 保存为命名视图，侧栏一键切换。视图是平铺筛选字段的命名快照——state
+ * 平铺字段始终为活动视图的镜像（B-02 约定），应用视图即整体覆写这些字段，
+ * 不引入额外派生筛选态；视图列表持久化在应用设置（settings.savedViews）。
  */
 
 /** 视图上限（与主进程 normalizeSavedViews 的截断一致，先在前置校验拦截） */
@@ -25,6 +26,7 @@ function snapshotFilters() {
     search: state.search,
     typeFilter: state.typeFilter,
     subFilter: state.subFilter,
+    baseFilter: state.baseFilter,
     showFavoritesOnly: state.showFavoritesOnly,
     showDuplicatesOnly: state.showDuplicatesOnly,
     sortBy: state.sortBy,
@@ -38,6 +40,8 @@ function viewMatchesCurrent(v) {
     v.search === state.search &&
     v.typeFilter === state.typeFilter &&
     v.subFilter === state.subFilter &&
+    // 旧视图缺省基底筛选时按 '' 参与（F-2）
+    (v.baseFilter || '') === state.baseFilter &&
     v.showFavoritesOnly === state.showFavoritesOnly &&
     // 旧视图缺省该字段时按 false 参与（=== true 与 undefined 比较）
     (v.showDuplicatesOnly === true) === state.showDuplicatesOnly &&
@@ -57,6 +61,7 @@ export function viewSummary(v) {
   const parts = []
   if (v.typeFilter && v.typeFilter !== 'all') parts.push(typeInfo(v.typeFilter).label)
   if (v.subFilter) parts.push(subCategoryInfo(v.subFilter)?.label || v.subFilter)
+  if (v.baseFilter) parts.push(`基底：${BASE_FAMILIES.find((b) => b.key === v.baseFilter)?.label || v.baseFilter}`)
   if (v.showFavoritesOnly) parts.push('仅收藏')
   if (v.showDuplicatesOnly) parts.push('仅重复')
   if (v.search) parts.push(`搜索“${v.search}”`)
@@ -117,11 +122,13 @@ export async function applySavedView(id) {
   state.showDuplicatesOnly = v.showDuplicatesOnly === true
   state.sortBy = v.sortBy
   state.sortAsc = v.sortAsc
-  // typeFilter 变更会触发 filter.js 的 watcher 清空 subFilter（flush 在微任务）：
-  // 先切主分类并等该 watcher 落定，再恢复视图携带的子分类筛选
+  // typeFilter 变更会触发 filter.js 的 watcher 清空 subFilter/baseFilter
+  // （flush 在微任务）：先切主分类并等该 watcher 落定，再恢复视图携带的
+  // 子分类与基底筛选
   state.typeFilter = v.typeFilter
   await nextTick()
   state.subFilter = v.subFilter
+  state.baseFilter = v.baseFilter || ''
   await saveSettings({ sortBy: v.sortBy, sortAsc: v.sortAsc })
 }
 

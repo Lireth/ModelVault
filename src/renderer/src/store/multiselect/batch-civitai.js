@@ -164,7 +164,11 @@ export async function batchCivitaiIdentify() {
   state.multiSelect.busy = true
   try {
     const { metas, notFound, failed, cancelled } = await identifySequentially(ids, '识别中')
-    const ok = applyMetaUpdates(metas, (meta) => ({ civitaiUrl: meta.civitaiUrl || '' }))
+    const ok = applyMetaUpdates(metas, (meta, cur) => ({
+      civitaiUrl: meta.civitaiUrl || '',
+      // 基底模型识别回填（F-2）：与单模型识别同一合并语义（本地已有值优先）
+      baseModel: cur?.baseModel || meta.baseModel || ''
+    }))
     const done = ok + notFound + failed
     const parts = []
     if (notFound > 0) parts.push(`未收录 ${notFound} 个`)
@@ -276,7 +280,10 @@ export async function batchCivitaiImages() {
         }
       }
     }
-    applyMetaUpdates(metas, (meta) => ({ civitaiUrl: meta.civitaiUrl || '' }))
+    applyMetaUpdates(metas, (meta, cur) => ({
+      civitaiUrl: meta.civitaiUrl || '',
+      baseModel: cur?.baseModel || meta.baseModel || ''
+    }))
     const parts = []
     if (skippedHasCover > 0) parts.push(`已有示例图跳过 ${skippedHasCover} 个`)
     if (notFound > 0) parts.push(`未收录或无示例图 ${notFound} 个`)

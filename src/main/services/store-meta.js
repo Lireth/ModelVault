@@ -121,6 +121,10 @@ function normalizeModelMeta(raw) {
       /^https:\/\/civitai\.com\/models\/\d+/.test(raw.civitaiUrl)
         ? raw.civitaiUrl
         : '',
+    // 基底模型（F-2 筛选数据源之二）：Civitai 识别回填（safetensors 头部
+    // 解析不可用或未携带时的补全来源）；渲染层与 autoInfo.baseModel 合并展示
+    baseModel:
+      typeof raw.baseModel === 'string' ? raw.baseModel.trim().slice(0, 100) : '',
     params: {
       steps: Number.isFinite(params.steps) ? params.steps : null,
       // CFG 为区间字段；兼容旧版单值 cfg（迁移为 min = max = 旧值）

@@ -4,7 +4,8 @@ import { reactive, shallowReactive } from 'vue'
 import {
   SUB_CATEGORY_DEFS,
   LORA_TAG_DEFS,
-  CHECKPOINT_TAG_DEFS
+  CHECKPOINT_TAG_DEFS,
+  BASE_FAMILIES
 } from '../../../shared/model-categories'
 import { SORT_OPTION_DEFS, CARD_SIZE_DEFS } from '../../../shared/app-enums'
 import { MODEL_EXTENSIONS as SHARED_SCAN_EXTS } from '../../../shared/model-extensions'
@@ -41,6 +42,9 @@ export const LORA_TAGS = LORA_TAG_DEFS
 
 /** Checkpoint 模型的自动分类标签（无需手动标注） */
 export const CHECKPOINT_TAGS = CHECKPOINT_TAG_DEFS
+
+/** 基底模型家族选项（F-2 基底筛选；A-12 单一来源 shared/model-categories.js） */
+export const BASE_MODEL_FAMILIES = BASE_FAMILIES
 
 /**
  * 排序方式选项（A-12 单一来源 shared/app-enums.js）：顶栏与设置页共用。
@@ -138,6 +142,9 @@ export const state = shallowReactive({
   viewMode: 'grid', // 首页视图模式：grid（网格卡片）/ list（紧凑列表）
   typeFilter: 'all',
   subFilter: '', // LoRA 分类筛选（仅 typeFilter 为 lora 时生效）
+  // 基底模型家族筛选（F-2，key 为 shared BASE_FAMILIES 之一，'' 为全部）：
+  // 命中 normalizeBaseModel(m.baseModel)；typeFilter 切换时随 subFilter 一并清空
+  baseFilter: '',
   showFavoritesOnly: false, // 仅显示收藏的模型
   // 仅显示重复模型（FEAT-1）：文件 SHA256 完全一致（与其他模型互为副本）。
   // 哈希由后台预热渐进就绪，开启前以「重复」筛选入口上的计数为准

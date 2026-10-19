@@ -69,9 +69,14 @@ export function registerCivitaiHandlers() {
       logger.info(`Civitai 无匹配记录: ${id}`)
       return { found: false }
     }
-    // URL 写盘前重读最新元数据，避免覆盖哈希计算期间的用户并发保存
+    // URL 写盘前重读最新元数据，避免覆盖哈希计算期间的用户并发保存。
+    // baseModel 一并回填（F-2 筛选数据源）：已有值不覆盖（宁留旧不覆盖）
     const latest = getModelMeta(id) || meta
-    const saved = setModelMeta(id, { ...latest, civitaiUrl: res.info.url })
+    const saved = setModelMeta(id, {
+      ...latest,
+      civitaiUrl: res.info.url,
+      baseModel: latest.baseModel || res.info.baseModel || ''
+    })
     logger.info(`Civitai 识别成功: ${id} -> ${res.info.url}`)
     return {
       found: true,
@@ -99,7 +104,12 @@ export function registerCivitaiHandlers() {
     if (!res.found) return { found: false }
     const latest = getModelMeta(id) || meta
     const { patch, applied } = civitaiCompletePatch(latest, res.info)
-    const saved = setModelMeta(id, { ...latest, civitaiUrl: res.info.url, ...patch })
+    const saved = setModelMeta(id, {
+      ...latest,
+      civitaiUrl: res.info.url,
+      baseModel: latest.baseModel || res.info.baseModel || '',
+      ...patch
+    })
     logger.info(`Civitai 一键补全完成（${applied.length ? applied.join('/') : '无空缺字段'}）: ${id}`)
     return {
       found: true,

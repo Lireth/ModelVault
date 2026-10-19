@@ -25,7 +25,9 @@ export function applyMetaFlags(id, meta) {
  * 失效（大库下每次重算含 O(n log n) 排序）；单趟写入保证同一时钟周期内
  * 完成全部变更，filteredModels 仅重算一次。
  * @param {Map<string, object>} metaMap id → 主进程返回的最新元数据
- * @param {(meta: object) => object} pick 从 meta 提取需合并到模型对象的字段
+ * @param {(meta: object, current?: object) => object} pick 从 meta 提取需
+ *   合并到模型对象的字段；第二参数为当前模型对象（F-2：baseModel 回填的
+ *   「本地已有值优先」合并需要读取现值）
  * @returns {number} 实际更新的模型数量（列表中不存在的 id 不计入）
  */
 export function applyMetaUpdates(metaMap, pick) {
@@ -34,7 +36,7 @@ export function applyMetaUpdates(metaMap, pick) {
   for (let i = 0; i < state.models.length; i++) {
     const meta = metaMap.get(state.models[i].id)
     if (!meta) continue
-    state.models[i] = { ...state.models[i], ...pick(meta) }
+    state.models[i] = { ...state.models[i], ...pick(meta, state.models[i]) }
     updated += 1
     if (updated === metaMap.size) break
   }

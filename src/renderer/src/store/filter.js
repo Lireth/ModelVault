@@ -1,5 +1,6 @@
 import { computed, watch } from 'vue'
 import { state, MODEL_TYPES, SUB_MAP, sortDirectional } from './state'
+import { normalizeBaseModel } from '../../../shared/model-categories'
 
 /**
  * 筛选/搜索/排序派生状态（A-04 自 appStore.js 拆出）。
@@ -26,16 +27,17 @@ const searchHaystackCache = new WeakMap()
 function searchHaystack(m) {
   let hay = searchHaystackCache.get(m)
   if (hay !== undefined) return hay
-  const parts = [m.name, m.alias, m.note, m.triggerWords]
+  // 基底模型取装饰层合成字段，兼容手工构造/旧数据仅带 autoInfo 的对象
+  const parts = [m.name, m.alias, m.note, m.triggerWords, m.baseModel || m.autoInfo?.baseModel]
   if (m.subCategory) {
     parts.push(m.subCategory)
     const info = SUB_MAP[m.subCategory]
     if (info) parts.push(info.label)
   }
   if (m.autoInfo) {
-    // 作者与基底模型是高频检索词（"那个 SDXL 的 LoRA 在哪"）；
-    // 训练标签候选（ss_tag_frequency 高频词）是内容检索的自然入口
-    parts.push(m.autoInfo.author, m.autoInfo.baseModel, m.autoInfo.title)
+    // 作者与训练标签候选是内容检索的自然入口；基底模型已在 parts 中
+    // （m.baseModel，safetensors 解析与 Civitai 回填双来源，F-2）
+    parts.push(m.autoInfo.author, m.autoInfo.title)
     if (Array.isArray(m.autoInfo.triggerCandidates)) {
       parts.push(...m.autoInfo.triggerCandidates)
     }
@@ -94,15 +96,19 @@ export const duplicateWastedBytes = computed(() =>
  */
 const filteredUnsorted = computed(() => {
   const keyword = state.search.trim().toLowerCase()
-  const { typeFilter, subFilter, showFavoritesOnly, showDuplicatesOnly } = state
+  const { typeFilter, subFilter, baseFilter, showFavoritesOnly, showDuplicatesOnly } = state
   // LoRA 分类筛选：仅选中 LoRA 分类且指定了子分类时生效
   const checkSub = typeFilter === 'lora' && subFilter
+  // 基底模型家族筛选（F-2）：归一化比较（autoInfo 解析 + Civitai 回填双来源
+  // 已在装饰层合成为 m.baseModel）；未解析基底（''）不命中任何家族
+  const checkBase = baseFilter
   // 重复筛选仅在开启时读取命中集合（关闭路径零额外开销）
   const dupes = showDuplicatesOnly ? duplicateIdSet.value : null
   const list = []
   for (const m of state.models) {
     if (typeFilter !== 'all' && m.type !== typeFilter) continue
     if (checkSub && m.subCategory !== subFilter) continue
+    if (checkBase && normalizeBaseModel(m.baseModel || m.autoInfo?.baseModel || '') !== checkBase) continue
     if (showFavoritesOnly && !m.favorite) continue
     if (dupes && !dupes.has(m.id)) continue
     if (keyword && !searchHaystack(m).includes(keyword)) continue
@@ -164,10 +170,11 @@ export const typeCounts = computed(() => {
   return counts
 })
 
-// 切换主分类时清空 LoRA 子分类筛选，避免残留条件
+// 切换主分类时清空 LoRA 子分类与基底模型筛选，避免残留条件
 watch(
   () => state.typeFilter,
   () => {
     state.subFilter = ''
+    state.baseFilter = ''
   }
 )

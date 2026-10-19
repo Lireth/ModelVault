@@ -223,7 +223,7 @@ export function buildModelsCsv(rows) {
       r.alias,
       r.type,
       r.subCategory,
-      r.autoInfo?.baseModel || '',
+      r.baseModel || r.autoInfo?.baseModel || '',
       r.autoInfo?.author || '',
       r.favorite ? '是' : '',
       Number.isFinite(r.rating) && r.rating > 0 ? r.rating : '',

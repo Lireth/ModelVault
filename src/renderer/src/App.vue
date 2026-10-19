@@ -16,6 +16,7 @@ import {
   chooseFolder,
   duplicateIdSet,
   duplicateWastedBytes,
+  BASE_MODEL_FAMILIES,
   filteredModels,
   formatSize,
   initApp,
@@ -322,6 +323,21 @@ onUnmounted(() => {
               <select v-model="state.subFilter">
                 <option value="">全部</option>
                 <option v-for="t in LORA_TAGS" :key="t.key" :value="t.key">{{ t.label }}</option>
+              </select>
+            </label>
+            <!-- 基底模型家族筛选（F-2）：LoRA/Checkpoint 视图可用；
+                 数据为装饰层合成的 baseModel（safetensors 解析 + Civitai 识别回填），
+                 归一化到有限家族后命中 -->
+            <label
+              v-if="state.typeFilter === 'lora' || state.typeFilter === 'checkpoint'"
+              class="sort-select"
+              :class="{ 'sub-filter': state.typeFilter !== 'lora' }"
+              title="按基底模型筛选"
+            >
+              <span class="sort-label">基底</span>
+              <select v-model="state.baseFilter">
+                <option value="">全部</option>
+                <option v-for="b in BASE_MODEL_FAMILIES" :key="b.key" :value="b.key">{{ b.label }}</option>
               </select>
             </label>
           </div>

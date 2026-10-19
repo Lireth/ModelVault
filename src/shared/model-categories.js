@@ -101,3 +101,57 @@ export function civitaiTagsToTag(tags) {
   }
   return ''
 }
+
+/* ---------------- 基底模型家族（F-2 基底模型筛选） ---------------- */
+
+/**
+ * 基底模型家族定义（UI 展示顺序即数组顺序）：
+ * autoInfo.baseModel（safetensors 头部解析）/ Civitai 识别回填的 baseModel
+ * 是自由文本（"SDXL 1.0"、"Pony"、"sd_v1-5-pruned"…），筛选需先归一化为
+ * 有限家族。key 稳定可持久化（智能视图），label 仅展示。
+ */
+export const BASE_FAMILIES = [
+  { key: 'sd15', label: 'SD 1.5' },
+  { key: 'sdxl', label: 'SDXL' },
+  { key: 'pony', label: 'Pony' },
+  { key: 'illustrious', label: 'Illustrious' },
+  { key: 'noobai', label: 'NoobAI' },
+  { key: 'flux', label: 'Flux' },
+  { key: 'sd3', label: 'SD 3/3.5' },
+  { key: 'other', label: '其他基底' }
+]
+
+const BASE_FAMILY_KEYS = new Set(BASE_FAMILIES.map((d) => d.key))
+
+/**
+ * 基底模型自由文本 → 家族 key（纯函数，渲染层筛选与单测共用）：
+ * 小写后按优先级顺序做包含匹配——派生家族（Pony/Illustrious/NoobAI 均为
+ * SDXL 衍生）必须先于 sdxl 判定，否则 "Pony Diffusion V6 XL" 会误归 sdxl。
+ * 非空但不命中任何家族 → 'other'；空/非字符串 → ''（未知，不参与筛选命中）。
+ * @param {unknown} text 基底模型原始文本
+ * @returns {string} BASE_FAMILIES 中的 key，或 ''（未解析）
+ */
+export function normalizeBaseModel(text) {
+  if (typeof text !== 'string') return ''
+  const s = text.trim().toLowerCase()
+  if (!s) return ''
+  // 匹配规则：sd1.5 写法族（sd 1.5 / sd1.5 / v1-5 / 1.5）与其余家族专名
+  const rules = [
+    ['noobai', /noob/],
+    ['illustrious', /illust/],
+    ['pony', /pony/],
+    ['flux', /flux/],
+    ['sd3', /sd[ _-]?3/],
+    ['sdxl', /sdxl|\bxl\b/],
+    ['sd15', /(?:sd|v)[ _-]?1[._-]5|1\.5/]
+  ]
+  for (const [key, re] of rules) {
+    if (re.test(s)) return key
+  }
+  return 'other'
+}
+
+/** 家族 key 是否合法（持久化校验用，如智能视图 baseFilter 字段） */
+export function isBaseFamilyKey(key) {
+  return typeof key === 'string' && BASE_FAMILY_KEYS.has(key)
+}
