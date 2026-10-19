@@ -237,35 +237,48 @@ export function batchRating(rating) {
 }
 
 /**
- * 一键分配标签（Civitai）：对选中模型逐个按已保存的 Civitai 链接查询模型
- * 类型并映射为本地分类标签（character→角色、style→风格、concept→概念、
- * clothing→服饰、background→背景、pose→姿势、tool→工具），映射成功时
- * 覆盖已有标签（分配语义）。串行执行避免 Civitai API 压力，期间更新
- * state.multiSelect.progress；无链接/未映射/失败的模型计入汇总提示。
+ * 一键分配标签（Civitai，仅 LoRA）：对选中的 LoRA 模型逐个按已保存的
+ * Civitai 链接查询分类并映射为本地分类标签（character→角色、style→风格、
+ * concept→概念、clothing→服饰、background→背景、pose→姿势、tool→工具），
+ * 映射成功时覆盖已有标签（分配语义）。串行执行避免 Civitai API 压力，
+ * 期间更新 state.multiSelect.progress；非 LoRA/无链接/未映射/失败的模型
+ * 计入汇总提示。
  */
 export async function batchAssignCivitaiTags() {
   const ids = [...state.multiSelect.ids]
   if (ids.length === 0 || state.multiSelect.busy) return
+  const byId = modelById.value
+  // 仅 LoRA 参与分配（7 类标签是 LoRA 专属维度），非 LoRA 计入汇总
+  const loraIds = []
+  let notLora = 0
+  for (const id of ids) {
+    const m = byId.get(id)
+    if (m?.type === 'lora') loraIds.push(id)
+    else notLora += 1
+  }
+  if (loraIds.length === 0) {
+    toast('info', '选中的模型均不是 LoRA，分类标签不适用')
+    return
+  }
   if (
     !(await confirmDialog(
-      `将按 Civitai 模型类型为选中的 ${ids.length} 个模型分配分类标签（已有标签会被覆盖）。继续吗？`
+      `将按 Civitai 分类为选中的 ${loraIds.length} 个 LoRA 模型分配分类标签（已有标签会被覆盖）。继续吗？`
     ))
   ) {
     return
   }
   state.multiSelect.busy = true
   try {
-    const byId = modelById.value
     const metas = new Map()
     let skippedNoUrl = 0
     let unmapped = 0
     let notFound = 0
     let failed = 0
-    for (let i = 0; i < ids.length; i++) {
+    for (let i = 0; i < loraIds.length; i++) {
       if (state.multiSelect.cancelRequested) break
-      const id = ids[i]
+      const id = loraIds[i]
       const m = byId.get(id)
-      state.multiSelect.progress = `分配标签 ${i + 1}/${ids.length}：${m?.alias || m?.name || ''}`
+      state.multiSelect.progress = `分配标签 ${i + 1}/${loraIds.length}：${m?.alias || m?.name || ''}`
       let res
       try {
         res = await window.api.models.civitaiCategory(id)
@@ -278,7 +291,8 @@ export async function batchAssignCivitaiTags() {
         continue
       }
       if (res.skipped) {
-        skippedNoUrl += 1
+        if (res.reason === 'not-lora') notLora += 1
+        else skippedNoUrl += 1
         continue
       }
       if (!res.found) {
@@ -296,12 +310,13 @@ export async function batchAssignCivitaiTags() {
     }))
     const done = ok + skippedNoUrl + unmapped + notFound + failed
     const parts = []
+    if (notLora > 0) parts.push(`非 LoRA ${notLora} 个`)
     if (skippedNoUrl > 0) parts.push(`无 Civitai 链接 ${skippedNoUrl} 个（可先「识别 Civitai」补链接）`)
     if (unmapped > 0) parts.push(`类型未映射 ${unmapped} 个`)
     if (notFound > 0) parts.push(`未收录 ${notFound} 个`)
     if (failed > 0) parts.push(`失败 ${failed} 个`)
-    if (done < ids.length) {
-      toast('warn', `标签分配已取消（完成 ${done}/${ids.length}）：已完成部分已保存`)
+    if (done < loraIds.length) {
+      toast('warn', `标签分配已取消（完成 ${done}/${loraIds.length}）：已完成部分已保存`)
       return
     }
     if (ok > 0) toast(failed > 0 ? 'warn' : 'success', `标签分配完成：成功 ${ok} 个${parts.length ? `，${parts.join('，')}` : ''}`)
@@ -314,10 +329,11 @@ export async function batchAssignCivitaiTags() {
 }
 
 /**
- * 一键移动文件（自动标签整理）：把选中模型中已分配分类标签的移动到
- * 模型库根目录对应标签文件夹（主进程自动创建缺失的 7 个标签文件夹，
- * 已存在的不动），元数据键随移动即时迁移。移动后 id 全部变化，
- * 整表重扫收敛；移动后文件夹名与标签一致，自动标签保持稳定。
+ * 一键移动文件（自动标签整理）：把选中的 LoRA 模型移动到模型库根目录的
+ * LoRA 文件夹——已分配分类标签的移入 LoRA/<标签>/（主进程自动创建缺失的
+ * 7 个标签子文件夹，已存在的不动），未标注 LoRA 移入 LoRA/ 根目录，
+ * 元数据键随移动即时迁移。移动后 id 全部变化，整表重扫收敛；
+ * 移动后文件夹名与标签一致，自动标签保持稳定。
  */
 export async function batchOrganizeByTags() {
   const ids = [...state.multiSelect.ids]
@@ -326,17 +342,18 @@ export async function batchOrganizeByTags() {
   const moves = []
   for (const id of ids) {
     const m = byId.get(id)
-    if (m && LORA_TAG_KEYS.has(m.subCategory)) {
-      moves.push({ id, subCategory: m.subCategory })
+    if (!m) continue
+    if (LORA_TAG_KEYS.has(m.subCategory) || m.type === 'lora') {
+      moves.push({ id, subCategory: m.subCategory || '' })
     }
   }
   if (moves.length === 0) {
-    toast('info', '选中模型均未分配分类标签，未做改动')
+    toast('info', '选中的模型均不是 LoRA，未做改动')
     return
   }
   if (
     !(await confirmDialog(
-      `将在模型库根目录创建 7 个分类文件夹（已有的不动），并把 ${moves.length} 个已标注模型移动到对应文件夹（元数据自动迁移）。继续吗？`
+      `将在模型库根目录创建 LoRA 文件夹及其下 7 个分类子文件夹（已有的不动），并把 ${moves.length} 个 LoRA 模型移入对应分类子文件夹（未标注的移入 LoRA 根目录，元数据自动迁移）。继续吗？`
     ))
   ) {
     return
@@ -354,7 +371,7 @@ export async function batchOrganizeByTags() {
     const parts = []
     if (res.failed?.length > 0) parts.push(`失败 ${res.failed.length} 个`)
     if (res.skipped?.length > 0) parts.push(`跳过 ${res.skipped.length} 个`)
-    if (res.moved > 0) toast(res.failed?.length > 0 ? 'warn' : 'success', `已移动 ${res.moved} 个模型到对应分类文件夹${parts.length ? `（${parts.join('，')}）` : ''}`)
+    if (res.moved > 0) toast(res.failed?.length > 0 ? 'warn' : 'success', `已移动 ${res.moved} 个 LoRA 模型到分类文件夹${parts.length ? `（${parts.join('，')}）` : ''}`)
     else toast('info', `未移动任何模型：${parts.join('，') || '无需移动'}`)
   } finally {
     state.multiSelect.busy = false

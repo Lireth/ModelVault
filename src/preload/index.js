@@ -171,9 +171,10 @@ const api = {
      */
     civitaiIdentify: (id) => invokeValidated('models:civitaiIdentify', { id }),
     /**
-     * Civitai 一键分配标签（按已保存链接查询模型类型并映射分类标签），
-     * 返回 { found: true, subCategory, meta } / { found: true, unmapped: true }
-     * / { skipped: true } / { found: false } / { error }
+     * Civitai 一键分配标签（仅 LoRA 模型；按已保存链接查询模型分类并映射
+     * 分类标签），返回 { found: true, subCategory, meta }
+     * / { found: true, unmapped: true } / { skipped: true, reason? }
+     * / { found: false } / { error }
      */
     civitaiCategory: (id) => invokeValidated('models:civitaiCategory', { id }),
     /**

@@ -33,17 +33,26 @@ const roots = []
 describe('planOrganizeMoves', () => {
   const root = path.join(os.tmpdir(), 'plan-root')
 
-  it('按标签 label 生成「根目录/标签文件夹/原文件名」目标路径', () => {
+  it('按标签 label 生成「根目录/LoRA/标签文件夹/原文件名」目标路径', () => {
     const { planned, skipped } = planOrganizeMoves(
       [{ id: path.join(root, 'lora', 'a.safetensors'), subCategory: 'role' }],
       root
     )
-    expect(planned).toEqual([{ id: path.join(root, 'lora', 'a.safetensors'), newPath: path.join(root, '角色', 'a.safetensors') }])
+    expect(planned).toEqual([{ id: path.join(root, 'lora', 'a.safetensors'), newPath: path.join(root, 'LoRA', '角色', 'a.safetensors') }])
+    expect(skipped).toEqual([])
+  })
+
+  it('未标注模型（subCategory 为空）目标为 LoRA 根目录', () => {
+    const { planned, skipped } = planOrganizeMoves(
+      [{ id: path.join(root, 'misc', 'c.safetensors'), subCategory: '' }],
+      root
+    )
+    expect(planned).toEqual([{ id: path.join(root, 'misc', 'c.safetensors'), newPath: path.join(root, 'LoRA', 'c.safetensors') }])
     expect(skipped).toEqual([])
   })
 
   it('非法标签与已在目标位置的模型分别跳过', () => {
-    const inPlace = path.join(root, '角色', 'b.safetensors')
+    const inPlace = path.join(root, 'LoRA', '角色', 'b.safetensors')
     const { planned, skipped } = planOrganizeMoves(
       [
         { id: path.join(root, 'x.safetensors'), subCategory: 'embedding' },
@@ -90,7 +99,7 @@ describe('models:organizeByTags handler', () => {
     return abs
   }
 
-  it('创建 7 个标签文件夹并把已标注模型移入对应文件夹，元数据键随迁', async () => {
+  it('创建 LoRA 及 7 个标签子文件夹并把已标注模型移入对应子文件夹，元数据键随迁', async () => {
     const id = await makeModel(path.join('lora', 'a.safetensors'), 'role')
 
     const res = await handler(makeEvent(), { moves: [{ id, subCategory: 'role' }] })
@@ -99,18 +108,28 @@ describe('models:organizeByTags handler', () => {
     expect(res.failed).toEqual([])
     expect(res.skipped).toEqual([])
 
-    // 7 个标签文件夹全部创建
+    // LoRA 目录及其下 7 个标签子文件夹全部创建
     for (const folder of ['角色', '风格', '概念', '服饰', '背景', '姿势', '工具']) {
-      const stat = await fs.stat(path.join(root, folder))
+      const stat = await fs.stat(path.join(root, 'LoRA', folder))
       expect(stat.isDirectory()).toBe(true)
     }
     // 文件已移动，原位置不存在
-    const newPath = path.join(root, '角色', 'a.safetensors')
+    const newPath = path.join(root, 'LoRA', '角色', 'a.safetensors')
     await expect(fs.readFile(newPath, 'utf-8')).resolves.toBe('model-data')
     await expect(fs.access(id)).rejects.toThrow()
     // 元数据键迁移：标注与封面等用户数据完整保留
     expect(getModelMeta(newPath)).toMatchObject({ subCategory: 'role', note: '标注' })
     expect(getModelMeta(id)).toBeNull()
+  })
+
+  it('未标注模型移入 LoRA 根目录', async () => {
+    const id = await makeModel(path.join('misc', 'e.safetensors'), '')
+    const res = await handler(makeEvent(), { moves: [{ id, subCategory: '' }] })
+    expect(res.error).toBeUndefined()
+    expect(res.moved).toBe(1)
+    const newPath = path.join(root, 'LoRA', 'e.safetensors')
+    await expect(fs.access(newPath)).resolves.toBeUndefined()
+    await expect(fs.access(id)).rejects.toThrow()
   })
 
   it('同名 sidecar 一并移动', async () => {
@@ -120,9 +139,9 @@ describe('models:organizeByTags handler', () => {
 
     const res = await handler(makeEvent(), { moves: [{ id, subCategory: 'style' }] })
     expect(res.moved).toBe(1)
-    const newPath = path.join(root, '风格', 'b.safetensors')
-    await expect(fs.readFile(path.join(root, '风格', 'b.txt'), 'utf-8')).resolves.toBe('说明文本')
-    await expect(fs.readFile(path.join(root, '风格', 'b.preview.png'), 'utf-8')).resolves.toBe('png')
+    const newPath = path.join(root, 'LoRA', '风格', 'b.safetensors')
+    await expect(fs.readFile(path.join(root, 'LoRA', '风格', 'b.txt'), 'utf-8')).resolves.toBe('说明文本')
+    await expect(fs.readFile(path.join(root, 'LoRA', '风格', 'b.preview.png'), 'utf-8')).resolves.toBe('png')
     await expect(fs.access(newPath)).resolves.toBeUndefined()
   })
 
@@ -130,8 +149,8 @@ describe('models:organizeByTags handler', () => {
     const a = await makeModel('a.safetensors', 'concept')
     const b = await makeModel(path.join('sub', 'c.safetensors'), 'concept')
     // 预占目标位置（与 a 同名）
-    await fs.mkdir(path.join(root, '概念'), { recursive: true })
-    await fs.writeFile(path.join(root, '概念', 'a.safetensors'), 'occupied')
+    await fs.mkdir(path.join(root, 'LoRA', '概念'), { recursive: true })
+    await fs.writeFile(path.join(root, 'LoRA', '概念', 'a.safetensors'), 'occupied')
 
     const res = await handler(makeEvent(), {
       moves: [
@@ -143,11 +162,11 @@ describe('models:organizeByTags handler', () => {
     expect(res.moved).toBe(1)
     expect(res.failed).toEqual([{ id: a, error: '目标位置已存在同名文件' }])
     await expect(fs.access(a)).resolves.toBeUndefined()
-    await expect(fs.access(path.join(root, '概念', 'c.safetensors'))).resolves.toBeUndefined()
+    await expect(fs.access(path.join(root, 'LoRA', '概念', 'c.safetensors'))).resolves.toBeUndefined()
   })
 
   it('已在目标位置的模型跳过', async () => {
-    const id = await makeModel(path.join('背景', 'd.safetensors'), 'background')
+    const id = await makeModel(path.join('LoRA', '背景', 'd.safetensors'), 'background')
     const res = await handler(makeEvent(), { moves: [{ id, subCategory: 'background' }] })
     expect(res.moved).toBe(0)
     expect(res.skipped).toEqual([{ id, reason: 'same-dir' }])

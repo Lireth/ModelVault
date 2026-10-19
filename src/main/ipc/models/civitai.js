@@ -1,7 +1,9 @@
 import fs from 'node:fs/promises'
+import path from 'node:path'
 import { BrowserWindow } from 'electron'
 import logger from '../../logger'
-import { getModelMeta, setModelMeta } from '../../services/store'
+import { getModelMeta, setModelMeta, toRelKey } from '../../services/store'
+import { classifyModel } from '../../services/scanner'
 import { saveCoverBuffer } from '../../services/covers'
 import {
   civitaiCompletePatch,
@@ -110,14 +112,21 @@ export function registerCivitaiHandlers() {
     }
   }, { errorPrefix: 'Civitai 补全失败' })
 
-  // 一键分配标签（按 Civitai 分类）：读取已保存的模型页链接，查询 Civitai
-  // 模型信息并映射为本地分类标签写盘。Civitai API 的 type 字段只有
+  // 一键分配标签（按 Civitai 分类，仅 LoRA 模型）：读取已保存的模型页链接，
+  // 查询 Civitai 模型信息并映射为本地分类标签写盘。仅对扫描分类为 lora 的
+  // 模型生效（7 类标签是 LoRA 专属维度）；Civitai API 的 type 字段只有
   // Lora/Checkpoint 等模型种类，character/style 等 7 类分类挂在 tags 里，
-  // 故先查 type 再回退 tags。无链接/未映射/失败的模型不做改动（渲染层
-  // 汇总提示）；映射成功时覆盖已有标签（分配语义）。
+  // 故先查 type 再回退 tags。无链接/非 LoRA/未映射/失败的模型不做改动
+  // （渲染层汇总提示）；映射成功时覆盖已有标签（分配语义）。
   wrapHandler('models:civitaiCategory', async (event, { id } = {}) => {
     const invalid = checkModelIdInRoot(id)
     if (invalid) return { error: invalid }
+    // 模型类型限制：按相对路径复算扫描分类，非 LoRA 直接跳过
+    const rel = toRelKey(id)
+    const segments = rel ? rel.split('/') : []
+    if (classifyModel(segments.slice(0, -1), path.basename(id)) !== 'lora') {
+      return { skipped: true, reason: 'not-lora' }
+    }
     const meta = getModelMeta(id) || {}
     if (!meta.civitaiUrl) {
       return { skipped: true }

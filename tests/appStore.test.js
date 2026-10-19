@@ -623,8 +623,8 @@ describe('批量操作单次状态合并（O2）', () => {
     expect(state.toasts.some((t) => t.type === 'warn' && t.text.includes('成功 2 个，失败 1 个'))).toBe(true)
   })
 
-  it('一键分配标签：确认后逐个按 Civitai 类型分配并单趟同步标签字段', async () => {
-    state.models = [makeModel('a'), makeModel('b')]
+  it('一键分配标签：确认后逐个按 Civitai 分类分配并单趟同步标签字段', async () => {
+    state.models = [makeModel('a', { type: 'lora' }), makeModel('b', { type: 'lora' })]
     state.multiSelect.ids = ['a', 'b']
     api.models.civitaiCategory.mockImplementation((id) =>
       id === 'a'
@@ -641,8 +641,30 @@ describe('批量操作单次状态合并（O2）', () => {
     ).toBe(true)
   })
 
+  it('一键分配标签：非 LoRA 模型不发起 IPC 且计入汇总', async () => {
+    state.models = [makeModel('a', { type: 'lora' }), makeModel('b', { type: 'checkpoint' })]
+    state.multiSelect.ids = ['a', 'b']
+    api.models.civitaiCategory.mockResolvedValue({ found: true, subCategory: 'role', meta: { subCategory: 'role' } })
+    const p = batchAssignCivitaiTags()
+    acceptConfirm()
+    await p
+    expect(api.models.civitaiCategory).toHaveBeenCalledTimes(1)
+    expect(api.models.civitaiCategory).toHaveBeenCalledWith('a')
+    expect(
+      state.toasts.some((t) => t.type === 'success' && t.text.includes('成功 1 个') && t.text.includes('非 LoRA 1 个'))
+    ).toBe(true)
+  })
+
+  it('一键分配标签：全选均非 LoRA 时提示且不发起 IPC', async () => {
+    state.models = [makeModel('a', { type: 'checkpoint' })]
+    state.multiSelect.ids = ['a']
+    await batchAssignCivitaiTags()
+    expect(api.models.civitaiCategory).not.toHaveBeenCalled()
+    expect(state.toasts.some((t) => t.text.includes('均不是 LoRA'))).toBe(true)
+  })
+
   it('一键分配标签：确认层拒绝时不发起任何 IPC', async () => {
-    state.models = [makeModel('a')]
+    state.models = [makeModel('a', { type: 'lora' })]
     state.multiSelect.ids = ['a']
     const p = batchAssignCivitaiTags()
     rejectConfirm()
@@ -650,28 +672,31 @@ describe('批量操作单次状态合并（O2）', () => {
     expect(api.models.civitaiCategory).not.toHaveBeenCalled()
   })
 
-  it('一键移动文件：已标注模型按标签提交移动并整表重扫，未标注的不参与', async () => {
+  it('一键移动文件：已标注与未标注 LoRA 按新结构提交移动并整表重扫，非 LoRA 不参与', async () => {
     state.models = [
-      makeModel('a', { subCategory: 'role' }),
-      makeModel('b', { subCategory: '' }),
-      makeModel('c', { subCategory: 'base' })
+      makeModel('a', { type: 'lora', subCategory: 'role' }),
+      makeModel('b', { type: 'lora', subCategory: '' }),
+      makeModel('c', { type: 'checkpoint', subCategory: 'base' })
     ]
     state.multiSelect.ids = ['a', 'b', 'c']
     state.scanning = true // 跳过移动后的整表重扫（该链路由 scanner/watcher 测试覆盖）
-    api.models.organizeByTags.mockResolvedValue({ moved: 1, failed: [], skipped: [] })
+    api.models.organizeByTags.mockResolvedValue({ moved: 2, failed: [], skipped: [] })
     const p = batchOrganizeByTags()
     acceptConfirm()
     await p
-    expect(api.models.organizeByTags).toHaveBeenCalledWith([{ id: 'a', subCategory: 'role' }])
-    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已移动 1 个模型'))).toBe(true)
+    expect(api.models.organizeByTags).toHaveBeenCalledWith([
+      { id: 'a', subCategory: 'role' },
+      { id: 'b', subCategory: '' }
+    ])
+    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已移动 2 个 LoRA 模型'))).toBe(true)
   })
 
-  it('一键移动文件：选中模型均未分配标签时提示且不发起 IPC', async () => {
-    state.models = [makeModel('a', { subCategory: '' })]
+  it('一键移动文件：选中模型均非 LoRA 时提示且不发起 IPC', async () => {
+    state.models = [makeModel('a', { type: 'checkpoint', subCategory: '' })]
     state.multiSelect.ids = ['a']
     await batchOrganizeByTags()
     expect(api.models.organizeByTags).not.toHaveBeenCalled()
-    expect(state.toasts.some((t) => t.text.includes('均未分配分类标签'))).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('均不是 LoRA'))).toBe(true)
   })
 
   it('批量删除：确认后单趟移除并清理 selectedId 与选区', async () => {

@@ -17,20 +17,24 @@ import { wrapHandler, checkModelIdInRoot } from '../handler'
  * 历史说明：整理功能面板曾在精简阶段移除；本模块只做单文件粒度的
  * 最小闭环，不恢复整套整理 UI。
  * - models:organizeByTags：一键移动文件（自动标签整理）：在模型库根目录
- *   创建 7 个分类标签文件夹（已存在的不动），把已分配标签的模型移动到
- *   对应文件夹，元数据键即时迁移（与 moveModelTo 同一机制）。
+ *   创建 LoRA 文件夹及其下 7 个分类标签子文件夹（已存在的不动），已标注
+ *   LoRA 移入 LoRA/<标签>/，未标注 LoRA 移入 LoRA/ 根目录，元数据键即时
+ *   迁移（与 moveModelTo 同一机制）。
  */
 
 /**
- * 移动文件的目标文件夹名（与分类标签 label 一致，保证移动后重扫的
- * 文件夹自动标签与元数据标签一致，形成闭环）
+ * 移动文件的目标目录（LoRA 一级文件夹 + 7 个标签子文件夹名，与分类标签
+ * label 一致，保证移动后重扫的文件夹自动标签与元数据标签一致，形成闭环）：
+ * 已标注 LoRA → LoRA/<标签>/，未标注 LoRA → LoRA/ 根目录。
  */
+const LORA_DIR = 'LoRA'
 const TAG_FOLDER_NAMES = LORA_TAG_DEFS.map((d) => d.label)
 
 /**
  * 计算一键移动的计划（纯函数，便于单测）：
- * 校验标签合法性，按「根目录/标签文件夹/原文件名」生成目标路径；
- * 已在目标位置的模型计入 skipped（same-dir），不再重复移动。
+ * subCategory 命中 7 类标签时目标为「根目录/LoRA/标签文件夹/原文件名」，
+ * subCategory 为空（未标注 LoRA）时目标为「根目录/LoRA/原文件名」；
+ * 非法标签跳过（invalid-tag），已在目标位置的模型计入 skipped（same-dir）。
  * @param {{id: string, subCategory: string}[]} moves 待移动项
  * @param {string} root 模型库根目录
  * @returns {{planned: {id: string, newPath: string}[], skipped: {id: string, reason: string}[]}}
@@ -40,16 +44,20 @@ export function planOrganizeMoves(moves, root) {
   const skipped = []
   for (const item of moves || []) {
     if (!item || typeof item.id !== 'string' || !item.id) continue
-    if (!LORA_TAG_KEYS.has(item.subCategory)) {
-      skipped.push({ id: item.id, reason: 'invalid-tag' })
-      continue
+    let targetDir = LORA_DIR
+    if (item.subCategory) {
+      if (!LORA_TAG_KEYS.has(item.subCategory)) {
+        skipped.push({ id: item.id, reason: 'invalid-tag' })
+        continue
+      }
+      const label = LORA_TAG_DEFS.find((d) => d.key === item.subCategory)?.label || ''
+      if (!label) {
+        skipped.push({ id: item.id, reason: 'invalid-tag' })
+        continue
+      }
+      targetDir = path.join(LORA_DIR, label)
     }
-    const label = LORA_TAG_DEFS.find((d) => d.key === item.subCategory)?.label || ''
-    if (!label) {
-      skipped.push({ id: item.id, reason: 'invalid-tag' })
-      continue
-    }
-    const newPath = path.join(root, label, path.basename(item.id))
+    const newPath = path.join(root, targetDir, path.basename(item.id))
     if (path.resolve(newPath) === path.resolve(item.id)) {
       skipped.push({ id: item.id, reason: 'same-dir' })
       continue
@@ -127,8 +135,9 @@ export function registerFilesHandlers() {
     return { path: newPath }
   }, { errorPrefix: '移动失败' })
 
-  // 一键移动文件（自动标签整理）：根目录创建 7 个标签文件夹（已存在不动），
-  // 把已分配标签的模型移入对应文件夹；元数据键即时迁移，watcher 触发局部重扫。
+  // 一键移动文件（自动标签整理）：根目录创建 LoRA 文件夹及其下 7 个标签
+  // 子文件夹（已存在不动），已标注 LoRA 移入 LoRA/<标签>/，未标注 LoRA 移入
+  // LoRA/ 根目录；元数据键即时迁移，watcher 触发局部重扫。
   // 单个失败（同名冲突等）不中断整批，结果按模型反馈。
   wrapHandler('models:organizeByTags', async (event, { moves } = {}) => {
     if (!Array.isArray(moves) || moves.length === 0) {
@@ -155,10 +164,11 @@ export function registerFilesHandlers() {
     if (planned.length === 0) {
       return { moved: 0, failed: [], skipped }
     }
-    // 创建 7 个标签文件夹（recursive：已存在时静默保持原样）
+    // 创建 LoRA 一级目录与 7 个标签子文件夹（recursive：已存在时静默保持原样）
     try {
+      await fs.mkdir(path.join(root, LORA_DIR), { recursive: true })
       for (const folder of TAG_FOLDER_NAMES) {
-        await fs.mkdir(path.join(root, folder), { recursive: true })
+        await fs.mkdir(path.join(root, LORA_DIR, folder), { recursive: true })
       }
     } catch (err) {
       return { error: `创建分类文件夹失败: ${err.message}` }

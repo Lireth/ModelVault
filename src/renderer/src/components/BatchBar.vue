@@ -154,7 +154,7 @@ onUnmounted(() => {
             class="bb-menu-item"
             role="menuitem"
             :disabled="!batchReady"
-            title="按已保存的 Civitai 链接查询模型类型并分配分类标签（character→角色、style→风格、concept→概念、clothing→服饰、background→背景、pose→姿势、tool→工具；无链接的模型跳过，已有标签会被覆盖）"
+            title="仅 LoRA 模型：按已保存的 Civitai 链接查询分类并分配分类标签（character→角色、style→风格、concept→概念、clothing→服饰、background→背景、pose→姿势、tool→工具；非 LoRA/无链接的模型跳过，已有标签会被覆盖）"
             @click="runMore(batchAssignCivitaiTags)"
           >Civitai 分配标签</button>
           <button
@@ -170,7 +170,7 @@ onUnmounted(() => {
           class="bb-menu-item"
           role="menuitem"
           :disabled="!batchReady"
-          title="在模型库根目录创建 7 个分类文件夹（已有的不动），把已分配标签的模型移动到对应文件夹（元数据自动迁移）"
+          title="在模型库根目录创建 LoRA 文件夹及其下 7 个分类子文件夹（已有的不动），把选中的 LoRA 模型移入对应分类子文件夹（未标注的移入 LoRA 根目录，元数据自动迁移）"
           @click="runMore(batchOrganizeByTags)"
         >一键移动文件</button>
         <button

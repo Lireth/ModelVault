@@ -385,7 +385,7 @@ async function onSave() {
                   :style="{ borderColor: currentSubInfo.color, color: currentSubInfo.color }"
                 >{{ currentSubInfo.label }}</span>
                 <span v-else class="subcat-hint">
-                  未分配（可在文件所在文件夹按标签命名自动匹配，或使用批量栏「Civitai 分配标签」）
+                  未分配（可在文件所在文件夹按标签命名自动匹配，或使用批量栏「Civitai 分配标签」，仅 LoRA）
                 </span>
                 <span v-if="selectedModel.type === 'checkpoint'" class="subcat-hint">大模型自动标注为基底模型</span>
               </div>
