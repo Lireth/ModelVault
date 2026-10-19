@@ -1063,6 +1063,37 @@ describe('applyThumbUpdates', () => {
     applyThumbUpdates('not-an-array')
     expect(state.models).toHaveLength(2)
   })
+
+  it('coverThumb 按 path 合并进对应 covers 条目（OPT-1）', () => {
+    state.models = [
+      makeModel('m1', {
+        coverUrl: 'orig',
+        covers: [
+          { rel: 'a.png', path: 'p-a', url: 'u-a' },
+          { rel: 'b.png', path: 'p-b', url: 'u-b' }
+        ]
+      })
+    ]
+    // 仅 coverThumb：默认封面 URL 不变，目标 covers 条目获得 thumbUrl
+    applyThumbUpdates([{ id: 'm1', coverThumb: { path: 'p-b', thumbUrl: 't-b' } }])
+    expect(state.models[0].coverUrl).toBe('orig')
+    expect(state.models[0].covers[0].thumbUrl).toBeUndefined()
+    expect(state.models[0].covers[1].thumbUrl).toBe('t-b')
+    // coverUrl 与 coverThumb 同时携带时一并生效；未知 path 静默忽略
+    applyThumbUpdates([
+      { id: 'm1', coverUrl: 'thumb1', coverThumb: { path: 'p-a', thumbUrl: 't-a' } },
+      { id: 'm1', coverThumb: { path: 'p-missing', thumbUrl: 't-x' } }
+    ])
+    expect(state.models[0].coverUrl).toBe('thumb1')
+    expect(state.models[0].covers[0].thumbUrl).toBe('t-a')
+    expect(state.models[0].covers[1].thumbUrl).toBe('t-b')
+  })
+
+  it('coverThumb 与 coverUrl 均缺省的更新被忽略', () => {
+    state.models = [makeModel('m1', { coverUrl: 'orig' })]
+    applyThumbUpdates([{ id: 'm1' }])
+    expect(state.models[0].coverUrl).toBe('orig')
+  })
 })
 
 describe('批量拖拽导入封面（OPT-9）', () => {

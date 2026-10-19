@@ -249,7 +249,11 @@ export function registerScanHandlers() {
       const models = scanResult.models
       // 重关联限定受影响子树：范围外元数据保持原样
       const relinkResult = relinkScannedMeta(models, { affectedDirs: subDirs })
-      const decorated = await decorateModels(models, signal)
+      // pruneThumbs=false（OPT-1 修复）：局部装饰仅覆盖变更子树，若按局部
+      // usedThumbs 清理会把子树外模型的全部缩略图误删（缓存命中路径不会重新
+      // 生成，坏图将持续到元数据变化）。失效缩略图与孤儿封面同一约定：
+      // 由下一次全量扫描兜底清理
+      const decorated = await decorateModels(models, signal, { pruneThumbs: false })
       models.length = 0 // 同全量扫描：装饰后立即释放原始数组（O8）
 
       const win = BrowserWindow.fromWebContents(event.sender)

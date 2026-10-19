@@ -50,10 +50,24 @@ let cycleAdvancing = false
 
 const cycleList = computed(() => props.model.covers || [])
 
+/** 本轮悬停会话内加载失败的缩略图 URL（回退原图展示） */
+const cycleBrokenUrls = new Set()
+
+/**
+ * 封面的展示 URL（OPT-1）：优先主进程缩略图（thumbUrl，640px JPEG），
+ * 缩略图缺失或本轮会话内预加载失败时回退原图——多 MB 原图的预加载解码
+ * 是悬停卡顿的根源；缩略图文件被清理/源图变更导致 404 时不产生碎图帧。
+ */
+function displayUrlOf(c) {
+  return c.thumbUrl && !cycleBrokenUrls.has(c.thumbUrl) ? c.thumbUrl : c.url
+}
+
 /** 当前轮播图 URL（空串表示未轮播） */
-const cycleUrl = computed(() =>
-  cycleIdx.value >= 0 ? cycleList.value[cycleIdx.value]?.url || '' : ''
-)
+const cycleUrl = computed(() => {
+  if (cycleIdx.value < 0) return ''
+  const c = cycleList.value[cycleIdx.value]
+  return c ? displayUrlOf(c) : ''
+})
 
 function clearCycleTimers() {
   clearTimeout(hoverTimer)
@@ -62,7 +76,8 @@ function clearCycleTimers() {
   cycleTimer = 0
 }
 
-/** 预加载封面图：本地文件加载快，但多 MB 原图解码仍需时间，先载后切避免空白帧 */
+/** 预加载封面图：本地文件加载快，但多 MB 原图解码仍需时间，先载后切避免空白帧。
+ * OPT-1：与展示 URL 同源（优先缩略图），预载的即所要显示的 */
 function preloadImage(url) {
   return new Promise((resolve, reject) => {
     const im = new Image()
@@ -83,11 +98,23 @@ async function advanceCycle(session) {
       const next = (cycleIdx.value + step) % list.length
       const c = list[next]
       if (cycleFailed.has(c.path)) continue
+      const display = displayUrlOf(c)
       try {
-        await preloadImage(c.url)
+        await preloadImage(display)
       } catch {
-        cycleFailed.add(c.path)
-        continue
+        // 缩略图预加载失败：本轮会话内标记并回退原图；原图也失败才跳过该封面
+        if (display !== c.url) {
+          cycleBrokenUrls.add(display)
+          try {
+            await preloadImage(c.url)
+          } catch {
+            cycleFailed.add(c.path)
+            continue
+          }
+        } else {
+          cycleFailed.add(c.path)
+          continue
+        }
       }
       if (session !== cycleSession) return
       cycleIdx.value = next
@@ -118,6 +145,7 @@ function stopCycle() {
   clearCycleTimers()
   cycleIdx.value = -1
   cycleFailed.clear()
+  cycleBrokenUrls.clear()
 }
 
 /** 已展示轮播图加载失败（预加载成功后的兜底）：跳过该图继续推进 */

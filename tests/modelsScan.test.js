@@ -180,6 +180,26 @@ describe('models:partialScan（A-03）', () => {
   })
 })
 
+describe('局部扫描不清理子树外缩略图（OPT-1 修复）', () => {
+  it('partialScan 跳过缩略图清理：非本次装饰产出的缩略图文件保留', async () => {
+    const partial = getRegisteredHandler('models:partialScan')
+    await registerLibrary(root)
+    // 预置一个「子树外模型」的缩略图文件（模拟此前全量扫描的产物）
+    const thumbsDir = path.join(root, '.modelvault', 'thumbs')
+    await fs.mkdir(thumbsDir, { recursive: true })
+    const externalThumb = path.join(thumbsDir, 'external-1.jpg')
+    await fs.writeFile(externalThumb, 'jpeg-bytes')
+    // mock 扫描器返回空列表：局部装饰 usedThumbs 为空
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+
+    const res = await partial(makeEvent(), { folder: root, dirs: ['lora'] })
+    expect(res.error).toBeUndefined()
+    // 修复前：decorateModels 按局部 usedThumbs 清理，子树外缩略图被全部误删，
+    // 且装饰缓存命中路径不会重新生成，坏图持续到元数据变化
+    await expect(fs.access(externalThumb)).resolves.toBeUndefined()
+  })
+})
+
 describe('models:scan 取消', () => {
   it('cancelScan 中止后返回 { canceled: true }', async () => {
     const scan = getRegisteredHandler('models:scan')

@@ -322,8 +322,15 @@ describe('startThumbDrain 窗口生命周期（A7）', () => {
     startThumbDrain(win)
     await awaitThumbDrain()
 
+    // OPT-1：默认封面同时是 covers 条目，更新携带 coverUrl 与 coverThumb 双字段
     expect(win.webContents.send).toHaveBeenCalledWith('models:thumbsReady', {
-      updates: [{ id: abs, coverUrl: expect.stringContaining('thumbs') }]
+      updates: [
+        {
+          id: abs,
+          coverUrl: expect.stringContaining('thumbs'),
+          coverThumb: { path: expect.any(String), thumbUrl: expect.stringContaining('thumbs') }
+        }
+      ]
     })
   })
 
@@ -432,6 +439,112 @@ describe('健康检查与 civitai 自动导入（F6/F8 集成）', () => {
     const [decorated] = await decorateModels([makeModel(abs, { type: 'lora' })])
     expect(decorated.triggerWords).toBe('用户已有')
     expect(decorated.triggerWordsSource).toBe('')
+  })
+})
+
+describe('OPT-1 轮播封面复用缩略图管线', () => {
+  beforeEach(() => {
+    clearDeferredOwners()
+    clearDeferredJobs()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** 准备一个双封面模型（默认封面 c0），nativeImage 桩允许缩略图真实落盘 */
+  async function setupMultiCover() {
+    const abs = path.join(root, 'multi.safetensors')
+    await fs.writeFile(abs, 'x')
+    const coversDir = path.join(root, DATA_DIR, COVERS_DIR)
+    await fs.mkdir(coversDir, { recursive: true })
+    const c0 = path.join(coversDir, 'c0.png')
+    const c1 = path.join(coversDir, 'c1.png')
+    await fs.writeFile(c0, PNG_MAGIC)
+    await fs.writeFile(c1, PNG_MAGIC)
+    setModelMeta(abs, {
+      cover: `${DATA_DIR}/${COVERS_DIR}/c0.png`,
+      covers: [`${DATA_DIR}/${COVERS_DIR}/c0.png`, `${DATA_DIR}/${COVERS_DIR}/c1.png`]
+    })
+    vi.mocked(nativeImage.createFromBuffer).mockReturnValue({
+      isEmpty: () => false,
+      getSize: () => ({ width: 1200, height: 900 }),
+      resize: () => ({ toJPEG: () => Buffer.from('fake-jpeg') })
+    })
+    return { abs, c0, c1 }
+  }
+
+  it('装饰阶段为全部封面登记缩略图；drain 后回写 covers 条目并推送 coverThumb', async () => {
+    const { abs, c0, c1 } = await setupMultiCover()
+    const [decorated] = await decorateModels([makeModel(abs)])
+    // 缩略图未命中：所有封面先用原图 URL，登记后台任务
+    expect(decorated.covers.map((c) => c.thumbUrl)).toEqual(['', ''])
+    expect(decorated.coverUrl).toContain('c0.png')
+
+    const win = { isDestroyed: () => false, webContents: { send: vi.fn() } }
+    startThumbDrain(win)
+    await awaitThumbDrain()
+
+    // drain 后：默认封面 coverUrl 与全部 covers 条目均回写缩略图 URL
+    expect(decorated.coverUrl).toContain('thumbs')
+    expect(decorated.covers.map((c) => c.thumbUrl)).toEqual([
+      expect.stringContaining('thumbs'),
+      expect.stringContaining('thumbs')
+    ])
+    // 推送载荷：默认封面条目 coverUrl + coverThumb 双字段；非默认仅 coverThumb
+    const updates = win.webContents.send.mock.calls
+      .filter((c) => c[0] === 'models:thumbsReady')
+      .flatMap((c) => c[1].updates)
+    expect(updates).toHaveLength(2)
+    const defaultUpdate = updates.find((u) => u.coverUrl)
+    const carouselUpdate = updates.find((u) => !u.coverUrl)
+    expect(defaultUpdate.id).toBe(abs)
+    expect(defaultUpdate.coverThumb).toEqual({ path: c0, thumbUrl: expect.any(String) })
+    expect(carouselUpdate.id).toBe(abs)
+    expect(carouselUpdate.coverUrl).toBe('')
+    expect(carouselUpdate.coverThumb).toEqual({ path: c1, thumbUrl: expect.any(String) })
+  })
+
+  it('缩略图生成后再次装饰命中缓存：thumbUrl 保留且缓存文件不被 prune 误删', async () => {
+    const { abs } = await setupMultiCover()
+    await decorateModels([makeModel(abs)])
+    startThumbDrain(null)
+    await awaitThumbDrain()
+
+    // 二次装饰（mtime/签名未变）走缓存命中路径：保留 drain 回写的 thumbUrl
+    const [cached] = await decorateModels([{ ...makeModel(abs) }])
+    expect(cached.covers.every((c) => c.thumbUrl.includes('thumbs'))).toBe(true)
+    // prune 名单必须包含全部封面缩略图（命中路径计入），文件仍然存在
+    for (const c of cached.covers) {
+      await expect(fs.access(c.thumbPath)).resolves.toBeUndefined()
+    }
+  })
+
+  it('默认封面回退 sidecar 预览图时仍走既有 coverUrl 链路（不进 covers）', async () => {
+    const abs = path.join(root, 'sidecar-default.safetensors')
+    await fs.writeFile(abs, 'x')
+    // 同名 sidecar 预览图（非 covers 成员）
+    const sidecar = path.join(root, 'sidecar-default.png')
+    await fs.writeFile(sidecar, PNG_MAGIC)
+    vi.mocked(nativeImage.createFromBuffer).mockReturnValue({
+      isEmpty: () => false,
+      getSize: () => ({ width: 1200, height: 900 }),
+      resize: () => ({ toJPEG: () => Buffer.from('fake-jpeg') })
+    })
+
+    const win = { isDestroyed: () => false, webContents: { send: vi.fn() } }
+    const [decorated] = await decorateModels([makeModel(abs)])
+    expect(decorated.covers).toEqual([])
+    startThumbDrain(win)
+    await awaitThumbDrain()
+    expect(decorated.coverUrl).toContain('thumbs')
+    // sidecar 默认封面不在 covers 列表内：更新仅含 coverUrl，无 coverThumb
+    const updates = win.webContents.send.mock.calls
+      .filter((c) => c[0] === 'models:thumbsReady')
+      .flatMap((c) => c[1].updates)
+    expect(updates).toHaveLength(1)
+    expect(updates[0].coverUrl).toContain('thumbs')
+    expect(updates[0].coverThumb).toBeUndefined()
   })
 })
 

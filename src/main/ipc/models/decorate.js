@@ -82,8 +82,11 @@ export function trackDeferredOwner(modelId, absCover) {
 
 /**
  * 向窗口推送若干卡片的缩略图就绪事件（载荷格式与 drain 推送一致：{updates}）。
+ * update 形状：{ id, coverUrl?, coverThumb? }——coverUrl 为默认封面缩略图
+ * （OPT-1 前 updates 恒有此字段），coverThumb 为轮播封面条目更新
+ * { path, thumbUrl }（OPT-1：轮播复用缩略图管线后新增，二者至少其一）。
  * @param {object|null} win 来源窗口（null/已销毁时静默跳过）
- * @param {Array<{id:string, coverUrl:string}>} updates
+ * @param {Array<{id:string, coverUrl?:string, coverThumb?:{path:string, thumbUrl:string}}>} updates
  */
 export function sendThumbReady(win, updates) {
   if (!win || win.isDestroyed() || !updates?.length) return
@@ -119,17 +122,30 @@ export function startThumbDrain(win) {
       drainDeferredThumbs((absCover, thumbPath) => {
         const ids = ownersSnapshot.get(absCover)
         if (!ids?.size) return
-        const coverUrl = toImageUrl(thumbPath)
-        // 同步更新装饰缓存，使下一次扫描的缓存命中直接携带缩略图 URL
+        const thumbUrl = toImageUrl(thumbPath)
+        const updates = []
         for (const id of ids) {
           const entry = decorateCache.get(id)
-          if (entry && entry.deferredCover === absCover) {
+          if (!entry) continue
+          const update = { id, coverUrl: '' }
+          if (entry.deferredCover === absCover) {
             entry.deferredCover = ''
             entry.thumbPath = thumbPath
-            entry.decorated.coverUrl = coverUrl
+            entry.decorated.coverUrl = thumbUrl
+            update.coverUrl = thumbUrl
           }
+          // OPT-1：轮播封面（含作为默认封面的 covers 条目）缩略图生成完成后
+          // 回写装饰缓存（下一轮扫描命中即携带），并以 coverThumb 通知渲染层
+          // 更新对应 covers 条目（渲染层轮播据此从原图切换为缩略图）
+          const coverEntry = (entry.decorated.covers || []).find((cv) => cv.path === absCover)
+          if (coverEntry) {
+            coverEntry.thumbPath = thumbPath
+            coverEntry.thumbUrl = thumbUrl
+            update.coverThumb = { path: absCover, thumbUrl }
+          }
+          if (update.coverUrl || update.coverThumb) updates.push(update)
         }
-        sendThumbReady(win, [...ids].map((id) => ({ id, coverUrl })))
+        sendThumbReady(win, updates)
       })
     )
     .finally(() => {
@@ -198,6 +214,11 @@ async function decorateOne(model, usedThumbs) {
     decorateCache.delete(model.id)
     decorateCache.set(model.id, cached)
     if (cached.thumbPath) usedThumbs.add(path.basename(cached.thumbPath))
+    // OPT-1：轮播封面缩略图同样计入保留名单——漏计会被 pruneThumbs 误删，
+    // 且缓存命中路径不会重新生成，坏图将持续到元数据变化
+    for (const cv of cached.decorated.covers) {
+      if (cv.thumbPath) usedThumbs.add(path.basename(cv.thumbPath))
+    }
     return cached.decorated
   }
 
@@ -223,13 +244,35 @@ async function decorateOne(model, usedThumbs) {
   if (!cover) {
     cover = await findSidecarPreview(model.id)
   }
-  // 卡片显示使用缩略图：命中缓存直接用；未命中登记后台生成，
+  // OPT-1 全部封面登记缩略图：卡片悬停轮播此前预加载的是各封面原图
+  // （多 MB 级），内存峰值与解码开销随封面数线性放大；改为与默认封面共用
+  // 同一缩略图管线——命中缓存立即可用；未命中登记后台生成并登记归属
+  // （先用原图，完成后经 thumbsReady 以 coverThumb 推送更新）。
+  // 详情页画廊不受影响，仍使用原图 URL。
+  let defaultThumbPath = ''
+  await Promise.all(
+    covers.map(async (c) => {
+      const tp = await getThumbPathDeferred(c.path)
+      if (tp) {
+        usedThumbs.add(path.basename(tp))
+        c.thumbPath = tp
+        c.thumbUrl = toImageUrl(tp)
+      } else {
+        c.thumbUrl = ''
+        trackDeferredThumb(c.path, model.id)
+      }
+      // 默认封面在封面列表内时复用循环结果，避免重复 stat/登记
+      if (defaultEntry && c.path === cover) defaultThumbPath = tp
+    })
+  )
+  // 卡片显示使用缩略图：默认封面复用上方循环结果（封面列表内），
+  // sidecar 回退的默认封面单独解析；未命中登记后台生成，
   // 先用原图显示（后台完成后经 thumbsReady 事件更新），避免阻塞扫描响应
   let coverUrl = ''
   let thumbPath = ''
   let deferredCover = ''
   if (cover) {
-    thumbPath = await getThumbPathDeferred(cover)
+    thumbPath = defaultEntry ? defaultThumbPath : await getThumbPathDeferred(cover)
     if (thumbPath) {
       usedThumbs.add(path.basename(thumbPath))
       coverUrl = toImageUrl(thumbPath)
@@ -297,8 +340,13 @@ async function decorateOne(model, usedThumbs) {
  * 末尾按已使用的缩略图清单清理失效缩略图文件。
  * @param {Array<object>} models 扫描出的模型列表
  * @param {AbortSignal} [signal] 取消信号（批间检查）
+ * @param {{pruneThumbs?: boolean}} [opts] pruneThumbs=false 跳过末尾的失效
+ *   缩略图清理（局部增量扫描必传）：局部装饰仅覆盖变更子树，usedThumbs 不含
+ *   子树外模型的缩略图，此时按名单清理会把子树外有效缩略图全部误删——且
+ *   装饰缓存命中路径不会重新生成，坏图将持续到元数据变化。失效缩略图与孤儿
+ *   封面同一约定（scan.js：「不做孤儿清理，全量扫描兜底」）。
  */
-export async function decorateModels(models, signal) {
+export async function decorateModels(models, signal, opts = {}) {
   const usedThumbs = new Set()
   const result = []
   for (let i = 0; i < models.length; i += DECORATE_BATCH_SIZE) {
@@ -307,6 +355,6 @@ export async function decorateModels(models, signal) {
     const decoratedBatch = await Promise.all(batch.map((m) => decorateOne(m, usedThumbs)))
     result.push(...decoratedBatch)
   }
-  await pruneThumbs(usedThumbs)
+  if (opts.pruneThumbs !== false) await pruneThumbs(usedThumbs)
   return result
 }

@@ -266,6 +266,36 @@ describe('ModelCard 封面悬停轮播', () => {
     wrapper.unmount()
   })
 
+  it('轮播优先使用封面缩略图（OPT-1）', async () => {
+    const covers = makeCovers('t', 2)
+    // 第二张携带主进程推送的缩略图地址：预载与展示均走 thumbUrl
+    covers[1].thumbUrl = 'mvimg://thumb/t1.jpg'
+    const wrapper = mountCard(
+      makeModel('m1', { cover: covers[0].path, covers, coverUrl: 'mvimg://thumb/t0.png' })
+    )
+    await wrapper.find('.cover').trigger('mouseenter')
+    await vi.advanceTimersByTimeAsync(HOVER_DELAY)
+    expect(currentCycleSrc(wrapper)).toBe(covers[1].thumbUrl)
+    wrapper.unmount()
+  })
+
+  it('缩略图预加载失败时回退原图（OPT-1）', async () => {
+    const covers = makeCovers('u', 2)
+    covers[1].thumbUrl = 'mvimg://thumb/u1.jpg'
+    failUrls.add(covers[1].thumbUrl)
+    const wrapper = mountCard(
+      makeModel('m1', { cover: covers[0].path, covers, coverUrl: 'mvimg://thumb/u0.png' })
+    )
+    await wrapper.find('.cover').trigger('mouseenter')
+    await vi.advanceTimersByTimeAsync(HOVER_DELAY)
+    // 缩略图预载失败 → 回退原图展示，封面不被跳过
+    expect(currentCycleSrc(wrapper)).toBe(covers[1].url)
+    // 后续推进正常（原图可加载）
+    await vi.advanceTimersByTimeAsync(CYCLE_INTERVAL)
+    expect(currentCycleSrc(wrapper)).toBe(covers[0].url)
+    wrapper.unmount()
+  })
+
   it('光标扫过未停稳不触发轮播', async () => {
     const covers = makeCovers('c', 2)
     const wrapper = mountCard(

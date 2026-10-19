@@ -147,7 +147,8 @@ const api = {
     onFsChanged: (listener) => subscribe('models:fsChanged', listener),
     /** 订阅元数据落盘失败事件（message: 错误信息），返回取消监听函数 */
     onStoreError: (listener) => subscribe('models:storeError', listener),
-    /** 订阅后台缩略图生成完成事件（updates: [{ id, coverUrl }]），返回取消监听函数 */
+    /** 订阅后台缩略图生成完成事件（updates: [{ id, coverUrl?, coverThumb? }]，
+     * coverThumb 为轮播封面条目缩略图更新 { path, thumbUrl }），返回取消监听函数 */
     onThumbsReady: (listener) => subscribe('models:thumbsReady', listener),
     /** 订阅后台哈希预热进度事件（快照: { active, id, percent, hashedBytes, totalBytes, done, remaining }） */
     onWarmupProgress: (listener) => subscribe('models:warmupProgress', listener),

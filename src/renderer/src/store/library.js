@@ -242,7 +242,9 @@ export function cancelScan() {
 /**
  * 应用后台缩略图生成完成的封面 URL 更新
  * （首次扫描时卡片先显示原图，缩略图在后台补齐后替换）。
- * @param {Array<{id: string, coverUrl: string}>} updates 更新列表
+ * @param {Array<{id: string, coverUrl?: string, coverThumb?: {path: string, thumbUrl: string}}>} updates
+ *   更新列表：coverUrl 为默认封面缩略图；coverThumb（OPT-1）为轮播封面条目
+ *   的缩略图更新，按 path 匹配 covers 中的对应项
  */
 export function applyThumbUpdates(updates) {
   if (!Array.isArray(updates)) return
@@ -251,11 +253,21 @@ export function applyThumbUpdates(updates) {
   // 替换会使 selectedModel 指向新引用，但详情页 watch 有 formDirty 保护
   // （有编辑时跳过重填），无编辑时重填等值无副作用
   const indexById = new Map(state.models.map((m, i) => [m.id, i]))
-  for (const { id, coverUrl } of updates) {
-    if (!coverUrl) continue
+  for (const { id, coverUrl, coverThumb } of updates) {
+    if (!coverUrl && !coverThumb) continue
     const idx = indexById.get(id)
-    if (idx !== undefined) {
-      state.models[idx] = { ...state.models[idx], coverUrl }
+    if (idx === undefined) continue
+    let next = state.models[idx]
+    if (coverUrl) next = { ...next, coverUrl }
+    if (coverThumb && Array.isArray(next.covers)) {
+      const ci = next.covers.findIndex((c) => c.path === coverThumb.path)
+      if (ci >= 0) {
+        const covers = next.covers.map((c, i) =>
+          i === ci ? { ...c, thumbUrl: coverThumb.thumbUrl } : c
+        )
+        next = { ...next, covers }
+      }
     }
+    if (next !== state.models[idx]) state.models[idx] = next
   }
 }
