@@ -1,18 +1,26 @@
 <script setup>
 import { computed } from 'vue'
 import {
+  BASE_MODEL_FAMILIES,
+  duplicateGroups,
+  duplicateWastedBytes,
   MODEL_TYPES,
   formatSize,
   state,
   typeInfo
 } from '../store/appStore'
+import { normalizeBaseModel } from '../../../shared/model-categories'
 
 /**
- * 库统计区（F7）：模型资产总览——总数/总容量/分类占比/标注覆盖率，
- * 以及最占空间 TOP 5（「该删谁」清理场景的第一入口）。
- * 全部由渲染层 state.models 派生，零 IPC、随扫描/标注即时刷新。
- * 说明：本组件为「轻量统计形态」——完整占用分析面板曾在功能精简阶段
- * 被移除，重启时以设置页区块而非独立面板的形态落地。
+ * 库统计区（F7，F-3 图表化增强）：
+ * - 总览数字 + 分类容量堆叠条（一键看「磁盘被谁吃了」）+ 分类明细行；
+ * - 标注覆盖率（引导补全标注）；
+ * - 基底模型分布（F-2 数据：autoInfo 解析 + Civitai 回填，按家族归一化）；
+ * - 重复占用（FEAT-1：冗余副本可释放空间，给清理动机）；
+ * - 最占空间 TOP 5。
+ * 全部由渲染层 state.models 派生，零 IPC、随扫描/标注即时刷新；
+ * 图表为纯 CSS 条形（无图表库依赖）。本组件为「轻量统计形态」——完整
+ * 占用分析面板曾在功能精简阶段被移除，重启时以设置页区块而非独立面板落地。
  */
 
 const stats = computed(() => {
@@ -103,6 +111,60 @@ const topSize = computed(() =>
     .slice(0, 5)
     .map((m) => ({ id: m.id, name: m.alias || m.name, size: m.size }))
 )
+
+/* ---------------- F-3 图表化增强 ---------------- */
+
+/** 分类容量堆叠条的百分比（容量为零时返回 0，避免除零） */
+function bytePctOf(bytes) {
+  const total = stats.value.totalBytes
+  return total > 0 ? Math.round((bytes / total) * 100) : 0
+}
+
+/**
+ * 基底模型家族分布（F-2 数据源）：仅统计已解析/已回填基底模型的条目，
+ * 按家族聚合计数与容量；未知（未解析）数量单列——筛选器命中语义与之一致
+ * （未解析不命中任何家族）。
+ */
+const baseRows = computed(() => {
+  const byFamily = new Map()
+  let total = 0
+  for (const m of state.models) {
+    const family = normalizeBaseModel(m.baseModel || m.autoInfo?.baseModel || '')
+    if (!family) continue
+    total += 1
+    const row = byFamily.get(family) || { count: 0, bytes: 0 }
+    row.count += 1
+    row.bytes += Number.isFinite(m.size) ? m.size : 0
+    byFamily.set(family, row)
+  }
+  return {
+    total,
+    rows: BASE_MODEL_FAMILIES.filter((f) => byFamily.has(f.key)).map((f) => {
+      const s = byFamily.get(f.key)
+      return {
+        key: f.key,
+        label: f.label,
+        count: s.count,
+        bytes: s.bytes,
+        pct: total === 0 ? 0 : Math.round((s.count / total) * 100)
+      }
+    })
+  }
+})
+
+/** 重复占用统计（FEAT-1）：组数 / 冗余副本数 / 可释放空间占比 */
+const dupStats = computed(() => {
+  const groups = duplicateGroups.value
+  if (groups.length === 0) return null
+  let redundant = 0
+  for (const g of groups) redundant += g.models.length - 1
+  const total = stats.value.totalBytes
+  return {
+    groups: groups.length,
+    redundant,
+    wastedPct: total > 0 ? Math.round((duplicateWastedBytes.value / total) * 100) : 0
+  }
+})
 </script>
 
 <template>
@@ -130,6 +192,21 @@ const topSize = computed(() =>
       <!-- 分类占比 -->
       <div class="stats-block">
         <h4>分类占比</h4>
+        <!-- 容量堆叠条（F-3）：按字节占比分色，一眼看出磁盘大头 -->
+        <div
+          v-if="typeRows.length && stats.totalBytes > 0"
+          class="stack-bar"
+          role="img"
+          aria-label="各分类容量占比"
+        >
+          <div
+            v-for="t in typeRows"
+            :key="t.key"
+            class="stack-seg"
+            :style="{ flex: t.bytes, background: t.color }"
+            :title="`${t.label}：${formatSize(t.bytes)}（${bytePctOf(t.bytes)}%）`"
+          ></div>
+        </div>
         <ul v-if="typeRows.length" class="type-stats">
           <li v-for="t in typeRows" :key="t.key">
             <span class="type-dot" :style="{ background: t.color }"></span>
@@ -156,6 +233,42 @@ const topSize = computed(() =>
         </div>
         <p v-else class="stats-empty">尚未扫描模型</p>
       </div>
+    </div>
+
+    <!-- 基底模型分布（F-3，数据源 F-2）：清理「基底不匹配」模型时的全局视角 -->
+    <div v-if="baseRows.total" class="stats-block">
+      <h4>基底模型分布</h4>
+      <p class="base-note">
+        已识别 {{ baseRows.total }} 个模型的基底（safetensors 头部解析 / Civitai 识别）
+      </p>
+      <div class="coverage">
+        <div v-for="row in baseRows.rows" :key="row.key" class="cov-row">
+          <span class="cov-label base-label" :title="`${row.label}：${formatSize(row.bytes)}`">
+            {{ row.label }}
+          </span>
+          <div class="cov-bar">
+            <div class="cov-fill" :style="{ width: `${row.pct}%` }"></div>
+          </div>
+          <span class="cov-value base-value">{{ row.count }} 个 · {{ row.pct }}%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 重复占用（F-3，数据源 FEAT-1）：把「可释放空间」量化为清理动机 -->
+    <div v-if="dupStats" class="stats-block">
+      <h4>重复占用</h4>
+      <p class="dup-summary">
+        {{ dupStats.groups }} 组重复内容、{{ dupStats.redundant }} 个冗余副本，
+        可释放 <strong>{{ formatSize(duplicateWastedBytes) }}</strong>（约占总容量 {{ dupStats.wastedPct }}%）
+      </p>
+      <div class="cov-row">
+        <span class="cov-label">可释放</span>
+        <div class="cov-bar">
+          <div class="cov-fill dup-fill" :style="{ width: `${dupStats.wastedPct}%` }"></div>
+        </div>
+        <span class="cov-value">{{ dupStats.wastedPct }}%</span>
+      </div>
+      <p class="stats-empty">在结果栏开启「重复」筛选并「选中冗余项」即可批量清理</p>
     </div>
 
     <!-- 最占空间 TOP 5 -->
@@ -231,6 +344,55 @@ const topSize = computed(() =>
   letter-spacing: 1px;
   color: var(--text-muted);
   margin-bottom: 8px;
+}
+
+/* 分类容量堆叠条（F-3）：flex 比例即字节占比，段间留 1px 视觉分隔 */
+.stack-bar {
+  display: flex;
+  height: 10px;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  gap: 1px;
+  margin-bottom: 10px;
+  background: var(--bg-hover);
+}
+
+.stack-seg {
+  min-width: 2px;
+  transition: flex var(--dur-base) var(--ease-out);
+}
+
+/* 基底模型分布 */
+.base-note {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  margin: 0 0 8px;
+}
+
+.base-label {
+  width: 88px;
+}
+
+.base-value {
+  width: 88px;
+  white-space: nowrap;
+}
+
+/* 重复占用 */
+.dup-summary {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  margin: 0 0 8px;
+}
+
+.dup-summary strong {
+  color: var(--warning);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 可释放占比条：警示色与「该清理了」语义呼应 */
+.dup-fill {
+  background: var(--warning);
 }
 
 .stats-empty {
