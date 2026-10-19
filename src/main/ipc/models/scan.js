@@ -160,7 +160,10 @@ export function registerScanHandlers() {
         errors,
         durationMs: Date.now() - startedAt,
         // 本次扫描自动重新关联的移动/重命名模型数（A-02，渲染层据此提示）
-        relinked: relinkResult.relinked
+        relinked: relinkResult.relinked,
+        // 库设置随模型库走：显式传入 folder 的扫描即切库（chooseFolder/switchRoot
+        // 均经此路径），响应携带目标库合并后的设置供渲染层应用（主题/视图随库切换）
+        settings: getSettings()
       }
     } finally {
       scanning = false

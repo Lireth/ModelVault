@@ -7,6 +7,7 @@ import {
   loadSettings,
   loadData,
   switchDataRoot,
+  reloadLibrarySettings,
   setStoreSaveErrorListener,
   updateSettings
 } from '../../services/store'
@@ -39,6 +40,9 @@ export async function ensureRootStore(root) {
     // 旧根待落盘数据先写入旧目录，再切换根目录（A6）
     await switchDataRoot(root)
     await loadData()
+    // 库设置随根目录切换（设置随模型库走）：加载目标库的 .modelvault/settings.json，
+    // 文件不存在时以默认值初始化并落盘；主题/视图等随目标库生效
+    await reloadLibrarySettings(root)
   }
 }
 

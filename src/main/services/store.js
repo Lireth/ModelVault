@@ -7,15 +7,19 @@
  * - atomic-write.js  原子写入（临时文件 + rename）
  * - store-events.js  持久化失败通知（监听器注册与广播）
  * - store-paths.js   存储位置常量、根目录状态与路径换算
- * - store-settings.js 应用设置（settings.json 加载/规范化/更新）
+ * - store-settings.js 应用设置（引导层 + 随库的库层 settings.json 双层存储）
  * - store-meta.js    关联存储（.modelvault/store.json 元数据与落盘链）
  *
  * 设计要点：
- * - 应用设置（最近使用的模型根目录）保存在用户数据目录 settings.json
+ * - 应用设置双层存储：引导层（激活库 modelsFolder 与库列表 modelsFolders）
+ *   保存在用户数据目录 settings.json（引导悖论：库列表无法存在库内部）；
+ *   其余设置保存在当前模型根目录的 .modelvault/settings.json，随模型文件夹
+ *   移动/复制，换机器打开即恢复完整配置
  * - 模型的所有用户数据（封面图片、推荐参数、备注、二级分类标签等）
  *   统一保存在用户所选模型根目录下的 .modelvault/ 文件夹中：
- *     <模型根目录>/.modelvault/store.json   元数据（按相对路径关联模型）
- *     <模型根目录>/.modelvault/covers/      上传的封面图片
+ *     <模型根目录>/.modelvault/store.json      元数据（按相对路径关联模型）
+ *     <模型根目录>/.modelvault/settings.json   库设置（主题/视图/扫描规则等）
+ *     <模型根目录>/.modelvault/covers/         上传的封面图片
  * - 元数据键为相对于模型根目录的路径，封面为相对路径，
  *   因此整个模型文件夹移动/复制到其他位置后关联关系依然成立。
  * - 首次对某个根目录启用关联存储时，自动从旧版（%APPDATA% 全局存储）
@@ -36,18 +40,28 @@ export {
   DATA_DIR,
   DATA_FILE,
   COVERS_DIR,
+  LIB_SETTINGS_FILE,
   setDataRoot,
   getCurrentRoot,
   getCoversDir,
+  getLibSettingsFilePath,
   isInRoot,
   toRelKey,
   resolveCover,
   relativizeCover
 } from './store-paths'
 
-/* ---------------- 应用设置 ---------------- */
+/* ---------------- 应用设置（引导层 + 随模型库的库层） ---------------- */
 
-export { loadSettings, getSettings, updateSettings } from './store-settings'
+export {
+  loadSettings,
+  getSettings,
+  getLibrarySettings,
+  updateSettings,
+  reloadLibrarySettings,
+  saveLibrarySettings,
+  normalizeLibrarySettings
+} from './store-settings'
 
 /* ---------------- 关联存储（按模型根目录） ---------------- */
 

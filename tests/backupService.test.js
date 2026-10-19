@@ -284,9 +284,13 @@ describe('importBackup', () => {
     expect(
       fs.readFileSync(path.join(target, '.modelvault', 'covers', 'ok.png'), 'utf8')
     ).toBe('coverdata')
-    // 设置写盘（userData/settings.json）
-    const saved = JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8'))
+    // 库设置随备份恢复（写入目标库 .modelvault/settings.json，引导字段不入包）
+    const saved = JSON.parse(
+      fs.readFileSync(path.join(target, '.modelvault', 'settings.json'), 'utf8')
+    )
     expect(saved.theme).toBe('light')
+    expect(saved.sortBy).toBe('size')
+    expect(saved.modelsFolder).toBeUndefined()
   })
 
   it('目标已有 .modelvault 时确认后覆盖并留存 .bak', async () => {
@@ -341,7 +345,7 @@ describe('importBackup', () => {
     await loadData()
   })
 
-  it('覆盖确认取消时保留现有数据（设置已恢复、库数据未动）', async () => {
+  it('覆盖确认取消时保留现有数据（设置与库数据均未恢复）', async () => {
     const zipPath = makeBackupZip(path.join(mkTmp('modelvault-out-'), 'backup.zip'))
     const target = mkTmp('modelvault-target-')
     const dataDir = path.join(target, '.modelvault')
@@ -355,8 +359,10 @@ describe('importBackup', () => {
     const res = await importBackup(null)
 
     expect(res.error).toContain('已取消覆盖恢复')
-    expect(res.settingsRestored).toBe(true)
+    // 库设置随库恢复：未发生目录交换，设置同样未落盘
+    expect(res.settingsRestored).toBe(false)
     expect(fs.readFileSync(path.join(dataDir, 'store.json'), 'utf8')).toBe('OLD')
+    expect(fs.existsSync(path.join(dataDir, 'settings.json'))).toBe(false)
   })
 
   it('跳过路径穿越的封面条目（恢复后目标目录外无文件写入）', async () => {
@@ -409,7 +415,9 @@ describe('importBackup', () => {
     expect(res.canceled).toBe(true)
   })
 
-  it('仅含设置的备份：不弹出目标文件夹选择', async () => {
+  it('仅含设置的备份：写入当前激活库，不弹出目标文件夹选择', async () => {
+    const lib = makeLibrary()
+    setDataRoot(lib)
     const zipPath = makeBackupZip(path.join(mkTmp('modelvault-out-'), 'backup.zip'), {
       withLibrary: false
     })
@@ -422,6 +430,13 @@ describe('importBackup', () => {
     expect(res.libraryRestored).toBeUndefined()
     // 仅调用一次对话框（选文件）
     expect(dialogMock.showOpenDialog).toHaveBeenCalledTimes(1)
+    // 库设置随库落盘（引导字段剥离）
+    const saved = JSON.parse(
+      fs.readFileSync(path.join(lib, '.modelvault', 'settings.json'), 'utf8')
+    )
+    expect(saved.theme).toBe('light')
+    expect(saved.sortBy).toBe('size')
+    expect(saved.modelsFolder).toBeUndefined()
   })
 })
 

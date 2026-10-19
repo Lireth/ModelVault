@@ -12,6 +12,7 @@ import {
   loadData,
   loadSettings,
   reloadCurrentRootData,
+  reloadLibrarySettings,
   removeModelMeta,
   renameModelMeta,
   resolveCover,
@@ -544,9 +545,9 @@ describe('应用设置文件损坏恢复（B2）', () => {
   })
 
   it('设置落盘失败经监听器通知（C7），内存值运行时仍生效', async () => {
-    // 占位 settings.json 为目录：原子写 rename 到目录必然失败
-    await fs.rm(settingsFile, { force: true }).catch(() => {})
-    await fs.mkdir(settingsFile, { recursive: true })
+    // 占位库设置文件为目录：库层原子写 rename 到目录必然失败（设置随模型库走）
+    const libSettingsFile = path.join(root, '.modelvault', 'settings.json')
+    await fs.mkdir(libSettingsFile, { recursive: true })
     const errors = []
     setStoreSaveErrorListener((err) => errors.push(err))
     try {
@@ -558,19 +559,14 @@ describe('应用设置文件损坏恢复（B2）', () => {
       expect(getSettings().sortBy).toBe('mtime')
     } finally {
       setStoreSaveErrorListener(null)
-      await fs.rm(settingsFile, { recursive: true, force: true }).catch(() => {})
     }
   })
 })
 
-describe('settings.json 并发落盘串行化（A1）', () => {
-  const settingsFile = path.join(fakeUserData, 'settings.json')
-
-  afterEach(async () => {
-    await fs.rm(settingsFile, { force: true }).catch(() => {})
-  })
-
+describe('库设置并发落盘串行化（A1）', () => {
   it('并发 updateSettings 依次落盘：最终文件为最新合并快照，且不产生失败上报', async () => {
+    // 库设置落盘到当前根目录的 .modelvault/settings.json（设置随模型库走）
+    const libSettingsFile = path.join(root, '.modelvault', 'settings.json')
     const realRename = fs.rename.bind(fs)
     let releaseFirstRename = () => {}
     const firstRenameGate = new Promise((resolve) => {
@@ -578,7 +574,7 @@ describe('settings.json 并发落盘串行化（A1）', () => {
     })
     let gated = false
     vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
-      // 卡住 settings.json 的第一次 rename，构造与后续并发写重叠的时间窗口
+      // 卡住库设置文件的第一次 rename，构造与后续并发写重叠的时间窗口
       if (!gated && src.includes('settings.json')) {
         gated = true
         await firstRenameGate
@@ -599,12 +595,94 @@ describe('settings.json 并发落盘串行化（A1）', () => {
       // 串行化后无任何写失败（未串行化时：共享临时文件导致一方 rename ENOENT 被上报）
       expect(errors).toEqual([])
       // 最终落盘包含两次更新的合并结果（未串行化时可能仅剩先前的旧快照）
-      const onDisk = JSON.parse(await fs.readFile(settingsFile, 'utf-8'))
+      const onDisk = JSON.parse(await fs.readFile(libSettingsFile, 'utf-8'))
       expect(onDisk.theme).toBe('light')
       expect(onDisk.cardSize).toBe('large')
     } finally {
       setStoreSaveErrorListener(null)
       vi.restoreAllMocks()
+    }
+  })
+})
+
+describe('库设置随模型库存储（双层设置）', () => {
+  const settingsFile = path.join(fakeUserData, 'settings.json')
+
+  afterEach(async () => {
+    await fs.rm(settingsFile, { force: true }).catch(() => {})
+    await fs.rm(`${settingsFile}.bak`, { force: true }).catch(() => {})
+  })
+
+  it('旧版全局设置一次性迁移：激活库生成库设置文件，全局文件精简为引导字段', async () => {
+    await fs.mkdir(fakeUserData, { recursive: true })
+    // 旧版布局：全局 settings.json 承载全部字段
+    await fs.writeFile(
+      settingsFile,
+      JSON.stringify({
+        modelsFolder: root,
+        modelsFolders: [root],
+        theme: 'light',
+        cardSize: 'large'
+      })
+    )
+    const s = await loadSettings()
+    expect(s.theme).toBe('light')
+    expect(s.modelsFolder).toBe(root)
+    // 库设置文件已生成并携带迁移的库字段（引导字段不入库文件）
+    const libOnDisk = JSON.parse(
+      await fs.readFile(path.join(root, '.modelvault', 'settings.json'), 'utf-8')
+    )
+    expect(libOnDisk.theme).toBe('light')
+    expect(libOnDisk.cardSize).toBe('large')
+    expect(libOnDisk.modelsFolder).toBeUndefined()
+    expect(libOnDisk.modelsFolders).toBeUndefined()
+    // 全局文件已精简为仅引导字段
+    const globalOnDisk = JSON.parse(await fs.readFile(settingsFile, 'utf-8'))
+    expect(globalOnDisk.modelsFolder).toBe(root)
+    expect(globalOnDisk.theme).toBeUndefined()
+  })
+
+  it('切库后库设置随目标库切换（reloadLibrarySettings）', async () => {
+    const libFile = path.join(root, '.modelvault', 'settings.json')
+    await fs.mkdir(path.dirname(libFile), { recursive: true })
+    await fs.writeFile(libFile, JSON.stringify({ theme: 'light', viewMode: 'list' }))
+
+    await reloadLibrarySettings(root)
+    expect(getSettings().theme).toBe('light')
+    expect(getSettings().viewMode).toBe('list')
+
+    // 切到无库设置文件的另一个库：以默认值初始化并落盘
+    const other = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-libswitch-'))
+    roots.push(other)
+    await reloadLibrarySettings(other)
+    expect(getSettings().theme).toBe('dark')
+    const otherOnDisk = JSON.parse(
+      await fs.readFile(path.join(other, '.modelvault', 'settings.json'), 'utf-8')
+    )
+    expect(otherOnDisk.theme).toBe('dark')
+  })
+
+  it('库设置文件损坏时备份为 .bak 后以默认值重置', async () => {
+    const libFile = path.join(root, '.modelvault', 'settings.json')
+    await fs.mkdir(path.dirname(libFile), { recursive: true })
+    await fs.writeFile(libFile, '{broken!!')
+    await reloadLibrarySettings(root)
+    expect(getSettings().theme).toBe('dark')
+    expect(await fs.readFile(`${libFile}.bak`, 'utf-8')).toBe('{broken!!')
+    await expect(fs.access(libFile)).rejects.toThrow()
+  })
+
+  it('无激活库时库字段仅内存生效，引导字段仍正常落盘', async () => {
+    setDataRoot(null)
+    try {
+      await updateSettings({ theme: 'light' })
+      expect(getSettings().theme).toBe('light')
+      // 引导字段不受影响，照常写入全局文件
+      await updateSettings({ modelsFolder: root })
+      const onDisk = JSON.parse(await fs.readFile(settingsFile, 'utf-8'))
+      expect(onDisk.modelsFolder).toBe(root)
+    } finally {
+      setDataRoot(root)
     }
   })
 })

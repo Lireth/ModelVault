@@ -2,7 +2,7 @@ import path from 'node:path'
 import { BrowserWindow } from 'electron'
 import logger from '../../logger'
 import { exportBackup, importBackup } from '../../services/backup'
-import { getCurrentRoot, reloadCurrentRootData } from '../../services/store'
+import { getCurrentRoot, reloadCurrentRootData, reloadLibrarySettings } from '../../services/store'
 import { clearDeferredJobs } from '../../services/thumbs'
 import { resetDecorateCache, awaitThumbDrain } from './model-state'
 import { clearDeferredOwners } from './decorate'
@@ -47,6 +47,9 @@ export function registerBackupHandlers() {
     ) {
       await awaitThumbDrain()
       await reloadCurrentRootData()
+      // 库设置随备份恢复：目标库的 .modelvault/settings.json 已随目录交换，
+      // 内存库设置须一并重载，否则下一次设置更新会用旧设置覆盖恢复结果
+      await reloadLibrarySettings(restoredRoot)
       resetDecorateCache(restoredRoot)
       clearDeferredOwners()
       clearDeferredJobs()

@@ -7,7 +7,7 @@ import path from 'node:path'
  * - 绝对路径 ↔ 相对键的换算（Windows 大小写不敏感兜底）
  */
 
-/** 应用设置文件名（位于 %APPDATA%/modelvault/） */
+/** 应用设置文件名（位于 %APPDATA%/modelvault/，仅含引导字段：激活库与库列表） */
 export const SETTINGS_FILE = 'settings.json'
 /** 旧版全局存储文件名（迁移前的 %APPDATA% 单文件方案，仅迁移路径使用） */
 export const LEGACY_STORE_FILE = 'store.json'
@@ -15,6 +15,8 @@ export const LEGACY_STORE_FILE = 'store.json'
 export const DATA_DIR = '.modelvault'
 /** 关联存储元数据文件名 */
 export const DATA_FILE = 'store.json'
+/** 库设置文件名（位于模型根目录的 .modelvault/ 内，随模型文件夹走） */
+export const LIB_SETTINGS_FILE = 'settings.json'
 /** 封面图片目录名（位于 .modelvault/ 内） */
 export const COVERS_DIR = 'covers'
 
@@ -42,6 +44,11 @@ export function getDataDir(root = currentRoot) {
 /** 根目录下的关联存储元数据文件路径 */
 export function getDataFilePath(root = currentRoot) {
   return path.join(getDataDir(root), DATA_FILE)
+}
+
+/** 模型根目录下的库设置文件路径（.modelvault/settings.json，随模型文件夹走） */
+export function getLibSettingsFilePath(root = currentRoot) {
+  return path.join(getDataDir(root), LIB_SETTINGS_FILE)
 }
 
 /** 封面图片目录（位于模型根目录内） */

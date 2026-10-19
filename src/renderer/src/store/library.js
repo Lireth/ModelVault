@@ -206,6 +206,15 @@ export async function scanModels() {
     }
     replaceModels(res.models)
     state.lastScan = { count: res.models.length, durationMs: res.durationMs }
+    // 库设置随模型库走：切库扫描（chooseFolder/switchRoot）返回目标库的设置，
+    // 应用主题/排序/视图模式——与 saveSettings 相同的同步模式
+    if (res.settings) {
+      replaceSettings(res.settings)
+      applyTheme(state.settings.theme)
+      if (state.settings.sortBy) state.sortBy = state.settings.sortBy
+      state.sortAsc = state.settings.sortAsc !== false
+      if (state.settings.viewMode) state.viewMode = state.settings.viewMode
+    }
     // A-02：主进程自动重关联了被移动/重命名模型的标注时，告知用户数量
     const relinkedSuffix = res.relinked > 0
       ? `（已自动重新关联 ${res.relinked} 个移动/重命名模型的标注）`

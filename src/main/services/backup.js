@@ -7,22 +7,25 @@ import {
   COVERS_DIR,
   DATA_DIR,
   DATA_FILE,
+  LIB_SETTINGS_FILE,
   flushStoreSave,
   getCurrentRoot,
-  getSettings,
-  updateSettings
+  getLibrarySettings,
+  normalizeLibrarySettings,
+  saveLibrarySettings
 } from './store'
 
 /**
  * 数据备份与恢复（FEAT-3）：
- * - 导出：应用设置（settings.json）+ 当前模型库的关联存储（store.json 与
- *   covers/）打包为 zip；thumbs/ 为可再生产物，不纳入备份；
- * - 恢复：选择备份文件 → 恢复设置 → 如含库数据则选择目标模型文件夹
- *   （已存在关联数据时经原生确认框覆盖，旧数据留 .bak）→ 落盘生效。
+ * - 导出：当前库设置（settings.json，不含激活库/库列表）+ 当前模型库的
+ *   关联存储（store.json 与 covers/）打包为 zip；thumbs/ 为可再生产物，
+ *   不纳入备份；
+ * - 恢复：选择备份文件 → 如含库数据则选择目标模型文件夹（设置随目录交换
+ *   写入目标库；已存在关联数据时经原生确认框覆盖，旧数据留 .bak）→ 落盘生效。
  *
  * 备份文件结构：
  *   manifest.json       格式标识与内容清单（app/version/createdAt/library）
- *   settings.json       应用设置快照
+ *   settings.json       库设置快照（随模型库走，不含引导字段）
  *   library/store.json  目标库元数据（按相对路径关联模型）
  *   library/covers/*    封面文件
  */
@@ -176,7 +179,9 @@ async function pathExists(p) {
  *   | {canceled: true} | {error: string}>}
  */
 export async function exportBackup(win) {
-  const settings = getSettings()
+  // 库设置随模型库走：备份当前库的设置（不含引导字段）——恢复到任意
+  // 模型文件夹时配置随包生效，且不会劫持本机的激活库/库列表
+  const librarySettings = getLibrarySettings()
   const root = getCurrentRoot()
   /** @type {Record<string, Uint8Array>} */
   const files = {}
@@ -187,7 +192,7 @@ export async function exportBackup(win) {
     appVersion: app.getVersion(),
     settings: true
   }
-  files['settings.json'] = strToU8(JSON.stringify(settings, null, 2))
+  files['settings.json'] = strToU8(JSON.stringify(librarySettings, null, 2))
 
   let models = 0
   let covers = 0
@@ -292,12 +297,16 @@ async function pruneRestoreArtifacts(root, keepBakName) {
 }
 
 /**
- * 将库数据还原到目标根目录：先解出到临时目录，校验无误后与既有目录交换
- * （既有数据留 .bak 而非直接删除，恢复中断可回滚）；失败即清理本次临时目录，
+ * 从备份恢复库数据到目标模型根目录（解出 → 校验 → 目录交换）：
+ * 既有数据留 .bak 而非直接删除，恢复中断可回滚；失败即清理本次临时目录，
  * 成功后按「仅保留最新 .bak」治理残留（OPT-18）。
+ * @param {string} root 目标模型根目录
+ * @param {Record<string, Uint8Array>} unzipped 解压出的备份条目
+ * @param {object|null} [libSettings] 随备份恢复的库设置（写入目标库的
+ *   .modelvault/settings.json，随目录交换原子生效；空则不写）
  * @returns {Promise<{root: string, models: number, covers: number, skipped: number}>}
  */
-async function restoreLibrary(root, unzipped) {
+async function restoreLibrary(root, unzipped, libSettings = null) {
   const decoder = new TextDecoder()
   const storeText = decoder.decode(unzipped[`${LIB_PREFIX}${DATA_FILE}`])
   // 落盘前先校验 JSON：损坏的备份不应触发任何目录交换
@@ -314,6 +323,13 @@ async function restoreLibrary(root, unzipped) {
   try {
     await fs.mkdir(path.join(tmpDir, COVERS_DIR), { recursive: true })
     await fs.writeFile(path.join(tmpDir, DATA_FILE), storeText)
+    if (libSettings) {
+      // 库设置随备份恢复（设置随模型库走）：写入临时目录，随目录交换原子生效
+      await fs.writeFile(
+        path.join(tmpDir, LIB_SETTINGS_FILE),
+        JSON.stringify(libSettings, null, 2)
+      )
+    }
 
     let covers = 0
     let skipped = 0
@@ -395,13 +411,15 @@ export async function importBackup(win) {
   if (!parsedManifest.ok) return { error: parsedManifest.error }
   const manifest = parsedManifest.manifest
 
-  // 设置恢复（规范化与落盘走既有 updateSettings 管线）
-  let settingsRestored = false
+  // 设置恢复（库设置随模型库走）：先规范化并暂存——含库数据时随目录交换
+  // 写入目标库的 .modelvault/settings.json；仅设置的备份（或旧格式 settings-only）
+  // 写入当前激活库。引导字段（激活库/库列表）一律剥离：恢复到任意文件夹
+  // 不得劫持本机的库列表（兼容旧格式备份中的完整设置快照）
+  let settingsPayload = null
   if (manifest.settings && unzipped['settings.json']) {
     try {
-      const settings = JSON.parse(new TextDecoder().decode(unzipped['settings.json']))
-      await updateSettings(settings)
-      settingsRestored = true
+      const parsed = JSON.parse(new TextDecoder().decode(unzipped['settings.json']))
+      settingsPayload = normalizeLibrarySettings(parsed)
     } catch (err) {
       return { error: `备份中的设置数据损坏: ${err.message}` }
     }
@@ -415,8 +433,8 @@ export async function importBackup(win) {
     })
     if (target.canceled || !target.filePaths[0]) {
       return {
-        error: '已取消选择目标文件夹（应用设置已恢复，库数据未恢复）',
-        settingsRestored,
+        error: '已取消选择目标文件夹（设置与库数据均未恢复）',
+        settingsRestored: false,
         partial: true
       }
     }
@@ -434,23 +452,38 @@ export async function importBackup(win) {
       })
       if (choice.response !== 1) {
         return {
-          error: '已取消覆盖恢复（应用设置已恢复，库数据未恢复）',
-          settingsRestored,
+          error: '已取消覆盖恢复（设置与库数据均未恢复）',
+          settingsRestored: false,
           partial: true
         }
       }
     }
     try {
-      const libraryRestored = await restoreLibrary(root, unzipped)
+      const libraryRestored = await restoreLibrary(root, unzipped, settingsPayload)
       logger.info(
         `备份已恢复: ${filePath} → ${root}（${libraryRestored.models} 模型 / ${libraryRestored.covers} 封面）`
       )
-      return { settingsRestored, libraryRestored, skipped: libraryRestored.skipped }
+      return {
+        settingsRestored: settingsPayload !== null,
+        libraryRestored,
+        skipped: libraryRestored.skipped
+      }
     } catch (err) {
       logger.warn(`备份恢复失败: ${err.message}`)
-      return { error: `库数据恢复失败: ${err.message}`, settingsRestored, partial: true }
+      return { error: `库数据恢复失败: ${err.message}`, settingsRestored: false, partial: true }
     }
   }
 
-  return { settingsRestored }
+  // 仅设置的备份（无库数据，含旧格式 settings-only）：写入当前激活库随库生效；
+  // 尚无激活库时无处落盘，保持未恢复状态
+  if (settingsPayload) {
+    const root = getCurrentRoot()
+    if (root) {
+      await saveLibrarySettings(root, settingsPayload)
+      logger.info(`备份中的库设置已写入当前模型库: ${root}`)
+      return { settingsRestored: true }
+    }
+    logger.warn('备份含库设置但当前无激活模型库，设置未恢复')
+  }
+  return { settingsRestored: false }
 }
