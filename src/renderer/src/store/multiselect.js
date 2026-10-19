@@ -262,7 +262,7 @@ export async function batchAssignCivitaiTags() {
   }
   if (
     !(await confirmDialog(
-      `将按 Civitai 分类为选中的 ${loraIds.length} 个 LoRA 模型分配分类标签（已有标签会被覆盖）。继续吗？`
+      `将按 Civitai 分类为选中的 ${loraIds.length} 个 LoRA 模型分配分类标签（已有标签会被覆盖）。请求按限速串行执行，模型较多时需要几分钟。继续吗？`
     ))
   ) {
     return

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import { net } from 'electron'
+import logger from '../logger'
 
 /**
  * Civitai 在线识别服务：
@@ -22,6 +23,75 @@ const HASH_CHUNK_SIZE = 8 * 1024 * 1024
 const MAX_IMAGES = 30
 /** 示例图下载大小上限（与封面导入同一量级） */
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024
+
+/**
+ * Civitai API 全局限流（实测）：
+ * 突发约 30 个请求后返回 429 Too Many Requests（Retry-After: 60），约
+ * 1.3 请求/秒的持续速率可稳定通过（84 连发验证）。批量链路（识别/分配
+ * 标签）请求间隔低于该速率即触发整批漏分配，故在服务层统一节流：
+ * 相邻请求至少间隔 CIVITAI_API_MIN_INTERVAL_MS，并对 429 按 Retry-After
+ * 退避重试兜底。
+ */
+const CIVITAI_API_MIN_INTERVAL_MS = 1200
+/** 429 退避重试次数上限 */
+const CIVITAI_429_MAX_RETRIES = 3
+/** 429 无 Retry-After 头时的兜底等待（秒） */
+const CIVITAI_429_FALLBACK_WAIT_S = 60
+/** 429 Retry-After 等待上限（秒），防止异常大值卡死批量链路 */
+const CIVITAI_429_MAX_WAIT_S = 90
+
+/** 上次 Civitai API 请求时刻（节流基准） */
+let lastCivitaiApiAt = 0
+/** 请求最小间隔（可经 setCivitaiApiInterval 注入，测试环境置 0 免真实等待） */
+let civitaiApiIntervalMs = CIVITAI_API_MIN_INTERVAL_MS
+
+/**
+ * 调整 Civitai API 请求最小间隔（测试钩子）：
+ * 测试环境置 0 避免 vitest 真实等待节流间隔。
+ * @param {number} ms 间隔毫秒数
+ */
+export function setCivitaiApiInterval(ms) {
+  civitaiApiIntervalMs = Number.isFinite(ms) && ms >= 0 ? ms : CIVITAI_API_MIN_INTERVAL_MS
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** 全局节流：相邻 Civitai API 请求至少间隔 civitaiApiIntervalMs */
+async function throttleCivitaiApi() {
+  const wait = lastCivitaiApiAt + civitaiApiIntervalMs - Date.now()
+  if (wait > 0) await sleep(wait)
+  lastCivitaiApiAt = Date.now()
+}
+
+/**
+ * 发起 Civitai API JSON 请求（全局节流 + 429 退避重试）：
+ * 429 时按 Retry-After 等待后重试（无头兜底 60s，等待上限 90s），
+ * 超出重试次数后把最后一次 429 响应交回调用方按 HTTP 错误处理。
+ * @param {string} url API 地址
+ * @param {object} [options] net.fetch 选项
+ * @returns {Promise<{response: Response} | {networkError: Error}>}
+ */
+async function fetchCivitaiApi(url, options = {}) {
+  for (let attempt = 0; ; attempt++) {
+    await throttleCivitaiApi()
+    let response
+    try {
+      response = await net.fetch(url, options)
+    } catch (err) {
+      return { networkError: err instanceof Error ? err : new Error(String(err)) }
+    }
+    if (response.status === 429 && attempt < CIVITAI_429_MAX_RETRIES) {
+      const ra = Number(response.headers.get('retry-after'))
+      const waitSec = Number.isFinite(ra) && ra >= 0 ? Math.min(ra, CIVITAI_429_MAX_WAIT_S) : CIVITAI_429_FALLBACK_WAIT_S
+      logger.warn(`Civitai API 限流（429），${waitSec}s 后重试（第 ${attempt + 1}/${CIVITAI_429_MAX_RETRIES} 次）`)
+      await sleep(waitSec * 1000)
+      continue
+    }
+    return { response }
+  }
+}
 
 /**
  * Civitai 示例图 CDN 域名白名单：API 响应中的图片 URL 不可信，
@@ -97,17 +167,18 @@ export async function computeFileHash(filePath, signal, onProgress) {
  *   info 为规范化后的 { url, modelName, versionName, baseModel, trainedWords, description }
  */
 export async function fetchCivitaiVersionByHash(hash) {
-  let response
-  try {
-    response = await net.fetch(`${CIVITAI_API_BASE}/model-versions/by-hash/${hash}`, {
+  const { response, networkError } = await fetchCivitaiApi(
+    `${CIVITAI_API_BASE}/model-versions/by-hash/${hash}`,
+    {
       headers: { 'User-Agent': 'ModelVault', Accept: 'application/json' },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-    })
-  } catch (err) {
-    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+    }
+  )
+  if (networkError) {
+    if (networkError.name === 'TimeoutError' || networkError.name === 'AbortError') {
       return { found: false, error: '请求超时，请检查网络后重试' }
     }
-    return { found: false, error: `网络请求失败: ${err.message}` }
+    return { found: false, error: `网络请求失败: ${networkError.message}` }
   }
   if (response.status === 404) {
     // 哈希未收录：Civitai 无此模型（自训/其他来源），不是错误
@@ -190,17 +261,18 @@ export function parseCivitaiModelId(url) {
  *   found=false 且无 error 表示 id 不存在或已下架（不是失败）
  */
 export async function fetchCivitaiModelType(modelId) {
-  let response
-  try {
-    response = await net.fetch(`${CIVITAI_API_BASE}/models/${modelId}`, {
+  const { response, networkError } = await fetchCivitaiApi(
+    `${CIVITAI_API_BASE}/models/${modelId}`,
+    {
       headers: { 'User-Agent': 'ModelVault', Accept: 'application/json' },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-    })
-  } catch (err) {
-    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+    }
+  )
+  if (networkError) {
+    if (networkError.name === 'TimeoutError' || networkError.name === 'AbortError') {
       return { found: false, error: '请求超时，请检查网络后重试' }
     }
-    return { found: false, error: `网络请求失败: ${err.message}` }
+    return { found: false, error: `网络请求失败: ${networkError.message}` }
   }
   if (response.status === 404) {
     return { found: false }

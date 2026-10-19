@@ -17,9 +17,13 @@ import {
   isAllowedCivitaiImageUrl,
   normalizeVersionInfo,
   parseCivitaiModelId,
+  setCivitaiApiInterval,
   stripHtml
 } from '../src/main/services/civitai'
 import { net } from 'electron'
+
+// 测试环境关闭请求节流：避免真实等待 1.2s 间隔拖慢用例
+setCivitaiApiInterval(0)
 
 /**
  * civitai.js 单元测试（纯函数 + 类型查询，不真实触网）：
@@ -87,6 +91,29 @@ describe('fetchCivitaiModelType', () => {
     const res = await fetchCivitaiModelType('123')
     expect(res.found).toBe(false)
     expect(res.error).toContain('格式异常')
+  })
+
+  it('429 限流按 Retry-After 退避重试后成功', async () => {
+    vi.mocked(net.fetch)
+      .mockResolvedValueOnce(new Response('', { status: 429, headers: { 'Retry-After': '0' } }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 123, type: 'LORA', tags: ['character'] }), { status: 200 })
+      )
+    const res = await fetchCivitaiModelType('123')
+    expect(res).toEqual({ found: true, type: 'LORA', tags: ['character'] })
+    expect(net.fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('429 重试次数耗尽后按 HTTP 错误返回', async () => {
+    for (let i = 0; i < 4; i++) {
+      vi.mocked(net.fetch).mockResolvedValueOnce(
+        new Response('', { status: 429, headers: { 'Retry-After': '0' } })
+      )
+    }
+    const res = await fetchCivitaiModelType('123')
+    expect(res.found).toBe(false)
+    expect(res.error).toContain('HTTP 429')
+    expect(net.fetch).toHaveBeenCalledTimes(4)
   })
 })
 
