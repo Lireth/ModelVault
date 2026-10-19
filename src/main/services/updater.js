@@ -1,11 +1,15 @@
 import { app, net } from 'electron'
 import logger from '../logger'
 import { isAllowedExternalUrl } from '../utils'
+import { findUpdateAssets, setPendingUpdate } from './update-download'
 
 /**
- * 应用内检查更新（E1）：
+ * 应用内检查更新（E1，F-6 扩展下载链路）：
  * portable 单文件分发无 electron-updater 支持，采用轻量方案——
- * 查询 GitHub Releases 最新版本号并与当前版本比对，提示用户前往下载页。
+ * 查询 GitHub Releases 最新版本号并与当前版本比对；同时解析 Release
+ * 附加的 ModelVault-<version>.exe 与 .sha256 资产（命名约定精确匹配 +
+ * github.com 白名单），供「下载更新 → 运行更新程序」闭环使用（资产信息
+ * 保存于 update-download 模块态，渲染层不可注入 URL）。
  * 网络请求走 Electron net.fetch（Chromium 网络栈，继承系统代理，项目约定）。
  */
 
@@ -38,7 +42,7 @@ export function compareVersions(a, b) {
  * 检查更新。任何失败都以 { error } 返回（不抛出），调用方直接展示。
  * @returns {Promise<{error: string} |
  *   {current: string, latest?: string, hasUpdate: boolean, releaseUrl?: string,
- *    releaseNotes?: string}>}
+ *    releaseNotes?: string, canDownload?: boolean, downloadSize?: number}>}
  */
 export async function checkForUpdate() {
   const current = app.getVersion()
@@ -78,8 +82,23 @@ export async function checkForUpdate() {
       return { error: '更新信息格式异常（缺少版本号）', current }
     }
     const hasUpdate = compareVersions(latest, current) > 0
-    logger.info(`更新检查完成: 当前 ${current} / 最新 ${latest}${hasUpdate ? '（有更新）' : ''}`)
-    return { current, latest, hasUpdate, releaseUrl, releaseNotes }
+    // 应用内下载资产（F-6）：命名约定 + 白名单双校验通过才可用；
+    // 结果保存模块态（下载入口的唯一合法 URL 来源），渲染层仅得可用性标志
+    const assets = findUpdateAssets(data, latest)
+    setPendingUpdate(hasUpdate ? assets : null, latest)
+    logger.info(
+      `更新检查完成: 当前 ${current} / 最新 ${latest}${hasUpdate ? '（有更新）' : ''}` +
+        `${assets ? '，支持应用内下载' : ''}`
+    )
+    return {
+      current,
+      latest,
+      hasUpdate,
+      releaseUrl,
+      releaseNotes,
+      canDownload: hasUpdate && assets !== null,
+      downloadSize: assets ? assets.size : 0
+    }
   } catch (err) {
     if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
       return { error: '更新检查超时，请检查网络后重试', current }

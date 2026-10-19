@@ -8,6 +8,9 @@ const VALID_INVOKE_CHANNELS = [
   'app:getInfo',
   'app:reportError',
   'app:checkUpdate',
+  'app:downloadUpdate',
+  'app:cancelUpdateDownload',
+  'app:installUpdate',
   'app:openLogs',
   'window:setTheme',
   'settings:update',
@@ -41,6 +44,7 @@ const VALID_INVOKE_CHANNELS = [
 ]
 
 const VALID_RECEIVE_CHANNELS = [
+  'app:updateProgress',
   'models:scanProgress',
   'models:menuAction',
   'models:thumbsReady',
@@ -83,8 +87,16 @@ const api = {
     getInfo: () => invokeValidated('app:getInfo'),
     /** 上报渲染进程异常（写入主进程日志） */
     reportError: (message, stack) => invokeValidated('app:reportError', { message, stack }),
-    /** 应用内检查更新（E1）：返回 { current, latest?, hasUpdate, releaseUrl? } 或 { error } */
+    /** 应用内检查更新（E1）：返回 { current, latest?, hasUpdate, releaseUrl?, canDownload?, downloadSize? } 或 { error } */
     checkUpdate: () => invokeValidated('app:checkUpdate'),
+    /** 下载更新包（F-6，URL 由主进程检查结果提供），进度经 onUpdateProgress 推送 */
+    downloadUpdate: () => invokeValidated('app:downloadUpdate'),
+    /** 取消进行中的更新包下载 */
+    cancelUpdateDownload: () => invokeValidated('app:cancelUpdateDownload'),
+    /** 运行更新程序（F-6）：延迟拉起新版本并退出当前应用 */
+    installUpdate: () => invokeValidated('app:installUpdate'),
+    /** 订阅更新包下载进度（{ received, total }），返回取消监听函数 */
+    onUpdateProgress: (listener) => subscribe('app:updateProgress', listener),
     /** 在系统资源管理器中打开日志目录（B-04），返回 { ok } 或 { error } */
     openLogs: () => invokeValidated('app:openLogs')
   },

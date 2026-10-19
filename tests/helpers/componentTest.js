@@ -47,6 +47,10 @@ export function makeComponentApiMock() {
     app: {
       getInfo: vi.fn(),
       checkUpdate: vi.fn(() => Promise.resolve({ hasUpdate: false })),
+      downloadUpdate: vi.fn(() => Promise.resolve({ error: '没有可用的更新信息' })),
+      cancelUpdateDownload: vi.fn(() => Promise.resolve({ ok: true })),
+      installUpdate: vi.fn(() => Promise.resolve({ error: '尚未下载更新包' })),
+      onUpdateProgress: vi.fn(() => () => {}),
       openLogs: vi.fn(() => Promise.resolve({ ok: true }))
     }
   }

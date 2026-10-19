@@ -4,6 +4,11 @@ import { registerModelIpcHandlers } from './ipc/models/index.js'
 import { validateIpcPayload } from './ipc/schema'
 import { themeColors } from './theme'
 import { checkForUpdate } from './services/updater'
+import {
+  cancelUpdateDownload,
+  downloadUpdatePackage,
+  installUpdatePackage
+} from './services/update-download'
 
 /**
  * 注册所有主进程 IPC 处理器。
@@ -33,6 +38,19 @@ export function registerIpcHandlers() {
 
   // 应用内检查更新（E1）：查询 GitHub Releases 最新版本并与当前版本比对
   ipcMain.handle('app:checkUpdate', () => checkForUpdate())
+
+  // 应用内更新下载/安装（F-6）：URL 由检查更新链路保存在主进程模块态，
+  // 渲染层不传任何参数；下载进度经 app:updateProgress 事件推送来源窗口
+  ipcMain.handle('app:downloadUpdate', (event) =>
+    downloadUpdatePackage((p) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('app:updateProgress', p)
+      }
+    })
+  )
+  ipcMain.handle('app:cancelUpdateDownload', () => cancelUpdateDownload())
+  ipcMain.handle('app:installUpdate', () => installUpdatePackage())
 
   // 打开日志目录（B-04）：反馈问题时用户可直接定位 %APPDATA%\modelvault\logs。
   // 目录为应用自有 userData 子目录，不接受渲染进程传入路径，无越界面。

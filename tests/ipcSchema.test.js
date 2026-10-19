@@ -36,6 +36,9 @@ const SCHEMA_EXEMPT_CHANNELS = [
   'app:getInfo',
   'app:reportError', // handler 自带归一化截断
   'app:checkUpdate',
+  'app:downloadUpdate', // F-6：无 payload，URL 由主进程检查结果提供
+  'app:cancelUpdateDownload',
+  'app:installUpdate',
   'app:openLogs',
   'models:loadStore',
   'models:chooseFolder',
