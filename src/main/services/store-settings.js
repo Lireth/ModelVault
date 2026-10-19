@@ -60,7 +60,7 @@ let bootstrap = null
 let library = null
 
 /** 默认应用设置（A-12 单一来源：src/shared/defaults.js；返回可变副本） */
-export function defaultSettings() {
+function defaultSettings() {
   return {
     ...DEFAULT_SETTINGS,
     scanExtensions: [...DEFAULT_SETTINGS.scanExtensions],

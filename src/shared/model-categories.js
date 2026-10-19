@@ -40,7 +40,7 @@ export const LORA_TAG_KEYS = new Set(LORA_TAG_DEFS.map((d) => d.key))
  * 文件夹名 → 分类标签 key 映射（自动标签规则，A-12 单一来源）：
  * 中文标签名与英文 key（忽略大小写）均可命中，如「角色」/「Role」→ role。
  */
-export const LORA_TAG_NAME_TO_KEY = new Map()
+const LORA_TAG_NAME_TO_KEY = new Map()
 for (const d of LORA_TAG_DEFS) {
   LORA_TAG_NAME_TO_KEY.set(d.label, d.key)
   LORA_TAG_NAME_TO_KEY.set(d.key.toLowerCase(), d.key)
@@ -64,7 +64,7 @@ export function folderNameToTag(name) {
  * 种类（实测不携带上述分类），分类实际挂在 model.tags 里（pose 为复数
  * 形式 poses），故 poses 作为 pose 的别名入表。
  */
-export const CIVITAI_TYPE_TO_TAG = new Map([
+const CIVITAI_TYPE_TO_TAG = new Map([
   ['character', 'role'],
   ['style', 'style'],
   ['concept', 'concept'],
