@@ -6,6 +6,7 @@ import logger from '../logger'
 // 直连存储叶子模块而非聚合门面（与 covers.js 同理：避免门面重导出链
 // 在模块初始化顺序变化时拿到未就绪绑定）
 import { getCurrentRoot } from './store-paths'
+import { runWithConcurrency } from '../utils'
 
 /**
  * 封面缩略图缓存：
@@ -29,6 +30,12 @@ const JPEG_QUALITY = 82
  * 瞬时内存峰值可达数百 MB 并挤占主进程事件循环；这类超大图直接用原图。
  */
 const MAX_SOURCE_BYTES = 64 * 1024 * 1024
+/**
+ * 后台生成并发数（O-6）：generateThumb 单图瞬时内存 = 源图字节 + 解码位图，
+ * 并发 4 时峰值约为批处理模型（16）的 1/4，且缩略图是后台锦上添花任务，
+ * 低并发不构成体验瓶颈（网格卡片在生成完成前回退原图）。
+ */
+const THUMB_GEN_CONCURRENCY = 4
 
 /** 缩略图缓存目录（位于模型根目录内） */
 function getThumbsDir() {
@@ -105,29 +112,34 @@ export function clearDeferredJobs() {
 }
 
 /**
- * 依次处理后台延迟生成队列（批内并发、批间串行）。
+ * 依次处理后台延迟生成队列（O-6：固定并发 worker 池，替代「批内并发 16、
+ * 批间串行」的批处理模型）：
+ * - 内存峰值有界：generateThumb 需整图读入内存解码（上限 64MB/张），并发
+ *   峰值 = 并发数 × 单图峰值；此前批内 16 张大图同时解码，瞬时内存可达
+ *   数百 MB 并挤占主进程事件循环；
+ * - 消除批尾延迟：批处理模型需等整批（含最慢一张）完成才进入下一批，
+ *   单张慢图拖住 15 张已完成任务的推送；worker 池流式取任务，完成即回调。
  * 每成功生成一个缩略图，调用 onGenerated(源图路径, 缩略图路径)
  * 通知调用方（用于推送渲染进程更新卡片封面）。
  * @param {(absCover: string, thumbPath: string) => void} onGenerated 生成成功回调
- * @param {number} [batchSize] 单批并发数量
+ * @param {number} [concurrency] 并发 worker 数
  */
-export async function drainDeferredThumbs(onGenerated, batchSize = 16) {
+export async function drainDeferredThumbs(onGenerated, concurrency = THUMB_GEN_CONCURRENCY) {
   const jobs = [...deferredJobs.values()]
   deferredJobs.clear()
-  for (let i = 0; i < jobs.length; i += batchSize) {
-    const batch = jobs.slice(i, i + batchSize)
-    await Promise.allSettled(
-      batch.map(async ({ absCover, mtimeMs }) => {
-        const thumbPath = path.join(getThumbsDir(), thumbFileName(absCover, mtimeMs))
-        try {
-          const generated = await generateThumb(absCover, mtimeMs, thumbPath)
-          if (generated) onGenerated(absCover, generated)
-        } catch (err) {
-          logger.warn(`后台缩略图生成失败（回退原图）: ${err.message}`)
-        }
-      })
-    )
-  }
+  await runWithConcurrency(
+    jobs,
+    async ({ absCover, mtimeMs }) => {
+      const thumbPath = path.join(getThumbsDir(), thumbFileName(absCover, mtimeMs))
+      try {
+        const generated = await generateThumb(absCover, mtimeMs, thumbPath)
+        if (generated) onGenerated(absCover, generated)
+      } catch (err) {
+        logger.warn(`后台缩略图生成失败（回退原图）: ${err.message}`)
+      }
+    },
+    concurrency
+  )
 }
 
 /**
