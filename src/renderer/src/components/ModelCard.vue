@@ -51,6 +51,9 @@ let cycleAdvancing = false
 
 const cycleList = computed(() => props.model.covers || [])
 
+/** 卡片展示的自由标签（F-5）：最多 3 个，溢出以 +N 收尾 */
+const cardTags = computed(() => (props.model.tags || []).slice(0, 3))
+
 /** 本轮悬停会话内加载失败的缩略图 URL（回退原图展示） */
 const cycleBrokenUrls = new Set()
 
@@ -336,6 +339,13 @@ const isDuplicate = computed(() => duplicateIdSet.value.has(props.model.id))
       <div v-if="state.settings.showSize || state.settings.showMtime" class="model-meta">
         <span v-if="state.settings.showSize">{{ formatSize(model.size) }}</span>
         <span v-if="state.settings.showMtime">{{ mtimeText }}</span>
+      </div>
+      <!-- 自由标签角标（F-5）：最多展示 3 个，溢出计数收尾 -->
+      <div v-if="cardTags.length" class="tag-row">
+        <span v-for="t in cardTags" :key="t" class="card-tag">{{ t }}</span>
+        <span v-if="(model.tags || []).length > cardTags.length" class="card-tag more">
+          +{{ model.tags.length - cardTags.length }}
+        </span>
       </div>
       <p v-if="state.settings.showParams && paramSummary" class="param-summary" :title="paramSummary">{{ paramSummary }}</p>
       <p v-else-if="state.settings.showParams" class="param-summary empty">未设置推荐参数</p>
@@ -640,5 +650,29 @@ const isDuplicate = computed(() => duplicateIdSet.value.has(props.model.id))
 .param-summary.empty {
   color: var(--text-muted);
   opacity: 0.7;
+}
+
+/* 自由标签角标（F-5）：小型胶囊，视觉弱于分类标签 */
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.card-tag {
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  max-width: 88px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-tag.more {
+  background: var(--bg-hover);
+  color: var(--text-muted);
 }
 </style>

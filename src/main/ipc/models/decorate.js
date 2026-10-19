@@ -53,7 +53,7 @@ export function metaSignature(meta) {
   const signature = JSON.stringify([
     meta.cover, meta.covers, meta.alias, meta.note, meta.subCategory,
     meta.triggerWords, meta.favorite, meta.nsfw, meta.rating, meta.params, meta.hash,
-    meta.civitaiUrl,
+    meta.civitaiUrl, meta.baseModel, meta.tags,
     meta.noteSource, meta.triggerWordsSource
   ])
   signatureCache.set(meta, signature)
@@ -328,6 +328,11 @@ async function decorateOne(model, usedThumbs) {
     hash: meta.hash || '',
     // Civitai 在线识别结果：模型页面 URL（空串表示未识别）
     civitaiUrl: meta.civitaiUrl || '',
+    // 基底模型（F-2 筛选数据源）：safetensors 头部解析优先，Civitai 识别
+    // 回填值兜底（.ckpt/.pt 等无头部元信息的模型经识别补全后同样可筛）
+    baseModel: autoInfo?.baseModel || meta.baseModel || '',
+    // 自由标签（F-5）：用户自定义多标签，卡片角标/筛选/搜索消费
+    tags: meta.tags || [],
     autoInfo
   }
   // 写入装饰缓存（容量超限时按插入顺序淘汰最旧条目，C4 共享工具）

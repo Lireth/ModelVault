@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { BrowserWindow, Menu, clipboard, dialog, shell } from 'electron'
+import { BrowserWindow, Menu, clipboard, shell } from 'electron'
 import logger from '../../logger'
 import { isInRoot, getModelMeta, removeModelMeta } from '../../services/store'
 import { SIDECAR_PREVIEW_EXTS } from '../../services/scanner'
@@ -8,7 +8,7 @@ import { wrapHandler, checkModelId, checkModelIdInRoot } from '../handler'
 
 /**
  * 其他模型操作链路：删除模型（回收站 + sidecar 清理）、
- * 右键上下文菜单、资源管理器定位、模型列表导出（E2）。
+ * 右键上下文菜单、资源管理器定位。
  */
 
 /** 模型同名的 sidecar 文件（SD WebUI 惯例：同名预览图 + 说明文本）。
@@ -128,122 +128,4 @@ export function registerMiscHandlers() {
     shell.showItemInFolder(targetPath)
     return { ok: true }
   }, { errorPrefix: '定位文件失败' })
-
-  // 导出模型列表（E2）：渲染进程传当前列表行，主进程弹保存对话框并写文件。
-  // 复用已装饰的模型数据（备注/参数/收藏等随行携带），CSV 带 BOM 便于 Excel 打开
-  wrapHandler('models:exportList', async (event, { format, rows } = {}) => {
-    if (format !== 'csv') {
-      return { error: '不支持的导出格式' }
-    }
-    if (!Array.isArray(rows)) {
-      return { error: '无效的导出数据' }
-    }
-    if (rows.length > 100000) {
-      return { error: '导出数据量过大' }
-    }
-    const win = BrowserWindow.fromWebContents(event.sender)
-    const date = new Date().toISOString().slice(0, 10)
-    const result = await dialog.showSaveDialog(win, {
-      title: '导出模型列表',
-      defaultPath: `modelvault-export-${date}.${format}`,
-      filters: [{ name: 'CSV 表格', extensions: ['csv'] }]
-    })
-    if (result.canceled || !result.filePath) {
-      return { canceled: true }
-    }
-    try {
-      await fs.writeFile(result.filePath, buildModelsCsv(rows), 'utf-8')
-      logger.info(`模型列表已导出: ${result.filePath}（${rows.length} 条）`)
-      return { path: result.filePath, count: rows.length }
-    } catch (err) {
-      logger.warn(`模型列表导出失败: ${err.message}`)
-      return { error: `导出失败: ${err.message}` }
-    }
-  }, { errorPrefix: '导出失败' })
-}
-
-/** CSV 导出的列定义（E2）：顺序即文件列顺序 */
-const EXPORT_COLUMNS = [
-  ['name', '名称'],
-  ['alias', '备注名'],
-  ['type', '分类'],
-  ['subCategory', '分类标签'],
-  ['baseModel', '基底模型'],
-  ['author', '作者'],
-  ['favorite', '收藏'],
-  ['rating', '评分'],
-  ['nsfw', 'NSFW'],
-  ['triggerWords', '触发词'],
-  ['steps', '采样步数'],
-  ['cfg', 'CFG'],
-  ['sampler', '采样器'],
-  ['scheduler', '调度器'],
-  ['precision', '精度'],
-  ['resolution', '推荐分辨率'],
-  ['sizeBytes', '文件大小(字节)'],
-  ['mtimeIso', '修改时间'],
-  ['covers', '封面数'],
-  ['note', '备注'],
-  ['relDir', '所在目录'],
-  ['path', '文件路径']
-]
-
-/**
- * CSV 公式注入防护（O7）：模型名/备注等字段可能来自不可信的下载来源，
- * Excel 打开 CSV 时以 = + - @ 等开头的单元格会被解析执行为公式
- *（=cmd 系可执行 DDE，=WEBSERVICE 可外泄数据）。危险前缀字段前置
- * 单引号使其成为纯文本（Excel 惯例转义，数据中的引号在读取方可见）。
- */
-const FORMULA_PREFIX_RE = /^[=+\-@\t\r]/
-
-/** CSV 字段转义：含分隔符/引号/换行的字段包裹双引号，内部引号翻倍；
- *  危险公式前缀先加单引号防注入；null/undefined 输出空串 */
-function csvEscape(value) {
-  let s = value == null ? '' : String(value)
-  if (FORMULA_PREFIX_RE.test(s)) {
-    s = `'${s}`
-  }
-  if (/[",\r\n]/.test(s)) {
-    return `"${s.replace(/"/g, '""')}"`
-  }
-  return s
-}
-
-/**
- * 将模型行数组构建为 CSV 文本（纯函数，E2）。
- * @param {Array<object>} rows 渲染进程传来的模型行（appStore.exportModels 组装）
- * @returns {string} CSV 文本（含 BOM，便于 Excel 直接打开不乱码）
- */
-export function buildModelsCsv(rows) {
-  const header = EXPORT_COLUMNS.map(([, title]) => csvEscape(title)).join(',')
-  const lines = rows.map((r) => {
-    const p = r.params || {}
-    const cells = [
-      r.name,
-      r.alias,
-      r.type,
-      r.subCategory,
-      r.autoInfo?.baseModel || '',
-      r.autoInfo?.author || '',
-      r.favorite ? '是' : '',
-      Number.isFinite(r.rating) && r.rating > 0 ? r.rating : '',
-      r.nsfw ? '是' : '',
-      r.triggerWords,
-      Number.isFinite(p.steps) ? p.steps : '',
-      Number.isFinite(p.cfgMin) && Number.isFinite(p.cfgMax) ? `${p.cfgMin}~${p.cfgMax}` : '',
-      p.sampler,
-      p.scheduler,
-      p.precision,
-      Number.isFinite(p.resMin) && Number.isFinite(p.resMax) ? `${p.resMin}x${p.resMax}` : '',
-      Number.isFinite(r.size) ? r.size : '',
-      Number.isFinite(r.mtimeMs) ? new Date(r.mtimeMs).toISOString() : '',
-      Array.isArray(r.covers) ? r.covers.length : 0,
-      r.note,
-      r.relDir || '',
-      r.id
-    ]
-    return cells.map(csvEscape).join(',')
-  })
-  // \uFEFF BOM：Excel 识别 UTF-8
-  return `\uFEFF${header}\n${lines.join('\n')}\n`
 }

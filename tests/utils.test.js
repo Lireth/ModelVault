@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isAllowedExternalUrl } from '../src/main/utils'
+import { isAllowedExternalUrl, runWithConcurrency } from '../src/main/utils'
 
 /**
  * utils.isAllowedExternalUrl 单元测试（B3）：
@@ -37,5 +37,91 @@ describe('isAllowedExternalUrl（B3 外链白名单）', () => {
     expect(isAllowedExternalUrl(undefined)).toBe(false)
     expect(isAllowedExternalUrl(null)).toBe(false)
     expect(isAllowedExternalUrl(42)).toBe(false)
+  })
+})
+
+/** 手动放行的延迟 Promise（控制 worker 时序用） */
+function deferred() {
+  let resolve
+  const promise = new Promise((r) => {
+    resolve = r
+  })
+  return { promise, resolve }
+}
+
+describe('runWithConcurrency（O-6 固定并发任务池）', () => {
+  it('同时在途数不超过并发上限，且并发被用满', async () => {
+    const tasks = Array.from({ length: 20 }, (_, i) => i)
+    const gates = tasks.map(() => deferred())
+    let inFlight = 0
+    let maxInFlight = 0
+    const processed = new Set()
+    const pool = runWithConcurrency(
+      tasks,
+      async (task) => {
+        inFlight += 1
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        await gates[task].promise
+        inFlight -= 1
+        processed.add(task)
+      },
+      4
+    )
+    // 全部放行后等待池排空
+    for (const g of gates) g.resolve()
+    await pool
+    expect(maxInFlight).toBe(4)
+    expect(processed.size).toBe(20)
+  })
+
+  it('任务数少于并发数时按任务数收敛（不空转）', async () => {
+    const gates = Array.from({ length: 2 }, () => deferred())
+    const started = []
+    const pool = runWithConcurrency(
+      [0, 1],
+      async (task) => {
+        started.push(task)
+        await gates[task].promise
+      },
+      8
+    )
+    gates.forEach((g) => g.resolve())
+    await pool
+    expect(started.length).toBe(2)
+  })
+
+  it('空任务列表与 0 并发均立即完成且不调用 worker', async () => {
+    let calls = 0
+    await runWithConcurrency([], async () => {
+      calls += 1
+    }, 4)
+    await runWithConcurrency([1, 2], async () => {
+      calls += 1
+    }, 0)
+    expect(calls).toBe(0)
+  })
+
+  it('按序消费任务（调度顺序与任务顺序一致）', async () => {
+    const gates = Array.from({ length: 3 }, () => deferred())
+    const order = []
+    const pool = runWithConcurrency(
+      ['a', 'b', 'c'],
+      async (task) => {
+        order.push(task)
+        await gates[order.length - 1].promise
+      },
+      3
+    )
+    gates.forEach((g) => g.resolve())
+    await pool
+    expect(order).toEqual(['a', 'b', 'c'])
+  })
+
+  it('worker 抛错时 reject（错误处理由调用方 worker 内负责）', async () => {
+    await expect(
+      runWithConcurrency([1], async () => {
+        throw new Error('boom')
+      }, 2)
+    ).rejects.toThrow('boom')
   })
 })

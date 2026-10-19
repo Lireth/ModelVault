@@ -1,0 +1,240 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { createHash } from 'node:crypto'
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import { fakeUserData } from './setup'
+
+/**
+ * 应用内更新下载/安装服务单元测试（F-6）：
+ * - 校验和解析与资产提取（命名约定 + 白名单双校验）；
+ * - 下载闭环：流式落盘 + SHA256 比对 + 已有包复用 + 损坏包拒绝；
+ * - 安装：延迟拉起新 EXE（单实例锁竞争规避）并退出当前应用。
+ * electron / child_process 由本文件提供最小桩。
+ */
+vi.mock('electron', () => ({
+  app: {
+    getPath: vi.fn(() => fakeUserData),
+    isPackaged: true,
+    getVersion: vi.fn(() => '0.1.0'),
+    quit: vi.fn()
+  },
+  net: { fetch: vi.fn() }
+}))
+vi.mock('node:child_process', () => ({
+  spawn: vi.fn(() => ({ unref: vi.fn() }))
+}))
+
+import { app, net } from 'electron'
+import { spawn } from 'node:child_process'
+import {
+  parseChecksumHash,
+  findUpdateAssets,
+  setPendingUpdate,
+  hasPendingUpdate,
+  resetUpdateStateForTest,
+  downloadUpdatePackage,
+  cancelUpdateDownload,
+  installUpdatePackage
+} from '../src/main/services/update-download'
+
+const EXE_BYTES = Buffer.from('hello-exe')
+/** 与 EXE_BYTES 一致的真实 SHA256（校验和闭环） */
+const HASH = createHash('sha256').update(EXE_BYTES).digest('hex')
+const CHECKSUM_BODY = `${HASH}  ModelVault-0.2.0.exe\n`
+
+const ASSETS = {
+  downloadUrl: 'https://github.com/Lireth/ModelVault/releases/download/v0.2.0/ModelVault-0.2.0.exe',
+  checksumUrl:
+    'https://github.com/Lireth/ModelVault/releases/download/v0.2.0/ModelVault-0.2.0.exe.sha256',
+  size: EXE_BYTES.length
+}
+const RELEASE = {
+  assets: [
+    { name: 'ModelVault-0.2.0.exe', browser_download_url: ASSETS.downloadUrl, size: EXE_BYTES.length },
+    {
+      name: 'ModelVault-0.2.0.exe.sha256',
+      browser_download_url: ASSETS.checksumUrl
+    }
+  ]
+}
+
+/** 更新目录（userData/update，fakeUserData 随测试文件自动清理） */
+function updateDir() {
+  return path.join(fakeUserData, 'update')
+}
+
+beforeEach(() => {
+  vi.mocked(net.fetch).mockReset()
+  vi.mocked(app.quit).mockClear()
+  vi.mocked(spawn).mockClear()
+  resetUpdateStateForTest()
+})
+
+afterEach(async () => {
+  await fs.rm(updateDir(), { recursive: true, force: true }).catch(() => {})
+})
+
+/** 按请求 URL 派发响应：校验和 / 更新包 */
+function mockFetchFlow(exeBytes) {
+  vi.mocked(net.fetch).mockImplementation((url) => {
+    if (String(url).endsWith('.sha256')) {
+      return Promise.resolve(new Response(CHECKSUM_BODY, { status: 200 }))
+    }
+    return Promise.resolve(
+      new Response(exeBytes, {
+        status: 200,
+        headers: { 'content-length': String(exeBytes.length) }
+      })
+    )
+  })
+}
+
+describe('parseChecksumHash（sha256sum 兼容解析）', () => {
+  it('解析首个 64 位 hex token 并小写化', () => {
+    expect(parseChecksumHash(`${'AB'.repeat(32)}  file.exe`)).toBe('ab'.repeat(32))
+    expect(parseChecksumHash(`\n  ${HASH}  ModelVault-0.2.0.exe\n`)).toBe(HASH)
+  })
+
+  it('非法输入返回空串', () => {
+    expect(parseChecksumHash('not-a-hash')).toBe('')
+    expect(parseChecksumHash('')).toBe('')
+    expect(parseChecksumHash(null)).toBe('')
+    // 63 位长度不足
+    expect(parseChecksumHash('a'.repeat(63))).toBe('')
+  })
+})
+
+describe('findUpdateAssets（命名约定 + 白名单双校验）', () => {
+  it('命中命名约定的资产对返回下载/校验和地址与体积', () => {
+    const assets = findUpdateAssets(RELEASE, '0.2.0')
+    expect(assets).toEqual(ASSETS)
+  })
+
+  it('资产名与版本不一致 / 缺少校验和 / 地址不在白名单时返回 null', () => {
+    expect(findUpdateAssets(RELEASE, '0.3.0')).toBeNull()
+    expect(
+      findUpdateAssets({ assets: RELEASE.assets.filter((a) => !a.name.endsWith('.sha256')) }, '0.2.0')
+    ).toBeNull()
+    expect(
+      findUpdateAssets(
+        {
+          assets: [
+            { name: 'ModelVault-0.2.0.exe', browser_download_url: 'https://evil.com/x.exe', size: 1 },
+            { name: 'ModelVault-0.2.0.exe.sha256', browser_download_url: 'https://evil.com/x.sha256' }
+          ]
+        },
+        '0.2.0'
+      )
+    ).toBeNull()
+    expect(findUpdateAssets(null, '0.2.0')).toBeNull()
+  })
+})
+
+describe('downloadUpdatePackage（下载 + SHA256 校验闭环）', () => {
+  it('成功下载并通过校验，重复下载复用已有完整包', async () => {
+    mockFetchFlow(EXE_BYTES)
+    setPendingUpdate(ASSETS, '0.2.0')
+    expect(hasPendingUpdate()).toBe(true)
+
+    const res = await downloadUpdatePackage()
+    expect(res.error).toBeUndefined()
+    expect(res.path).toContain(path.join('update', 'ModelVault-0.2.0.exe'))
+    expect(res.size).toBe(EXE_BYTES.length)
+    const saved = await fs.readFile(res.path)
+    expect(saved).toEqual(EXE_BYTES)
+    // 无残留临时文件
+    const names = await fs.readdir(updateDir())
+    expect(names.every((n) => !n.endsWith('.part'))).toBe(true)
+
+    // 第二次调用：本地完整包哈希命中，直接复用（仍需校验和请求，共 3 次网络请求）
+    const res2 = await downloadUpdatePackage()
+    expect(res2.reused).toBe(true)
+    expect(res2.path).toBe(res.path)
+  })
+
+  it('校验和不匹配时拒绝落盘并清理临时文件', async () => {
+    // 内容与校验和不符（'world...' 的 SHA256 ≠ HASH）
+    mockFetchFlow(Buffer.from('world-exe'))
+    setPendingUpdate(ASSETS, '0.2.0')
+    const res = await downloadUpdatePackage()
+    expect(res.error).toContain('校验和不匹配')
+    const names = await fs.readdir(updateDir())
+    expect(names.length).toBe(0)
+  })
+
+  it('无可用更新信息时拒绝；空闲取消为 no-op', async () => {
+    expect(await downloadUpdatePackage()).toEqual({ error: '没有可用的更新信息，请先检查更新' })
+    expect(cancelUpdateDownload()).toEqual({ ok: true })
+  })
+
+  it('下载进行中（busy）拒绝并发请求；完成后第一个请求正常落盘', async () => {
+    setPendingUpdate(ASSETS, '0.2.0')
+    // 更新包请求挂起直到放行：期间 downloadAbort 已置位，并发请求被拒
+    let releaseFetch
+    const gate = new Promise((resolve) => {
+      releaseFetch = resolve
+    })
+    vi.mocked(net.fetch).mockImplementation((url) => {
+      if (String(url).endsWith('.sha256')) {
+        return Promise.resolve(new Response(CHECKSUM_BODY, { status: 200 }))
+      }
+      return gate.then(
+        () =>
+          new Response(EXE_BYTES, {
+            status: 200,
+            headers: { 'content-length': String(EXE_BYTES.length) }
+          })
+      )
+    })
+    const first = downloadUpdatePackage()
+    // 并发闸在函数入口同步置位（首个 await 之前）：第二个调用必然立即被拒
+    const second = await downloadUpdatePackage()
+    expect(second).toEqual({ error: '更新包正在下载中，请稍候' })
+
+    releaseFetch()
+    await expect(first).resolves.toMatchObject({ size: EXE_BYTES.length })
+  })
+
+  it('下载被中止（AbortError）返回 canceled', async () => {
+    setPendingUpdate(ASSETS, '0.2.0')
+    vi.mocked(net.fetch).mockImplementation((url) => {
+      if (String(url).endsWith('.sha256')) {
+        return Promise.resolve(new Response(CHECKSUM_BODY, { status: 200 }))
+      }
+      const err = new Error('aborted')
+      err.name = 'AbortError'
+      return Promise.reject(err)
+    })
+    await expect(downloadUpdatePackage()).resolves.toEqual({ canceled: true })
+  })
+})
+
+describe('installUpdatePackage（延迟拉起新版本）', () => {
+  it('未下载更新包时拒绝', () => {
+    expect(installUpdatePackage()).toEqual({ error: '尚未下载更新包，请先下载更新' })
+  })
+
+  it('下载成功后以延迟方式拉起新 EXE 并退出当前应用', async () => {
+    vi.useFakeTimers()
+    try {
+      mockFetchFlow(EXE_BYTES)
+      setPendingUpdate(ASSETS, '0.2.0')
+      const res = await downloadUpdatePackage()
+      expect(res.error).toBeUndefined()
+
+      const install = installUpdatePackage()
+      expect(install).toEqual({ ok: true })
+      expect(spawn).toHaveBeenCalledTimes(1)
+      const [cmd, args] = vi.mocked(spawn).mock.calls[0]
+      expect(cmd).toBe('cmd.exe')
+      expect(args.join(' ')).toContain('ModelVault-0.2.0.exe')
+      expect(args.join(' ')).toContain('timeout /t 3')
+      // 延迟退出（等待单实例锁释放）
+      expect(app.quit).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(600)
+      expect(app.quit).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

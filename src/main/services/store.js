@@ -44,7 +44,6 @@ export {
   setDataRoot,
   getCurrentRoot,
   getCoversDir,
-  getLibSettingsFilePath,
   isInRoot,
   toRelKey,
   resolveCover,
@@ -75,7 +74,6 @@ export {
   removeModelMeta,
   renameModelMeta,
   relinkScannedMeta,
-  scheduleSave,
   saveStoreNow,
   flushStoreSave,
   switchDataRoot

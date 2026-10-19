@@ -60,7 +60,7 @@ let bootstrap = null
 let library = null
 
 /** 默认应用设置（A-12 单一来源：src/shared/defaults.js；返回可变副本） */
-export function defaultSettings() {
+function defaultSettings() {
   return {
     ...DEFAULT_SETTINGS,
     scanExtensions: [...DEFAULT_SETTINGS.scanExtensions],
@@ -129,6 +129,10 @@ function normalizeSavedViews(raw) {
       search: typeof v.search === 'string' ? v.search.slice(0, 100) : '',
       typeFilter: typeof v.typeFilter === 'string' ? v.typeFilter.slice(0, 20) : 'all',
       subFilter: typeof v.subFilter === 'string' ? v.subFilter.slice(0, 50) : '',
+      // 基底模型家族筛选（F-2）：旧视图缺省时为 ''（全部）
+      baseFilter: typeof v.baseFilter === 'string' ? v.baseFilter.slice(0, 20) : '',
+      // 自由标签筛选（F-5）：旧视图缺省时为 ''（全部）
+      tagFilter: typeof v.tagFilter === 'string' ? v.tagFilter.slice(0, 32) : '',
       showFavoritesOnly: v.showFavoritesOnly === true,
       // 重复模型筛选（FEAT-1）：旧视图缺省该字段时为 false
       showDuplicatesOnly: v.showDuplicatesOnly === true,

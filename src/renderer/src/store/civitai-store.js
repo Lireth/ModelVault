@@ -21,6 +21,9 @@ function applyModelMeta(id, meta) {
     state.models[idx] = {
       ...state.models[idx],
       civitaiUrl: meta.civitaiUrl || '',
+      // 基底模型识别回填（F-2）：装饰层约定 autoInfo 解析值优先、meta 兜底，
+      // 此处仅在本地无解析值时应用，避免覆盖已有的 autoInfo.baseModel
+      baseModel: state.models[idx].baseModel || meta.baseModel || '',
       triggerWords: meta.triggerWords || '',
       note: meta.note || ''
     }

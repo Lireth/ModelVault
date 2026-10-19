@@ -20,6 +20,7 @@ const EXPECTED_EXPORTS = [
   'SUB_CATEGORIES',
   'LORA_TAGS',
   'CHECKPOINT_TAGS',
+  'BASE_MODEL_FAMILIES',
   'SORT_OPTIONS',
   'CARD_SIZE_PRESETS',
   'CARD_SIZE_OPTIONS',
@@ -58,6 +59,7 @@ const EXPECTED_EXPORTS = [
   'filteredModels',
   'typeCounts',
   'duplicateGroups',
+  'allTags',
   'duplicateIdSet',
   'duplicateWastedBytes',
   // 智能视图（组合筛选收藏）
@@ -112,10 +114,10 @@ const EXPECTED_EXPORTS = [
   // 单模型操作
   'revealModel',
   'deleteModel',
-  'exportModels',
   'toggleFavorite',
   'setNsfw',
   'setRating',
+  'setModelTags',
   'showContextMenu',
   'handleMenuAction',
   // 文件操作（批次 4）

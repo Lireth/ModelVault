@@ -22,6 +22,7 @@ export function makeComponentApiMock() {
       cancelScan: vi.fn(() => Promise.resolve({ ok: false })),
       chooseFolder: vi.fn(),
       setMetaFlags: vi.fn(),
+      setModelTags: vi.fn(() => Promise.resolve({ meta: { tags: [] } })),
       deleteModel: vi.fn(),
       popupMenu: vi.fn(),
       reveal: vi.fn(),
@@ -31,7 +32,6 @@ export function makeComponentApiMock() {
       setDefaultCover: vi.fn(),
       deleteCover: vi.fn(),
       importCover: vi.fn(),
-      exportList: vi.fn(() => Promise.resolve({ canceled: true })),
       partialScan: vi.fn(() => Promise.resolve({ models: [], dirs: [], relinked: 0 })),
       warmupHash: vi.fn(() => Promise.resolve({ ok: true })),
       onScanProgress: vi.fn(() => () => {}),
@@ -46,6 +46,10 @@ export function makeComponentApiMock() {
     app: {
       getInfo: vi.fn(),
       checkUpdate: vi.fn(() => Promise.resolve({ hasUpdate: false })),
+      downloadUpdate: vi.fn(() => Promise.resolve({ error: '没有可用的更新信息' })),
+      cancelUpdateDownload: vi.fn(() => Promise.resolve({ ok: true })),
+      installUpdate: vi.fn(() => Promise.resolve({ error: '尚未下载更新包' })),
+      onUpdateProgress: vi.fn(() => () => {}),
       openLogs: vi.fn(() => Promise.resolve({ ok: true }))
     }
   }

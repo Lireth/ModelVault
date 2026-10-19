@@ -1,12 +1,40 @@
 import { state, replaceModels } from './state'
 import { toast, confirmDialog } from './toast'
 import { applyMetaFlags } from './meta-apply'
-import { filteredModels } from './filter'
 import { openDetail } from './detail'
 
 /**
- * 单模型文件操作、即时标注、右键菜单、列表导出（A-04 自 appStore.js 拆出）。
+ * 单模型文件操作、即时标注、自由标签（F-5）、右键菜单
+ * （A-04 自 appStore.js 拆出）。
  */
+
+/**
+ * 整体覆写模型自由标签（F-5，即时落盘）：
+ * 详情页标签编辑器每次增删提交全量列表；成功后同步本地列表元素
+ * （浅响应约定：元素级整体替换，触发卡片角标与筛选池更新）。
+ * @param {string} id 模型 id
+ * @param {string[]} tags 全量标签列表
+ * @returns {Promise<boolean>} 是否保存成功（失败已 toast）
+ */
+export async function setModelTags(id, tags) {
+  let res
+  try {
+    res = await window.api.models.setModelTags(id, tags)
+  } catch (err) {
+    toast('error', `标签保存失败: ${err.message}`)
+    return false
+  }
+  if (res?.error) {
+    toast('error', res.error)
+    return false
+  }
+  const next = res?.meta?.tags || []
+  const idx = state.models.findIndex((m) => m.id === id)
+  if (idx >= 0) {
+    state.models[idx] = { ...state.models[idx], tags: next }
+  }
+  return true
+}
 
 /**
  * 在资源管理器中显示模型文件。
@@ -46,60 +74,6 @@ export async function deleteModel(id, opts = {}) {
   if (state.selectedId === id) state.selectedId = null
   if (!opts.silent) toast('success', '模型已移入回收站')
   return true
-}
-
-/**
- * 导出当前（筛选后）模型列表到文件（E2）。
- * in-flight 防重（O7）：导出含保存对话框与整列表 IPC，期间连点会重复
- * 弹窗/重复写盘——busy 期间入口直接拦截。
- * @param {'csv'} format 导出格式
- */
-let exporting = false
-export async function exportModels(format) {
-  if (exporting) return
-  const list = filteredModels.value
-  if (list.length === 0) {
-    toast('warn', '当前列表为空，无可导出的模型')
-    return
-  }
-  exporting = true
-  try {
-    const rows = list.map((m) => ({
-      id: m.id,
-      name: m.name,
-      alias: m.alias || '',
-      type: m.type,
-      subCategory: m.subCategory || '',
-      favorite: m.favorite === true,
-      nsfw: m.nsfw === true,
-      rating: m.rating || 0,
-      triggerWords: m.triggerWords || '',
-      note: m.note || '',
-      size: m.size,
-      mtimeMs: m.mtimeMs,
-      relDir: m.relDir || '',
-      covers: Array.isArray(m.covers) ? m.covers.length : 0,
-      // F4 扩列：基底模型/作者来自 safetensors 自动解析，随行携带
-      autoInfo:
-        m.autoInfo
-          ? { baseModel: m.autoInfo.baseModel || '', author: m.autoInfo.author || '' }
-          : null,
-      // params 来自 reactive state，是 Proxy；Electron IPC 结构化序列化不支持
-      // Proxy，直接传会抛 "An object could not be cloned"，需拷贝为普通对象
-      params: m.params ? { ...m.params } : null
-    }))
-    const res = await window.api.models.exportList({ format, rows })
-    if (res.canceled) return
-    if (res.error) {
-      toast('error', res.error)
-      return
-    }
-    toast('success', `已导出 ${res.count} 个模型：${res.path}`)
-  } catch (err) {
-    toast('error', `导出失败: ${err.message}`)
-  } finally {
-    exporting = false
-  }
 }
 
 /**

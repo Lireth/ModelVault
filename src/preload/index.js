@@ -8,6 +8,9 @@ const VALID_INVOKE_CHANNELS = [
   'app:getInfo',
   'app:reportError',
   'app:checkUpdate',
+  'app:downloadUpdate',
+  'app:cancelUpdateDownload',
+  'app:installUpdate',
   'app:openLogs',
   'window:setTheme',
   'settings:update',
@@ -23,10 +26,10 @@ const VALID_INVOKE_CHANNELS = [
   'models:deleteCover',
   'models:deleteModel',
   'models:setMetaFlags',
+  'models:setModelTags',
   'models:popupMenu',
   'models:importCover',
   'models:reveal',
-  'models:exportList',
   'models:exportBackup',
   'models:importBackup',
   'models:toggleDisabled',
@@ -40,6 +43,7 @@ const VALID_INVOKE_CHANNELS = [
 ]
 
 const VALID_RECEIVE_CHANNELS = [
+  'app:updateProgress',
   'models:scanProgress',
   'models:menuAction',
   'models:thumbsReady',
@@ -82,8 +86,16 @@ const api = {
     getInfo: () => invokeValidated('app:getInfo'),
     /** 上报渲染进程异常（写入主进程日志） */
     reportError: (message, stack) => invokeValidated('app:reportError', { message, stack }),
-    /** 应用内检查更新（E1）：返回 { current, latest?, hasUpdate, releaseUrl? } 或 { error } */
+    /** 应用内检查更新（E1）：返回 { current, latest?, hasUpdate, releaseUrl?, canDownload?, downloadSize? } 或 { error } */
     checkUpdate: () => invokeValidated('app:checkUpdate'),
+    /** 下载更新包（F-6，URL 由主进程检查结果提供），进度经 onUpdateProgress 推送 */
+    downloadUpdate: () => invokeValidated('app:downloadUpdate'),
+    /** 取消进行中的更新包下载 */
+    cancelUpdateDownload: () => invokeValidated('app:cancelUpdateDownload'),
+    /** 运行更新程序（F-6）：延迟拉起新版本并退出当前应用 */
+    installUpdate: () => invokeValidated('app:installUpdate'),
+    /** 订阅更新包下载进度（{ received, total }），返回取消监听函数 */
+    onUpdateProgress: (listener) => subscribe('app:updateProgress', listener),
     /** 在系统资源管理器中打开日志目录（B-04），返回 { ok } 或 { error } */
     openLogs: () => invokeValidated('app:openLogs')
   },
@@ -125,8 +137,6 @@ const api = {
     setDefaultCover: (id, cover) => invokeValidated('models:setDefaultCover', { id, cover }),
     /** 删除单张封面（cover 为封面相对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */
     deleteCover: (id, cover) => invokeValidated('models:deleteCover', { id, cover }),
-    /** 导出模型列表（E2），rows 为当前列表行，返回 { path, count } / { canceled } / { error } */
-    exportList: (payload) => invokeValidated('models:exportList', payload),
     /** 导出备份（FEAT-3）：设置 + 当前库标注/封面 → zip，返回 { path, sizeBytes, library, models, covers } / { canceled } / { error } */
     exportBackup: () => invokeValidated('models:exportBackup'),
     /** 从备份恢复（FEAT-3）：zip → 设置 + 指定库，返回 { settingsRestored, libraryRestored? } / { canceled } / { error } */
@@ -135,6 +145,8 @@ const api = {
     deleteModel: (id) => invokeValidated('models:deleteModel', { id }),
     /** 更新快捷标记（收藏/NSFW/评分，仅传需更新的字段），返回 { meta } 或 { error } */
     setMetaFlags: (payload) => invokeValidated('models:setMetaFlags', payload),
+    /** 整体覆写模型自由标签（F-5，tags 为全量字符串数组），返回 { meta } 或 { error } */
+    setModelTags: (id, tags) => invokeValidated('models:setModelTags', { id, tags }),
     /** 弹出模型右键菜单（原生菜单），动作经 onMenuAction 事件回传 */
     popupMenu: (id) => invokeValidated('models:popupMenu', { id }),
     /** 拖拽导入封面（sourcePath 为外部图片绝对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */

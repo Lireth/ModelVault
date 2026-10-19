@@ -281,3 +281,56 @@ describe('SettingsPage NSFW 示例图模糊开关', () => {
     wrapper.unmount()
   })
 })
+
+describe('SettingsPage 应用内更新下载与安装（F-6）', () => {
+  it('有更新且支持应用内下载时提供下载入口，完成后可运行更新程序', async () => {
+    const wrapper = await mountSettings()
+    await runUpdateCheck(wrapper, {
+      current: '0.1.0',
+      latest: '0.2.0',
+      hasUpdate: true,
+      releaseUrl: 'https://github.com/Lireth/ModelVault/releases/tag/v0.2.0',
+      releaseNotes: '',
+      canDownload: true
+    })
+
+    const downloadBtn = wrapper.findAll('button').find((b) => b.text() === '下载更新')
+    expect(downloadBtn).toBeTruthy()
+    window.api.app.downloadUpdate = vi.fn().mockResolvedValue({
+      path: 'C:\\Users\\test\\AppData\\Roaming\\modelvault\\update\\ModelVault-0.2.0.exe',
+      size: 100
+    })
+    await downloadBtn.trigger('click')
+    await flushPromises()
+
+    const installBtn = wrapper.findAll('button').find((b) => b.text() === '运行更新程序')
+    expect(installBtn).toBeTruthy()
+    window.api.app.installUpdate = vi.fn().mockResolvedValue({ ok: true })
+    await installBtn.trigger('click')
+    await flushPromises()
+    expect(window.api.app.installUpdate).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('下载失败时展示错误信息且不出现安装入口', async () => {
+    const wrapper = await mountSettings()
+    await runUpdateCheck(wrapper, {
+      current: '0.1.0',
+      latest: '0.2.0',
+      hasUpdate: true,
+      releaseUrl: 'https://github.com/Lireth/ModelVault/releases/tag/v0.2.0',
+      releaseNotes: '',
+      canDownload: true
+    })
+    window.api.app.downloadUpdate = vi
+      .fn()
+      .mockResolvedValue({ error: '校验和不匹配，下载可能损坏或被篡改，已放弃本次下载' })
+    const downloadBtn = wrapper.findAll('button').find((b) => b.text() === '下载更新')
+    await downloadBtn.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('校验和不匹配')
+    expect(wrapper.findAll('button').some((b) => b.text() === '运行更新程序')).toBe(false)
+    wrapper.unmount()
+  })
+})

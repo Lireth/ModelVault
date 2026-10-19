@@ -26,6 +26,7 @@ vi.mock('electron', () => ({
 import { net, protocol } from 'electron'
 import { registerImageProtocolHandler, toImageUrl } from '../src/main/protocol'
 import { setDataRoot } from '../src/main/services/store'
+import { getCivImageCachePath } from '../src/main/services/civ-cache'
 
 const roots = []
 let root
@@ -217,5 +218,58 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
     vi.mocked(net.fetch).mockResolvedValue(new Response('', { status: 403 }))
     const res = await civHandler(makeCivRequest('https://image.civitai.com/a.jpeg'))
     expect(res.status).toBe(502)
+  })
+
+  /** 最小 PNG 文件头（通过魔数校验，可入缓存） */
+  const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
+
+  it('首次请求回源并写入磁盘缓存，二次请求由缓存服务（不再发起网络请求，O-5）', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response(PNG_BYTES, { status: 200, headers: { 'Content-Type': 'image/png' } })
+    )
+    const target = 'https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/uuid/original=true/1.png'
+
+    const res1 = await civHandler(makeCivRequest(target))
+    expect(res1.status).toBe(200)
+    expect(vi.mocked(net.fetch)).toHaveBeenCalledTimes(1)
+    // 回源成功后缓存条目落盘（位于当前库 .modelvault/civcache/，与 thumbs 同范式）
+    const cachePath = getCivImageCachePath(target)
+    expect(cachePath).toContain(path.join('.modelvault', 'civcache'))
+    await expect(fs.access(cachePath)).resolves.toBeUndefined()
+
+    const res2 = await civHandler(makeCivRequest(target))
+    expect(res2.status).toBe(200)
+    // 命中磁盘缓存：网络请求次数不变
+    expect(vi.mocked(net.fetch)).toHaveBeenCalledTimes(1)
+    expect(Buffer.from(await res2.arrayBuffer())).toEqual(PNG_BYTES)
+    expect(res2.headers.get('Content-Type')).toBe('image/png')
+    expect(res2.headers.get('Cache-Control')).toContain('max-age=86400')
+  })
+
+  it('非图片内容（魔数不符）不放行入缓存', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response('upstream-error-page', { status: 200, headers: { 'Content-Type': 'text/html' } })
+    )
+    const target = 'https://image.civitai.com/b/2.png'
+    const res = await civHandler(makeCivRequest(target))
+    expect(res.status).toBe(200)
+    await expect(fs.access(getCivImageCachePath(target))).rejects.toThrow()
+  })
+
+  it('缓存条目损坏（魔数不符）时删除自愈并重新回源', async () => {
+    // 每次回源生成新 Response（Response body 一次性，mockResolvedValue 复用
+    // 同一实例会在二次消费时抛 Body is unusable）
+    vi.mocked(net.fetch).mockImplementation(() => Promise.resolve(new Response(PNG_BYTES, { status: 200 })))
+    const target = 'https://image.civitai.com/c/3.png'
+    expect((await civHandler(makeCivRequest(target))).status).toBe(200)
+    expect(vi.mocked(net.fetch)).toHaveBeenCalledTimes(1)
+
+    // 模拟半写/损坏：覆写缓存文件为非图片内容
+    await fs.writeFile(getCivImageCachePath(target), 'corrupted-not-an-image')
+    const res = await civHandler(makeCivRequest(target))
+    expect(res.status).toBe(200)
+    // 损坏条目已删除并重新拉取
+    expect(vi.mocked(net.fetch)).toHaveBeenCalledTimes(2)
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(PNG_BYTES)
   })
 })

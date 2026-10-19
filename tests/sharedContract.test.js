@@ -15,7 +15,10 @@ import {
   SUB_CATEGORY_DEFS,
   LORA_TAG_DEFS,
   CHECKPOINT_TAG_DEFS,
-  ALL_CATEGORY_KEYS
+  ALL_CATEGORY_KEYS,
+  BASE_FAMILIES,
+  normalizeBaseModel,
+  isBaseFamilyKey
 } from '../src/shared/model-categories'
 import {
   SORT_OPTION_DEFS,
@@ -66,6 +69,47 @@ describe('shared/model-categories', () => {
       'role', 'style', 'concept', 'outfit', 'background', 'pose', 'tool', 'base']) {
       expect(ALL_CATEGORY_KEYS.has(key)).toBe(true)
     }
+  })
+})
+
+describe('shared/model-categories 基底模型家族（F-2）', () => {
+  it('家族 key 唯一，normalizeBaseModel 输出恒在家族集合内', () => {
+    const keys = BASE_FAMILIES.map((d) => d.key)
+    expect(new Set(keys).size).toBe(keys.length)
+    for (const sample of ['SDXL 1.0', 'Pony V6', 'sd_v1-5', 'Flux.1 D', ' неизвестно', '']) {
+      const key = normalizeBaseModel(sample)
+      if (key) expect(keys).toContain(key)
+    }
+  })
+
+  it('常见基底写法归一化命中正确家族', () => {
+    expect(normalizeBaseModel('SDXL 1.0')).toBe('sdxl')
+    expect(normalizeBaseModel('sdxl')).toBe('sdxl')
+    expect(normalizeBaseModel('Pony Diffusion V6 XL')).toBe('pony')
+    expect(normalizeBaseModel('Illustrious-XL v0.1')).toBe('illustrious')
+    expect(normalizeBaseModel('NoobAI XLNAI')).toBe('noobai')
+    expect(normalizeBaseModel('Flux.1 Dev')).toBe('flux')
+    expect(normalizeBaseModel('SD 3.5')).toBe('sd3')
+    expect(normalizeBaseModel('SD 1.5')).toBe('sd15')
+    expect(normalizeBaseModel('sd1.5')).toBe('sd15')
+    // kohya 风格的版本串（ss_sd_model_name 常见值）
+    expect(normalizeBaseModel('sd_v1-5-pruned-emaonly')).toBe('sd15')
+  })
+
+  it('空/非字符串返回空串（未知不参与筛选命中），非空未命中归 other', () => {
+    expect(normalizeBaseModel('')).toBe('')
+    expect(normalizeBaseModel(null)).toBe('')
+    expect(normalizeBaseModel(undefined)).toBe('')
+    expect(normalizeBaseModel(42)).toBe('')
+    expect(normalizeBaseModel('Playground v2')).toBe('other')
+    expect(normalizeBaseModel('  ')).toBe('')
+  })
+
+  it('isBaseFamilyKey 校验持久化值（智能视图 baseFilter）', () => {
+    expect(isBaseFamilyKey('sdxl')).toBe(true)
+    expect(isBaseFamilyKey('')).toBe(false)
+    expect(isBaseFamilyKey('unknown-family')).toBe(false)
+    expect(isBaseFamilyKey(null)).toBe(false)
   })
 })
 

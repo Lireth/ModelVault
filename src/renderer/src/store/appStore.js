@@ -28,6 +28,7 @@ export {
   SUB_CATEGORIES,
   LORA_TAGS,
   CHECKPOINT_TAGS,
+  BASE_MODEL_FAMILIES,
   SORT_OPTIONS,
   CARD_SIZE_PRESETS,
   CARD_SIZE_OPTIONS,
@@ -63,13 +64,14 @@ export {
   applyHashUpdate
 } from './library'
 
-// 筛选派生（含重复模型分组，FEAT-1）
+// 筛选派生（含重复模型分组，FEAT-1；自由标签池 F-5）
 export {
   filteredModels,
   typeCounts,
   duplicateGroups,
   duplicateIdSet,
-  duplicateWastedBytes
+  duplicateWastedBytes,
+  allTags
 } from './filter'
 
 // 智能视图（组合筛选收藏）
@@ -130,14 +132,14 @@ export {
 // Civitai 在线识别与一键补全
 export { civitaiIdentify, civitaiComplete, civitaiImportImages } from './civitai-store'
 
-// 单模型操作/即时标注/右键菜单/导出/文件操作（批次 4）
+// 单模型操作/即时标注/右键菜单/文件操作（批次 4）/自由标签（F-5）
 export {
   revealModel,
   deleteModel,
-  exportModels,
   toggleFavorite,
   setNsfw,
   setRating,
+  setModelTags,
   showContextMenu,
   handleMenuAction,
   toggleDisabledModel,
