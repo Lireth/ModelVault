@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import { ipcMain } from 'electron'
 import logger from '../logger'
 import { isInRoot } from '../services/store'
+import { validateIpcPayload } from './schema'
 
 /**
  * IPC handler 统一包装与入参校验助手（O1/O2 样板收敛）：
@@ -15,6 +16,9 @@ import { isInRoot } from '../services/store'
  *
  * wrapHandler 收敛为统一约定：
  * - 校验助手（checkModelId 等）返回错误文案，handler 首行短路返回 { error }；
+ * - payload 结构校验（O-2）：按通道 schema 前置校验（ipc/schema.js 注册表），
+ *   非法 payload 在进入业务代码前即拒绝——schema 只查类型/边界，handler 内
+ *   的语义校验与专属文案保持不变；
  * - 抛出的异常兜底为 { error: `${前缀}: ${err.message}` } 并写主进程日志；
  * - AbortError（用户主动取消）保留 { canceled: true } 语义（与 models:scan
  *   取消链路的既有契约一致）。
@@ -31,6 +35,12 @@ export function wrapHandler(channel, handler, opts = {}) {
   const prefix = opts.errorPrefix || '操作失败'
   ipcMain.handle(channel, async (event, payload) => {
     try {
+      // O-2 结构门禁：非法 payload 不进入业务代码（语义校验仍在 handler 内）
+      const schemaError = validateIpcPayload(channel, payload)
+      if (schemaError) {
+        logger.warn(`IPC ${channel} 入参校验失败: ${schemaError}`)
+        return { error: schemaError }
+      }
       return await handler(event, payload)
     } catch (err) {
       if (err?.name === 'AbortError') {

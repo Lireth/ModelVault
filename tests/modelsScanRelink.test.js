@@ -110,7 +110,9 @@ describe('models:partialScan 局部增量扫描（A-03）', () => {
     await updateSettings({ modelsFolder: root })
     expect((await partial(makeEvent(), { folder: root, dirs: [] })).error).toContain('子树')
     expect((await partial(makeEvent(), { folder: root, dirs: ['../escape'] })).error).toContain('子树')
-    expect((await partial(makeEvent(), { folder: root, dirs: 'lora' })).error).toContain('子树')
+    // 非数组由 O-2 schema 结构门禁前置拦截（语义文案「缺少变更子树」仅在
+    // dirs 为数组但清洗后为空时由 handler 产出）
+    expect((await partial(makeEvent(), { folder: root, dirs: 'lora' })).error).toBe('dirs 须为数组')
   })
 })
 
