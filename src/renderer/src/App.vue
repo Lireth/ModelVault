@@ -12,6 +12,7 @@ import VirtualModelList from './components/VirtualModelList.vue'
 import { useGlobalShortcuts } from './composables/useGlobalShortcuts'
 import { useMainProcessEvents } from './composables/useMainProcessEvents'
 import {
+  allTags,
   cancelScan,
   chooseFolder,
   duplicateIdSet,
@@ -338,6 +339,20 @@ onUnmounted(() => {
               <select v-model="state.baseFilter">
                 <option value="">全部</option>
                 <option v-for="b in BASE_MODEL_FAMILIES" :key="b.key" :value="b.key">{{ b.label }}</option>
+              </select>
+            </label>
+            <!-- 自由标签筛选（F-5）：库内存在标签时显示；跨类型维度，
+                 不随主分类切换清空（与收藏筛选同类） -->
+            <label
+              v-if="allTags.length"
+              class="sort-select"
+              :class="{ 'sub-filter': state.typeFilter !== 'lora' && state.typeFilter !== 'checkpoint' }"
+              title="按标签筛选"
+            >
+              <span class="sort-label">标签</span>
+              <select v-model="state.tagFilter">
+                <option value="">全部</option>
+                <option v-for="t in allTags" :key="t" :value="t">{{ t }}</option>
               </select>
             </label>
           </div>

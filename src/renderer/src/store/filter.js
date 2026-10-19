@@ -29,6 +29,8 @@ function searchHaystack(m) {
   if (hay !== undefined) return hay
   // 基底模型取装饰层合成字段，兼容手工构造/旧数据仅带 autoInfo 的对象
   const parts = [m.name, m.alias, m.note, m.triggerWords, m.baseModel || m.autoInfo?.baseModel]
+  // 自由标签纳入搜索域（F-5）："那个赛博朋克风格的 LoRA" 直达
+  if (Array.isArray(m.tags)) parts.push(...m.tags)
   if (m.subCategory) {
     parts.push(m.subCategory)
     const info = SUB_MAP[m.subCategory]
@@ -96,12 +98,14 @@ export const duplicateWastedBytes = computed(() =>
  */
 const filteredUnsorted = computed(() => {
   const keyword = state.search.trim().toLowerCase()
-  const { typeFilter, subFilter, baseFilter, showFavoritesOnly, showDuplicatesOnly } = state
+  const { typeFilter, subFilter, baseFilter, tagFilter, showFavoritesOnly, showDuplicatesOnly } = state
   // LoRA 分类筛选：仅选中 LoRA 分类且指定了子分类时生效
   const checkSub = typeFilter === 'lora' && subFilter
   // 基底模型家族筛选（F-2）：归一化比较（autoInfo 解析 + Civitai 回填双来源
   // 已在装饰层合成为 m.baseModel）；未解析基底（''）不命中任何家族
   const checkBase = baseFilter
+  // 自由标签筛选（F-5）：包含即命中（单选语义）
+  const checkTag = tagFilter
   // 重复筛选仅在开启时读取命中集合（关闭路径零额外开销）
   const dupes = showDuplicatesOnly ? duplicateIdSet.value : null
   const list = []
@@ -109,6 +113,7 @@ const filteredUnsorted = computed(() => {
     if (typeFilter !== 'all' && m.type !== typeFilter) continue
     if (checkSub && m.subCategory !== subFilter) continue
     if (checkBase && normalizeBaseModel(m.baseModel || m.autoInfo?.baseModel || '') !== checkBase) continue
+    if (checkTag && !(m.tags || []).includes(checkTag)) continue
     if (showFavoritesOnly && !m.favorite) continue
     if (dupes && !dupes.has(m.id)) continue
     if (keyword && !searchHaystack(m).includes(keyword)) continue
@@ -155,6 +160,22 @@ export const filteredModels = computed(() => {
     list.sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0))
   }
   return list
+})
+
+/**
+ * 全库自由标签池（F-5）：按使用次数降序（同频按中文名稳定排序），上限 50——
+ * 筛选下拉的数据源；标签由详情页编辑器维护，随元数据即时落盘。
+ */
+export const allTags = computed(() => {
+  const counts = new Map()
+  for (const m of state.models) {
+    for (const t of m.tags || []) {
+      counts.set(t, (counts.get(t) || 0) + 1)
+    }
+  }
+  return [...counts.keys()]
+    .sort((a, b) => (counts.get(b) || 0) - (counts.get(a) || 0) || zhCollator.compare(a, b))
+    .slice(0, 50)
 })
 
 /**

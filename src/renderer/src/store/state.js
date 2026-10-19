@@ -145,6 +145,9 @@ export const state = shallowReactive({
   // 基底模型家族筛选（F-2，key 为 shared BASE_FAMILIES 之一，'' 为全部）：
   // 命中 normalizeBaseModel(m.baseModel)；typeFilter 切换时随 subFilter 一并清空
   baseFilter: '',
+  // 自由标签筛选（F-5，'' 为全部）：命中 m.tags 包含该项；标签跨类型存在，
+  // 不随主分类切换清空（与收藏筛选同为跨类型维度）
+  tagFilter: '',
   showFavoritesOnly: false, // 仅显示收藏的模型
   // 仅显示重复模型（FEAT-1）：文件 SHA256 完全一致（与其他模型互为副本）。
   // 哈希由后台预热渐进就绪，开启前以「重复」筛选入口上的计数为准

@@ -7,6 +7,7 @@ import {
   closeDetail,
   saveModelData,
   selectedModel,
+  setModelTags,
   setNsfw,
   setRating,
   state,
@@ -177,6 +178,40 @@ async function copyTriggerWords() {
   }
 }
 
+/* ---------------- 自由标签（F-5，即时保存） ---------------- */
+
+/** 标签上限（与主进程 MAX_TAGS 一致，前置提示用） */
+const MAX_TAGS = 20
+
+/** 当前标签列表：以本地模型元素为单一事实源（setModelTags 成功后同步） */
+const tags = computed(() => selectedModel.value?.tags || [])
+
+const newTag = ref('')
+
+/** 添加标签：trim + 长度/数量/重复校验后整体覆写提交 */
+async function addTag() {
+  const model = selectedModel.value
+  const t = newTag.value.trim().slice(0, 32)
+  newTag.value = ''
+  if (!model || !t) return
+  if (tags.value.some((x) => x.toLowerCase() === t.toLowerCase())) {
+    toast('info', '标签已存在')
+    return
+  }
+  if (tags.value.length >= MAX_TAGS) {
+    toast('warn', `标签最多 ${MAX_TAGS} 个`)
+    return
+  }
+  await setModelTags(model.id, [...tags.value, t])
+}
+
+/** 删除标签 */
+async function removeTag(tag) {
+  const model = selectedModel.value
+  if (!model) return
+  await setModelTags(model.id, tags.value.filter((x) => x !== tag))
+}
+
 /** 将表单收集为可校验的参数对象 */
 function collectParams() {
   const num = (v) => {
@@ -309,6 +344,30 @@ async function onSave() {
       <span>自定义显示名称（为空时显示文件名）</span>
       <input v-model="form.alias" type="text" maxlength="100" :placeholder="selectedModel.name" />
     </label>
+
+    <!-- 自由标签（F-5）：即时保存，与二级分类标签（固定枚举）互补 -->
+    <h3>标签</h3>
+    <div class="tags-editor">
+      <span v-for="t in tags" :key="t" class="tag-chip">
+        {{ t }}
+        <button
+          class="tag-remove"
+          type="button"
+          :title="`删除标签「${t}」`"
+          :aria-label="`删除标签「${t}」`"
+          @click="removeTag(t)"
+        >×</button>
+      </span>
+      <input
+        v-model="newTag"
+        class="tag-input"
+        type="text"
+        maxlength="32"
+        placeholder="添加标签，回车确认"
+        spellcheck="false"
+        @keydown.enter.prevent="addTag"
+      />
+    </div>
 
     <!-- 健康检查警示（F6）：下载损坏/中断的模型提前可见，避免使用时才发现 -->
     <div v-if="selectedModel.suspect" class="suspect-warn alert-warning" role="alert">
@@ -565,6 +624,59 @@ async function onSave() {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+/* ---------- 自由标签编辑器（F-5） ---------- */
+.tags-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  font-size: var(--font-xs);
+  max-width: 200px;
+  overflow-wrap: anywhere;
+}
+
+.tag-remove {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.tag-remove:hover {
+  color: var(--danger);
+}
+
+.tag-input {
+  flex: 1;
+  min-width: 140px;
+  padding: 4px 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  color: var(--text);
+  font-size: var(--font-xs);
+  outline: none;
+}
+
+.tag-input:focus {
+  border-color: var(--accent);
 }
 
 .subcat-chip {

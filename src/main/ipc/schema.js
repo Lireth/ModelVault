@@ -166,6 +166,13 @@ export const IPC_PAYLOAD_SCHEMAS = {
   // 语义字段（favorite/nsfw/rating）的类型与范围校验留在 handler（文案有测试锁定）
   'models:setMetaFlags': vObj({ fields: { id: ID } }),
   'models:popupMenu': vObj({ fields: { id: ID } }),
+  // 自由标签（F-5）：整体覆写语义；逐项去重/截断规范化在 store-meta
+  'models:setModelTags': vObj({
+    fields: {
+      id: ID,
+      tags: vArr({ required: true, max: 20, items: vStr({ max: 32 }) })
+    }
+  }),
 
   // ---------- 封面域 ----------
   'models:uploadCover': vObj({ fields: { id: ID } }),

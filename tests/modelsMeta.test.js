@@ -272,4 +272,40 @@ describe('models:saveModelData / models:setMetaFlags 集成（D1）', () => {
     expect(await handler(makeEvent(), { id: abs, rating: 6 })).toEqual({ error: '评分需为 0-5 的整数' })
     expect(await handler(makeEvent(), { id: abs })).toEqual({ error: '无有效的更新字段' })
   })
+
+  it('setModelTags 整体覆写标签并即时落盘（F-5）', async () => {
+    const abs = await setupModel()
+    const handler = getRegisteredHandler('models:setModelTags')
+    const res = await handler(makeEvent(), { id: abs, tags: ['赛博朋克', '服装'] })
+    expect(res.error).toBeUndefined()
+    expect(res.meta.tags).toEqual(['赛博朋克', '服装'])
+    expect(getModelMeta(abs).tags).toEqual(['赛博朋克', '服装'])
+    // 空列表允许清空全部标签
+    const cleared = await handler(makeEvent(), { id: abs, tags: [] })
+    expect(cleared.meta.tags).toEqual([])
+  })
+
+  it('setModelTags 非法入参与越界模型拒绝（F-5）', async () => {
+    const abs = await setupModel()
+    const handler = getRegisteredHandler('models:setModelTags')
+    // 非数组 tags 由 O-2 schema 结构门禁前置拦截
+    expect(await handler(makeEvent(), { id: abs, tags: 'x' })).toEqual({ error: 'tags 须为数组' })
+    // tags 必填（整体覆写语义不允许缺省）
+    expect(await handler(makeEvent(), { id: '' })).toEqual({ error: 'tags 缺失' })
+    // 空串 id 语义文案由 handler 产出（schema 对 id 只查类型）
+    expect(await handler(makeEvent(), { id: '', tags: [] })).toEqual({ error: '无效的模型标识' })
+    // 越界模型（checkModelIdInRoot）
+    expect(await handler(makeEvent(), { id: path.join(root, '..', 'x.safetensors'), tags: [] }))
+      .toEqual({ error: '模型不在当前根目录内' })
+  })
+
+  it('setModelTags 条目经规范化：去重（大小写不敏感）/去空/trim（F-5）', async () => {
+    const abs = await setupModel()
+    const handler = getRegisteredHandler('models:setModelTags')
+    const res = await handler(makeEvent(), {
+      id: abs,
+      tags: ['Pony', 'pony', '  ', 'Style', '  Style  ']
+    })
+    expect(res.meta.tags).toEqual(['Pony', 'Style'])
+  })
 })

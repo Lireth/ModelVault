@@ -27,6 +27,7 @@ function snapshotFilters() {
     typeFilter: state.typeFilter,
     subFilter: state.subFilter,
     baseFilter: state.baseFilter,
+    tagFilter: state.tagFilter,
     showFavoritesOnly: state.showFavoritesOnly,
     showDuplicatesOnly: state.showDuplicatesOnly,
     sortBy: state.sortBy,
@@ -40,8 +41,9 @@ function viewMatchesCurrent(v) {
     v.search === state.search &&
     v.typeFilter === state.typeFilter &&
     v.subFilter === state.subFilter &&
-    // 旧视图缺省基底筛选时按 '' 参与（F-2）
+    // 旧视图缺省基底/标签筛选时按 '' 参与（F-2/F-5）
     (v.baseFilter || '') === state.baseFilter &&
+    (v.tagFilter || '') === state.tagFilter &&
     v.showFavoritesOnly === state.showFavoritesOnly &&
     // 旧视图缺省该字段时按 false 参与（=== true 与 undefined 比较）
     (v.showDuplicatesOnly === true) === state.showDuplicatesOnly &&
@@ -62,6 +64,7 @@ export function viewSummary(v) {
   if (v.typeFilter && v.typeFilter !== 'all') parts.push(typeInfo(v.typeFilter).label)
   if (v.subFilter) parts.push(subCategoryInfo(v.subFilter)?.label || v.subFilter)
   if (v.baseFilter) parts.push(`基底：${BASE_FAMILIES.find((b) => b.key === v.baseFilter)?.label || v.baseFilter}`)
+  if (v.tagFilter) parts.push(`标签：${v.tagFilter}`)
   if (v.showFavoritesOnly) parts.push('仅收藏')
   if (v.showDuplicatesOnly) parts.push('仅重复')
   if (v.search) parts.push(`搜索“${v.search}”`)
@@ -124,11 +127,12 @@ export async function applySavedView(id) {
   state.sortAsc = v.sortAsc
   // typeFilter 变更会触发 filter.js 的 watcher 清空 subFilter/baseFilter
   // （flush 在微任务）：先切主分类并等该 watcher 落定，再恢复视图携带的
-  // 子分类与基底筛选
+  // 子分类与基底筛选；tagFilter 为跨类型维度，不经该 watcher
   state.typeFilter = v.typeFilter
   await nextTick()
   state.subFilter = v.subFilter
   state.baseFilter = v.baseFilter || ''
+  state.tagFilter = v.tagFilter || ''
   await saveSettings({ sortBy: v.sortBy, sortAsc: v.sortAsc })
 }
 

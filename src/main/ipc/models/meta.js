@@ -1,10 +1,13 @@
 import logger from '../../logger'
 import { getModelMeta, setModelMeta } from '../../services/store'
-import { wrapHandler, checkModelId } from '../handler'
+import { wrapHandler, checkModelId, checkModelIdInRoot } from '../handler'
 
 /**
- * 元数据链路：详情页标注保存、快捷标记（收藏/NSFW/评分）。
+ * 元数据链路：详情页标注保存、快捷标记（收藏/NSFW/评分）、自由标签（F-5）。
  */
+
+/** 自由标签上限（与 store-meta normalizeTags 的截断一致，前置校验用） */
+const MAX_TAGS = 20
 
 /**
  * 合并详情页保存的元数据字段（纯函数，不修改入参）。
@@ -77,4 +80,19 @@ export function registerMetaHandlers() {
     }
     return { meta }
   }, { errorPrefix: '标记保存失败' })
+
+  // 整体覆写模型自由标签（F-5）：渲染层详情页标签编辑器每次增删提交全量列表
+  // （与 setMetaFlags 的即时保存语义一致）；规范化（去重/截断）在 normalizeTags
+  wrapHandler('models:setModelTags', (event, { id, tags } = {}) => {
+    const invalid = checkModelIdInRoot(id)
+    if (invalid) return { error: invalid }
+    if (!Array.isArray(tags)) return { error: '无效的标签列表' }
+    if (tags.length > MAX_TAGS) return { error: `标签最多 ${MAX_TAGS} 个` }
+    const existing = getModelMeta(id) || {}
+    const meta = setModelMeta(id, { ...existing, tags })
+    if (!meta) {
+      return { error: '标签保存失败（模型需位于当前模型根目录内）' }
+    }
+    return { meta }
+  }, { errorPrefix: '标签保存失败' })
 }

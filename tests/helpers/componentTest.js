@@ -22,6 +22,7 @@ export function makeComponentApiMock() {
       cancelScan: vi.fn(() => Promise.resolve({ ok: false })),
       chooseFolder: vi.fn(),
       setMetaFlags: vi.fn(),
+      setModelTags: vi.fn(() => Promise.resolve({ meta: { tags: [] } })),
       deleteModel: vi.fn(),
       popupMenu: vi.fn(),
       reveal: vi.fn(),

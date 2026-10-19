@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import ModelDetail from '../src/renderer/src/components/ModelDetail.vue'
-import { acceptConfirm, rejectConfirm, state } from '../src/renderer/src/store/appStore'
+import { acceptConfirm, rejectConfirm, replaceModels, state } from '../src/renderer/src/store/appStore'
 import { setupComponentTest, settle } from './helpers/componentTest'
 
 /**
@@ -29,6 +29,7 @@ function makeDetailModel(id, overrides = {}) {
     note: '',
     subCategory: '',
     triggerWords: '',
+    tags: [],
     favorite: false,
     nsfw: false,
     rating: 0,
@@ -45,7 +46,9 @@ function makeDetailModel(id, overrides = {}) {
 /** 选中模型并返回（selectedModel 由此派生，挂载即触发表单填充） */
 function selectModel(overrides = {}) {
   const m = makeDetailModel('m1', overrides)
-  state.models = [m]
+  // 经 replaceModels 包 shallowReactive（与生产约定一致）：
+  // 元素级整体替换（如标签保存）才具备响应性
+  replaceModels([m])
   state.selectedId = m.id
   return m
 }
@@ -336,5 +339,40 @@ describe('焦点管理与健康警示（O10/F6）', () => {
     await flushPromises()
     expect(wrapper2.find('.suspect-warn').exists()).toBe(false)
     wrapper2.unmount()
+  })
+})
+
+describe('ModelDetail 自由标签编辑器（F-5）', () => {
+  it('回车添加标签：以全量列表提交 IPC，成功后角标与列表同步', async () => {
+    selectModel({ tags: ['基础'] })
+    window.api.models.setModelTags = vi
+      .fn()
+      .mockResolvedValue({ meta: { tags: ['基础', '赛博朋克'] } })
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const input = wrapper.find('.tag-input')
+    await input.setValue('赛博朋克')
+    await input.trigger('keydown.enter')
+    await flushPromises()
+
+    expect(window.api.models.setModelTags).toHaveBeenCalledWith('m1', ['基础', '赛博朋克'])
+    // 成功后以最新元数据渲染标签胶囊
+    const chips = wrapper.findAll('.tag-chip')
+    expect(chips.length).toBe(2)
+    wrapper.unmount()
+  })
+
+  it('点击 × 删除标签：以剩余列表提交', async () => {
+    selectModel({ tags: ['基础', '赛博朋克'] })
+    window.api.models.setModelTags = vi.fn().mockResolvedValue({ meta: { tags: ['赛博朋克'] } })
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    await wrapper.findAll('.tag-remove')[0].trigger('click')
+    await flushPromises()
+
+    expect(window.api.models.setModelTags).toHaveBeenCalledWith('m1', ['赛博朋克'])
+    wrapper.unmount()
   })
 })

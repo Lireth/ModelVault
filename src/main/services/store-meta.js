@@ -68,6 +68,33 @@ function pickLegacyRes(value, legacyValues) {
   return legacy.length > 0 ? Math.min(...legacy) : null
 }
 
+/** 自由标签上限：单模型标签数与单标签长度（F-5） */
+const MAX_TAGS = 20
+const MAX_TAG_LEN = 32
+
+/**
+ * 规范化自由标签列表（F-5）：逐项 trim + 截断长度，去空项与重复项
+ * （大小写不敏感去重，保留首个原始写法），总量超限截断。
+ * @param {unknown} raw 原始 tags 值
+ * @returns {string[]} 规范化后的标签数组（无标签为空数组）
+ */
+function normalizeTags(raw) {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set()
+  const out = []
+  for (const item of raw) {
+    if (typeof item !== 'string') continue
+    const tag = item.trim().slice(0, MAX_TAG_LEN)
+    if (!tag) continue
+    const lower = tag.toLowerCase()
+    if (seen.has(lower)) continue
+    seen.add(lower)
+    out.push(tag)
+    if (out.length >= MAX_TAGS) break
+  }
+  return out
+}
+
 /** 规范化单条模型元数据，剔除未知字段 */
 function normalizeModelMeta(raw) {
   if (!raw || typeof raw !== 'object') return null
@@ -125,6 +152,9 @@ function normalizeModelMeta(raw) {
     // 解析不可用或未携带时的补全来源）；渲染层与 autoInfo.baseModel 合并展示
     baseModel:
       typeof raw.baseModel === 'string' ? raw.baseModel.trim().slice(0, 100) : '',
+    // 自由标签（F-5）：用户自定义多标签，与二级分类标签（固定枚举）互补；
+    // 随元数据整体迁移（relink），不参与文件夹整理的目录映射
+    tags: normalizeTags(raw.tags),
     params: {
       steps: Number.isFinite(params.steps) ? params.steps : null,
       // CFG 为区间字段；兼容旧版单值 cfg（迁移为 min = max = 旧值）

@@ -5,8 +5,37 @@ import { filteredModels } from './filter'
 import { openDetail } from './detail'
 
 /**
- * 单模型文件操作、即时标注、右键菜单、列表导出（A-04 自 appStore.js 拆出）。
+ * 单模型文件操作、即时标注、自由标签（F-5）、右键菜单、列表导出
+ * （A-04 自 appStore.js 拆出）。
  */
+
+/**
+ * 整体覆写模型自由标签（F-5，即时落盘）：
+ * 详情页标签编辑器每次增删提交全量列表；成功后同步本地列表元素
+ * （浅响应约定：元素级整体替换，触发卡片角标与筛选池更新）。
+ * @param {string} id 模型 id
+ * @param {string[]} tags 全量标签列表
+ * @returns {Promise<boolean>} 是否保存成功（失败已 toast）
+ */
+export async function setModelTags(id, tags) {
+  let res
+  try {
+    res = await window.api.models.setModelTags(id, tags)
+  } catch (err) {
+    toast('error', `标签保存失败: ${err.message}`)
+    return false
+  }
+  if (res?.error) {
+    toast('error', res.error)
+    return false
+  }
+  const next = res?.meta?.tags || []
+  const idx = state.models.findIndex((m) => m.id === id)
+  if (idx >= 0) {
+    state.models[idx] = { ...state.models[idx], tags: next }
+  }
+  return true
+}
 
 /**
  * 在资源管理器中显示模型文件。

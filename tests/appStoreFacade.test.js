@@ -59,6 +59,7 @@ const EXPECTED_EXPORTS = [
   'filteredModels',
   'typeCounts',
   'duplicateGroups',
+  'allTags',
   'duplicateIdSet',
   'duplicateWastedBytes',
   // 智能视图（组合筛选收藏）
@@ -117,6 +118,7 @@ const EXPECTED_EXPORTS = [
   'toggleFavorite',
   'setNsfw',
   'setRating',
+  'setModelTags',
   'showContextMenu',
   'handleMenuAction',
   // 文件操作（批次 4）

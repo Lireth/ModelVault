@@ -18,6 +18,7 @@ import {
   duplicateGroups,
   duplicateIdSet,
   duplicateWastedBytes,
+  allTags,
   filteredModels,
   formatSize,
   importCoversFromDrop,
@@ -400,6 +401,30 @@ describe('筛选与排序（filteredModels）', () => {
     state.search = '普通'
     expect(filteredModels.value.map((m) => m.id)).toEqual(['lora2'])
     state.search = ''
+  })
+
+  it('自由标签筛选与标签池（F-5）：包含即命中，跨类型维度不随主分类清空', () => {
+    state.models = [
+      makeModel('a', { type: 'lora', tags: ['赛博朋克', '服装'] }),
+      makeModel('b', { type: 'checkpoint', tags: ['赛博朋克'] }),
+      makeModel('c', { type: 'vae', tags: [] })
+    ]
+    // 标签池：按使用次数降序
+    expect(allTags.value).toEqual(['赛博朋克', '服装'])
+    // 筛选：包含该标签的模型命中（跨类型）
+    state.tagFilter = '赛博朋克'
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['a', 'b'])
+    state.tagFilter = '服装'
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['a'])
+    // 跨类型维度：切主分类不清空（与 subFilter/baseFilter 不同）
+    state.typeFilter = 'lora'
+    expect(state.tagFilter).toBe('服装')
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['a'])
+    state.typeFilter = 'all'
+    state.tagFilter = ''
+    // 库内无标签时标签池为空
+    state.models = [makeModel('x', { tags: [] })]
+    expect(allTags.value).toEqual([])
   })
 
   it('收藏优先排序：收藏在前，组内按名称；固定语义不响应方向翻转（O1）', () => {
