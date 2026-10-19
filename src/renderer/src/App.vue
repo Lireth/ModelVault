@@ -9,36 +9,35 @@ import SettingsPage from './components/SettingsPage.vue'
 import ToastHost from './components/ToastHost.vue'
 import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import VirtualModelList from './components/VirtualModelList.vue'
+import { useGlobalShortcuts } from './composables/useGlobalShortcuts'
+import { useMainProcessEvents } from './composables/useMainProcessEvents'
 import {
-  allFilteredSelected,
-  applyHashUpdate,
-  applyThumbUpdates,
-  batchDeleteModels,
-  batchFavorite,
   cancelScan,
   chooseFolder,
   duplicateIdSet,
   duplicateWastedBytes,
-  exitMultiSelect,
   filteredModels,
   formatSize,
-  handleMenuAction,
   initApp,
   LORA_TAGS,
   saveSettings,
   scanModels,
-  partialScanModels,
-  requestBatchCancel,
   selectRedundantDuplicates,
   SORT_OPTIONS,
   sortDirectional,
   state,
   toast,
-  toggleFavorite,
   toggleMultiSelectMode,
-  toggleSelectAllFiltered,
   typeInfo
 } from './store/appStore'
+
+/**
+ * 应用根布局（O-4 拆分）：
+ * - 全局快捷键（B-03）→ composables/useGlobalShortcuts.js
+ * - 主进程事件订阅与自动重扫防抖（E8/A-07a）→ composables/useMainProcessEvents.js
+ * 本文件保留：搜索防抖、排序/视图切换、重复筛选入口、窗口级拖放兜底、
+ * 应用初始化编排与整体模板/样式。
+ */
 
 const searchInput = ref(state.search)
 /** 搜索框 DOM 引用（Ctrl+F 聚焦用） */
@@ -70,6 +69,12 @@ function clearSearch() {
   searchInput.value = ''
   state.search = ''
 }
+
+// 全局快捷键（依赖搜索框引用与清空搜索动作）
+useGlobalShortcuts(searchFieldEl, clearSearch)
+
+// 主进程事件订阅：先于 initApp 就位（App onMounted 注册在其后）
+const mainEvents = useMainProcessEvents()
 
 /** 切换排序方式：立即生效并静默持久化，重启后保持用户选择 */
 async function onSortChange(e) {
@@ -103,60 +108,6 @@ function onSelectRedundant() {
   if (n > 0) toast('info', `已选中 ${n} 个冗余副本，复核后按 Delete 移入回收站`)
 }
 
-let unsubscribeProgress = null
-let unsubscribeMenu = null
-let unsubscribeThumbs = null
-let unsubscribeStoreError = null
-let unsubscribeFsChanged = null
-let unsubscribeWarmup = null
-
-/** 目录变更自动重扫的二级防抖（主进程 3s 静默期后此处再缓冲 1s，E8） */
-let fsChangedTimer = null
-
-/**
- * 扫描进行中收到的变更待处理子树集合（A-07a 漏报修复 + A-03 增量）：
- * 扫描进行中到达的 fsChanged 不丢弃，其变更子树累积到集合（多次合并），
- * 由 state.scanning 侦听器在扫描结束后补一次防抖的局部扫描。
- * null 表示无待处理
- */
-let fsChangedPendingDirs = null
-
-/**
- * 安排一次二级防抖后的刷新（A-03）：
- * 有变更子树走局部增量扫描，空列表（旧载荷/无法定位）由 store 回退全量扫描。
- */
-function scheduleFsRescan(dirs) {
-  clearTimeout(fsChangedTimer)
-  fsChangedTimer = setTimeout(() => {
-    fsChangedTimer = null
-    if (!state.scanning && state.settings.autoRescan) partialScanModels(dirs || [])
-  }, 1000)
-}
-
-function onFsChanged({ root, dirs }) {
-  if (root !== state.folder || !state.settings.autoRescan) return
-  const subDirs = Array.isArray(dirs) ? dirs : []
-  // 扫描进行中：累积变更子树，扫描结束后由侦听器补一次局部扫描，不丢弃事件
-  if (state.scanning) {
-    if (!fsChangedPendingDirs) fsChangedPendingDirs = new Set()
-    for (const d of subDirs) fsChangedPendingDirs.add(d)
-    return
-  }
-  scheduleFsRescan(subDirs)
-}
-
-// 扫描结束补决策（A-07a）：扫描中累积的变更子树在结束后补一次防抖局部扫描
-watch(
-  () => state.scanning,
-  (scanning, wasScanning) => {
-    if (wasScanning && !scanning && fsChangedPendingDirs) {
-      const pending = [...fsChangedPendingDirs]
-      fsChangedPendingDirs = null
-      if (state.settings.autoRescan) scheduleFsRescan(pending)
-    }
-  }
-)
-
 /**
  * 拖放兜底（B13）：阻止非文件拖放（文本/链接等）触发默认导航覆盖当前窗口。
  * 文件拖入封面的业务处理在 ModelDetail 内完成（含 preventDefault），
@@ -174,155 +125,21 @@ function onWindowDrop(e) {
   }
 }
 
-/* ---------------- 全局快捷键（B-03） ---------------- */
-
-/** 事件目标是否为可编辑控件（打字场景，除 Ctrl+F 外交由原生行为） */
-function isEditableTarget(e) {
-  const t = e.target
-  if (!t || !t.tagName) return false
-  return (
-    t.tagName === 'INPUT' ||
-    t.tagName === 'TEXTAREA' ||
-    t.tagName === 'SELECT' ||
-    t.isContentEditable === true
-  )
-}
-
-/** 设置页是否打开（该场景搜索框不在 DOM 中） */
-function isOverlayPanelOpen() {
-  return state.settingsOpen
-}
-
-/**
- * 全局快捷键：
- * - Ctrl+F 聚焦搜索（面板打开/未选文件夹时无效）；
- * - Esc 逐层退出：多选模式 → 清空搜索词（面板/详情/确认层打开时让位其自有 Esc 逻辑）；
- * - Ctrl+A 进入多选并全选当前筛选结果；Delete 批量移入回收站（自带确认）；
- * - Ctrl+D 多选时批量收藏，详情打开时收藏当前模型；
- * - 网格内焦点卡片快捷键（方向键导航 / F 收藏 / Delete 单卡删除）由 VirtualModelGrid 处理。
- * 输入控件内除 Ctrl+F 外不拦截，避免破坏文本编辑。
- */
-function onGlobalKeydown(e) {
-  const key = e.key.toLowerCase()
-  const ctrl = e.ctrlKey || e.metaKey
-
-  // Ctrl+F：只要网格区可用就聚焦搜索（输入态同样适用，便于随时跳转检索）
-  if (ctrl && key === 'f') {
-    if (isOverlayPanelOpen() || state.scanning || !state.folder) return
-    const el = searchFieldEl.value
-    if (el) {
-      e.preventDefault()
-      el.focus()
-      el.select?.()
-    }
-    return
-  }
-
-  // 输入态保留原生编辑行为；确认层/面板打开时整键让位（F1 独占策略）
-  if (isEditableTarget(e) || state.confirm.visible || isOverlayPanelOpen()) return
-
-  const detailOpen = state.selectedId !== null
-
-  if (e.key === 'Escape') {
-    // 详情打开时 Esc 由 ModelDetail 处理（可能涉及脏表单确认）
-    if (!detailOpen) {
-      // 多选为模式态，优先退出；再次 Esc 才轮到清空搜索词
-      if (state.multiSelect.active) {
-        // 长耗时批量进行中：Esc 先请求取消而非直接退出多选（防误退丢上下文），
-        // 批量收尾后再次 Esc 才退出
-        if (state.multiSelect.busy) {
-          requestBatchCancel()
-          toast('info', '已请求取消批量操作，完成后可再次按 Esc 退出多选')
-        } else {
-          exitMultiSelect()
-        }
-        e.preventDefault()
-        return
-      }
-      if (state.search) {
-        clearSearch()
-        e.preventDefault()
-      }
-    }
-    return
-  }
-
-  // 详情打开时仅保留 Ctrl+D 收藏当前模型，其余让位详情
-  if (detailOpen) {
-    if (ctrl && key === 'd') {
-      e.preventDefault()
-      toggleFavorite(state.selectedId)
-    }
-    return
-  }
-
-  if (ctrl && key === 'a' && state.models.length > 0) {
-    e.preventDefault()
-    if (!state.multiSelect.active) toggleMultiSelectMode()
-    if (!allFilteredSelected.value) toggleSelectAllFiltered()
-    return
-  }
-
-  if (ctrl && key === 'd' && state.multiSelect.active && state.multiSelect.ids.length > 0) {
-    e.preventDefault()
-    batchFavorite(true)
-    return
-  }
-
-  // Delete 仅在多选且有选中时触发（批量删除自带确认层，不会直接删文件）
-  if (e.key === 'Delete' && state.multiSelect.active && state.multiSelect.ids.length > 0) {
-    e.preventDefault()
-    batchDeleteModels()
-  }
-}
-
 onMounted(async () => {
   window.addEventListener('dragover', onWindowDragOver)
   window.addEventListener('drop', onWindowDrop)
-  window.addEventListener('keydown', onGlobalKeydown)
-  // 订阅扫描进度事件
-  unsubscribeProgress = window.api.models.onScanProgress((progress) => {
-    state.progress = progress
-  })
-  // 订阅右键菜单动作事件
-  unsubscribeMenu = window.api.models.onMenuAction(({ id, action }) => {
-    handleMenuAction(id, action)
-  })
-  // 订阅后台缩略图生成完成事件（首扫卡片先显示原图，缩略图补齐后替换）
-  unsubscribeThumbs = window.api.models.onThumbsReady(({ updates }) => {
-    applyThumbUpdates(updates)
-  })
-  // 订阅持久化落盘失败事件（B1/C7）：元数据与设置的落盘都在保存响应之后异步发生，
-  // 失败须提示用户重试，否则磁盘错误时静默丢失
-  unsubscribeStoreError = window.api.models.onStoreError(({ message }) => {
-    toast('error', `数据保存失败: ${message}，请检查磁盘后重新保存`)
-  })
-  // 订阅目录变更事件（E8）：autoRescan 开启时自动重扫
-  unsubscribeFsChanged = window.api.models.onFsChanged?.(onFsChanged)
-  // 订阅后台哈希预热进度事件（Civitai 识别加速）：整体替换快照，
-  // 详情页 Civitai 面板按当前模型 id 匹配展示；完成事件携带的哈希经
-  // applyHashUpdate 回填模型对象（FEAT-1 重复检测渐进可用）
-  unsubscribeWarmup = window.api.models.onWarmupProgress?.((progress) => {
-    state.warmup = progress
-    applyHashUpdate(progress)
-  })
+  // 订阅主进程事件（扫描进度/菜单动作/缩略图/落盘失败/目录变更/哈希预热）
+  mainEvents.subscribe()
   await initApp()
 })
 
 onUnmounted(() => {
   window.removeEventListener('dragover', onWindowDragOver)
   window.removeEventListener('drop', onWindowDrop)
-  window.removeEventListener('keydown', onGlobalKeydown)
-  clearTimeout(fsChangedTimer)
   // 搜索防抖定时器：回调为裸闭包（写 state.search），卸载后若仍到期
   // 会滞后覆写全局搜索词（测试中跨用例竞态的根源）
   clearTimeout(searchTimer)
-  unsubscribeProgress?.()
-  unsubscribeMenu?.()
-  unsubscribeThumbs?.()
-  unsubscribeStoreError?.()
-  unsubscribeFsChanged?.()
-  unsubscribeWarmup?.()
+  mainEvents.unsubscribeAll()
 })
 </script>
 
