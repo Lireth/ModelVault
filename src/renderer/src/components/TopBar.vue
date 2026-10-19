@@ -2,14 +2,13 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   chooseFolder,
-  exportModels,
   scanModels,
   state
 } from '../store/appStore'
 
 /**
  * 窄屏操作菜单（OPT-1）：
- * 侧边栏操作区（重新扫描/选择文件夹/导出）在窗口宽度 <900px 时
+ * 侧边栏操作区（重新扫描/选择文件夹）在窗口宽度 <900px 时
  * 被 Sidebar.vue 的媒体查询整体隐藏，核心操作在窄窗口下不可达。
  * 此处于标题栏提供替代入口（☰ 按钮 + 下拉菜单），仅在同样 <900px 时显示；
  * 宽屏下 display:none，桌面端布局与交互零变化。
@@ -37,12 +36,6 @@ function onRescan() {
 function onChooseFolder() {
   closeMenu()
   chooseFolder()
-}
-
-/** 导出当前筛选后的模型列表（E2，格式与侧边栏入口一致） */
-function onExport(format) {
-  closeMenu()
-  exportModels(format)
 }
 
 /** 点击菜单外部区域关闭（pointerdown 先于 click，避免误触菜单项后状态残留） */
@@ -119,15 +112,6 @@ onBeforeUnmount(() => {
           @click="onChooseFolder"
         >
           选择文件夹
-        </button>
-        <button
-          class="menu-item"
-          role="menuitem"
-          title="将当前列表导出为 CSV 文件（可被 Excel 打开）"
-          :disabled="!state.models.length"
-          @click="onExport('csv')"
-        >
-          导出 CSV
         </button>
       </div>
     </div>

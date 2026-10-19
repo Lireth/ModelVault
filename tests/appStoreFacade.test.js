@@ -114,7 +114,6 @@ const EXPECTED_EXPORTS = [
   // 单模型操作
   'revealModel',
   'deleteModel',
-  'exportModels',
   'toggleFavorite',
   'setNsfw',
   'setRating',

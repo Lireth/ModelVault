@@ -5,7 +5,6 @@ import {
   state,
   typeCounts,
   chooseFolder,
-  exportModels,
   openSettings,
   removeRoot,
   scanModels,
@@ -93,10 +92,6 @@ function onScanClick() {
           {{ state.scanning ? '扫描中…' : '重新扫描' }}
         </button>
         <button class="btn action-btn" title="选择模型文件夹" @click="chooseFolder">选择文件夹</button>
-        <!-- 导出当前筛选后的模型列表（E2） -->
-        <button class="btn action-btn" title="将当前列表导出为 CSV 文件（可被 Excel 打开）" :disabled="!state.models.length" @click="exportModels('csv')">
-          导出 CSV
-        </button>
       </div>
     </div>
 

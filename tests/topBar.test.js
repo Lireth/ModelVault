@@ -27,7 +27,6 @@ function makeModel(id) {
     note: '',
     subCategory: '',
     triggerWords: '',
-    // 经 reactive state 后变为 Proxy，用于回归「导出 rows 可结构化克隆」
     params: { steps: 20, cfgMin: 7, cfgMax: 7, sampler: 'euler', scheduler: 'normal', precision: 'FP16', resMin: 512, resMax: 1024 }
   }
 }
@@ -45,11 +44,10 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
     await wrapper.find('.narrow-actions-btn').trigger('click')
     expect(wrapper.find('.narrow-actions-menu').exists()).toBe(true)
     const items = wrapper.findAll('.menu-item')
-    expect(items).toHaveLength(3)
+    expect(items).toHaveLength(2)
     expect(items.map((i) => i.text())).toEqual([
       '重新扫描',
-      '选择文件夹',
-      '导出 CSV'
+      '选择文件夹'
     ])
   })
 
@@ -64,23 +62,6 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
     expect(window.api.models.chooseFolder).toHaveBeenCalled()
   })
 
-  it('「导出 CSV」携带当前列表行调用导出 IPC（E2）', async () => {
-    const wrapper = mountTopBar()
-    await wrapper.find('.narrow-actions-btn').trigger('click')
-    await wrapper.findAll('.menu-item')[2].trigger('click')
-    await flushPromises()
-    expect(window.api.models.exportList).toHaveBeenCalledWith(
-      expect.objectContaining({ format: 'csv' })
-    )
-    // 回归（E2）：rows 须可被结构化克隆——state 为 reactive，params 若保留
-    // Proxy 引用，ipcRenderer.invoke 会抛 "An object could not be cloned"
-    const payload = window.api.models.exportList.mock.calls.at(-1)[0]
-    expect(() => structuredClone(payload)).not.toThrow()
-    expect(payload.rows[0].params).toEqual(
-      expect.objectContaining({ steps: expect.anything() })
-    )
-  })
-
   it('禁用态与侧边栏按钮同规则：无模型/无文件夹时置灰', async () => {
     const wrapper = mountTopBar()
     // 在展开菜单前置空库状态（mountTopBar 会写入默认库与模型）
@@ -90,7 +71,6 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
     const items = wrapper.findAll('.menu-item')
     expect(items[0].attributes('disabled')).toBeDefined() // 重新扫描（无文件夹）
     expect(items[1].attributes('disabled')).toBeUndefined() // 选择文件夹恒可用
-    expect(items[2].attributes('disabled')).toBeDefined() // 导出 CSV（无模型）
   })
 
   it('点击菜单外部区域关闭', async () => {

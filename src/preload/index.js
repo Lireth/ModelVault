@@ -30,7 +30,6 @@ const VALID_INVOKE_CHANNELS = [
   'models:popupMenu',
   'models:importCover',
   'models:reveal',
-  'models:exportList',
   'models:exportBackup',
   'models:importBackup',
   'models:toggleDisabled',
@@ -138,8 +137,6 @@ const api = {
     setDefaultCover: (id, cover) => invokeValidated('models:setDefaultCover', { id, cover }),
     /** 删除单张封面（cover 为封面相对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */
     deleteCover: (id, cover) => invokeValidated('models:deleteCover', { id, cover }),
-    /** 导出模型列表（E2），rows 为当前列表行，返回 { path, count } / { canceled } / { error } */
-    exportList: (payload) => invokeValidated('models:exportList', payload),
     /** 导出备份（FEAT-3）：设置 + 当前库标注/封面 → zip，返回 { path, sizeBytes, library, models, covers } / { canceled } / { error } */
     exportBackup: () => invokeValidated('models:exportBackup'),
     /** 从备份恢复（FEAT-3）：zip → 设置 + 指定库，返回 { settingsRestored, libraryRestored? } / { canceled } / { error } */

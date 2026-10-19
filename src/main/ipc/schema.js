@@ -224,16 +224,7 @@ export const IPC_PAYLOAD_SCHEMAS = {
       })
     }
   }),
-  'models:warmupHash': vObj({ fields: { id: ID } }),
-
-  // ---------- 导出域 ----------
-  'models:exportList': vObj({
-    fields: {
-      format: vStr({ max: 16 }),
-      // 行内容校验交给 handler 的 CSV 构建（逐字段容错转义）
-      rows: vArr({ max: 100000 })
-    }
-  })
+  'models:warmupHash': vObj({ fields: { id: ID } })
 }
 
 /**

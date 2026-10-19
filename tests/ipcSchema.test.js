@@ -194,9 +194,7 @@ describe('IPC payload 通道校验（validateIpcPayload）', () => {
     ).toBe('images[0].url 须为字符串')
   })
 
-  it('models:exportList / models:reveal / models:importCover：字段类型', () => {
-    expect(validateIpcPayload('models:exportList', { format: 'csv', rows: [] })).toBe('')
-    expect(validateIpcPayload('models:exportList', { format: 1, rows: [] })).toBe('format 须为字符串')
+  it('models:reveal / models:importCover：字段类型', () => {
     expect(validateIpcPayload('models:reveal', { path: 'D:\\m\\a.safetensors' })).toBe('')
     expect(validateIpcPayload('models:reveal', { path: 7 })).toBe('path 须为字符串')
     expect(validateIpcPayload('models:importCover', { id: 'x', path: 'D:\\pic.png' })).toBe('')
