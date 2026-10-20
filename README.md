@@ -4,7 +4,7 @@
 ![Electron](https://img.shields.io/badge/Electron-44-47848F?logo=electron&logoColor=white)
 ![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?logo=vuedotjs&logoColor=white)
 ![Node](https://img.shields.io/badge/Node.js-%E2%89%A522.22-339933?logo=nodedotjs&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-vitest%20650%2B-6E9F18?logo=vitest&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-vitest%20760%2B-6E9F18?logo=vitest&logoColor=white)
 ![Release](https://img.shields.io/github/v/release/Lireth/ModelVault?include_prereleases&label=release)
 ![License](https://img.shields.io/github/license/Lireth/ModelVault)
 
@@ -202,7 +202,7 @@ ipcMain.handle('my:channel', (event, payload) => {
 
 ### 测试
 
-单元测试位于 `tests/`（44 个文件 / 650+ 用例）：主进程纯逻辑与 IPC handler（node 环境）、渲染层 store 按域拆分测试、组件交互测试（`@vue/test-utils` + jsdom，文件头 `// @vitest-environment jsdom` 声明）。Electron API 在 `tests/setup.js` 中统一 mock。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证。
+单元测试位于 `tests/`（48 个文件 / 760+ 用例）：主进程纯逻辑与 IPC handler（node 环境）、渲染层 store 按域拆分测试、组件交互测试（`@vue/test-utils` + jsdom，文件头 `// @vitest-environment jsdom` 声明）。Electron API 在 `tests/setup.js` 中统一 mock，公共挂载/IPC 脚手架在 `tests/helpers/` 中复用。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证；`npm run test:coverage` 受防退化阈值门禁约束（Statements 79% / Branches 71% / Functions 78% / Lines 80%，棘轮渐进上调）。
 
 ### CI 与发版
 
