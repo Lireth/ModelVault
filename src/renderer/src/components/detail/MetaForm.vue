@@ -319,32 +319,27 @@ async function onSave() {
       </div>
     </div>
 
-    <!-- 分类标签：自动分配（所在文件夹名 / Civitai 类型 / 大模型基底），只读展示 -->
-    <template v-if="tagsForType(selectedModel.type)">
-      <h3>{{ selectedModel.type === 'other' ? '二级分类标签' : '分类标签' }}</h3>
-      <div class="subcat-group">
-        <span
-          v-if="currentSubInfo"
-          class="subcat-chip locked"
-          :style="{ borderColor: currentSubInfo.color, color: currentSubInfo.color }"
-        >{{ currentSubInfo.label }}</span>
-        <span v-else class="subcat-hint">
-          未分配（可在文件所在文件夹按标签命名自动匹配，或使用批量栏「Civitai 分配标签」，仅 LoRA）
-        </span>
-        <span v-if="selectedModel.type === 'checkpoint'" class="subcat-hint">大模型自动标注为基底模型</span>
-      </div>
-    </template>
+    <!-- 健康检查警示（F6）：下载损坏/中断的模型提前可见，避免使用时才发现 -->
+    <div v-if="selectedModel.suspect" class="suspect-warn alert-warning" role="alert">
+      <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M8.9 1.9a1 1 0 0 0-1.8 0l-5.6 10.4A1 1 0 0 0 2.4 13.8h11.2a1 1 0 0 0 .9-1.5zM8 5.6a.9.9 0 0 1 .9.9v2.8a.9.9 0 0 1-1.8 0V6.5a.9.9 0 0 1 .9-.9zm0 6.9a1 1 0 1 1 0-2 1 1 0 0 1 0 2z" /></svg>
+      该文件疑似损坏（结构校验失败或 0 字节），在绘画工具中加载可能失败，建议重新下载或移入回收站。
+    </div>
 
-    <!-- 备注名（卡片显示名） -->
-    <h3>备注名</h3>
+    <!-- 命名与标签：显示名 + 二级分类（只读） + 自由标签集中于一区 -->
+    <h3>命名与标签</h3>
     <label class="field">
-      <span>自定义显示名称（为空时显示文件名）</span>
+      <span>备注名（卡片显示名，为空时显示文件名）</span>
       <input v-model="form.alias" type="text" maxlength="100" :placeholder="selectedModel.name" />
     </label>
-
-    <!-- 自由标签（F-5）：即时保存，与二级分类标签（固定枚举）互补 -->
-    <h3>标签</h3>
     <div class="tags-editor">
+      <!-- 二级分类标签：自动分配（所在文件夹名 / Civitai 类型 / 大模型基底），只读 -->
+      <span
+        v-if="tagsForType(selectedModel.type) && currentSubInfo"
+        class="subcat-chip locked"
+        :style="{ borderColor: currentSubInfo.color, color: currentSubInfo.color }"
+        :title="selectedModel.type === 'checkpoint' ? '大模型自动标注为基底模型' : '二级分类（自动分配）'"
+      >{{ currentSubInfo.label }}</span>
+      <!-- 自由标签（F-5）：即时保存，与二级分类标签（固定枚举）互补 -->
       <span v-for="t in tags" :key="t" class="tag-chip">
         {{ t }}
         <button
@@ -365,13 +360,11 @@ async function onSave() {
         @keydown.enter.prevent="addTag"
       />
     </div>
+    <span v-if="tagsForType(selectedModel.type) && !currentSubInfo" class="subcat-hint">
+      二级分类未分配（可在文件所在文件夹按标签命名自动匹配，或使用批量栏「Civitai 分配标签」，仅 LoRA）
+    </span>
 
-    <!-- 健康检查警示（F6）：下载损坏/中断的模型提前可见，避免使用时才发现 -->
-    <div v-if="selectedModel.suspect" class="suspect-warn alert-warning" role="alert">
-      <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M8.9 1.9a1 1 0 0 0-1.8 0l-5.6 10.4A1 1 0 0 0 2.4 13.8h11.2a1 1 0 0 0 .9-1.5zM8 5.6a.9.9 0 0 1 .9.9v2.8a.9.9 0 0 1-1.8 0V6.5a.9.9 0 0 1 .9-.9zm0 6.9a1 1 0 1 1 0-2 1 1 0 0 1 0 2z" /></svg>
-      该文件疑似损坏（结构校验失败或 0 字节），在绘画工具中加载可能失败，建议重新下载或移入回收站。
-    </div>
-
+    <!-- 推荐参数（含 LoRA 触发词：同属「使用信息」，集中编排） -->
     <h3>推荐参数</h3>
     <div class="form-grid">
       <label class="field">
@@ -417,12 +410,12 @@ async function onSave() {
 
     <!-- 触发词：仅 LoRA 模型提供，支持一键复制 -->
     <template v-if="selectedModel.type === 'lora'">
-      <h3>
-        触发词
+      <div class="trigger-head">
+        <span class="trigger-title">触发词</span>
         <span v-if="selectedModel.triggerWordsSource" class="sidecar-hint">
           来自同名 {{ selectedModel.triggerWordsSource === 'civitai' ? '.civitai.info' : '.txt' }} 自动导入，可自由修改
         </span>
-      </h3>
+      </div>
       <div class="trigger-row">
         <textarea
           v-model="form.triggerWords"
@@ -451,7 +444,7 @@ async function onSave() {
     <textarea
       v-model="form.note"
       class="note-input"
-      rows="4"
+      rows="3"
       maxlength="2000"
       placeholder="记录模型触发词、适用风格、注意事项…"
     ></textarea>
@@ -468,7 +461,7 @@ async function onSave() {
 .detail-form-col {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -489,7 +482,7 @@ async function onSave() {
   font-size: var(--font-xs);
   color: var(--accent);
   letter-spacing: 1px;
-  margin-top: 4px;
+  margin: 6px 0 0;
 }
 
 /* ---------- 收藏 / 评分 ---------- */
@@ -585,6 +578,20 @@ async function onSave() {
   filter: drop-shadow(0 0 4px rgba(245, 179, 1, 0.35));
 }
 
+/* 触发词小节标题（与备注 h3 视觉同族，避免套用 h3 的 letter-spacing 溢出） */
+.trigger-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.trigger-title {
+  font-size: var(--font-xs);
+  color: var(--accent);
+  letter-spacing: 1px;
+}
+
 /* 触发词行：文本框占满剩余宽度，复制按钮固定在右侧 */
 .trigger-row {
   display: flex;
@@ -613,14 +620,6 @@ async function onSave() {
 
 .trigger-input:focus {
   border-color: var(--accent);
-}
-
-/* 二级分类标签 */
-.subcat-group {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
 }
 
 /* ---------- 自由标签编辑器（F-5） ---------- */
@@ -678,7 +677,8 @@ async function onSave() {
 }
 
 .subcat-chip {
-  padding: 6px 16px;
+  /* 与 .tag-chip 等高：同内边距与字号，二级分类 chip 与自由标签 chip 并排协调 */
+  padding: 3px 12px;
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--bg) 55%, transparent);
@@ -710,8 +710,9 @@ async function onSave() {
 
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 12px;
+  /* 150px 下限：中部列宽下可排 3 列，较 2 列显著压缩纵向空间 */
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
 }
 
 .field {

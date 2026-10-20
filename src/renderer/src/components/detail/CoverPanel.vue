@@ -234,13 +234,15 @@ onBeforeUnmount(() => {
       <span class="type-badge" :style="{ background: info.color }">{{ info.label }}</span>
       <span v-if="dropActive" class="drop-hint">松开导入</span>
     </div>
-    <button class="btn btn-primary" :disabled="busy" @click="onUploadCover">
-      {{ covers.length ? '上传图片' : '上传封面图片' }}
-    </button>
-    <button class="btn" :disabled="busy" @click="onPasteCover">粘贴图片 (Ctrl+V)</button>
+    <!-- 上传/粘贴两按钮并排，压缩纵向空间 -->
+    <div class="cover-actions">
+      <button class="btn btn-primary" :disabled="busy" @click="onUploadCover">
+        {{ covers.length ? '上传图片' : '上传封面图片' }}
+      </button>
+      <button class="btn" :disabled="busy" @click="onPasteCover">粘贴 (Ctrl+V)</button>
+    </div>
     <p class="cover-hint">
-      支持 png / jpg / webp / gif / bmp，可添加多张预览图（上传 / Ctrl+V / 直接拖入图片文件），
-      点击缩略图将其设为首页默认显示
+      也可直接拖入图片文件；支持 png / jpg / webp / gif / bmp 多张预览图，点击缩略图设为默认显示
     </p>
 
     <div v-if="covers.length" class="cover-thumbs">
@@ -291,7 +293,7 @@ onBeforeUnmount(() => {
 .detail-cover-col {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -346,6 +348,13 @@ onBeforeUnmount(() => {
   font-size: var(--font-md);
   font-weight: 600;
   pointer-events: none;
+}
+
+/* 上传/粘贴按钮：两列并排等宽 */
+.cover-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 .cover-hint {

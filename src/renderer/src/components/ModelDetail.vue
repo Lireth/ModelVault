@@ -193,8 +193,8 @@ function onPanelContextMenu() {
   display: grid;
   /* 三列：封面 | 标注表单 | 识别信息（AutoInfo + Civitai） */
   grid-template-columns: 300px minmax(0, 1fr) 280px;
-  gap: 20px;
-  padding: 20px;
+  gap: 16px;
+  padding: 16px 20px;
   overflow-y: auto;
 }
 
@@ -202,7 +202,7 @@ function onPanelContextMenu() {
 .detail-info-col {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
 }
 
