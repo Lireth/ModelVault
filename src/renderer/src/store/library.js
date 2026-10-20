@@ -101,11 +101,23 @@ export function applyAccent(accentColor, effective = resolveTheme(state.settings
 }
 
 export function openSettings() {
+  // 与统计页互斥：同占内容区，打开一方关闭另一方
+  state.statsOpen = false
   state.settingsOpen = true
 }
 
 export function closeSettings() {
   state.settingsOpen = false
+}
+
+/** 打开独立库统计页（自设置页独立）：与设置页互斥 */
+export function openStats() {
+  state.settingsOpen = false
+  state.statsOpen = true
+}
+
+export function closeStats() {
+  state.statsOpen = false
 }
 
 /**

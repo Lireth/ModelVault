@@ -6,6 +6,7 @@ import {
   typeCounts,
   chooseFolder,
   openSettings,
+  openStats,
   removeRoot,
   scanModels,
   switchRoot,
@@ -202,10 +203,15 @@ function onScanClick() {
       </ul>
     </div>
 
-    <!-- 设置按钮：固定在侧边栏最底部，宽度自适应侧边栏 -->
-    <button class="btn settings-btn" title="打开设置" @click="openSettings">
-      设置
-    </button>
+    <!-- 底部页面入口：统计页 + 设置页（同占内容区，互斥打开） -->
+    <div class="page-entry">
+      <button class="btn stats-btn" title="查看库统计" @click="openStats">
+        统计
+      </button>
+      <button class="btn settings-btn" title="打开设置" @click="openSettings">
+        设置
+      </button>
+    </div>
   </aside>
 </template>
 
@@ -550,7 +556,16 @@ function onScanClick() {
   font-size: var(--font-xs);
 }
 
-/* ---------- 设置按钮（固定侧边栏最底部，全宽；hover 态由全局 .btn:hover 统一） ---------- */
+/* ---------- 底部页面入口（统计/设置，固定侧边栏最底部，全宽） ---------- */
+.page-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-top: auto;
+}
+
+.stats-btn,
 .settings-btn {
   width: 100%;
   display: flex;
@@ -558,8 +573,6 @@ function onScanClick() {
   justify-content: center;
   gap: 6px;
   padding: 9px 12px;
-  flex-shrink: 0;
-  margin-top: auto;
 }
 
 /* 窄屏图标栏（OPT-1）：断点 960px 与 TopBar.vue 的窄屏操作菜单联动——

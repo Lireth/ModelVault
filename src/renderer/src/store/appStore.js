@@ -54,6 +54,8 @@ export {
   applyAccent,
   openSettings,
   closeSettings,
+  openStats,
+  closeStats,
   saveSettings,
   chooseFolder,
   switchRoot,

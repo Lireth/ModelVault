@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import SettingsPage from '../src/renderer/src/components/SettingsPage.vue'
+import StatsPage from '../src/renderer/src/components/StatsPage.vue'
 import { acceptConfirm, state } from '../src/renderer/src/store/appStore'
 import { setupComponentTest } from './helpers/componentTest'
 
@@ -10,6 +11,7 @@ import { setupComponentTest } from './helpers/componentTest'
  * - A-15 应用内检查更新：有新版本时展示 releaseNotes（更新说明文本），
  *   远程内容以文本插值渲染（防 XSS），无说明时不渲染说明区；
  * - B-04 日志与诊断入口：「打开日志目录」按钮经 app.openLogs 调用主进程。
+ * 库统计区（F7）已独立为 StatsPage，相关测试随迁至本文件末段。
  */
 
 setupComponentTest()
@@ -193,7 +195,7 @@ describe('SettingsPage 主题跟随系统与自定义强调色', () => {
   })
 })
 
-describe('库统计区（F7）', () => {
+describe('库统计页（F7，自设置页独立为 StatsPage）', () => {
   /** 构造带统计字段的模型（字段与装饰结果对齐） */
   function statModel(id, overrides = {}) {
     return {
@@ -214,12 +216,20 @@ describe('库统计区（F7）', () => {
     }
   }
 
+  /** 挂载统计页（StatsSection 在 stats-body 内渲染） */
+  async function mountStats() {
+    state.statsOpen = true
+    const wrapper = mount(StatsPage)
+    await flushPromises()
+    return wrapper
+  }
+
   it('展示总模型数、分类行、标注覆盖率与最占空间 TOP-N', async () => {
     state.models = [
       statModel('big', { name: '大模型', type: 'checkpoint', size: 3 * 1024 * 1024 * 1024, note: '有备注' }),
       statModel('small', { name: '小模型', size: 512 })
     ]
-    const wrapper = await mountSettings()
+    const wrapper = await mountStats()
 
     const section = wrapper.find('.stats-section')
     expect(section.exists()).toBe(true)
@@ -238,14 +248,16 @@ describe('库统计区（F7）', () => {
     expect(tops).toHaveLength(2)
     expect(tops[0].text()).toContain('大模型')
     wrapper.unmount()
+    state.statsOpen = false
   })
 
   it('空库时显示「尚未扫描模型」占位而非报错', async () => {
-    const wrapper = await mountSettings()
+    const wrapper = await mountStats()
     expect(wrapper.find('.stats-section').exists()).toBe(true)
     expect(wrapper.findAll('.stats-empty').length).toBeGreaterThanOrEqual(2)
     expect(wrapper.find('.top-list').exists()).toBe(false)
     wrapper.unmount()
+    state.statsOpen = false
   })
 })
 

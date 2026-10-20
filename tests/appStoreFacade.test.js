@@ -47,6 +47,8 @@ const EXPECTED_EXPORTS = [
   'applyAccent',
   'openSettings',
   'closeSettings',
+  'openStats',
+  'closeStats',
   'saveSettings',
   'chooseFolder',
   'switchRoot',

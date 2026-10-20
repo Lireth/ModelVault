@@ -169,6 +169,8 @@ export const state = shallowReactive({
   // 设置（深响应：主题/卡片尺寸实时预览等就地改深层字段）
   settings: reactive(defaultSettings()),
   settingsOpen: false,
+  // 库统计页（自设置页独立）：与设置页互斥，同占内容区
+  statsOpen: false,
   // Toast
   toasts: reactive([]),
   // 自定义确认层（U4：confirmDialog 逐字段赋值，需深响应）

@@ -6,6 +6,7 @@ import BatchBar from './components/BatchBar.vue'
 import ConfirmOverlay from './components/ConfirmOverlay.vue'
 import ModelDetail from './components/ModelDetail.vue'
 import SettingsPage from './components/SettingsPage.vue'
+import StatsPage from './components/StatsPage.vue'
 import ToastHost from './components/ToastHost.vue'
 import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import VirtualModelList from './components/VirtualModelList.vue'
@@ -153,8 +154,9 @@ onUnmounted(() => {
       <Sidebar />
 
       <main class="content">
-        <!-- 设置页面：占用模型预览区位置 -->
-        <SettingsPage v-if="state.settingsOpen" />
+        <!-- 库统计页 / 设置页面：占用模型预览区位置（互斥） -->
+        <StatsPage v-if="state.statsOpen" />
+        <SettingsPage v-else-if="state.settingsOpen" />
 
         <!-- 模型预览区 -->
         <template v-else>

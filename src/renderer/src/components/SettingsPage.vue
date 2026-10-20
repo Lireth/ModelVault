@@ -1,15 +1,12 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import StatsSection from './StatsSection.vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import SettingsAbout from './settings/SettingsAbout.vue'
 import SettingsBackup from './settings/SettingsBackup.vue'
 import { useSettingsForm } from '../composables/useSettingsForm'
 import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
 import {
   chooseFolder,
-  clearAllCovers,
   closeSettings,
-  confirmDialog,
   revealModel,
   saveSettings,
   CARD_SIZE_OPTIONS,
@@ -24,43 +21,16 @@ import {
  * 设置页编排壳（O-4 拆分）：
  * - 表单状态/脏数据保护/实时预览 → composables/useSettingsForm.js
  * - 「关于」（应用信息/检查更新/日志诊断）→ settings/SettingsAbout.vue
- * - 「数据备份」→ settings/SettingsBackup.vue（恢复后 emit 重填表单）
+ * - 「数据管理」（备份恢复 + 全库示例图清理）→ settings/SettingsBackup.vue
+ *   （恢复后 emit 重填表单）
  * - 共享设置原语样式（.setting-row/.switch 等）→ main.css 公共类
  * 本文件保留：页面骨架、通用/扫描/外观三个表单板块、保存与重扫编排。
+ * 库统计已独立为统计页（StatsPage.vue，侧边栏「统计」入口）。
  */
 
 const { form, fillForm, onCancel, parseExcludeDirs } = useSettingsForm()
 
 const saving = ref(false)
-
-/** 全库示例图清理进行中标记（按钮禁用，防重复触发） */
-const clearingCovers = ref(false)
-
-/** 带手动示例图的模型数（确认对话框文案用，随扫描/标注即时刷新） */
-const modelsWithCovers = computed(
-  () => state.models.filter((m) => (m.covers || []).length > 0).length
-)
-
-/** 一键清空当前库全部模型的示例图（双重确认：明确张数与不可恢复性） */
-async function onClearAllCovers() {
-  const count = modelsWithCovers.value
-  if (count === 0) {
-    toast('info', '当前模型库没有可清理的示例图')
-    return
-  }
-  const ok = await confirmDialog(
-    `确定移除当前模型库中 ${count} 个模型的全部示例图吗？图片文件将被删除且不可恢复，模型文件不受影响。`
-  )
-  if (!ok) return
-  clearingCovers.value = true
-  try {
-    await clearAllCovers()
-  } catch (err) {
-    toast('error', `示例图清空失败: ${err.message}`)
-  } finally {
-    clearingCovers.value = false
-  }
-}
 
 /** 组件挂载时（settingsOpen 已为 true，watch 不会触发）以及后续打开时填充表单 */
 onMounted(() => {
@@ -347,36 +317,8 @@ async function onSave() {
         </label>
       </div>
 
-      <!-- 库统计（F7）：模型资产总览，随扫描/标注即时刷新 -->
-      <h3>库统计</h3>
-      <div class="settings-group">
-        <StatsSection />
-      </div>
-
-      <!-- 数据备份（O-4 拆分：settings/SettingsBackup.vue，恢复后重填表单） -->
+      <!-- 数据管理（O-4 拆分：settings/SettingsBackup.vue，含备份恢复与全库示例图清理） -->
       <SettingsBackup @restored="fillForm" />
-
-      <!-- 数据清理：全库示例图一键清空（危险操作，双重确认） -->
-      <h3>数据清理</h3>
-      <div class="settings-group">
-        <div class="setting-row">
-          <div class="setting-info">
-            <span class="setting-title">移除全部示例图</span>
-            <span class="setting-desc">
-              一键清空当前模型库中 {{ modelsWithCovers }} 个模型的手动预览图
-              （删除图片文件并清理封面记录，不可恢复；模型文件与参数/备注等标注不受影响）
-            </span>
-          </div>
-          <div class="setting-actions">
-            <button
-              class="btn btn-danger"
-              :disabled="clearingCovers || modelsWithCovers === 0"
-              :title="modelsWithCovers === 0 ? '当前模型库没有可清理的示例图' : '移除当前模型库全部模型的示例图'"
-              @click="onClearAllCovers"
-            >{{ clearingCovers ? '清理中…' : '移除全部' }}</button>
-          </div>
-        </div>
-      </div>
 
       <!-- 关于（O-4 拆分：settings/SettingsAbout.vue，含检查更新/日志诊断） -->
       <SettingsAbout />

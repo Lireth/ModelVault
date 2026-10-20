@@ -1,7 +1,9 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import {
   applyTheme,
+  clearAllCovers,
+  confirmDialog,
   defaultSettings,
   replaceSettings,
   scanModels,
@@ -10,8 +12,9 @@ import {
 } from '../../store/appStore'
 
 /**
- * 设置页「数据备份」板块（FEAT-3，O-4 自 SettingsPage.vue 按域拆出）：
- * 备份导出（设置 + 当前库标注/封面 → zip）与恢复。
+ * 设置页「数据管理」板块（FEAT-3，O-4 自 SettingsPage.vue 按域拆出）：
+ * 数据域操作集中一处——备份导出/恢复（设置 + 当前库标注/封面 → zip）
+ * 与全库示例图一键清理（危险操作，双重确认）。
  * 恢复成功且设置有变更时 emit('restored')，由父组件重填表单——
  * 表单状态归 useSettingsForm 所有，避免恢复后用旧表单值覆盖刚恢复的设置。
  */
@@ -19,6 +22,35 @@ import {
 const emit = defineEmits(['restored'])
 
 const backupBusy = ref(false)
+
+/** 全库示例图清理进行中标记（按钮禁用，防重复触发） */
+const clearingCovers = ref(false)
+
+/** 带手动示例图的模型数（确认对话框文案用，随扫描/标注即时刷新） */
+const modelsWithCovers = computed(
+  () => state.models.filter((m) => (m.covers || []).length > 0).length
+)
+
+/** 一键清空当前库全部模型的示例图（双重确认：明确模型数与不可恢复性） */
+async function onClearAllCovers() {
+  const count = modelsWithCovers.value
+  if (count === 0) {
+    toast('info', '当前模型库没有可清理的示例图')
+    return
+  }
+  const ok = await confirmDialog(
+    `确定移除当前模型库中 ${count} 个模型的全部示例图吗？图片文件将被删除且不可恢复，模型文件与参数/备注等标注不受影响。`
+  )
+  if (!ok) return
+  clearingCovers.value = true
+  try {
+    await clearAllCovers()
+  } catch (err) {
+    toast('error', `示例图清空失败: ${err.message}`)
+  } finally {
+    clearingCovers.value = false
+  }
+}
 
 /** 导出备份：应用设置 + 当前库标注/封面 → zip（对话框与打包均在主进程） */
 async function onExportBackup() {
@@ -84,8 +116,8 @@ async function onImportBackup() {
 </script>
 
 <template>
-  <!-- 数据备份 -->
-  <h3>数据备份</h3>
+  <!-- 数据管理：备份恢复 + 危险数据操作集中一区 -->
+  <h3>数据管理</h3>
   <div class="settings-group">
     <div class="setting-row">
       <div class="setting-info">
@@ -99,6 +131,24 @@ async function onImportBackup() {
       <div class="setting-actions">
         <button class="btn" :disabled="backupBusy" @click="onExportBackup">导出备份…</button>
         <button class="btn" :disabled="backupBusy" @click="onImportBackup">从备份恢复…</button>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <span class="setting-title">移除全部示例图</span>
+        <span class="setting-desc">
+          一键清空当前模型库中 {{ modelsWithCovers }} 个模型的手动预览图
+          （删除图片文件并清理封面记录，不可恢复；模型文件与参数/备注等标注不受影响）
+        </span>
+      </div>
+      <div class="setting-actions">
+        <button
+          class="btn btn-danger"
+          :disabled="clearingCovers || modelsWithCovers === 0"
+          :title="modelsWithCovers === 0 ? '当前模型库没有可清理的示例图' : '移除当前模型库全部模型的示例图'"
+          @click="onClearAllCovers"
+        >{{ clearingCovers ? '清理中…' : '移除全部' }}</button>
       </div>
     </div>
   </div>

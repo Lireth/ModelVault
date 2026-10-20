@@ -37,9 +37,9 @@ export function useGlobalShortcuts(searchFieldEl, clearSearch) {
     )
   }
 
-  /** 设置页是否打开（该场景搜索框不在 DOM 中） */
+  /** 内容区被页面占用（设置页/统计页，该场景搜索框不在 DOM 中） */
   function isOverlayPanelOpen() {
-    return state.settingsOpen
+    return state.settingsOpen || state.statsOpen
   }
 
   function onGlobalKeydown(e) {
