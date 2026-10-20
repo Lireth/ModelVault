@@ -1,17 +1,24 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import AutoInfoPanel from './detail/AutoInfoPanel.vue'
+import CivitaiPanel from './detail/CivitaiPanel.vue'
 import CoverPanel from './detail/CoverPanel.vue'
 import MetaForm from './detail/MetaForm.vue'
 import { closeDetail, revealModel, selectedModel, showContextMenu, state } from '../store/appStore'
 
 /**
  * 详情页面板骨架（O-4 拆分）：
- * - 右侧标注表单列（表单状态/脏检测/保存/收藏评分/自动解析与 Civitai 面板）
- *   → detail/MetaForm.vue
+ * - 中部标注表单列（表单状态/脏检测/保存/收藏评分）→ detail/MetaForm.vue
  * - 左侧封面管理 → detail/CoverPanel.vue（C1，既有拆分）
+ * - 右侧信息列：文件元数据（自动解析）+ Civitai 识别信息 →
+ *   detail/AutoInfoPanel.vue + detail/CivitaiPanel.vue（本文件编排）。
+ *   AutoInfoPanel 的「一键填入」经 MetaForm 暴露的方法写入其本地表单。
  * 本文件保留：遮罩与面板骨架、打开/关闭焦点管理（O10）、Tab 焦点陷阱、
  * ESC 关闭与面板右键菜单。
  */
+
+/** 中部表单列实例：承接 AutoInfoPanel 的「一键填入」（跨列写本地表单） */
+const metaFormRef = ref(null)
 
 /* ---------------- 焦点管理（O10：键盘/读屏可达性） ---------------- */
 
@@ -108,8 +115,17 @@ function onPanelContextMenu() {
           <!-- 左侧：封面管理（CoverPanel，C1） -->
           <CoverPanel />
 
-          <!-- 右侧：推荐参数与标注（MetaForm，O-4 拆分） -->
-          <MetaForm />
+          <!-- 中部：推荐参数与标注（MetaForm，O-4 拆分） -->
+          <MetaForm ref="metaFormRef" />
+
+          <!-- 右侧：识别信息列（文件元数据自动解析 + Civitai 在线识别） -->
+          <div class="detail-info-col">
+            <AutoInfoPanel
+              @apply-resolution="(resMin, resMax) => metaFormRef?.onAutoApplyResolution(resMin, resMax)"
+              @apply-triggers="(words) => metaFormRef?.onAutoApplyTriggers(words)"
+            />
+            <CivitaiPanel />
+          </div>
         </div>
       </section>
     </div>
@@ -141,7 +157,8 @@ function onPanelContextMenu() {
   -webkit-backdrop-filter: blur(22px);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-xl);
-  width: min(960px, 100%);
+  /* 三列布局（封面/表单/信息列）后加宽面板 */
+  width: min(1180px, 100%);
   max-height: calc(100vh - var(--titlebar-height) - 48px);
   display: flex;
   flex-direction: column;
@@ -174,9 +191,28 @@ function onPanelContextMenu() {
 
 .detail-body {
   display: grid;
-  grid-template-columns: 300px 1fr;
+  /* 三列：封面 | 标注表单 | 识别信息（AutoInfo + Civitai） */
+  grid-template-columns: 300px minmax(0, 1fr) 280px;
   gap: 20px;
   padding: 20px;
   overflow-y: auto;
+}
+
+/* 右侧识别信息列：文件元数据（自动解析）+ Civitai 识别，纵向排布 */
+.detail-info-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* 窄窗口降级：信息列移到封面/表单下方整行铺开，避免三列挤压 */
+@media (max-width: 1100px) {
+  .detail-body {
+    grid-template-columns: 300px minmax(0, 1fr);
+  }
+  .detail-info-col {
+    grid-column: 1 / -1;
+  }
 }
 </style>

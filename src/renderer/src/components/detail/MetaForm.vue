@@ -1,7 +1,5 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
-import AutoInfoPanel from './AutoInfoPanel.vue'
-import CivitaiPanel from './CivitaiPanel.vue'
 import { PARAM_LIMITS, SAMPLERS, SCHEDULERS, PRECISIONS } from '../../constants/modelParams'
 import {
   closeDetail,
@@ -18,11 +16,11 @@ import {
 } from '../../store/appStore'
 
 /**
- * 详情页右侧标注表单列（O-4 自 ModelDetail.vue 按域拆出）：
+ * 详情页中部标注表单列（O-4 自 ModelDetail.vue 按域拆出）：
  * 表单本地副本与脏数据保护（C8）、推荐参数编辑与校验、备注/触发词/
- * 备注名、收藏/NSFW/评分快捷标记、自动解析信息与 Civitai 面板编排。
- * 表单所有权集中于此：AutoInfoPanel 的「一键填入」直接写本地表单。
- * 焦点陷阱与 ESC/右键菜单留在 ModelDetail.vue（面板骨架职责）。
+ * 备注名、收藏/NSFW/评分快捷标记。自动解析与 Civitai 面板已移至详情页
+ * 第三列（ModelDetail.vue 编排），其「一键填入」经 defineExpose 暴露的
+ * 方法直接写本地表单。焦点陷阱与 ESC/右键菜单留在 ModelDetail.vue。
  */
 
 const busy = ref(false)
@@ -102,7 +100,9 @@ watch(formDirty, (d) => {
   state.detailDirty = d
 }, { immediate: true })
 
-/* ---------------- 文件元数据自动解析（AutoInfoPanel 事件，C1） ---------------- */
+/* ---------------- 文件元数据自动解析（AutoInfoPanel 事件，C1） ----------------
+ * AutoInfoPanel 现位于 ModelDetail.vue 第三列，经 defineExpose 暴露以下
+ * 方法供其「一键填入」调用（表单所有权仍在本组件）。 */
 
 /** 将训练分辨率填入推荐分辨率表单 */
 function onAutoApplyResolution(resMin, resMax) {
@@ -122,6 +122,9 @@ function onAutoApplyTriggers(words) {
   form.triggerWords = words.join(', ')
   toast('success', '触发词已填入表单，点击「保存参数」生效')
 }
+
+/** 供 ModelDetail.vue 第三列的 AutoInfoPanel「一键填入」跨列调用 */
+defineExpose({ onAutoApplyResolution, onAutoApplyTriggers })
 
 /* ---------------- 收藏 / 评分 ---------------- */
 
@@ -282,14 +285,8 @@ async function onSave() {
 </script>
 
 <template>
-  <!-- 右侧：推荐参数与标注（根节点承接原 .detail-form-col 布局） -->
+  <!-- 中部：推荐参数与标注（根节点承接 grid 列布局） -->
   <div class="detail-form-col">
-    <!-- 文件元数据（safetensors 头部自动解析）：仅展示 + 一键填入表单（AutoInfoPanel，C1） -->
-    <AutoInfoPanel @apply-resolution="onAutoApplyResolution" @apply-triggers="onAutoApplyTriggers" />
-
-    <!-- Civitai 在线识别：URL 展示 + 一键补全空缺信息（开关见设置页） -->
-    <CivitaiPanel />
-
     <!-- 收藏 / 评分 -->
     <div class="flags-row">
       <button
@@ -467,7 +464,7 @@ async function onSave() {
 </template>
 
 <style scoped>
-/* 右侧表单列（根节点，承接 ModelDetail.vue 的 grid 列布局） */
+/* 中部表单列（根节点，承接 ModelDetail.vue 的 grid 列布局） */
 .detail-form-col {
   display: flex;
   flex-direction: column;
@@ -663,15 +660,16 @@ async function onSave() {
   color: var(--danger);
 }
 
+/* 内边距/字号与 .field input 同源，保证与备注名、参数输入框等高（视觉协调） */
 .tag-input {
   flex: 1;
   min-width: 140px;
-  padding: 4px 10px;
+  padding: 8px 12px;
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--bg) 55%, transparent);
   color: var(--text);
-  font-size: var(--font-xs);
+  font-size: var(--font-sm);
   outline: none;
 }
 
