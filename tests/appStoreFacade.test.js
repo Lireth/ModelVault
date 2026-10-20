@@ -106,6 +106,8 @@ const EXPECTED_EXPORTS = [
   'pasteCover',
   'setDefaultCover',
   'deleteCover',
+  'clearCovers',
+  'clearAllCovers',
   'importCoversFromDrop',
   // Civitai 在线识别与一键补全
   'civitaiIdentify',

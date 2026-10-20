@@ -183,6 +183,7 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'models:deleteCover': vObj({
     fields: { id: ID, cover: vStr({ max: 1000 }) }
   }),
+  'models:clearCovers': vObj({ fields: { id: ID } }),
   'models:importCover': vObj({
     fields: { id: ID, path: vStr({ max: 2000 }) }
   }),

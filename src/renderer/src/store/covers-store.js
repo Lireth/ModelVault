@@ -117,6 +117,44 @@ export async function deleteCover(id, cover) {
 }
 
 /**
+ * 一键移除全部示例图（物理文件 + 元数据），并同步本地列表。
+ * 移除后卡片回退 sidecar 预览图 / 扩展名占位。
+ * @param {string} id 模型 id
+ */
+export async function clearCovers(id) {
+  const res = await window.api.models.clearCovers(id)
+  if (res.error) {
+    toast('error', res.error)
+    return false
+  }
+  applyCoverResult(id, res)
+  toast('success', '已移除全部示例图')
+  return true
+}
+
+/**
+ * 一键清空当前库全部模型的示例图（设置页数据清理入口）。
+ * 主进程逐模型清空封面引用并删除物理文件；本地列表单趟同步
+ * （全部卡片立即回退 sidecar 预览图 / 扩展名占位，无需重扫）。
+ * @returns {Promise<boolean>} 是否成功
+ */
+export async function clearAllCovers() {
+  const res = await window.api.models.clearAllCovers()
+  if (res.error) {
+    toast('error', res.error)
+    return false
+  }
+  for (const m of state.models) {
+    m.cover = ''
+    m.coverUrl = ''
+    m.covers = []
+    m.hasManualCover = false
+  }
+  toast('success', `已清空 ${res.cleared} 个模型共 ${res.images} 张示例图`)
+  return true
+}
+
+/**
  * 批量拖拽导入封面（OPT-9）：多个外部图片文件依次导入为预览图。
  * - IPC 逐文件串行：主进程按「时间戳-文件名」命名，并发导入同基名文件
  *   存在同毫秒同名碰撞风险，串行保留既有安全性；

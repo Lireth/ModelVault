@@ -1,6 +1,6 @@
 import { BrowserWindow } from 'electron'
 import logger from '../../logger'
-import { getModelMeta, relativizeCover, setModelMeta } from '../../services/store'
+import { getMetaMapByAbsPath, getModelMeta, relativizeCover, setModelMeta } from '../../services/store'
 import { deleteCoverFile, importCoverFromPath, pickAndSaveCover, saveClipboardImage } from '../../services/covers'
 import { getThumbPathDeferred } from '../../services/thumbs'
 import { toImageUrl } from '../../protocol'
@@ -167,6 +167,47 @@ export function registerCoverHandlers() {
     logger.info(`封面已删除: ${id} -> ${cover}`)
     return buildCoverResponse(resolveCoverSafe(meta.cover), meta)
   }, { errorPrefix: '封面删除失败' })
+
+  // 一键移除全部示例图（清空元数据封面列表并删除物理文件）
+  wrapHandler('models:clearCovers', async (event, { id } = {}) => {
+    const invalid = checkModelId(id)
+    if (invalid) return { error: invalid }
+    const existing = getModelMeta(id) || {}
+    const covers = Array.isArray(existing.covers) ? existing.covers : []
+    const meta = setModelMeta(id, { ...existing, covers: [], cover: '' })
+    if (!meta) {
+      return { error: '封面移除失败' }
+    }
+    // 物理文件删除放在元数据更新之后：单张失败不阻塞整体（失败残留的
+    // 孤儿文件由 pruneOrphanCovers 周期清理兜底）
+    await Promise.all(covers.map((rel) => deleteCoverFile(resolveCoverSafe(rel))))
+    logger.info(`已移除全部示例图: ${id}（${covers.length} 张）`)
+    return buildCoverResponse('', meta)
+  }, { errorPrefix: '封面移除失败' })
+
+  // 一键清空当前库全部模型的示例图（设置页数据清理入口）：
+  // 逐模型清空封面引用（复用 setModelMeta 规范化与防抖落盘），再删除物理文件
+  wrapHandler('models:clearAllCovers', async () => {
+    const metas = getMetaMapByAbsPath()
+    let clearedModels = 0
+    let clearedImages = 0
+    const deletions = []
+    for (const [id, meta] of Object.entries(metas)) {
+      const covers = Array.isArray(meta.covers) ? meta.covers : []
+      if (covers.length === 0) continue
+      setModelMeta(id, { ...meta, covers: [], cover: '' })
+      clearedModels += 1
+      clearedImages += covers.length
+      for (const rel of covers) {
+        deletions.push(() => deleteCoverFile(resolveCoverSafe(rel)))
+      }
+    }
+    // 引用清理已全部完成后统一删文件：单张失败不阻塞（孤儿文件由
+    // pruneOrphanCovers 周期清理兜底）
+    await Promise.all(deletions.map((del) => del()))
+    logger.info(`已清空全部示例图: ${clearedModels} 个模型共 ${clearedImages} 张`)
+    return { cleared: clearedModels, images: clearedImages }
+  }, { errorPrefix: '示例图清空失败' })
 
   // 拖拽导入封面：将外部图片文件复制到封面目录并追加到封面列表
   wrapHandler('models:importCover', async (event, { id, path: source } = {}) => {

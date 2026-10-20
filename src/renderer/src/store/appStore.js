@@ -126,6 +126,8 @@ export {
   pasteCover,
   setDefaultCover,
   deleteCover,
+  clearCovers,
+  clearAllCovers,
   importCoversFromDrop
 } from './covers-store'
 

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import CoverGallery from './CoverGallery.vue'
 import {
+  clearCovers,
   confirmDialog,
   deleteCover,
   importCoversFromDrop,
@@ -192,6 +193,25 @@ async function onUploadCover() {
   }
 }
 
+/** 一键移除全部示例图（需确认；物理文件与封面记录一并删除，不可恢复） */
+async function onClearAllCovers() {
+  const model = selectedModel.value
+  const count = model?.covers?.length || 0
+  if (!model || count === 0) return
+  const ok = await confirmDialog(
+    `确定移除全部 ${count} 张示例图吗？图片文件将被删除，该操作不可恢复。`
+  )
+  if (!ok) return
+  busy.value = true
+  try {
+    await clearCovers(model.id)
+  } catch (err) {
+    toast('error', `移除示例图失败: ${err.message}`)
+  } finally {
+    busy.value = false
+  }
+}
+
 /** 全局粘贴事件：详情页打开且剪贴板内容为图片时，走添加预览图流程（C1 自父组件迁移） */
 function onWindowPaste(e) {
   if (!selectedModel.value) return
@@ -245,32 +265,45 @@ onBeforeUnmount(() => {
       也可直接拖入图片文件；支持 png / jpg / webp / gif / bmp 多张预览图，点击缩略图设为默认显示
     </p>
 
-    <div v-if="covers.length" class="cover-thumbs">
-      <div
-        v-for="c in covers"
-        :key="c.path"
-        class="cover-thumb"
-        :class="{ active: isDefault(c) }"
-        :title="isDefault(c) ? '当前默认显示' : '点击设为默认显示'"
-        @click="onSetDefault(c)"
-      >
-        <img
-          v-if="!failedThumbs.has(c.path)"
-          :src="c.url"
-          alt="预览图"
-          loading="lazy"
-          draggable="false"
-          @error="failedThumbs.add(c.path)"
-        />
-        <span v-else class="thumb-missing">已失效</span>
-        <span v-if="isDefault(c)" class="thumb-badge">默认</span>
+    <!-- 多封面缩略图区：头部计数 + 一键移除全部 -->
+    <div v-if="covers.length" class="thumbs-section">
+      <div class="thumbs-head">
+        <span class="thumbs-count">{{ covers.length }} 张预览图</span>
         <button
-          class="thumb-delete"
-          title="删除这张预览图"
-          aria-label="删除这张预览图"
+          class="thumbs-clear"
           type="button"
-          @click.stop="onDeleteCover(c)"
-        ><svg viewBox="0 0 16 16" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg></button>
+          :disabled="busy"
+          title="移除全部示例图（图片文件一并删除，不可恢复）"
+          @click="onClearAllCovers"
+        >移除全部</button>
+      </div>
+      <div class="cover-thumbs">
+        <div
+          v-for="c in covers"
+          :key="c.path"
+          class="cover-thumb"
+          :class="{ active: isDefault(c) }"
+          :title="isDefault(c) ? '当前默认显示' : '点击设为默认显示'"
+          @click="onSetDefault(c)"
+        >
+          <img
+            v-if="!failedThumbs.has(c.path)"
+            :src="c.url"
+            alt="预览图"
+            loading="lazy"
+            draggable="false"
+            @error="failedThumbs.add(c.path)"
+          />
+          <span v-else class="thumb-missing">已失效</span>
+          <span v-if="isDefault(c)" class="thumb-badge">默认</span>
+          <button
+            class="thumb-delete"
+            title="删除这张预览图"
+            aria-label="删除这张预览图"
+            type="button"
+            @click.stop="onDeleteCover(c)"
+          ><svg viewBox="0 0 16 16" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg></button>
+        </div>
       </div>
     </div>
 
@@ -361,6 +394,39 @@ onBeforeUnmount(() => {
   font-size: 11px;
   color: var(--text-muted);
   line-height: 1.6;
+}
+
+/* 多封面缩略图区：头部计数 + 一键移除 */
+.thumbs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.thumbs-count {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.thumbs-clear {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+
+.thumbs-clear:hover:not(:disabled) {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.thumbs-clear:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* 多封面缩略图网格 */

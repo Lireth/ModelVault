@@ -24,6 +24,8 @@ const VALID_INVOKE_CHANNELS = [
   'models:pasteCover',
   'models:setDefaultCover',
   'models:deleteCover',
+  'models:clearCovers',
+  'models:clearAllCovers',
   'models:deleteModel',
   'models:setMetaFlags',
   'models:setModelTags',
@@ -137,6 +139,10 @@ const api = {
     setDefaultCover: (id, cover) => invokeValidated('models:setDefaultCover', { id, cover }),
     /** 删除单张封面（cover 为封面相对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */
     deleteCover: (id, cover) => invokeValidated('models:deleteCover', { id, cover }),
+    /** 一键移除全部示例图（清空封面列表并删除物理文件），返回 { cover, coverUrl, covers, meta } 或 { error } */
+    clearCovers: (id) => invokeValidated('models:clearCovers', { id }),
+    /** 一键清空当前库全部模型的示例图（设置页数据清理），返回 { cleared, images } 或 { error } */
+    clearAllCovers: () => invokeValidated('models:clearAllCovers'),
     /** 导出备份（FEAT-3）：设置 + 当前库标注/封面 → zip，返回 { path, sizeBytes, library, models, covers } / { canceled } / { error } */
     exportBackup: () => invokeValidated('models:exportBackup'),
     /** 从备份恢复（FEAT-3）：zip → 设置 + 指定库，返回 { settingsRestored, libraryRestored? } / { canceled } / { error } */

@@ -43,6 +43,7 @@ const SCHEMA_EXEMPT_CHANNELS = [
   'models:loadStore',
   'models:chooseFolder',
   'models:cancelScan',
+  'models:clearAllCovers', // 无 payload，清空范围以当前库为界
   'models:exportBackup',
   'models:importBackup'
 ]
