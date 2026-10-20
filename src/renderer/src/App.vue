@@ -182,6 +182,29 @@ onUnmounted(() => {
             </button>
           </div>
 
+          <!-- 统计与快捷筛选（原结果栏）：与搜索框/排序同一行，减少纵向占用 -->
+          <span class="muted result-count">共 {{ filteredModels.length }} 个模型</span>
+          <!-- 收藏筛选：仅显示收藏的模型 -->
+          <button
+            class="fav-filter"
+            :class="{ active: state.showFavoritesOnly }"
+            :title="state.showFavoritesOnly ? '显示全部模型' : '仅显示收藏的模型'"
+            @click="state.showFavoritesOnly = !state.showFavoritesOnly"
+          >
+            <svg viewBox="0 0 24 24" width="11" height="11" :fill="state.showFavoritesOnly ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z" /></svg>
+            收藏
+          </button>
+          <!-- 多选模式开关（E4） -->
+          <button
+            class="fav-filter"
+            :class="{ active: state.multiSelect.active }"
+            :title="state.multiSelect.active ? '退出多选模式' : '进入多选模式，批量管理模型'"
+            @click="toggleMultiSelectMode"
+          >
+            <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3" /><path d="M5 8.2l2.1 2.1L11.4 6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            多选
+          </button>
+
           <div class="sort-select" title="排序方式">
             <span class="sort-label">排序</span>
             <select :value="state.sortBy" @change="onSortChange">
@@ -268,20 +291,9 @@ onUnmounted(() => {
         <!-- 模型网格 -->
         <template v-else>
           <div class="result-bar">
-            <span class="muted">共 {{ filteredModels.length }} 个模型</span>
             <span v-if="state.typeFilter !== 'all'" class="chip">
               {{ typeInfo(state.typeFilter).label }}
             </span>
-            <!-- 收藏筛选：仅显示收藏的模型 -->
-            <button
-              class="fav-filter"
-              :class="{ active: state.showFavoritesOnly }"
-              :title="state.showFavoritesOnly ? '显示全部模型' : '仅显示收藏的模型'"
-              @click="state.showFavoritesOnly = !state.showFavoritesOnly"
-            >
-              <svg viewBox="0 0 24 24" width="11" height="11" :fill="state.showFavoritesOnly ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z" /></svg>
-              收藏
-            </button>
             <!-- 重复筛选（FEAT-1）：仅显示与其他模型文件完全相同（SHA256 一致）的模型。
                  哈希由后台预热渐进就绪，无可见重复项时隐藏入口 -->
             <button
@@ -307,16 +319,6 @@ onUnmounted(() => {
               @click="onSelectRedundant"
             >
               选中冗余项
-            </button>
-            <!-- 多选模式开关（E4） -->
-            <button
-              class="fav-filter"
-              :class="{ active: state.multiSelect.active }"
-              :title="state.multiSelect.active ? '退出多选模式' : '进入多选模式，批量管理模型'"
-              @click="toggleMultiSelectMode"
-            >
-              <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3" /><path d="M5 8.2l2.1 2.1L11.4 6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-              多选
             </button>
             <!-- LoRA 分类筛选：仅选中 LoRA 分类时显示（即使筛选结果为空也保持可见） -->
             <label v-if="state.typeFilter === 'lora'" class="sort-select sub-filter" title="按 LoRA 分类筛选">
@@ -511,13 +513,12 @@ onUnmounted(() => {
   color: var(--text);
 }
 
-/* ---------- 排序下拉（搜索行最右侧） ---------- */
+/* ---------- 排序下拉（搜索行右侧，紧跟统计/筛选组之后） ---------- */
 .sort-select {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-  margin-left: auto;
 }
 
 .sort-label {
@@ -587,6 +588,13 @@ onUnmounted(() => {
   color: var(--accent);
   border-color: var(--accent);
   outline: none;
+}
+
+/* 结果统计（搜索行内，靠右与排序对齐） */
+.result-count {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .result-bar {
