@@ -11,7 +11,7 @@ import { defaultSettings, exitMultiSelect, replaceModels, state } from '../../sr
  */
 
 /** 构造 window.api 桩（按用例覆写具体方法返回值） */
-export function makeComponentApiMock() {
+function makeComponentApiMock() {
   return {
     // 拖拽文件真实路径解析（preload webUtils 的测试替身）：
     // 默认取 File 对象的 path 属性（测试构造的 File-like 对象携带），无则空串

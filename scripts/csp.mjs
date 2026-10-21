@@ -22,7 +22,7 @@ const CSP_META_RE = /(http-equiv="Content-Security-Policy"\s+content=")([^"]*)("
  * @param {string} csp 源码（dev）CSP 字符串
  * @returns {string} 生产 CSP 字符串
  */
-export function toProductionCsp(csp) {
+function toProductionCsp(csp) {
   return csp.replace(DEV_STYLE_SRC, PROD_STYLE_SRC)
 }
 

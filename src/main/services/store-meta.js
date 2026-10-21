@@ -362,7 +362,7 @@ export function setModelMeta(modelId, meta) {
 }
 
 /** 防抖保存：短时间内多次修改只落盘一次 */
-export function scheduleSave() {
+function scheduleSave() {
   if (saveTimer) clearTimeout(saveTimer)
   // 记录调度时的根目录（A6）：定时器触发时若根已切换，本次防抖携带的
   // 是旧根数据，直接落盘会写进新根目录的 store.json（跨库污染）——丢弃。
