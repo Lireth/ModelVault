@@ -7,13 +7,22 @@ directories:
   buildResources: build
   output: dist/${version}
 
-# 只打包构建产物与生产依赖
+# 只打包构建产物（依赖已由 electron-vite 打进 bundle，node_modules 整体排除）
 files:
   - out/**
   - package.json
   - "!**/*.map"
+  - "!node_modules/**"
 
 asar: true
+
+# 7z 最大压缩：portable 体积优先（构建时间略增）
+compression: maximum
+
+# 语言包裁剪：仅简体中文（en-US 为 Chromium 兜底 locale，缺失可能引起非中文系统启动异常）
+electronLanguages:
+  - en-US
+  - zh-CN
 
 # Windows 单文件（portable）打包：最终产物为一个 exe，运行时不写入 exe 所在目录
 # （应用数据 settings.json/日志保存在 %APPDATA%\modelvault，模型元数据保存在用户选择的模型文件夹）

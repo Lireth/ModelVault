@@ -16,9 +16,10 @@ const rendererCspPlugin = {
 }
 
 export default defineConfig({
-  // 主进程：外部化所有依赖，仅打包业务代码
+  // 主进程：外部化所有依赖，仅打包业务代码（fflate 除外——打进 bundle 后
+  // electron-builder 可整个排除 node_modules，避免 asar 携带无用的依赖树）
   main: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin({ exclude: ['fflate'] })]
   },
   // 预加载脚本
   preload: {
