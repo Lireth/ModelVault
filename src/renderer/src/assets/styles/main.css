@@ -527,6 +527,153 @@ textarea::placeholder {
   padding: var(--space-1) var(--space-3);
 }
 
+/* ---------- 库视图共享原语（O-5 自 App.vue scoped 抽取：
+   LibraryToolbar（搜索行控件）与 ResultBar（筛选 chips）共用，
+   空态族由 LibraryStates 与 App 插槽内空结果分支共用） ---------- */
+
+/* 收藏筛选按钮（收藏/多选/重复筛选等同族 chip 形按钮） */
+.fav-filter {
+  font-size: var(--font-xs);
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--glass-border-bright);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+
+.fav-filter:hover {
+  color: var(--favorite);
+  border-color: var(--favorite);
+}
+
+.fav-filter.active {
+  border-color: var(--favorite);
+  color: var(--favorite);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--favorite) 8%, transparent);
+  box-shadow: var(--glow-favorite);
+}
+
+/* 下拉筛选（排序/LoRA 分类/基底/标签共用） */
+.sort-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.sort-label {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+.sort-select select {
+  padding: 7px 28px 7px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  color: var(--text);
+  font-size: var(--font-sm);
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238a97a5' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.sort-select select:hover,
+.sort-select select:focus {
+  border-color: var(--accent);
+}
+
+/* 排序方向切换按钮（U2） */
+.sort-dir {
+  padding: 6px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  color: var(--text-muted);
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+
+.sort-dir:hover,
+.sort-dir:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* 列表/网格视图切换按钮（与排序方向按钮同族） */
+.view-toggle {
+  padding: 7px 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  color: var(--text-muted);
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+
+.view-toggle:hover,
+.view-toggle:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* 主分类 chip */
+.chip {
+  font-size: 11px;
+  padding: 3px 12px;
+  border-radius: var(--radius-full);
+  background: var(--bg-active);
+  color: var(--accent);
+}
+
+/* ---------- 空状态（LibraryStates 五态 + App 插槽内空结果分支共用） ---------- */
+.empty-state {
+  margin: auto;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px;
+}
+
+/* 空态线稿图标：强调色与中性色混合，柔和不刺眼 */
+.empty-icon {
+  color: color-mix(in srgb, var(--accent) 62%, var(--text-muted));
+  display: inline-flex;
+  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 22%, transparent));
+}
+
+.empty-state h2 {
+  font-size: 17px;
+}
+
+.empty-state p {
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+  line-height: 1.8;
+}
+
 /* 警示条容器视觉（布局由组件自行组织）：
    金色系——扫描错误条（App.vue，复用收藏金色语义）；
    黄色系——健康检查警示（ModelDetail，--warning 语义） */
