@@ -15,10 +15,15 @@
  *   （alias 100/note 2000/triggerWords 1000 → schema 取 2~10 倍），schema
  *   只拦截滥用输入，正常超长输入仍走既有截断行为，不产生回归。
  *
- * 豁免通道（不登记 schema）：
- * - 无 payload 通道（loadStore/chooseFolder/cancelScan/backup 等）；
- * - app:reportError：handler 自带类型归一化与长度截断，任何形状都安全；
- * - payload 为 undefined/null 一律放行：所有 handler 均以解构默认值容错缺参。
+ * 登记原则（O1 fail-closed）：
+ * - 全部 invoke 通道（与 preload VALID_INVOKE_CHANNELS 一一对应）必须登记：
+ *   带参通道登记对象 schema，无 payload 通道登记 vVoid()（传参即拒绝）；
+ *   未登记通道在 validateIpcPayload 直接拒绝并经 wrapHandler 告警——新增
+ *   通道漏登记时显式暴露，而非静默绕过结构门禁（tests/ipcSchema.test.js
+ *   与 preload 白名单做全量对账）；
+ * - app:reportError：handler 自带类型归一化与长度截断，schema 只做宽松
+ *   结构门禁（字段可选，提供时才校验类型与长度）；
+ * - 带参通道 payload 为 undefined/null 放行：所有 handler 均以解构默认值容错缺参。
  *
  * 零依赖纯函数模块：无 electron/node 内置导入，可在 node 测试环境直接导入。
  */
@@ -56,6 +61,15 @@ export function vObj(opts = {}) {
 }
 
 /**
+ * 无参通道规则：渲染进程不得传任何参数（payload 须为缺省 undefined/null）。
+ * nullable 与 validateValue 的 null 分支对齐：显式 null 视同缺省。
+ * @returns {object} 规则
+ */
+export function vVoid() {
+  return { kind: 'void', nullable: true }
+}
+
+/**
  * 校验单个值是否满足规则。
  * @param {any} value 待校验值
  * @param {object} rule 字段规则（构造器产物）
@@ -70,6 +84,9 @@ export function validateValue(value, rule, label) {
     return rule.nullable ? '' : `${label} 不能为 null`
   }
   switch (rule.kind) {
+    // 无参规则：undefined/null 已在上方放行，走到此处即渲染进程传了参数
+    case 'void':
+      return `${label} 不接受参数`
     case 'string': {
       if (typeof value !== 'string') return `${label} 须为字符串`
       if (rule.max && value.length > rule.max) return `${label} 长度超限（≤${rule.max}）`
@@ -122,16 +139,37 @@ export function validateValue(value, rule, label) {
 const ID = vStr({ required: true, max: 2000 })
 
 /**
- * 每通道 payload schema 注册表。
- * 键必须与 preload 的 VALID_INVOKE_CHANNELS 一致；无 payload 的通道不登记。
- * 新增带参通道必须在此登记（tests/ipcSchema.test.js 有白名单对账测试锁定）。
+ * 每通道 payload schema 注册表（O1 fail-closed）。
+ * 键必须与 preload 的 VALID_INVOKE_CHANNELS 全量一致：带参通道登记对象
+ * schema，无 payload 通道登记 vVoid()。新增通道必须在此登记，未登记通道
+ * 一律被 validateIpcPayload 拒绝（tests/ipcSchema.test.js 全量对账锁定）。
  */
 export const IPC_PAYLOAD_SCHEMAS = {
-  // ---------- 应用域（ipc.js 直注册，handler 内手动调用 validateIpcPayload）----------
-  // app:reportError 豁免：handler 自带归一化截断
+  // ---------- 应用域（ipc.js 经 wrapHandler 统一注册）----------
+  // 无 payload 通道：vVoid 门禁，渲染进程传参即拒绝
+  'app:getInfo': vVoid(),
+  // 渲染进程异常上报：handler 自带归一化截断，schema 仅宽松结构门禁
+  // （字段可选；上限取 handler 截断点 2000/4000 的 2 倍，超限输入仍由
+  // handler 截断落盘而非报错）
+  'app:reportError': vObj({
+    fields: {
+      message: vStr({ max: 4000 }),
+      stack: vStr({ max: 8000 })
+    }
+  }),
+  'app:checkUpdate': vVoid(),
+  // F-6：URL 由主进程检查更新链路提供，渲染层不传任何参数
+  'app:downloadUpdate': vVoid(),
+  'app:cancelUpdateDownload': vVoid(),
+  'app:installUpdate': vVoid(),
+  'app:openLogs': vVoid(),
   'window:setTheme': vObj({
     fields: { theme: vStr({ required: true, max: 32 }) }
   }),
+
+  // ---------- 存储域 ----------
+  'models:loadStore': vVoid(),
+  'models:chooseFolder': vVoid(),
 
   // ---------- 设置域 ----------
   // settings:update 全宽松（字段级规范化在 normalizeSettings + 目录存在性
@@ -149,6 +187,7 @@ export const IPC_PAYLOAD_SCHEMAS = {
       dirs: vArr({ max: 200, items: vStr({ max: 1000 }) })
     }
   }),
+  'models:cancelScan': vVoid(),
 
   // ---------- 元数据域 ----------
   'models:saveModelData': vObj({
@@ -184,9 +223,14 @@ export const IPC_PAYLOAD_SCHEMAS = {
     fields: { id: ID, cover: vStr({ max: 1000 }) }
   }),
   'models:clearCovers': vObj({ fields: { id: ID } }),
+  'models:clearAllCovers': vVoid(), // 无 payload，清空范围以当前库为界
   'models:importCover': vObj({
     fields: { id: ID, path: vStr({ max: 2000 }) }
   }),
+
+  // ---------- 备份域 ----------
+  'models:exportBackup': vVoid(),
+  'models:importBackup': vVoid(),
 
   // ---------- 文件操作域 ----------
   'models:deleteModel': vObj({ fields: { id: ID } }),
@@ -229,14 +273,21 @@ export const IPC_PAYLOAD_SCHEMAS = {
 }
 
 /**
- * 校验指定通道的 IPC payload（wrapHandler / 直注册 handler 的统一前置入口）。
+ * 校验指定通道的 IPC payload（wrapHandler 统一前置入口）。
+ * fail-closed（O1）：未登记 schema 的通道一律拒绝——新增通道漏登记时
+ * 显式报错并经 wrapHandler 告警，而非静默绕过结构门禁。
  * @param {string} channel IPC 通道名
  * @param {any} payload 渲染进程传入的 payload
- * @returns {string} 合法（或通道无 schema / payload 缺省）返回空串，非法返回错误文案
+ * @returns {string} 合法返回空串，非法返回错误文案
  */
 export function validateIpcPayload(channel, payload) {
   const rule = IPC_PAYLOAD_SCHEMAS[channel]
-  if (!rule) return ''
+  // 未登记通道拒绝：带参与无参通道都须在注册表登记（含 vVoid）
+  if (!rule) return `通道未登记入参 schema: ${channel}`
+  // 无参通道：只接受缺省调用（preload 均以无参形式调用）
+  if (rule.kind === 'void') {
+    return payload === undefined || payload === null ? '' : '该通道不接受参数'
+  }
   // 缺省 payload 交由 handler 的解构默认值兜底（所有 handler 均容忍缺参）
   if (payload === undefined || payload === null) return ''
   if (typeof payload !== 'object' || Array.isArray(payload)) {

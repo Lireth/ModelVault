@@ -9,14 +9,15 @@ import {
   vBool,
   vInt,
   vArr,
-  vObj
+  vObj,
+  vVoid
 } from '../src/main/ipc/schema'
 
 /**
- * IPC payload 入口结构校验（O-2）：
+ * IPC payload 入口结构校验（O-2 / O1 fail-closed）：
  * - 校验器纯函数单测（类型/边界/嵌套规则）；
- * - 注册表与 preload 白名单对账：新增带参通道必须登记 schema
- *   （或显式进入豁免清单），防止漏检通道静默绕过结构门禁；
+ * - 注册表与 preload 白名单全量对账：所有 invoke 通道必须登记 schema
+ *   （带参通道为对象规则，无 payload 通道为 vVoid），未登记通道一律拒绝；
  * - 代表性通道的合法/篡改 payload 通过性锁定。
  */
 
@@ -30,23 +31,6 @@ function extractPreloadChannels() {
   if (!match) throw new Error('preload 中未找到 VALID_INVOKE_CHANNELS')
   return [...match[1].matchAll(/'([^']+)'/g)].map((m) => m[1])
 }
-
-/** 无 payload（或按设计豁免 schema）的通道：注册表对账的豁免清单 */
-const SCHEMA_EXEMPT_CHANNELS = [
-  'app:getInfo',
-  'app:reportError', // handler 自带归一化截断
-  'app:checkUpdate',
-  'app:downloadUpdate', // F-6：无 payload，URL 由主进程检查结果提供
-  'app:cancelUpdateDownload',
-  'app:installUpdate',
-  'app:openLogs',
-  'models:loadStore',
-  'models:chooseFolder',
-  'models:cancelScan',
-  'models:clearAllCovers', // 无 payload，清空范围以当前库为界
-  'models:exportBackup',
-  'models:importBackup'
-]
 
 describe('IPC schema 校验器（validateValue）', () => {
   it('string：类型 / 长度上限 / required / nullable', () => {
@@ -101,14 +85,43 @@ describe('IPC schema 校验器（validateValue）', () => {
     expect(validateValue({ a: 'x' }, strict, 'f')).toBe('')
     expect(validateValue({ a: 'x', bad: 1 }, strict, 'f')).toBe('f 包含未知字段: bad')
   })
+
+  it('void：仅缺省（undefined/null）放行，任何传参拒绝', () => {
+    const rule = vVoid()
+    expect(validateValue(undefined, rule, 'f')).toBe('')
+    expect(validateValue(null, rule, 'f')).toBe('')
+    expect(validateValue({}, rule, 'f')).toBe('f 不接受参数')
+    expect(validateValue('x', rule, 'f')).toBe('f 不接受参数')
+  })
 })
 
 describe('IPC payload 通道校验（validateIpcPayload）', () => {
-  it('未注册 schema 的通道与缺省 payload 一律放行', () => {
+  it('O1 fail-closed：未登记 schema 的通道一律拒绝', () => {
+    expect(validateIpcPayload('app:nonexistent', undefined)).toBe(
+      '通道未登记入参 schema: app:nonexistent'
+    )
+    expect(validateIpcPayload('models:nonexistent', {})).toBe(
+      '通道未登记入参 schema: models:nonexistent'
+    )
+  })
+
+  it('无参通道（vVoid）：缺省调用放行，传参一律拒绝', () => {
     expect(validateIpcPayload('models:loadStore', undefined)).toBe('')
-    expect(validateIpcPayload('models:chooseFolder', null)).toBe('')
-    expect(validateIpcPayload('models:cancelScan', {})).toBe('')
-    expect(validateIpcPayload('app:reportError', { whatever: new Array(9999) })).toBe('')
+    expect(validateIpcPayload('models:loadStore', null)).toBe('')
+    expect(validateIpcPayload('models:chooseFolder', {})).toBe('该通道不接受参数')
+    expect(validateIpcPayload('models:cancelScan', 'x')).toBe('该通道不接受参数')
+    expect(validateIpcPayload('models:exportBackup', [1])).toBe('该通道不接受参数')
+  })
+
+  it('app:reportError：宽松结构门禁（字段可选，提供时校验类型与长度）', () => {
+    expect(validateIpcPayload('app:reportError', { message: 'boom', stack: 'at x' })).toBe('')
+    expect(validateIpcPayload('app:reportError', {})).toBe('')
+    expect(validateIpcPayload('app:reportError', undefined)).toBe('')
+    expect(validateIpcPayload('app:reportError', 'boom')).toBe('参数无效: payload 须为对象')
+    expect(validateIpcPayload('app:reportError', { message: 42 })).toBe('message 须为字符串')
+    expect(
+      validateIpcPayload('app:reportError', { stack: 's'.repeat(8001) })
+    ).toBe('stack 长度超限（≤8000）')
   })
 
   it('payload 非对象时拒绝', () => {
@@ -209,12 +222,10 @@ describe('IPC payload 通道校验（validateIpcPayload）', () => {
 })
 
 describe('IPC schema 注册表与 preload 白名单对账', () => {
-  it('每个带参 invoke 通道都已登记 schema 或在豁免清单中', () => {
+  it('O1 fail-closed：preload 白名单的全部 invoke 通道都已登记 schema', () => {
     const channels = extractPreloadChannels()
     expect(channels.length).toBeGreaterThan(0)
-    const missing = channels.filter(
-      (c) => !IPC_PAYLOAD_SCHEMAS[c] && !SCHEMA_EXEMPT_CHANNELS.includes(c)
-    )
+    const missing = channels.filter((c) => !IPC_PAYLOAD_SCHEMAS[c])
     expect(missing).toEqual([])
   })
 
@@ -224,9 +235,9 @@ describe('IPC schema 注册表与 preload 白名单对账', () => {
     expect(stale).toEqual([])
   })
 
-  it('带参通道的 schema 均为对象规则（wrapHandler 前置校验的前提）', () => {
+  it('通道 schema 均为对象规则或无参 void 规则（wrapHandler 前置校验的前提）', () => {
     for (const rule of Object.values(IPC_PAYLOAD_SCHEMAS)) {
-      expect(rule.kind).toBe('object')
+      expect(['object', 'void']).toContain(rule.kind)
     }
   })
 })

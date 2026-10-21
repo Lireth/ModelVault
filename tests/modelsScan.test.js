@@ -208,7 +208,7 @@ describe('models:scan 取消', () => {
     await registerLibrary(root)
     const pending = scan(makeEvent(), { folder: root })
     await waitForScanStarted()
-    expect(await cancel(makeEvent(), {})).toEqual({ ok: true })
+    expect(await cancel(makeEvent())).toEqual({ ok: true })
     releaseScan() // signal 已 aborted -> mock 以 AbortError reject
     expect(await pending).toEqual({ canceled: true })
     // 取消后标志复位，可立即重新扫描
@@ -221,7 +221,7 @@ describe('models:scan 取消', () => {
 
   it('空闲时 cancelScan 返回 { ok: false }，无副作用', async () => {
     const cancel = getRegisteredHandler('models:cancelScan')
-    expect(await cancel(makeEvent(), {})).toEqual({ ok: false })
+    expect(await cancel(makeEvent())).toEqual({ ok: false })
   })
 })
 
@@ -373,10 +373,10 @@ describe('models:loadStore', () => {
   it('返回设置与元数据映射；连续调用结果一致（ensureRootStore 不重复加载）', async () => {
     await updateSettings({ modelsFolder: root })
     const loadStore = getRegisteredHandler('models:loadStore')
-    const first = await loadStore(makeEvent(), {})
+    const first = await loadStore(makeEvent())
     expect(first.settings.modelsFolder).toBe(root)
     expect(first.models).toEqual({})
-    const second = await loadStore(makeEvent(), {})
+    const second = await loadStore(makeEvent())
     expect(second.models).toEqual(first.models)
     expect(second.settings.modelsFolder).toBe(root)
   })
@@ -385,7 +385,7 @@ describe('models:loadStore', () => {
     await updateSettings({ modelsFolder: root })
     await fs.rm(root, { recursive: true, force: true })
     const loadStore = getRegisteredHandler('models:loadStore')
-    const res = await loadStore(makeEvent(), {})
+    const res = await loadStore(makeEvent())
     expect(res.settings.modelsFolder).toBe(root)
     expect(res.models).toEqual({})
   })
@@ -395,7 +395,7 @@ describe('models:chooseFolder', () => {
   it('对话框确认后持久化并返回所选目录', async () => {
     const chooseFolder = getRegisteredHandler('models:chooseFolder')
     vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [root] })
-    expect(await chooseFolder(makeEvent(), {})).toBe(root)
+    expect(await chooseFolder(makeEvent())).toBe(root)
     const { modelsFolder } = await loadSettings()
     expect(modelsFolder).toBe(root)
   })
@@ -403,7 +403,7 @@ describe('models:chooseFolder', () => {
   it('对话框取消返回 null 且不修改设置', async () => {
     const chooseFolder = getRegisteredHandler('models:chooseFolder')
     vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: true, filePaths: [] })
-    expect(await chooseFolder(makeEvent(), {})).toBeNull()
+    expect(await chooseFolder(makeEvent())).toBeNull()
   })
 })
 
