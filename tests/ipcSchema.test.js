@@ -11,25 +11,42 @@ import {
   vArr,
   vObj,
   vVoid
-} from '../src/main/ipc/schema'
+} from '../src/shared/ipc-schema'
 
 /**
- * IPC payload 入口结构校验（O-2 / O1 fail-closed）：
+ * IPC 通道单一来源对账 + payload 入口结构校验（O-2 / O1 fail-closed / O2）：
  * - 校验器纯函数单测（类型/边界/嵌套规则）；
- * - 注册表与 preload 白名单全量对账：所有 invoke 通道必须登记 schema
- *   （带参通道为对象规则，无 payload 通道为 vVoid），未登记通道一律拒绝；
+ * - 单一来源对账（O2）：shared/ipc-schema.js 注册表是全部 invoke 通道的唯一
+ *   声明处（preload 白名单由键集派生），本测试锁定注册表与两侧调用点的
+ *   双向一致——preload api 的 invokeValidated 调用点、主进程的 wrapHandler
+ *   注册点，任一侧出现未登记通道或登记通道无调用/注册即失败；
  * - 代表性通道的合法/篡改 payload 通过性锁定。
  */
 
-/** 从 preload 源码提取 invoke 通道白名单（避免为读常量而导入 electron） */
-function extractPreloadChannels() {
+/** 从 preload 源码提取 api 层的 invokeValidated 调用点通道（避免导入 electron） */
+function extractPreloadInvokeChannels() {
   const source = fs.readFileSync(
     path.resolve(__dirname, '../src/preload/index.js'),
     'utf-8'
   )
-  const match = /VALID_INVOKE_CHANNELS\s*=\s*\[([^\]]+)\]/.exec(source)
-  if (!match) throw new Error('preload 中未找到 VALID_INVOKE_CHANNELS')
-  return [...match[1].matchAll(/'([^']+)'/g)].map((m) => m[1])
+  return [...source.matchAll(/invokeValidated\(\s*'([^']+)'/g)].map((m) => m[1])
+}
+
+/** 从主进程源码提取 wrapHandler 注册点通道（ipc.js + ipc/models/*.js） */
+function extractMainHandlerChannels() {
+  const files = [path.resolve(__dirname, '../src/main/ipc.js')]
+  const modelsDir = path.resolve(__dirname, '../src/main/ipc/models')
+  for (const name of fs.readdirSync(modelsDir)) {
+    if (name.endsWith('.js')) files.push(path.join(modelsDir, name))
+  }
+  const channels = new Set()
+  for (const file of files) {
+    const source = fs.readFileSync(file, 'utf-8')
+    for (const m of source.matchAll(/wrapHandler\(\s*'([^']+)'/g)) {
+      channels.add(m[1])
+    }
+  }
+  return [...channels]
 }
 
 describe('IPC schema 校验器（validateValue）', () => {
@@ -221,18 +238,29 @@ describe('IPC payload 通道校验（validateIpcPayload）', () => {
   })
 })
 
-describe('IPC schema 注册表与 preload 白名单对账', () => {
-  it('O1 fail-closed：preload 白名单的全部 invoke 通道都已登记 schema', () => {
-    const channels = extractPreloadChannels()
-    expect(channels.length).toBeGreaterThan(0)
-    const missing = channels.filter((c) => !IPC_PAYLOAD_SCHEMAS[c])
-    expect(missing).toEqual([])
+describe('IPC 通道单一来源对账（O2）', () => {
+  it('注册表 ↔ preload api 调用点：双向一致（不缺不多）', () => {
+    const registry = new Set(Object.keys(IPC_PAYLOAD_SCHEMAS))
+    const invoked = new Set(extractPreloadInvokeChannels())
+    expect(invoked.size).toBeGreaterThan(0)
+    // preload 调用了未登记的通道：白名单派生后渲染进程会直接 throw
+    const unregistered = [...invoked].filter((c) => !registry.has(c))
+    expect(unregistered).toEqual([])
+    // 登记了但 preload api 无调用点：通道不可达（死通道）
+    const unreachable = [...registry].filter((c) => !invoked.has(c))
+    expect(unreachable).toEqual([])
   })
 
-  it('注册表中的每个通道都存在于 preload 白名单（防遗留脏键）', () => {
-    const channels = new Set(extractPreloadChannels())
-    const stale = Object.keys(IPC_PAYLOAD_SCHEMAS).filter((c) => !channels.has(c))
-    expect(stale).toEqual([])
+  it('注册表 ↔ 主进程 wrapHandler 注册点：双向一致（不缺不多）', () => {
+    const registry = new Set(Object.keys(IPC_PAYLOAD_SCHEMAS))
+    const registered = new Set(extractMainHandlerChannels())
+    expect(registered.size).toBeGreaterThan(0)
+    // 注册了未登记 schema 的通道：O1 fail-closed 会拒绝全部 payload
+    const unregistered = [...registered].filter((c) => !registry.has(c))
+    expect(unregistered).toEqual([])
+    // 登记了但主进程无 handler：渲染进程调用即「no handler」报错（死通道）
+    const unhandled = [...registry].filter((c) => !registered.has(c))
+    expect(unhandled).toEqual([])
   })
 
   it('通道 schema 均为对象规则或无参 void 规则（wrapHandler 前置校验的前提）', () => {

@@ -13,8 +13,8 @@ import {
 /**
  * 注册所有主进程 IPC 处理器。
  * 渲染进程通过 preload 暴露的 window.api 调用这些处理器。
- * 全部通道经 wrapHandler 统一注册（O1 fail-closed）：payload 按 ipc/schema.js
- * 注册表前置校验，未登记 schema 的通道直接拒绝并写告警日志。
+ * 全部通道经 wrapHandler 统一注册（O1 fail-closed）：payload 按 shared/ipc-schema.js
+ * 注册表（O2 单一来源）前置校验，未登记 schema 的通道直接拒绝并写告警日志。
  */
 export function registerIpcHandlers() {
   registerModelIpcHandlers()

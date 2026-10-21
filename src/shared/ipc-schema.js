@@ -1,10 +1,16 @@
 /**
- * IPC payload 入口结构校验（O-2）：
+ * IPC 通道单一注册来源（O2）+ payload 入口结构校验（O-2 / O1 fail-closed）：
  *
- * 渲染进程是唯一不受信输入边界：通道名白名单（preload）只约束「能调哪个
- * 通道」，不约束 payload 形状。此前各 handler 以点状手写校验（checkModelId
- * 等）兜底，新增通道极易漏检。本模块建立每通道声明式 schema，由 wrapHandler
- * 统一前置校验——非法 payload 在进入业务代码前即被拒绝并结构化报错。
+ * 本注册表是全部 invoke 通道的唯一声明处，主/渲染两侧的通道清单均由此派生：
+ * - preload 的 VALID_INVOKE_CHANNELS = Object.keys(IPC_PAYLOAD_SCHEMAS)，
+ *   不再维护独立白名单数组；
+ * - 主进程 wrapHandler 按 registerHandler(channel) 注册，通道名与注册表键的
+ *   一致性由 tests/ipcSchema.test.js 双向对账锁定（preload api 调用点 ↔
+ *   注册表 ↔ 主进程 handler 注册点），任何一侧漏登记/拼写漂移即测试失败。
+ *
+ * 渲染进程是唯一不受信输入边界：通道白名单只约束「能调哪个通道」，不约束
+ * payload 形状。本模块建立每通道声明式 schema，由 wrapHandler 统一前置校验
+ * ——非法 payload 在进入业务代码前即被拒绝并结构化报错。
  *
  * 分层原则（与既有测试锁定的 handler 语义文案兼容）：
  * - schema 只做「结构门禁」：字段类型、字符串长度上限、数组/对象规模上限；
@@ -16,16 +22,15 @@
  *   只拦截滥用输入，正常超长输入仍走既有截断行为，不产生回归。
  *
  * 登记原则（O1 fail-closed）：
- * - 全部 invoke 通道（与 preload VALID_INVOKE_CHANNELS 一一对应）必须登记：
- *   带参通道登记对象 schema，无 payload 通道登记 vVoid()（传参即拒绝）；
- *   未登记通道在 validateIpcPayload 直接拒绝并经 wrapHandler 告警——新增
- *   通道漏登记时显式暴露，而非静默绕过结构门禁（tests/ipcSchema.test.js
- *   与 preload 白名单做全量对账）；
+ * - 全部 invoke 通道必须在此登记：带参通道登记对象 schema，无 payload 通道
+ *   登记 vVoid()（传参即拒绝）；未登记通道在 validateIpcPayload 直接拒绝
+ *   并经 wrapHandler 告警——新增通道漏登记时显式暴露，而非静默绕过结构门禁；
  * - app:reportError：handler 自带类型归一化与长度截断，schema 只做宽松
  *   结构门禁（字段可选，提供时才校验类型与长度）；
  * - 带参通道 payload 为 undefined/null 放行：所有 handler 均以解构默认值容错缺参。
  *
- * 零依赖纯函数模块：无 electron/node 内置导入，可在 node 测试环境直接导入。
+ * 零依赖纯函数模块：无 electron/node 内置导入，主进程、preload 与 node
+ * 测试环境均可直接导入。
  */
 
 /**
@@ -139,10 +144,11 @@ export function validateValue(value, rule, label) {
 const ID = vStr({ required: true, max: 2000 })
 
 /**
- * 每通道 payload schema 注册表（O1 fail-closed）。
- * 键必须与 preload 的 VALID_INVOKE_CHANNELS 全量一致：带参通道登记对象
- * schema，无 payload 通道登记 vVoid()。新增通道必须在此登记，未登记通道
- * 一律被 validateIpcPayload 拒绝（tests/ipcSchema.test.js 全量对账锁定）。
+ * 每通道 payload schema 注册表（O2 单一来源 + O1 fail-closed）。
+ * 键集合即 preload invoke 白名单（preload 由 Object.keys 派生）；带参通道
+ * 登记对象 schema，无 payload 通道登记 vVoid()。新增通道的完整清单见
+ * shared 层文件头注释；未登记通道一律被 validateIpcPayload 拒绝
+ * （tests/ipcSchema.test.js 双向对账锁定）。
  */
 export const IPC_PAYLOAD_SCHEMAS = {
   // ---------- 应用域（ipc.js 经 wrapHandler 统一注册）----------

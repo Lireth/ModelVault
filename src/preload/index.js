@@ -1,48 +1,13 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { IPC_PAYLOAD_SCHEMAS } from '../shared/ipc-schema'
 
 /**
  * IPC 通道白名单：渲染进程只能通过以下通道通信，防止任意通道调用。
- * 所有 invoke 均经过白名单校验（统一入口，新增通道必须先在此注册）。
+ * 所有 invoke 均经过白名单校验（统一入口，新增通道必须先在 shared/ipc-schema.js
+ * 注册表登记）。O2 单一来源：白名单由 schema 注册表键集派生，不再独立维护，
+ * 与主进程注册点的一致性由 tests/ipcSchema.test.js 双向对账锁定。
  */
-const VALID_INVOKE_CHANNELS = [
-  'app:getInfo',
-  'app:reportError',
-  'app:checkUpdate',
-  'app:downloadUpdate',
-  'app:cancelUpdateDownload',
-  'app:installUpdate',
-  'app:openLogs',
-  'window:setTheme',
-  'settings:update',
-  'models:loadStore',
-  'models:chooseFolder',
-  'models:scan',
-  'models:partialScan',
-  'models:cancelScan',
-  'models:saveModelData',
-  'models:uploadCover',
-  'models:pasteCover',
-  'models:setDefaultCover',
-  'models:deleteCover',
-  'models:clearCovers',
-  'models:clearAllCovers',
-  'models:deleteModel',
-  'models:setMetaFlags',
-  'models:setModelTags',
-  'models:popupMenu',
-  'models:importCover',
-  'models:reveal',
-  'models:exportBackup',
-  'models:importBackup',
-  'models:toggleDisabled',
-  'models:moveModelTo',
-  'models:organizeByTags',
-  'models:civitaiIdentify',
-  'models:civitaiCategory',
-  'models:civitaiComplete',
-  'models:civitaiImportImages',
-  'models:warmupHash'
-]
+const VALID_INVOKE_CHANNELS = Object.freeze(Object.keys(IPC_PAYLOAD_SCHEMAS))
 
 const VALID_RECEIVE_CHANNELS = [
   'app:updateProgress',

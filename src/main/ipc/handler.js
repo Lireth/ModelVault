@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import { ipcMain } from 'electron'
 import logger from '../logger'
 import { isInRoot } from '../services/store'
-import { validateIpcPayload } from './schema'
+import { validateIpcPayload } from '../../shared/ipc-schema'
 
 /**
  * IPC handler 统一包装与入参校验助手（O1/O2 样板收敛）：
@@ -16,10 +16,10 @@ import { validateIpcPayload } from './schema'
  *
  * wrapHandler 收敛为统一约定：
  * - 校验助手（checkModelId 等）返回错误文案，handler 首行短路返回 { error }；
- * - payload 结构校验（O-2）：按通道 schema 前置校验（ipc/schema.js 注册表），
- *   非法 payload 在进入业务代码前即拒绝——schema 只查类型/边界，handler 内
- *   的语义校验与专属文案保持不变；未登记 schema 的通道一律拒绝并告警
- *   （O1 fail-closed），新增通道漏登记不会静默绕过结构门禁；
+ * - payload 结构校验（O-2）：按通道 schema 前置校验（shared/ipc-schema.js
+ *   注册表，O2 单一来源），非法 payload 在进入业务代码前即拒绝——schema 只查
+ *   类型/边界，handler 内的语义校验与专属文案保持不变；未登记 schema 的通道
+ *   一律拒绝并告警（O1 fail-closed），新增通道漏登记不会静默绕过结构门禁；
  * - 抛出的异常兜底为 { error: `${前缀}: ${err.message}` } 并写主进程日志；
  * - AbortError（用户主动取消）保留 { canceled: true } 语义（与 models:scan
  *   取消链路的既有契约一致）。

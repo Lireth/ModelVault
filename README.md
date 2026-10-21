@@ -176,19 +176,25 @@ ModelVault/
 
 ### 主进程与渲染进程通信
 
-渲染进程**没有**裸 `invoke` 入口，所有通道必须经白名单注册：
+渲染进程**没有**裸 `invoke` 入口，所有 invoke 通道必须在 `src/shared/ipc-schema.js` 注册表登记（单一来源：preload 白名单由注册表键集派生，payload schema 一并声明，未登记通道被 fail-closed 拒绝）：
 
-1. 在 `src/main/ipc.js` 或 `src/main/ipc/models/` 对应域模块中注册处理器：
+1. 在 `src/shared/ipc-schema.js` 的 `IPC_PAYLOAD_SCHEMAS` 中登记通道：带参通道用 `vObj`/`vStr` 等构造器声明 payload 结构门禁，无参通道登记 `vVoid()`：
 
 ```js
-ipcMain.handle('my:channel', (event, payload) => {
+'my:channel': vObj({ fields: { id: vStr({ required: true, max: 2000 }) } })
+```
+
+2. 在 `src/main/ipc.js` 或 `src/main/ipc/models/` 对应域模块中注册处理器（统一经 `wrapHandler`，自动执行 schema 前置校验与异常兜底；事件推送类通道加入 preload 的 `VALID_RECEIVE_CHANNELS`）：
+
+```js
+wrapHandler('my:channel', async (event, payload) => {
   return 'result'
 })
 ```
 
-2. 在 `src/preload/index.js` 中将通道加入 `VALID_INVOKE_CHANNELS` 白名单（事件推送类加入 `VALID_RECEIVE_CHANNELS`）。
-
 3. 在 `src/preload/index.js` 的 `api` 对象中添加语义化方法（内部统一走 `invokeValidated` / `subscribe`），渲染进程通过 `window.api.myDomain.doThing(payload)` 调用。
+
+> 通道登记与两侧调用/注册点的一致性由 `tests/ipcSchema.test.js` 双向对账锁定，任一侧漏改即测试失败。
 
 ### 快捷键与窗口
 
