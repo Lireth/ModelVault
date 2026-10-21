@@ -1,7 +1,8 @@
 # ModelVault 持续集成工作流（CI）
 #
 # 触发条件：推送到 main 分支、针对 main 的 PR、手动触发
-# 职责：依赖安装 → 单元测试 → 三端编译 → 编译产物完整性校验 → 覆盖率报告归档
+# 职责：依赖安装 → ESLint → 类型检查（shared 契约层 + preload）→ 单元测试
+#   → 三端编译 → 编译产物完整性校验 → 覆盖率报告归档
 # 与 release.yml 的分工：本工作流只做质量门禁，不打包 EXE、不发布；
 #   打包发布由推送 v* 标签触发的 release.yml 负责。
 
@@ -67,6 +68,12 @@ jobs:
       # D1 代码质量门禁：ESLint（flat config，错误级规则）不通过则终止 CI
       - name: ESLint 代码检查
         run: npm run lint
+
+      # O6 渐进式类型门禁：TypeScript checkJs 校验跨进程契约层
+      # （shared 单一来源注册表 + preload 白名单派生），捕获字段漂移类回归；
+      # strict 渐进收紧，覆盖范围随棘轮扩展至 main / renderer
+      - name: 类型检查（shared 契约层 + preload）
+        run: npm run typecheck
 
       # 覆盖率统计的 instrumentation 有明显开销：仅在 Node 22 基准腿生成
       # 报告并归档；Node 24 兼容性腿跑普通测试，缩短矩阵总时长

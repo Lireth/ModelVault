@@ -136,6 +136,7 @@ export function normalizeBaseModel(text) {
   const s = text.trim().toLowerCase()
   if (!s) return ''
   // 匹配规则：sd1.5 写法族（sd 1.5 / sd1.5 / v1-5 / 1.5）与其余家族专名
+  /** @type {Array<[string, RegExp]>} [家族 key, 匹配正则]，按优先级排序 */
   const rules = [
     ['noobai', /noob/],
     ['illustrious', /illust/],

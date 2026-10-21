@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "lib": ["esnext", "dom"],
+    "strict": false,
+    "skipLibCheck": true
+  },
+  "include": ["src/shared/**/*.js", "src/preload/**/*.js"]
+}

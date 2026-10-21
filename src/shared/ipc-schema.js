@@ -34,6 +34,19 @@
  */
 
 /**
+ * 通道 schema 规则对象（构造器产物，kind 标识类型，其余为约束项）。
+ * @typedef {object} SchemaRule
+ * @property {string} kind 规则类型：void/string/boolean/int/array/object
+ * @property {boolean} [required] 字段必须存在（undefined 即失败）
+ * @property {number} [max] string 长度 / array 元素数 / object 键数 / int 数值上界
+ * @property {number} [min] int 数值下界
+ * @property {SchemaRule} [items] array：逐元素规则
+ * @property {Object<string, SchemaRule>} [fields] object：声明字段规则
+ * @property {boolean} [loose] object：true（默认）允许未声明字段
+ * @property {boolean} [nullable] 允许显式 null
+ */
+
+/**
  * 规则构造器：字段规则均为普通对象，kind 标识类型，其余为约束项。
  * - required：字段必须存在（undefined 即失败）；缺省允许缺省
  * - max：string 为长度上限 / array 为元素数上限 / object 为键数上限 /
@@ -43,24 +56,29 @@
  *   （默认 loose=true：handler 只解构已知字段，未知键天然无效，
  *   拒绝式未知字段检查留给未来强契约通道按需开启）
  * - nullable：允许显式 null（仅 params 清空场景需要）
- * @returns {object} 字段规则
+ * @param {Partial<SchemaRule>} [opts] 约束项
+ * @returns {SchemaRule} 字段规则
  */
 export function vStr(opts = {}) {
   return { kind: 'string', ...opts }
 }
 
+/** @param {Partial<SchemaRule>} [opts] 约束项 @returns {SchemaRule} 字段规则 */
 export function vBool(opts = {}) {
   return { kind: 'boolean', ...opts }
 }
 
+/** @param {Partial<SchemaRule>} [opts] 约束项 @returns {SchemaRule} 字段规则 */
 export function vInt(opts = {}) {
   return { kind: 'int', ...opts }
 }
 
+/** @param {Partial<SchemaRule>} [opts] 约束项 @returns {SchemaRule} 字段规则 */
 export function vArr(opts = {}) {
   return { kind: 'array', ...opts }
 }
 
+/** @param {Partial<SchemaRule>} [opts] 约束项 @returns {SchemaRule} 字段规则 */
 export function vObj(opts = {}) {
   return { kind: 'object', loose: true, ...opts }
 }
@@ -68,7 +86,7 @@ export function vObj(opts = {}) {
 /**
  * 无参通道规则：渲染进程不得传任何参数（payload 须为缺省 undefined/null）。
  * nullable 与 validateValue 的 null 分支对齐：显式 null 视同缺省。
- * @returns {object} 规则
+ * @returns {SchemaRule} 规则
  */
 export function vVoid() {
   return { kind: 'void', nullable: true }
@@ -77,7 +95,7 @@ export function vVoid() {
 /**
  * 校验单个值是否满足规则。
  * @param {any} value 待校验值
- * @param {object} rule 字段规则（构造器产物）
+ * @param {SchemaRule} rule 字段规则（构造器产物）
  * @param {string} label 错误信息中的字段名（数组元素递归时带下标）
  * @returns {string} 合法返回空串，非法返回中文错误文案
  */
