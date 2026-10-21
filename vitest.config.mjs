@@ -21,20 +21,65 @@ export default defineConfig({
     retry: 1,
     coverage: {
       // A-14 覆盖率防退化门禁（O-3 棘轮渐进上调）：门禁 = 实际基线下浮 ~1pt，
-      // 为环境波动留余量。2026-10-20 实测基线 Stmts 79.12/Branch 71.6/
-      // Funcs 77.28/Lines 80.99（Dependabot 升级 vue 3.5.44/jsdom 30/electron 44/
-      // eslint 10 后函数覆盖率回落），本轮下调 Stmts 79→78、Branch 71→70、
-      // Funcs 78→76 以匹配新基线；Lines 80 维持。待测试补强后作为棘轮上调候选。
+      // 为环境波动留余量。棘轮历史：2026-10-20 Dependabot 升级（vue 3.5.44/
+      // jsdom 30/electron 44/eslint 10）后基线回落，下调至 Stmts 78/Branch 70/
+      // Funcs 76/Lines 80；O7 补强备份/Civitai IPC handler 与 civitai-store 测试
+      // 并排除纯 re-export 门面（见 exclude）后基线回升至 Stmts 81.84/Branch
+      // 74.32/Funcs 78.68/Lines 83.81，2026-10-21 棘轮上调至当前值。
       // 仅 npm run test:coverage 生效；按全局总量判定（perFile=false），
-      // 不因个别低覆盖文件（如 mainWindow/menu 等薄胶水层）阻断 CI。
+      // 不因个别低覆盖文件（如 mainWindow/menu 等薄胶水层）阻断 CI；
+      // 数据完整性关键服务另设 per-file 地板（下方 glob 键，O7）。
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
+      exclude: [
+        // 纯 re-export 门面（C2/A-04 拆分保持导入路径的聚合入口，无逻辑）：
+        // 计入门面只会以 0% 稀释基线，逻辑在子模块中计量
+        'src/main/services/store.js',
+        'src/renderer/src/store/appStore.js',
+        'src/renderer/src/store/multiselect.js'
+      ],
       thresholds: {
-        statements: 78,
-        branches: 70,
-        functions: 76,
-        lines: 80,
-        perFile: false
+        statements: 80.8,
+        branches: 73.3,
+        functions: 77.7,
+        lines: 82.8,
+        perFile: false,
+        // ---------- O7 per-file 地板（数据完整性关键服务，防薄胶水层稀释）
+        // 地板 = 各文件实际基线下浮 ~2pt；这些模块的回归静默丢数据，
+        // 覆盖率回落须显式决策而非被全局均值掩盖 ----------
+
+        // 关联存储（store.json 元数据读写/迁移/重关联/落盘链）
+        '**/src/main/services/store-meta.js': {
+          statements: 90, branches: 84.5, functions: 94, lines: 96
+        },
+        // 应用设置双层存储（引导层 + 随库 settings.json）
+        '**/src/main/services/store-settings.js': {
+          statements: 91, branches: 86.5, functions: 95, lines: 92
+        },
+        // 目录监控（轮询快照比对 + 增量扫描触发）
+        '**/src/main/services/watcher.js': {
+          statements: 92, branches: 80, functions: 98, lines: 95.5
+        },
+        // 备份恢复（zip 打包/恢复/.bak 留存）
+        '**/src/main/services/backup.js': {
+          statements: 89, branches: 82, functions: 78, lines: 92
+        },
+        // 元数据重关联（库内移动/重命名后「宁可不绑也绝不绑错」）
+        '**/src/main/services/meta-relink.js': {
+          statements: 99, branches: 97, functions: 99, lines: 99
+        },
+        // safetensors 头部解析与健康检查
+        '**/src/main/services/safetensors.js': {
+          statements: 96, branches: 95.5, functions: 82, lines: 97
+        },
+        // 扫描分类（扩展名过滤/自动分类/禁用后缀）
+        '**/src/main/services/scanner.js': {
+          statements: 94, branches: 86, functions: 98, lines: 97
+        },
+        // 后台哈希预热（重复检测与 Civitai 识别的缓存基座）
+        '**/src/main/services/hash-warmup.js': {
+          statements: 91, branches: 87, functions: 98, lines: 94.5
+        }
       }
     }
   }

@@ -213,11 +213,11 @@ wrapHandler('my:channel', async (event, payload) => {
 
 ### 测试
 
-单元测试位于 `tests/`（48 个文件 / 760+ 用例）：主进程纯逻辑与 IPC handler（node 环境）、渲染层 store 按域拆分测试、组件交互测试（`@vue/test-utils` + jsdom，文件头 `// @vitest-environment jsdom` 声明）。Electron API 在 `tests/setup.js` 中统一 mock，公共挂载/IPC 脚手架在 `tests/helpers/` 中复用。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证；`npm run test:coverage` 受防退化阈值门禁约束（Statements 79% / Branches 71% / Functions 78% / Lines 80%，棘轮渐进上调）。
+单元测试位于 `tests/`（51 个文件 / 790+ 用例）：主进程纯逻辑与 IPC handler（node 环境）、渲染层 store 按域拆分测试、组件交互测试（`@vue/test-utils` + jsdom，文件头 `// @vitest-environment jsdom` 声明）。Electron API 在 `tests/setup.js` 中统一 mock，公共挂载/IPC 脚手架在 `tests/helpers/` 中复用。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证；`npm run test:coverage` 受防退化阈值门禁约束（Statements 80.8% / Branches 73.3% / Functions 77.7% / Lines 82.8%，棘轮渐进上调），store-meta/store-settings/watcher/backup 等数据完整性关键服务另有 per-file 覆盖率地板（见 `vitest.config.mjs`）。
 
 ### CI 与发版
 
-- `ci.yml`：push 到 main / PR 时运行质量门禁（Node 22/24 矩阵：ESLint → 单元测试 → 三端编译 → 产物完整性校验 → 覆盖率归档）
+- `ci.yml`：push 到 main / PR 时运行质量门禁（Node 22/24 矩阵：ESLint → 类型检查 → 单元测试 → 三端编译 → 产物完整性校验 → 覆盖率归档）
 - `release.yml`：推送 `v*` 标签触发 Windows 打包，自动创建 GitHub Release 并附加 EXE 与 SHA256 校验和
 
 ## 安全要点
