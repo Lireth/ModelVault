@@ -1,12 +1,16 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import ModelCard from './ModelCard.vue'
 import { handleModelActionKey } from './modelRowActions'
 import { CARD_SIZE_PRESETS, state } from '../store/appStore'
+import { useVirtualScroll } from '../composables/useVirtualScroll'
 
 /**
  * 模型卡片虚拟滚动网格：
  * - 仅渲染视口附近（含上下缓冲行）的卡片行，数千模型时 DOM 数量恒定；
+ * - 虚拟滚动内核（滚动测量/可视区间/浏览锚/键盘滚动联动）收敛于
+ *   useVirtualScroll（O4），本组件保留网格特有逻辑：列数推导、行高校准、
+ *   二维键盘导航；
  * - 列数/列宽复刻原 .model-grid 的 repeat(auto-fill, minmax(...)) 行为，
  *   行高（卡片实际高度 + 行间距）在渲染后按真实卡片校准；
  * - 滚动事件挂在最近的滚动祖先（.content）上，页面其余部分滚动行为不变。
@@ -19,10 +23,8 @@ const props = defineProps({
 /** 上下各多渲染的缓冲行数，保证快速滚动时不露白 */
 const OVERSCAN_ROWS = 3
 
-const rootEl = ref(null)
 const containerWidth = ref(0)
-const viewportHeight = ref(600)
-const scrollTop = ref(0)
+
 /**
  * 行间距（卡片高 + 行 gap），挂载后按实际卡片高度校准（B6）。
  * 初始估算值按当前档位推算：封面为 2:3 纵横比（宽取档位最小列宽）+ 信息区约 72px，
@@ -49,16 +51,19 @@ const totalHeight = computed(() =>
   rowCount.value > 0 ? rowCount.value * rowPitch.value - preset.value.gap : 0
 )
 
-const startRow = computed(() => {
-  const raw = Math.floor(scrollTop.value / rowPitch.value) - OVERSCAN_ROWS
-  // 上限钳制（B16）：scrollTop 瞬态越界（列表变短、rowPitch 变化）时
-  // 避免 startRow >= rowCount 导致渲染 0 行空白
-  return Math.min(Math.max(0, raw), Math.max(0, rowCount.value - 1))
+const scroll = useVirtualScroll({
+  rowHeight: rowPitch,
+  rowCount: () => rowCount.value,
+  models: () => props.models,
+  overscan: OVERSCAN_ROWS,
+  // 一行卡片 = 行号 × 列数；锚捕获取该行首个卡片，恢复按列数换算行号
+  indexAtRow: (row) => row * columns.value,
+  rowOfIndex: (index) => Math.floor(index / columns.value),
+  onMeasure: () => {
+    containerWidth.value = scroll.rootEl.value?.clientWidth || 0
+  }
 })
-const visibleRowCount = computed(
-  () => Math.ceil(viewportHeight.value / rowPitch.value) + 1 + OVERSCAN_ROWS * 2
-)
-const endRow = computed(() => Math.min(rowCount.value, startRow.value + visibleRowCount.value))
+const { rootEl, startIndex: startRow, endIndex: endRow, indexById, scrollToRow } = scroll
 
 const visibleRows = computed(() => {
   const rows = []
@@ -70,9 +75,6 @@ const visibleRows = computed(() => {
 })
 
 /* ---------------- 键盘网格导航（E10） ---------------- */
-
-/** id → 索引映射（导航定位用） */
-const indexById = computed(() => new Map(props.models.map((m, i) => [m.id, i])))
 
 /** 聚焦指定模型卡片（等待渲染后聚焦） */
 function focusModel(id) {
@@ -112,23 +114,8 @@ function onGridKeydown(e) {
   const id = props.models[idx]?.id
   if (!id) return
   e.preventDefault()
-  // 目标行不在渲染窗口内时先滚动（OVERSCAN 缓冲行内可视，无需精确对齐）
-  const targetRow = Math.floor(idx / cols)
-  const firstVisible = startRow.value + OVERSCAN_ROWS
-  const lastVisible = endRow.value - 1 - OVERSCAN_ROWS
-  if (scroller) {
-    let next = scroller.scrollTop
-    if (targetRow < firstVisible) next -= (firstVisible - targetRow) * rowPitch.value
-    else if (targetRow > lastVisible) next += (targetRow - lastVisible) * rowPitch.value
-    if (next !== scroller.scrollTop) {
-      next = Math.max(0, next)
-      scroller.scrollTop = next
-      scrollTop.value = next
-      // 键盘导航不触发 scroll 事件的 rAF 捕获（同步改动 scrollTop 后
-      // 事件在下一帧才到），此处直接更新浏览锚（B7）
-      captureAnchor()
-    }
-  }
+  // 目标行不在渲染窗口内时先滚动（内核 scrollToRow：缓冲行内可视，无需精确对齐）
+  scrollToRow(Math.floor(idx / cols))
   focusModel(id)
 }
 
@@ -144,67 +131,7 @@ function onCardActionKey(e) {
   })
 }
 
-/* ---------------- 滚动与尺寸测量 ---------------- */
-
-let scroller = null
-let resizeObserver = null
-
-/** 向上查找最近的滚动容器（.content） */
-function findScrollParent(el) {
-  let node = el?.parentElement
-  while (node) {
-    const { overflowY } = getComputedStyle(node)
-    if (overflowY === 'auto' || overflowY === 'scroll') return node
-    node = node.parentElement
-  }
-  return null
-}
-
-/**
- * 滚动事件 rAF 合帧（O4）：高频滚动下同一帧内的多次事件只取最后一帧的
- * 位置写入响应式 ref，减少无意义的依赖触发；clientHeight 读取也并入同一帧。
- */
-let scrollRafId = 0
-
-/**
- * 浏览位置锚（B7）：最近一次滚动稳定后的可视区首行信息。
- * 「列表签名变化 → 按锚恢复」取代此前「首项 id 未变则保留」的判断——
- * mtime 排序下局部重扫更新任意文件的 mtime 都会改变列表首项，把正在深位
- * 浏览的用户静默拉回顶部。非响应式变量：仅列表变化时读取，不参与渲染。
- */
-let anchorId = ''
-let anchorRow = -1
-let anchorScrollTop = 0
-
-/** 捕获当前浏览位置锚：可视区首行行号、该行首个模型 id 与滚动位置（保留行内偏移用） */
-function captureAnchor() {
-  if (!scroller) return
-  const top = scroller.scrollTop
-  const row = Math.max(0, Math.floor(top / rowPitch.value))
-  anchorRow = row
-  anchorScrollTop = top
-  anchorId = props.models[row * columns.value]?.id || ''
-}
-
-function onScroll() {
-  if (!scroller || scrollRafId) return
-  scrollRafId = requestAnimationFrame(() => {
-    scrollRafId = 0
-    if (!scroller) return
-    scrollTop.value = scroller.scrollTop
-    viewportHeight.value = scroller.clientHeight
-    captureAnchor()
-  })
-}
-
-function measure() {
-  if (!rootEl.value) return
-  containerWidth.value = rootEl.value.clientWidth
-  if (scroller) {
-    viewportHeight.value = scroller.clientHeight
-    scrollTop.value = scroller.scrollTop
-  }
-}
+/* ---------------- 行高校准（网格特有，B6） ---------------- */
 
 /** 等高假设告警只发一次（开发期断言） */
 let equalHeightWarned = false
@@ -248,66 +175,8 @@ watch(
   scheduleCalibrate
 )
 
-/**
- * 列表身份变化（筛选/搜索/排序导致长度或首尾项变化）时恢复/复位滚动位置：
- * 组件复用不重挂，列表变短后旧 scrollTop 会落在无效区间产生跳变。
- * 用「长度 + 首尾项 id」作签名，避免就地更新（如缩略图替换封面 URL）
- * 触发复位打断用户滚动。
- * B7 细化（取代旧「首项 id 未变则保留」判断）：以最近滚动捕获的浏览锚
- * （可视区首行模型 id）为准——
- * - 锚仍在新列表：滚动位置按锚的新行号平移（保留行内偏移），用户浏览
- *   不跳变。覆盖 autoRescan 局部重扫的就地合并，以及 mtime 排序下
- *   首项易主但可视内容未变的重排——此前这类变化会把深位用户拉回顶部；
- * - 无锚（未滚动过/在顶部）或锚已从列表消失（筛选/搜索/删除）：复位顶部
- *   （筛选/搜索变更几乎必然使锚失效，语义与旧版一致）。
- * 内容收缩导致的越界由浏览器钳制 scrollTop 并经 scroll 事件同步。
- */
-watch(
-  () =>
-    `${props.models.length}|${props.models[0]?.id}|${props.models[props.models.length - 1]?.id}`,
-  () => {
-    if (!scroller) return
-    const idx = anchorId ? indexById.value.get(anchorId) : undefined
-    if (anchorId && idx !== undefined) {
-      const newRow = Math.floor(idx / columns.value)
-      const target = Math.max(0, anchorScrollTop + (newRow - anchorRow) * rowPitch.value)
-      if (target !== scroller.scrollTop) {
-        scroller.scrollTop = target
-        scrollTop.value = target
-      }
-      // 以恢复后的位置为基准重捕锚：连续多次列表变化都以最新位置计算
-      captureAnchor()
-      return
-    }
-    anchorId = ''
-    anchorRow = -1
-    anchorScrollTop = 0
-    scroller.scrollTop = 0
-    scrollTop.value = 0
-  }
-)
-
-onMounted(() => {
-  scroller = findScrollParent(rootEl.value)
-  // 重新挂载（空态/筛选空结果切换回网格）时旧滚动位置已无意义，复位到顶部（B16）
-  if (scroller && scroller.scrollTop !== 0) {
-    scroller.scrollTop = 0
-  }
-  measure()
-  scroller?.addEventListener('scroll', onScroll, { passive: true })
-  resizeObserver = new ResizeObserver(measure)
-  resizeObserver.observe(rootEl.value)
-  // U5：rootEl 高度恒等于 totalHeight，窗口纵向缩放不会触发其回调；
-  // 须同时观察滚动容器，使 viewportHeight 随窗口缩放即时刷新（此前仅滚动时同步）
-  if (scroller) resizeObserver.observe(scroller)
-  scheduleCalibrate()
-})
-
-onBeforeUnmount(() => {
-  if (scrollRafId) cancelAnimationFrame(scrollRafId)
-  scroller?.removeEventListener('scroll', onScroll)
-  resizeObserver?.disconnect()
-})
+// 内核 onMounted 完成滚动挂载与测量后，按真实卡片高度校准初始行距
+onMounted(scheduleCalibrate)
 </script>
 
 <template>

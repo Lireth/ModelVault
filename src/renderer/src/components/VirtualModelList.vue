@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick } from 'vue'
 import { handleModelActionKey } from './modelRowActions'
 import {
   formatDate,
@@ -16,14 +16,15 @@ import {
   toggleSelect,
   typeInfo
 } from '../store/appStore'
+import { useVirtualScroll } from '../composables/useVirtualScroll'
 
 /**
  * 模型紧凑列表视图（列表/网格双视图之一）：
  * - 与 VirtualModelGrid 同一数据源与交互语义（点击打开详情/多选切换、
  *   右键菜单、F 收藏、Delete 删除、方向键导航），信息密度更高，
  *   面向大批量整理场景；
- * - 行高固定（无需网格的等高校准），虚拟滚动数学随之简化：
- *   可视窗口 + 上下缓冲行渲染，滚动位置经 rAF 合帧；
+ * - 行高固定（无需网格的等高校准），虚拟滚动内核（滚动测量/可视区间/
+ *   浏览锚/键盘滚动联动）收敛于 useVirtualScroll（O4）；
  * - 列随设置项显隐（显示文件大小/修改日期/推荐参数，与卡片同一开关）；
  * - 浏览位置锚（B7）与网格同一约定：局部重扫就地合并不把用户拉回顶部。
  */
@@ -36,9 +37,15 @@ const props = defineProps({
 const ROW_HEIGHT = 36
 const OVERSCAN_ROWS = 8
 
-const rootEl = ref(null)
-const viewportHeight = ref(600)
-const scrollTop = ref(0)
+const { rootEl, startIndex, endIndex, indexById, scrollToRow } = useVirtualScroll({
+  rowHeight: ROW_HEIGHT,
+  rowCount: () => props.models.length,
+  models: () => props.models,
+  overscan: OVERSCAN_ROWS,
+  // 单列行模型：行号与模型索引恒等
+  indexAtRow: (row) => row,
+  rowOfIndex: (index) => index
+})
 
 /** 列定义：key → 表头文案与 grid 列宽（name/params 弹性，其余定宽） */
 const COL_DEFS = {
@@ -66,20 +73,7 @@ const gridTemplate = computed(() =>
 
 const totalHeight = computed(() => props.models.length * ROW_HEIGHT)
 
-const startIndex = computed(() => {
-  const raw = Math.floor(scrollTop.value / ROW_HEIGHT) - OVERSCAN_ROWS
-  // 上限钳制（同网格 B16）：scrollTop 瞬态越界时避免渲染空窗口
-  return Math.min(Math.max(0, raw), Math.max(0, props.models.length - 1))
-})
-const visibleCount = computed(
-  () => Math.ceil(viewportHeight.value / ROW_HEIGHT) + 1 + OVERSCAN_ROWS * 2
-)
-const endIndex = computed(() => Math.min(props.models.length, startIndex.value + visibleCount.value))
-
 const visibleModels = computed(() => props.models.slice(startIndex.value, endIndex.value))
-
-/** id → 索引映射（导航定位/动作共用） */
-const indexById = computed(() => new Map(props.models.map((m, i) => [m.id, i])))
 
 /** 多选模式与选中态（E4，与卡片同一语义） */
 const selectedSet = multiSelectIdSet
@@ -187,123 +181,10 @@ function onListKeydown(e) {
   const id = props.models[idx]?.id
   if (!id) return
   e.preventDefault()
-  // 目标行不在可视窗口内时先滚动（缓冲行内可视，无需精确对齐）
-  if (scroller) {
-    const firstVisible = startIndex.value + OVERSCAN_ROWS
-    const lastVisible = endIndex.value - 1 - OVERSCAN_ROWS
-    let next = scroller.scrollTop
-    if (idx < firstVisible) next -= (firstVisible - idx) * ROW_HEIGHT
-    else if (idx > lastVisible) next += (idx - lastVisible) * ROW_HEIGHT
-    if (next !== scroller.scrollTop) {
-      next = Math.max(0, next)
-      scroller.scrollTop = next
-      scrollTop.value = next
-      // 同步改动 scrollTop 后 scroll 事件下一帧才到，此处直接更新浏览锚（B7）
-      captureAnchor()
-    }
-  }
+  // 目标行不在可视窗口内时先滚动（内核 scrollToRow：缓冲行内可视，无需精确对齐）
+  scrollToRow(idx)
   focusModel(id)
 }
-
-/* ---------------- 滚动与尺寸测量（与网格同一模式） ---------------- */
-
-let scroller = null
-let resizeObserver = null
-
-/** 向上查找最近的滚动容器（.content） */
-function findScrollParent(el) {
-  let node = el?.parentElement
-  while (node) {
-    const { overflowY } = getComputedStyle(node)
-    if (overflowY === 'auto' || overflowY === 'scroll') return node
-    node = node.parentElement
-  }
-  return null
-}
-
-/** 滚动事件 rAF 合帧（O4）：同一帧内多次事件只取最后位置写入响应式 ref */
-let scrollRafId = 0
-
-/** 浏览位置锚（B7，与网格同一约定）：最近一次滚动稳定后的可视区首行信息 */
-let anchorId = ''
-let anchorIndex = -1
-let anchorScrollTop = 0
-
-/** 捕获当前浏览位置锚：可视区首行模型 id 与滚动位置 */
-function captureAnchor() {
-  if (!scroller) return
-  const top = scroller.scrollTop
-  const idx = Math.max(0, Math.floor(top / ROW_HEIGHT))
-  anchorIndex = idx
-  anchorScrollTop = top
-  anchorId = props.models[idx]?.id || ''
-}
-
-function onScroll() {
-  if (!scroller || scrollRafId) return
-  scrollRafId = requestAnimationFrame(() => {
-    scrollRafId = 0
-    if (!scroller) return
-    scrollTop.value = scroller.scrollTop
-    viewportHeight.value = scroller.clientHeight
-    captureAnchor()
-  })
-}
-
-function measure() {
-  if (!rootEl.value) return
-  if (scroller) {
-    viewportHeight.value = scroller.clientHeight
-    scrollTop.value = scroller.scrollTop
-  }
-}
-
-/**
- * 列表身份变化（筛选/搜索/排序）时按浏览锚恢复或复位滚动位置
- *（与网格同一签名与语义，见 VirtualModelGrid B7 注释）。
- */
-watch(
-  () =>
-    `${props.models.length}|${props.models[0]?.id}|${props.models[props.models.length - 1]?.id}`,
-  () => {
-    if (!scroller) return
-    const idx = anchorId ? indexById.value.get(anchorId) : undefined
-    if (anchorId && idx !== undefined) {
-      const target = Math.max(0, anchorScrollTop + (idx - anchorIndex) * ROW_HEIGHT)
-      if (target !== scroller.scrollTop) {
-        scroller.scrollTop = target
-        scrollTop.value = target
-      }
-      captureAnchor()
-      return
-    }
-    anchorId = ''
-    anchorIndex = -1
-    anchorScrollTop = 0
-    scroller.scrollTop = 0
-    scrollTop.value = 0
-  }
-)
-
-onMounted(() => {
-  scroller = findScrollParent(rootEl.value)
-  // 重新挂载（空态/视图切换回来）时旧滚动位置已无意义，复位到顶部（B16）
-  if (scroller && scroller.scrollTop !== 0) {
-    scroller.scrollTop = 0
-  }
-  measure()
-  scroller?.addEventListener('scroll', onScroll, { passive: true })
-  resizeObserver = new ResizeObserver(measure)
-  resizeObserver.observe(rootEl.value)
-  // rootEl 高度恒等于 totalHeight，窗口纵向缩放须观察滚动容器（U5）
-  if (scroller) resizeObserver.observe(scroller)
-})
-
-onBeforeUnmount(() => {
-  if (scrollRafId) cancelAnimationFrame(scrollRafId)
-  scroller?.removeEventListener('scroll', onScroll)
-  resizeObserver?.disconnect()
-})
 </script>
 
 <template>
