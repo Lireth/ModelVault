@@ -14,11 +14,14 @@ import { normalizeBaseModel } from '../../../shared/model-categories'
 
 /**
  * 库统计区（F7，F-3 图表化增强）：
- * - 总览数字 + 分类容量堆叠条（一键看「磁盘被谁吃了」）+ 分类明细行；
+ * - 总览数字（数量/容量/平均/收藏/评分/损坏/NSFW/近 30 天更新）+
+ *   分类容量堆叠条（一键看「磁盘被谁吃了」）+ 分类明细行；
+ * - 格式分布（按扩展名聚合，与扫描文件类型设置呼应）；
+ * - 评分分布（5★ → 1★ + 未评分）；
  * - 标注覆盖率（引导补全标注）；
  * - 基底模型分布（F-2 数据：autoInfo 解析 + Civitai 回填，按家族归一化）；
  * - 重复占用（FEAT-1：冗余副本可释放空间，给清理动机）；
- * - 最占空间 TOP 5。
+ * - 最占空间 TOP 5（占比条 + 点击打开详情）。
  * 全部由渲染层 state.models 派生，零 IPC、随扫描/标注即时刷新；
  * 图表为纯 CSS 条形（无图表库依赖）。本组件为「轻量统计形态」——完整
  * 占用分析面板曾在功能精简阶段被移除，重启时以设置页区块而非独立面板落地。
@@ -34,6 +37,12 @@ const stats = computed(() => {
   let withCover = 0
   let favorites = 0
   let rated = 0
+  let suspect = 0
+  let nsfwCount = 0
+  let recent = 0
+  const ratingBuckets = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
+  let unrated = 0
+  const now = Date.now()
   for (const m of models) {
     totalBytes += Number.isFinite(m.size) ? m.size : 0
     const t = byType.get(m.type) || { count: 0, bytes: 0 }
@@ -46,6 +55,12 @@ const stats = computed(() => {
     if (m.hasManualCover) withCover += 1
     if (m.favorite) favorites += 1
     if (m.rating > 0) rated += 1
+    if (m.suspect) suspect += 1
+    if (m.nsfw) nsfwCount += 1
+    // 近 30 天有文件变动的模型（mtimeMs 为文件修改时间）
+    if (Number.isFinite(m.mtimeMs) && now - m.mtimeMs < 30 * 24 * 3600 * 1000) recent += 1
+    if (m.rating >= 1 && m.rating <= 5) ratingBuckets[m.rating] += 1
+    else unrated += 1
   }
   return {
     total: models.length,
@@ -56,7 +71,12 @@ const stats = computed(() => {
     withParams,
     withCover,
     favorites,
-    rated
+    rated,
+    suspect,
+    nsfw: nsfwCount,
+    recent,
+    ratingBuckets,
+    unrated
   }
 })
 
@@ -133,6 +153,59 @@ function bytePctOf(bytes) {
 }
 
 /**
+ * 格式分布（按扩展名聚合）：与分类占比同款堆叠条 + 明细行；
+ * 按容量降序，配色循环取自语义色板（safetensors 通常居首取主色）。
+ */
+const EXT_PALETTE = [
+  'var(--accent)',
+  'var(--accent-2)',
+  'var(--success)',
+  'var(--warning)',
+  'var(--warning-soft)',
+  'var(--text-muted)'
+]
+
+const extRows = computed(() => {
+  const byExt = new Map()
+  for (const m of state.models) {
+    const dot = m.id.lastIndexOf('.')
+    const ext = dot >= 0 ? m.id.slice(dot + 1).toLowerCase() : '其他'
+    const row = byExt.get(ext) || { count: 0, bytes: 0 }
+    row.count += 1
+    row.bytes += Number.isFinite(m.size) ? m.size : 0
+    byExt.set(ext, row)
+  }
+  const total = stats.value.total
+  return [...byExt.entries()]
+    .map(([ext, s]) => ({ ext, count: s.count, bytes: s.bytes }))
+    .sort((a, b) => b.bytes - a.bytes || b.count - a.count)
+    .map((row, i) => ({
+      ...row,
+      color: EXT_PALETTE[i % EXT_PALETTE.length],
+      pct: total === 0 ? 0 : Math.round((row.count / total) * 100)
+    }))
+})
+
+/** 评分分布行（5★ → 1★ + 未评分；空库不渲染该区块） */
+const ratingRows = computed(() => {
+  const total = stats.value.total
+  if (!total) return []
+  const rows = [5, 4, 3, 2, 1].map((star) => ({
+    star,
+    label: '★'.repeat(star),
+    count: stats.value.ratingBuckets[star],
+    pct: Math.round((stats.value.ratingBuckets[star] / total) * 100)
+  }))
+  rows.push({
+    star: 0,
+    label: '未评分',
+    count: stats.value.unrated,
+    pct: Math.round((stats.value.unrated / total) * 100)
+  })
+  return rows
+})
+
+/**
  * 基底模型家族分布（F-2 数据源）：仅统计已解析/已回填基底模型的条目，
  * 按家族聚合计数与容量；未知（未解析）数量单列——筛选器命中语义与之一致
  * （未解析不命中任何家族）。
@@ -202,6 +275,18 @@ const dupStats = computed(() => {
         <span class="stat-num">{{ stats.rated }}</span>
         <span class="stat-label">已评分</span>
       </div>
+      <div class="stat-item" :class="{ 'stat-warn': stats.suspect > 0 }">
+        <span class="stat-num">{{ stats.suspect }}</span>
+        <span class="stat-label">疑似损坏</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-num">{{ stats.nsfw }}</span>
+        <span class="stat-label">NSFW</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-num">{{ stats.recent }}</span>
+        <span class="stat-label">近 30 天更新</span>
+      </div>
     </div>
 
     <div class="stats-grid">
@@ -245,6 +330,52 @@ const dupStats = computed(() => {
               <div class="cov-fill" :style="{ width: `${pctOf(row.value)}%` }"></div>
             </div>
             <span class="cov-value cov-wide">{{ row.value }} 项 · {{ pctOf(row.value) }}%</span>
+          </div>
+        </div>
+        <p v-else class="stats-empty">尚未扫描模型</p>
+      </div>
+    </div>
+
+    <div class="stats-grid">
+      <!-- 格式分布：按扩展名聚合（与扫描文件类型设置呼应） -->
+      <div class="stats-block">
+        <h4>格式分布</h4>
+        <div
+          v-if="extRows.length && stats.totalBytes > 0"
+          class="stack-bar"
+          role="img"
+          aria-label="各格式容量占比"
+        >
+          <div
+            v-for="e in extRows"
+            :key="e.ext"
+            class="stack-seg"
+            :style="{ flex: e.bytes, background: e.color }"
+            :title="`.${e.ext}：${formatSize(e.bytes)}（${bytePctOf(e.bytes)}%）`"
+          ></div>
+        </div>
+        <ul v-if="extRows.length" class="type-stats">
+          <li v-for="e in extRows" :key="e.ext">
+            <span class="type-dot" :style="{ background: e.color }"></span>
+            <span class="type-name">.{{ e.ext }}</span>
+            <span class="type-count">{{ e.count }} 个</span>
+            <span class="type-size">{{ formatSize(e.bytes) }}</span>
+            <span class="type-pct">{{ e.pct }}%</span>
+          </li>
+        </ul>
+        <p v-else class="stats-empty">尚未扫描模型</p>
+      </div>
+
+      <!-- 评分分布：定位评分集中度与待评分存量 -->
+      <div class="stats-block">
+        <h4>评分分布</h4>
+        <div v-if="ratingRows.length" class="coverage">
+          <div v-for="r in ratingRows" :key="r.star" class="cov-row">
+            <span class="cov-label" :title="r.label">{{ r.label }}</span>
+            <div class="cov-bar">
+              <div class="cov-fill" :style="{ width: `${r.pct}%` }"></div>
+            </div>
+            <span class="cov-value cov-wide">{{ r.count }} 个 · {{ r.pct }}%</span>
           </div>
         </div>
         <p v-else class="stats-empty">尚未扫描模型</p>
@@ -344,6 +475,11 @@ const dupStats = computed(() => {
 .stat-label {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* 疑似损坏 > 0：渐变数字转警示红（background-clip: text 下换背景色即可） */
+.stat-warn .stat-num {
+  background: var(--danger);
 }
 
 .stats-grid {

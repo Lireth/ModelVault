@@ -43,14 +43,85 @@ describe('StatsSection 分类容量堆叠条（F-3）', () => {
       makeModel('b', { type: 'checkpoint', size: 3000 })
     ])
     const wrapper = mountStats()
-    const segs = wrapper.findAll('.stack-seg')
-    expect(segs.length).toBe(2)
+    // 分类占比块内的堆叠段数与分类数一致（格式分布块另有独立堆叠条）
+    const typeBlock = wrapper.findAll('.stats-block').find((b) => b.text().includes('分类占比'))
+    expect(typeBlock.findAll('.stack-seg').length).toBe(2)
   })
 
   it('总容量为零时不渲染堆叠条（避免除零与空段）', () => {
     replaceModels([makeModel('a', { type: 'lora', size: 0 })])
     const wrapper = mountStats()
     expect(wrapper.find('.stack-bar').exists()).toBe(false)
+  })
+})
+
+describe('StatsSection 总览健康与热度指标', () => {
+  it('统计疑似损坏、NSFW 与近 30 天更新数量，损坏 > 0 时数字转警示色', () => {
+    const recentMs = Date.now() - 24 * 3600 * 1000
+    const oldMs = Date.now() - 90 * 24 * 3600 * 1000
+    replaceModels([
+      makeModel('a', { suspect: true, mtimeMs: recentMs }),
+      makeModel('b', { nsfw: true, mtimeMs: recentMs }),
+      makeModel('c', { mtimeMs: oldMs })
+    ])
+    const wrapper = mountStats()
+    const overview = wrapper.find('.stats-overview')
+    expect(overview.text()).toContain('疑似损坏')
+    expect(overview.text()).toContain('近 30 天更新')
+    const warnItem = overview.find('.stat-warn')
+    expect(warnItem.exists()).toBe(true)
+    expect(warnItem.text()).toContain('1')
+    wrapper.unmount()
+  })
+})
+
+describe('StatsSection 格式分布', () => {
+  it('按扩展名聚合数量与容量，占比按总模型数计算', () => {
+    replaceModels([
+      makeModel('a.safetensors', { size: 3000 }),
+      makeModel('b.safetensors', { size: 1000 }),
+      makeModel('c.ckpt', { size: 2000 })
+    ])
+    const wrapper = mountStats()
+    const block = wrapper.findAll('.stats-block').find((b) => b.text().includes('格式分布'))
+    expect(block).toBeTruthy()
+    const rows = block.findAll('.type-stats li')
+    expect(rows.length).toBe(2)
+    // 容量降序：safetensors（4000）在前
+    expect(rows[0].text()).toContain('.safetensors')
+    expect(rows[0].text()).toContain('2 个')
+    expect(rows[0].text()).toContain('67%')
+    expect(rows[1].text()).toContain('.ckpt')
+    // 堆叠段 2 段
+    expect(block.findAll('.stack-seg').length).toBe(2)
+    wrapper.unmount()
+  })
+})
+
+describe('StatsSection 评分分布', () => {
+  it('按星级聚合并含未评分行', () => {
+    replaceModels([
+      makeModel('a', { rating: 5 }),
+      makeModel('b', { rating: 5 }),
+      makeModel('c', { rating: 3 }),
+      makeModel('d', { rating: 0 })
+    ])
+    const wrapper = mountStats()
+    const block = wrapper.findAll('.stats-block').find((b) => b.text().includes('评分分布'))
+    expect(block).toBeTruthy()
+    const rows = block.findAll('.cov-row')
+    expect(rows.length).toBe(6) // 5★ → 1★ + 未评分
+    expect(rows[0].text()).toContain('2 个 · 50%') // 5★
+    expect(block.text()).toContain('未评分')
+    wrapper.unmount()
+  })
+
+  it('空库时不渲染评分分布行', () => {
+    replaceModels([])
+    const wrapper = mountStats()
+    const block = wrapper.findAll('.stats-block').find((b) => b.text().includes('评分分布'))
+    expect(block.find('.cov-row').exists()).toBe(false)
+    wrapper.unmount()
   })
 })
 
