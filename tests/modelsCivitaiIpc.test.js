@@ -63,7 +63,10 @@ vi.mock('../src/main/ipc/models/decorate.js', () => ({
   resolveCoverSafe: vi.fn((p) => p || '')
 }))
 
-import { registerCivitaiHandlers } from '../src/main/ipc/models/civitai'
+import {
+  registerCivitaiHandlers,
+  setupWarmupProgressForwarding
+} from '../src/main/ipc/models/civitai'
 import {
   civitaiCompletePatch,
   downloadCivitaiImage,
@@ -71,7 +74,11 @@ import {
   fetchCivitaiVersionByHash,
   parseCivitaiModelId
 } from '../src/main/services/civitai'
-import { computeAndCacheHash, requestHashWarmup } from '../src/main/services/hash-warmup'
+import {
+  computeAndCacheHash,
+  requestHashWarmup,
+  setWarmupProgressListener
+} from '../src/main/services/hash-warmup'
 import { saveCoverBuffer } from '../src/main/services/covers'
 import {
   appendCoverMeta,
@@ -376,5 +383,53 @@ describe('models:warmupHash', () => {
     const res = await getRegisteredHandler('models:warmupHash')(makeEvent(), { id: 'D:\\outside\\x' })
     expect(res).toEqual({ error: '模型不在当前根目录内' })
     expect(requestHashWarmup).not.toHaveBeenCalled()
+  })
+})
+
+describe('预热完成事件合批（O2）', () => {
+  /** 注册转发器并取回其内部 listener */
+  function setupForwarding(wins) {
+    vi.mocked(BrowserWindow.getAllWindows).mockReturnValue(wins)
+    setupWarmupProgressForwarding()
+    return vi.mocked(setWarmupProgressListener).mock.calls.at(-1)[0]
+  }
+
+  it('时间窗内的多个完成事件合并为一次 completions 推送', () => {
+    vi.useFakeTimers()
+    try {
+      const win = makeWindow()
+      const listener = setupForwarding([win])
+
+      listener({ active: false, id: 'a', hash: 'h1', done: 1, remaining: 1 })
+      listener({ active: false, id: 'b', hash: 'h2', done: 2, remaining: 0 })
+      expect(win.webContents.send).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(160)
+      expect(win.webContents.send).toHaveBeenCalledTimes(1)
+      const [channel, payload] = win.webContents.send.mock.calls[0]
+      expect(channel).toBe('models:warmupProgress')
+      expect(payload).toMatchObject({ active: false, done: 2, remaining: 0 })
+      expect(payload.completions).toEqual([
+        { id: 'a', hash: 'h1' },
+        { id: 'b', hash: 'h2' }
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('后续进行中进度到达前先刷新完成批次，状态顺序不倒置', () => {
+    const win = makeWindow()
+    const listener = setupForwarding([win])
+
+    listener({ active: false, id: 'a', hash: 'h1', done: 1, remaining: 1 })
+    listener({ active: true, id: 'b', percent: 10, done: 1, remaining: 1 })
+
+    // 第一次发送 = 完成批次，第二次 = 新的进行中进度
+    expect(win.webContents.send).toHaveBeenCalledTimes(2)
+    expect(win.webContents.send.mock.calls[0][1].completions).toEqual([
+      { id: 'a', hash: 'h1' }
+    ])
+    expect(win.webContents.send.mock.calls[1][1]).toMatchObject({ active: true, id: 'b' })
   })
 })

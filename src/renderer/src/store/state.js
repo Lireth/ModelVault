@@ -188,15 +188,52 @@ export const state = shallowReactive({
 })
 
 /**
+ * 模型 id → 数组下标索引（O2）：批量事件回填时避免每次 O(n) findIndex/重建 Map。
+ * 仅在 models 数组引用变化时重建；元素级替换不改变 id 与下标，索引保持有效。
+ */
+let indexedModelsRef = null
+let modelIndexById = new Map()
+
+/** 按当前 models 数组重建 id 索引 */
+function rebuildModelIndex() {
+  indexedModelsRef = state.models
+  modelIndexById = new Map()
+  for (let i = 0; i < state.models.length; i++) {
+    modelIndexById.set(state.models[i].id, i)
+  }
+}
+
+/**
+ * 确保索引与当前 models 数组引用一致。
+ * 正常链路全部经 replaceModels；此处兜底直接赋值数组的旧调用方/测试，
+ * 数组引用变化时惰性重建一次，元素级更新不会触发重建。
+ */
+function ensureModelIndex() {
+  if (indexedModelsRef !== state.models) rebuildModelIndex()
+}
+
+/**
+ * 查询模型在 state.models 中的下标（O(1)，未找到返回 undefined）。
+ * @param {string} id 模型绝对路径
+ * @returns {number|undefined}
+ */
+export function modelIndexOf(id) {
+  ensureModelIndex()
+  return modelIndexById.get(id)
+}
+
+/**
  * 整体替换模型列表（models 数组级更新的唯一入口）：
  * 传入数组包一层 shallowReactive 后整体赋值——数组代理负责拦截索引读写
  * 与遍历（元素级 `state.models[i] = {...}` 因此可触发更新），元素对象保持
  * 原始引用（零代理开销，O3 目标不变）。传入已是 shallowReactive 的数组时
  * 幂等（Vue 对已代理目标原样返回）。
+ * 同时重建 id→下标索引，后续批量封面/哈希回填均走 O(1) 查找。
  * @param {Array} list 新模型列表（原始数组或已代理数组）
  */
 export function replaceModels(list) {
   state.models = shallowReactive(list)
+  rebuildModelIndex()
 }
 
 /**

@@ -1253,6 +1253,28 @@ describe('applyThumbUpdates', () => {
     applyThumbUpdates([{ id: 'm1' }])
     expect(state.models[0].coverUrl).toBe('orig')
   })
+
+  it('O2 批次：同一模型的多张轮播封面与默认封面合并为一次元素替换', () => {
+    replaceModels([
+      makeModel('m1', {
+        coverUrl: 'orig',
+        covers: [
+          { rel: 'a.png', path: 'p-a', url: 'u-a' },
+          { rel: 'b.png', path: 'p-b', url: 'u-b' }
+        ]
+      })
+    ])
+    const before = state.models[0]
+    applyThumbUpdates([
+      { id: 'm1', coverUrl: 't-default' },
+      { id: 'm1', coverThumb: { path: 'p-a', thumbUrl: 't-a' } },
+      { id: 'm1', coverThumb: { path: 'p-b', thumbUrl: 't-b' } }
+    ])
+
+    expect(state.models[0]).not.toBe(before)
+    expect(state.models[0].coverUrl).toBe('t-default')
+    expect(state.models[0].covers.map((c) => c.thumbUrl)).toEqual(['t-a', 't-b'])
+  })
 })
 
 describe('重复模型检测与筛选（FEAT-1）', () => {
@@ -1336,6 +1358,25 @@ describe('重复模型检测与筛选（FEAT-1）', () => {
     // 同值幂等：引用不变（避免无意义的响应式失效）
     applyHashUpdate({ active: false, id: 's', hash: 'c'.repeat(64) })
     expect(state.models[sIdx]).toBe(afterFirst)
+  })
+
+  it('O2 批次：completions 一次回填多个模型，未知/同值项安全跳过', () => {
+    seedDupes()
+    const beforeP1 = state.models[0]
+    applyHashUpdate({
+      active: false,
+      id: '',
+      hash: '',
+      completions: [
+        { id: 'p1', hash: 'c'.repeat(64) },
+        { id: 'no-such', hash: 'd'.repeat(64) },
+        { id: 'p2', hash: 'a'.repeat(64) } // 同值：引用不变
+      ]
+    })
+
+    expect(state.models[0]).not.toBe(beforeP1)
+    expect(state.models[0].hash).toBe('c'.repeat(64))
+    expect(state.models[1].hash).toBe('a'.repeat(64))
   })
 
   it('关闭重复筛选后视图恢复全量（筛选随开关生效与退出）', () => {

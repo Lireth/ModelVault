@@ -1,4 +1,4 @@
-import { state, defaultSettings, replaceModels, replaceSettings } from './state'
+import { state, defaultSettings, modelIndexOf, replaceModels, replaceSettings } from './state'
 import { toast } from './toast'
 import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
 
@@ -277,25 +277,44 @@ export function cancelScan() {
  */
 export function applyThumbUpdates(updates) {
   if (!Array.isArray(updates)) return
-  // 建 id→索引 Map（B5）：批量更新避免逐条 O(n) findIndex 的 O(n×m) 开销。
-  // O3 约定：浅响应下 Object.assign 原位变异不触发更新，须元素级替换；
-  // 替换会使 selectedModel 指向新引用，但详情页 watch 有 formDirty 保护
-  // （有编辑时跳过重填），无编辑时重填等值无副作用
-  const indexById = new Map(state.models.map((m, i) => [m.id, i]))
-  for (const { id, coverUrl, coverThumb } of updates) {
+  // O2：批次内先按模型合并，再对每个模型做一次元素级替换。
+  // 主进程已把多个缩略图完成事件合批；同一模型的多张轮播封面更新
+  // （coverThumb）合并为一次 covers 数组替换，避免同 tick 内多次
+  // 元素级赋值触发依赖整表的派生计算反复失效。
+  // 索引查找走 state 模块维护的持久 id→下标缓存（O(1)），
+  // 不再为每个事件重建全量 Map。
+  const byModel = new Map()
+  for (const update of updates) {
+    if (!update || typeof update.id !== 'string' || !update.id) continue
+    const { id, coverUrl, coverThumb } = update
     if (!coverUrl && !coverThumb) continue
-    const idx = indexById.get(id)
+    let entry = byModel.get(id)
+    if (!entry) {
+      entry = { coverUrl: '', thumbs: new Map() }
+      byModel.set(id, entry)
+    }
+    if (coverUrl) entry.coverUrl = coverUrl
+    if (coverThumb && typeof coverThumb.path === 'string' && typeof coverThumb.thumbUrl === 'string') {
+      entry.thumbs.set(coverThumb.path, coverThumb.thumbUrl)
+    }
+  }
+  for (const [id, entry] of byModel) {
+    const idx = modelIndexOf(id)
     if (idx === undefined) continue
+    // O3 约定：浅响应下 Object.assign 原位变异不触发更新，须元素级替换；
+    // 替换会使 selectedModel 指向新引用，但详情页 watch 有 formDirty 保护
+    // （有编辑时跳过重填），无编辑时重填等值无副作用
     let next = state.models[idx]
-    if (coverUrl) next = { ...next, coverUrl }
-    if (coverThumb && Array.isArray(next.covers)) {
-      const ci = next.covers.findIndex((c) => c.path === coverThumb.path)
-      if (ci >= 0) {
-        const covers = next.covers.map((c, i) =>
-          i === ci ? { ...c, thumbUrl: coverThumb.thumbUrl } : c
-        )
-        next = { ...next, covers }
-      }
+    if (entry.coverUrl) next = { ...next, coverUrl: entry.coverUrl }
+    if (entry.thumbs.size > 0 && Array.isArray(next.covers)) {
+      let changed = false
+      const covers = next.covers.map((c) => {
+        const thumbUrl = entry.thumbs.get(c.path)
+        if (thumbUrl === undefined || c.thumbUrl === thumbUrl) return c
+        changed = true
+        return { ...c, thumbUrl }
+      })
+      if (changed) next = { ...next, covers }
     }
     if (next !== state.models[idx]) state.models[idx] = next
   }
@@ -306,15 +325,22 @@ export function applyThumbUpdates(updates) {
  * SHA256 后经 warmupProgress 推送（active=false 且携带 hash），此处回填到
  * 对应模型对象——重复检测（filter.duplicateGroups）据此渐进可用，无需等待
  * 下次扫描。已在扫描装饰中携带哈希的模型不会产生完成事件，无冲突。
- * @param {{active?: boolean, id?: string, hash?: string}} progress 预热进度快照
+ * O2：主进程会把同一时间窗内的多个完成事件合批为
+ * `{ active: false, completions: [{id, hash}] }`；仍兼容旧的单条
+ * `{ active: false, id, hash }` 载荷。索引查找走持久 id→下标缓存（O(1)）。
+ * @param {{active?: boolean, id?: string, hash?: string,
+ *   completions?: Array<{id: string, hash: string}>}} progress 预热进度快照
  */
 export function applyHashUpdate(progress) {
   if (!progress || progress.active !== false) return
-  const { id, hash } = progress
-  if (!id || !hash) return
-  const idx = state.models.findIndex((m) => m.id === id)
-  if (idx < 0 || state.models[idx].hash === hash) return
-  // O3 约定：浅响应下元素级整体替换（替换会使 selectedModel 指向新引用，
-  // 详情页 formDirty 保护与缩略图回填路径一致）
-  state.models[idx] = { ...state.models[idx], hash }
+  const updates = Array.isArray(progress.completions) ? [...progress.completions] : []
+  if (progress.id && progress.hash) updates.push({ id: progress.id, hash: progress.hash })
+  for (const { id, hash } of updates) {
+    if (!id || !hash) continue
+    const idx = modelIndexOf(id)
+    if (idx === undefined || state.models[idx].hash === hash) continue
+    // O3 约定：浅响应下元素级整体替换（替换会使 selectedModel 指向新引用，
+    // 详情页 formDirty 保护与缩略图回填路径一致）
+    state.models[idx] = { ...state.models[idx], hash }
+  }
 }

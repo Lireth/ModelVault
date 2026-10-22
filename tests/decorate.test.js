@@ -490,10 +490,11 @@ describe('OPT-1 轮播封面复用缩略图管线', () => {
       expect.stringContaining('thumbs'),
       expect.stringContaining('thumbs')
     ])
+    // O2：同一轮 drain 的两张缩略图完成事件合并为一次 thumbsReady 推送
+    const readyCalls = win.webContents.send.mock.calls.filter((c) => c[0] === 'models:thumbsReady')
+    expect(readyCalls).toHaveLength(1)
     // 推送载荷：默认封面条目 coverUrl + coverThumb 双字段；非默认仅 coverThumb
-    const updates = win.webContents.send.mock.calls
-      .filter((c) => c[0] === 'models:thumbsReady')
-      .flatMap((c) => c[1].updates)
+    const updates = readyCalls.flatMap((c) => c[1].updates)
     expect(updates).toHaveLength(2)
     const defaultUpdate = updates.find((u) => u.coverUrl)
     const carouselUpdate = updates.find((u) => !u.coverUrl)
