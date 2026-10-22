@@ -81,8 +81,15 @@ const api = {
 
   /** 模型管理 */
   models: {
-    /** 加载持久化数据（设置 + 模型元数据） */
+    /** 加载持久化数据（设置 + 模型元数据 + 本地索引缓存） */
     loadStore: () => invokeValidated('models:loadStore'),
+    /**
+     * 打开已保存模型库（F1：优先返回本地索引，实现秒切库）
+     * @param {string} folder 模型库根目录
+     * @returns {Promise<{root:string, settings:object, cached:boolean,
+     *   models?:object[], savedAt?:number, durationMs?:number} | {error:string}>}
+     */
+    openLibrary: (folder) => invokeValidated('models:openLibrary', { folder }),
     /** 弹出目录选择框，返回所选目录或 null */
     chooseFolder: () => invokeValidated('models:chooseFolder'),
     /** 扫描模型目录，返回 { models, byType, errors } 或 { canceled } / { error } */

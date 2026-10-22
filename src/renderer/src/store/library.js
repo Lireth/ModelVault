@@ -29,7 +29,21 @@ export function resolveTheme(mode) {
   return mode === 'light' ? 'light' : 'dark'
 }
 
-/** 应用初始化：加载持久化数据与应用设置，按设置决定是否自动扫描 */
+/** 应用库设置（扫描/切库/启动共用）：设置、主题、排序与视图模式 */
+function applyLibrarySettings(settings) {
+  if (!settings) return
+  replaceSettings(settings)
+  applyTheme(state.settings.theme)
+  if (state.settings.sortBy) state.sortBy = state.settings.sortBy
+  state.sortAsc = state.settings.sortAsc !== false
+  if (state.settings.viewMode) state.viewMode = state.settings.viewMode
+}
+
+/**
+ * 应用初始化：加载持久化数据与应用设置。
+ * F1：有本地索引时先秒开列表（booting 立即结束），再后台校验；
+ * 无索引时保持原有自动扫描流程。
+ */
 export async function initApp() {
   try {
     bindSystemThemeListener()
@@ -41,7 +55,20 @@ export async function initApp() {
     if (state.settings.sortBy) state.sortBy = state.settings.sortBy
     state.sortAsc = state.settings.sortAsc !== false
     if (state.settings.viewMode) state.viewMode = state.settings.viewMode
-    if (state.folder && state.settings.autoScan !== false) {
+
+    const cached = data.cachedIndex
+    if (state.folder && Array.isArray(cached?.models) && cached.models.length > 0) {
+      // 秒开上次索引；autoScan 开启时后台校验，关闭时保持缓存展示
+      replaceModels(cached.models)
+      state.lastScan = {
+        count: cached.models.length,
+        durationMs: cached.durationMs || 0
+      }
+      state.booting = false
+      if (state.settings.autoScan !== false) {
+        void scanModels(state.folder, { background: true })
+      }
+    } else if (state.folder && state.settings.autoScan !== false) {
       await scanModels()
     }
   } catch (err) {
@@ -146,9 +173,10 @@ export async function saveSettings(patch) {
 
 /** 选择新的模型根目录并重新扫描 */
 export async function chooseFolder() {
-  // 扫描/增量刷新进行中拒绝切换目录（S2/B-01）：否则目录已切、列表未刷新，留下半状态
-  if (state.scanning || state.partialScanning) {
-    toast('warn', '正在扫描中，请稍候')
+  // 扫描/增量刷新/后台校验进行中拒绝切换目录（S2/B-01）：
+  // 否则目录已切、列表未刷新，留下半状态
+  if (state.scanning || state.partialScanning || state.backgroundScanning) {
+    toast('warn', '正在扫描或校验中，请稍候')
     return
   }
   try {
@@ -163,18 +191,45 @@ export async function chooseFolder() {
 }
 
 /**
- * 切换到已保存的模型库（E7 多根目录）：等效重新扫描该根目录，
- * 关联存储/装饰缓存/协议校验均随主进程根目录切换而切换。
+ * 切换到已保存的模型库（E7 多根目录 + F1 秒切库）：
+ * - 有本地索引：主进程切换根目录并返回缓存列表，渲染层立即展示，
+ *   随后后台全量校验（不显示全屏扫描遮罩）；
+ * - 无索引：回退原有全量扫描（V-02：失败保持当前库）。
  * @param {string} folder 目标根目录绝对路径
  */
 export async function switchRoot(folder) {
-  if (state.scanning || state.partialScanning) {
-    toast('warn', '正在扫描中，请稍候')
+  if (state.scanning || state.partialScanning || state.backgroundScanning) {
+    toast('warn', '正在扫描或校验中，请稍候')
     return
   }
   if (!folder || folder === state.folder) return
-  // V-02：先扫描目标库，成功后才提交 state.folder（失败保持当前库）
-  await scanModels(folder)
+  try {
+    const res = await window.api.models.openLibrary(folder)
+    if (res?.error) {
+      toast('error', res.error)
+      return
+    }
+    if (res?.cached && Array.isArray(res.models)) {
+      replaceModels(res.models)
+      state.folder = res.root || folder
+      state.lastScan = {
+        count: res.models.length,
+        durationMs: res.durationMs || 0
+      }
+      applyLibrarySettings(res.settings)
+      toast(
+        'success',
+        `已秒开本地索引（${res.models.length} 个模型），正在后台校验…`
+      )
+      // 后台校验：不进入 scanning 遮罩；完成后整体替换为磁盘真实结果
+      void scanModels(state.folder, { background: true })
+      return
+    }
+    // 无可用索引：主进程未切换根目录，交由扫描链路完成 V-02 状态机
+    await scanModels(folder)
+  } catch (err) {
+    toast('error', `切换模型库失败: ${err.message}`)
+  }
 }
 
 /**
@@ -199,10 +254,14 @@ export async function removeRoot(folder) {
  * 扫描指定模型目录（缺省为当前库）。
  * V-02 切库状态机：显式传入 folder 时，state.folder 只在扫描成功后提交；
  * 失败/取消保持原库与旧列表不变。
+ * F1：background=true 为「本地索引秒开后的后台校验」——不置 scanning
+ * （不显示全屏遮罩），但仍占用后台校验标记以阻止并发切库。
  * @param {string} [folder] 目标模型根目录（缺省为当前库）
+ * @param {{background?: boolean}} [options]
  * @returns {Promise<boolean>} 是否完成了一次成功扫描
  */
-export async function scanModels(folder = state.folder) {
+export async function scanModels(folder = state.folder, options = {}) {
+  const background = options.background === true
   const targetRoot = typeof folder === 'string' && folder ? folder : state.folder
   if (!targetRoot) {
     toast('warn', '请先选择模型文件夹')
@@ -210,54 +269,62 @@ export async function scanModels(folder = state.folder) {
   }
   // 渲染层防重入（S2/B-01）：主进程虽会拒绝并发扫描，但入口先拦截可避免误导性错误弹窗。
   // 增量刷新在途时同样拒绝：它已持有主进程扫描锁，此时发起全量扫描只会被拒绝。
-  if (state.scanning) return false
-  if (state.partialScanning) {
-    toast('warn', '正在增量刷新，请稍候')
+  if (state.scanning || state.backgroundScanning || state.partialScanning) {
+    if (!background) {
+      toast('warn', state.partialScanning ? '正在增量刷新，请稍候' : '正在扫描或校验中，请稍候')
+    }
     return false
   }
-  state.scanning = true
-  state.scanError = ''
+  if (background) state.backgroundScanning = true
+  else {
+    state.scanning = true
+    state.scanError = ''
+  }
   state.progress = { dirs: 0, found: 0, current: '' }
   try {
     const res = await window.api.models.scan(targetRoot)
     if (res.canceled) {
-      // 用户取消：保留上一次扫描结果，静默返回
+      // 用户取消：保留上一次扫描/本地索引结果，静默返回
       return false
     }
     if (res.error) {
-      state.scanError = res.error
-      toast('error', res.error)
+      if (background) {
+        // 后台校验失败不覆盖已展示的本地索引，也不触发全屏错误态
+        toast('warn', `后台校验失败，继续使用本地索引：${res.error}`)
+      } else {
+        state.scanError = res.error
+        toast('error', res.error)
+      }
       return false
     }
     replaceModels(res.models)
     // 扫描成功后才提交激活库（主进程已在同一维护锁内完成切根）
     state.folder = res.root || targetRoot
     state.lastScan = { count: res.models.length, durationMs: res.durationMs }
-    // 库设置随模型库走：切库扫描（chooseFolder/switchRoot）返回目标库的设置，
-    // 应用主题/排序/视图模式——与 saveSettings 相同的同步模式
-    if (res.settings) {
-      replaceSettings(res.settings)
-      applyTheme(state.settings.theme)
-      if (state.settings.sortBy) state.sortBy = state.settings.sortBy
-      state.sortAsc = state.settings.sortAsc !== false
-      if (state.settings.viewMode) state.viewMode = state.settings.viewMode
-    }
+    // 库设置随模型库走：切库扫描（chooseFolder/switchRoot）返回目标库的设置
+    applyLibrarySettings(res.settings)
     // A-02：主进程自动重关联了被移动/重命名模型的标注时，告知用户数量
     const relinkedSuffix = res.relinked > 0
       ? `（已自动重新关联 ${res.relinked} 个移动/重命名模型的标注）`
       : ''
+    const prefix = background ? '后台校验完成' : '扫描完成'
     if (res.errors?.length) {
-      toast('warn', `扫描完成，但有 ${res.errors.length} 个目录无法读取${relinkedSuffix}`)
+      toast('warn', `${prefix}，但有 ${res.errors.length} 个目录无法读取${relinkedSuffix}`)
     } else {
-      toast('success', `扫描完成：发现 ${res.models.length} 个模型${relinkedSuffix}`)
+      toast('success', `${prefix}：发现 ${res.models.length} 个模型${relinkedSuffix}`)
     }
     return true
   } catch (err) {
-    state.scanError = err.message
-    toast('error', `扫描失败: ${err.message}`)
+    if (background) {
+      toast('warn', `后台校验失败，继续使用本地索引：${err.message}`)
+    } else {
+      state.scanError = err.message
+      toast('error', `扫描失败: ${err.message}`)
+    }
     return false
   } finally {
-    state.scanning = false
+    if (background) state.backgroundScanning = false
+    else state.scanning = false
   }
 }
 

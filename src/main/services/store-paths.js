@@ -20,6 +20,8 @@ export const DATA_FILE = 'store.json'
  * 达到阈值/退出/备份/切库时合并回 store.json 快照。
  */
 export const JOURNAL_DIR = 'journal'
+/** 本地扫描索引文件名（F1：秒切库展示缓存，不参与备份） */
+export const INDEX_FILE = 'index.json'
 /** 库设置文件名（位于模型根目录的 .modelvault/ 内，随模型文件夹走） */
 export const LIB_SETTINGS_FILE = 'settings.json'
 /** 封面图片目录名（位于 .modelvault/ 内） */
@@ -54,6 +56,11 @@ export function getDataFilePath(root = currentRoot) {
 /** 元数据增量日志目录路径 */
 export function getJournalDir(root = currentRoot) {
   return path.join(getDataDir(root), JOURNAL_DIR)
+}
+
+/** 本地扫描索引文件路径 */
+export function getIndexFilePath(root = currentRoot) {
+  return path.join(getDataDir(root), INDEX_FILE)
 }
 
 /** 模型根目录下的库设置文件路径（.modelvault/settings.json，随模型文件夹走） */

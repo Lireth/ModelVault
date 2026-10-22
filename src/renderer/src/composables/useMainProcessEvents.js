@@ -45,8 +45,9 @@ export function useMainProcessEvents() {
     fsChangedTimer = setTimeout(() => {
       fsChangedTimer = null
       if (root !== state.folder || !state.settings.autoRescan) return
-      // 扫描/增量刷新已占用主进程扫描锁：本轮子树转入待处理，由忙闲侦听器补扫
-      if (state.scanning || state.partialScanning) {
+      // 扫描/增量刷新/后台校验已占用主进程扫描锁：本轮子树转入待处理，
+      // 由忙闲侦听器补扫
+      if (state.scanning || state.partialScanning || state.backgroundScanning) {
         if (!fsChangedPendingDirs) fsChangedPendingDirs = new Set()
         for (const d of dirs || []) fsChangedPendingDirs.add(d)
         return
@@ -58,8 +59,8 @@ export function useMainProcessEvents() {
   function onFsChanged({ root, dirs }) {
     if (root !== state.folder || !state.settings.autoRescan) return
     const subDirs = Array.isArray(dirs) ? dirs : []
-    // 扫描/增量刷新进行中：累积变更子树，结束后由侦听器补一次局部扫描，不丢弃事件
-    if (state.scanning || state.partialScanning) {
+    // 扫描/增量刷新/后台校验进行中：累积变更子树，结束后由侦听器补一次局部扫描
+    if (state.scanning || state.partialScanning || state.backgroundScanning) {
       if (!fsChangedPendingDirs) fsChangedPendingDirs = new Set()
       for (const d of subDirs) fsChangedPendingDirs.add(d)
       return
@@ -70,7 +71,7 @@ export function useMainProcessEvents() {
   // 扫描结束补决策（A-07a/B-01）：全量扫描或增量刷新结束后，
   // 对期间累积的变更子树补一次防抖局部扫描
   watch(
-    () => state.scanning || state.partialScanning,
+    () => state.scanning || state.partialScanning || state.backgroundScanning,
     (busy, wasBusy) => {
       if (wasBusy && !busy && fsChangedPendingDirs) {
         const pending = [...fsChangedPendingDirs]

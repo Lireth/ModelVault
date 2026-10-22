@@ -53,6 +53,7 @@ function makeApiMock() {
   return {
     models: {
       loadStore: vi.fn(),
+      openLibrary: vi.fn(),
       scan: vi.fn(),
       cancelScan: vi.fn(() => Promise.resolve({ ok: false })),
       chooseFolder: vi.fn(),
@@ -97,6 +98,7 @@ beforeEach(() => {
   // 重置模块级单例状态，用例间互不污染
   state.folder = ''
   state.scanning = false
+  state.backgroundScanning = false
   state.partialScanning = false
   state.scanError = ''
   replaceModels([])
@@ -397,6 +399,106 @@ describe('切库状态机（V-02）', () => {
 
     expect(state.folder).toBe('D:\\models')
     expect(state.models.map((m) => m.id)).toEqual(['D:\\models\\old.safetensors'])
+  })
+})
+
+describe('F1 本地索引：秒切库与后台校验', () => {
+  const tick = () => new Promise((resolve) => setImmediate(resolve))
+
+  it('switchRoot 有索引时立即展示缓存，再后台校验并替换为磁盘结果', async () => {
+    state.folder = 'D:\\models'
+    state.settings.autoScan = true
+    replaceModels([makeModel('D:\\models\\old.safetensors')])
+    api.models.openLibrary.mockResolvedValue({
+      root: 'D:\\other',
+      cached: true,
+      durationMs: 5,
+      models: [makeModel('D:\\other\\cached.safetensors')],
+      settings: { modelsFolder: 'D:\\other', autoScan: true }
+    })
+    let releaseScan
+    api.models.scan.mockReturnValue(new Promise((resolve) => { releaseScan = resolve }))
+
+    await switchRoot('D:\\other')
+
+    expect(state.folder).toBe('D:\\other')
+    expect(state.models.map((m) => m.id)).toEqual(['D:\\other\\cached.safetensors'])
+    expect(state.backgroundScanning).toBe(true)
+    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('秒开本地索引'))).toBe(
+      true
+    )
+    expect(api.models.scan).toHaveBeenCalledWith('D:\\other')
+
+    releaseScan({
+      root: 'D:\\other',
+      models: [makeModel('D:\\other\\fresh.safetensors')],
+      errors: [],
+      durationMs: 10
+    })
+    await tick()
+    expect(state.backgroundScanning).toBe(false)
+    expect(state.models.map((m) => m.id)).toEqual(['D:\\other\\fresh.safetensors'])
+  })
+
+  it('后台校验失败时保留缓存列表且不进入全屏错误态', async () => {
+    state.folder = 'D:\\models'
+    state.settings.autoScan = true
+    api.models.openLibrary.mockResolvedValue({
+      root: 'D:\\other',
+      cached: true,
+      models: [makeModel('D:\\other\\cached.safetensors')],
+      settings: { modelsFolder: 'D:\\other', autoScan: true }
+    })
+    api.models.scan.mockResolvedValue({ error: '磁盘读取失败' })
+
+    await switchRoot('D:\\other')
+    await tick()
+
+    expect(state.models.map((m) => m.id)).toEqual(['D:\\other\\cached.safetensors'])
+    expect(state.scanError).toBe('')
+    expect(state.backgroundScanning).toBe(false)
+    expect(
+      state.toasts.some((t) => t.type === 'warn' && t.text.includes('后台校验失败'))
+    ).toBe(true)
+  })
+
+  it('initApp 有缓存时先展示并后台校验；autoScan=false 时只展示', async () => {
+    state.booting = true
+    api.models.loadStore.mockResolvedValue({
+      settings: { modelsFolder: 'D:\\lib', autoScan: true },
+      models: {},
+      cachedIndex: { models: [makeModel('D:\\lib\\cached.safetensors')], durationMs: 3 }
+    })
+    let releaseScan
+    api.models.scan.mockReturnValue(new Promise((resolve) => { releaseScan = resolve }))
+
+    await initApp()
+
+    expect(state.booting).toBe(false)
+    expect(state.folder).toBe('D:\\lib')
+    expect(state.models.map((m) => m.id)).toEqual(['D:\\lib\\cached.safetensors'])
+    expect(state.backgroundScanning).toBe(true)
+
+    releaseScan({ root: 'D:\\lib', models: [makeModel('D:\\lib\\fresh.safetensors')], errors: [] })
+    await tick()
+    expect(state.backgroundScanning).toBe(false)
+    expect(state.models.map((m) => m.id)).toEqual(['D:\\lib\\fresh.safetensors'])
+  })
+
+  it('initApp autoScan=false 且有缓存：展示缓存但不触发扫描', async () => {
+    state.booting = true
+    api.models.loadStore.mockResolvedValue({
+      settings: { modelsFolder: 'D:\\lib', autoScan: false },
+      models: {},
+      cachedIndex: { models: [makeModel('D:\\lib\\cached.safetensors')], durationMs: 3 }
+    })
+
+    await initApp()
+
+    expect(state.booting).toBe(false)
+    expect(state.models.map((m) => m.id)).toEqual(['D:\\lib\\cached.safetensors'])
+    expect(state.backgroundScanning).toBe(false)
+    expect(api.models.scan).not.toHaveBeenCalled()
   })
 })
 

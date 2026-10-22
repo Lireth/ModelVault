@@ -36,6 +36,7 @@ vi.mock('../src/main/services/watcher', () => ({
 import { paramSummaryFromMeta, sidecarFilesFor } from '../src/main/ipc/models/misc'
 import { registerStoreHandlers } from '../src/main/ipc/models/store'
 import { syncWatcher } from '../src/main/services/watcher'
+import { getCurrentRoot, loadSettings } from '../src/main/services/store'
 import { getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
 
 describe('sidecarFilesFor', () => {
@@ -115,5 +116,105 @@ describe('models:loadStore 目录监控启动路径（OPT-19）', () => {
     const root = writeSettings({ autoScan: false, autoRescan: false })
     await getRegisteredHandler('models:loadStore')(makeEvent())
     expect(syncWatcher).toHaveBeenCalledWith(root, false, [])
+  })
+})
+
+describe('models:openLibrary 秒切库（F1）', () => {
+  const tmpRoots = []
+
+  function writeSettings(patch) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'modelvault-open-'))
+    tmpRoots.push(root)
+    fs.writeFileSync(
+      path.join(fakeUserData, 'settings.json'),
+      JSON.stringify({ modelsFolder: root, modelsFolders: [root], ...patch })
+    )
+    return root
+  }
+
+  function writeIndex(root, models = []) {
+    const dir = path.join(root, '.modelvault')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'index.json'),
+      JSON.stringify({
+        version: 1,
+        root,
+        savedAt: 1,
+        durationMs: 42,
+        models
+      })
+    )
+  }
+
+  beforeEach(() => {
+    vi.mocked(syncWatcher).mockClear()
+    registerStoreHandlers()
+  })
+
+  afterAll(() => {
+    for (const dir of tmpRoots) fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('有索引时切换根目录并返回缓存模型/设置', async () => {
+    const root = writeSettings({})
+    await loadSettings()
+    const model = {
+      id: path.join(root, 'a.safetensors'),
+      name: 'a',
+      type: 'lora',
+      ext: '.safetensors',
+      size: 1,
+      mtimeMs: 1,
+      relDir: ''
+    }
+    writeIndex(root, [model])
+    // 索引之后修改的标注应从当前元数据覆盖显示（F1）
+    fs.writeFileSync(
+      path.join(root, '.modelvault', 'store.json'),
+      JSON.stringify({
+        version: 1,
+        models: { 'a.safetensors': { favorite: true, note: '索引后修改' } }
+      })
+    )
+
+    const res = await getRegisteredHandler('models:openLibrary')(makeEvent(), { folder: root })
+
+    expect(res.error).toBeUndefined()
+    expect(res.cached).toBe(true)
+    expect(res.root).toBe(root)
+    expect(res.models[0]).toMatchObject({ favorite: true, note: '索引后修改' })
+    expect(res.durationMs).toBe(42)
+    expect(res.settings.modelsFolder).toBe(root)
+    expect(getCurrentRoot()).toBe(root)
+    expect(syncWatcher).toHaveBeenCalledWith(root, false, [])
+  })
+
+  it('无索引时不切换根目录，返回 cached=false 交由扫描链路', async () => {
+    const root = writeSettings({})
+    await loadSettings()
+    const before = getCurrentRoot()
+    const res = await getRegisteredHandler('models:openLibrary')(makeEvent(), { folder: root })
+
+    expect(res).toEqual({ root, cached: false })
+    expect(getCurrentRoot()).toBe(before)
+  })
+
+  it('模型库列表之外 / 不存在的目录拒绝', async () => {
+    writeSettings({})
+    await loadSettings()
+    const outside = path.join(os.tmpdir(), 'modelvault-not-in-list')
+    expect(
+      (await getRegisteredHandler('models:openLibrary')(makeEvent(), { folder: outside })).error
+    ).toBe('该目录不在模型库列表中')
+
+    const missing = path.join(os.tmpdir(), 'modelvault-missing-root')
+    writeSettings({ modelsFolder: missing, modelsFolders: [missing] })
+    await loadSettings()
+    // loadSettings 可能为目标库初始化 .modelvault；删除后模拟目录已不存在
+    fs.rmSync(missing, { recursive: true, force: true })
+    expect(
+      (await getRegisteredHandler('models:openLibrary')(makeEvent(), { folder: missing })).error
+    ).toContain('模型文件夹不存在')
   })
 })

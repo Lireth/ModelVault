@@ -195,6 +195,10 @@ export const IPC_PAYLOAD_SCHEMAS = {
 
   // ---------- 存储域 ----------
   'models:loadStore': vVoid(),
+  // F1：按路径打开已保存模型库（优先返回本地索引）
+  'models:openLibrary': vObj({
+    fields: { folder: vStr({ required: true, max: 1000 }) }
+  }),
   'models:chooseFolder': vVoid(),
 
   // ---------- 设置域 ----------

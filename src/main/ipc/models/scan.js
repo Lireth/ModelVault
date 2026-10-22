@@ -17,6 +17,7 @@ import { ensureRootStore } from './store'
 import { getDecorateCacheRoot, awaitThumbDrain, resetDecorateCache } from './model-state'
 import { wrapHandler, checkExistingDirectory } from '../handler'
 import { normalizePartialScanDirs } from '../../../shared/scan-dirs'
+import { writeLibraryIndex } from '../../services/library-index'
 
 /**
  * 扫描链路：全量扫描模型目录（进度推送、可取消）、局部增量扫描与取消入口。
@@ -152,6 +153,13 @@ export function registerScanHandlers() {
       if (errors.length > 0) {
         logger.warn(`扫描错误详情: ${JSON.stringify(errors.slice(0, 20))}`)
       }
+
+      // F1：全量扫描完成后写入本地索引（秒切库/启动缓存）。
+      // 索引只作展示缓存，写失败不影响本次扫描结果
+      await writeLibraryIndex(root, {
+        models: decorated,
+        durationMs: Date.now() - startedAt
+      })
 
       // 响应先返回，缺失的缩略图由后台队列补齐（完成后推送 thumbsReady 更新）
       startThumbDrain(win)

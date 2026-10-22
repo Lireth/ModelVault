@@ -18,6 +18,7 @@ function makeComponentApiMock() {
     getPathForFile: vi.fn((file) => (file && typeof file.path === 'string' ? file.path : '')),
     models: {
       loadStore: vi.fn(),
+      openLibrary: vi.fn(),
       scan: vi.fn(),
       cancelScan: vi.fn(() => Promise.resolve({ ok: false })),
       chooseFolder: vi.fn(),
@@ -66,6 +67,7 @@ function resetStoreState() {
   state.folder = ''
   state.booting = false
   state.scanning = false
+  state.backgroundScanning = false
   state.scanError = ''
   state.progress = { dirs: 0, found: 0, current: '' }
   replaceModels([])

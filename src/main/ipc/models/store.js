@@ -2,6 +2,7 @@ import { BrowserWindow, dialog } from 'electron'
 import logger from '../../logger'
 import {
   getMetaMapByAbsPath,
+  getModelMeta,
   getCurrentRoot,
   getSettings,
   loadSettings,
@@ -22,6 +23,7 @@ import {
 } from '../../services/maintenance-lock'
 import { awaitThumbDrain } from './model-state'
 import { wrapHandler, checkExistingDirectory } from '../handler'
+import { readLibraryIndex } from '../../services/library-index'
 
 /**
  * 存储与设置链路：持久化数据加载、模型根目录选择、应用设置更新。
@@ -30,6 +32,50 @@ import { wrapHandler, checkExistingDirectory } from '../handler'
  * 拦截渲染进程经 settings:update 写入的任意字符串路径——若不做校验，
  * 后续任意一次元数据写入即在该目录创建 .modelvault/（任意目录写入原语）。
  */
+
+/**
+ * 目录是否属于模型库列表（与 scan.js 同规则：Windows 大小写不敏感）。
+ * @param {string} dir 目标目录
+ * @returns {boolean}
+ */
+function isKnownLibrary(dir) {
+  const list = getSettings().modelsFolders || []
+  const lower = String(dir).toLowerCase()
+  return list.some((f) => typeof f === 'string' && f.toLowerCase() === lower)
+}
+
+/**
+ * F1：用当前内存元数据覆盖索引中的用户标注字段。
+ * 索引是上一次全量扫描的快照；收藏/评分/备注等可能在扫描后修改。
+ * 覆盖标量标注保证秒开列表即刻准确；封面/缩略图仍由后台校验刷新。
+ * @param {object[]} models 索引中的装饰模型
+ * @returns {object[]} 合并后的模型列表
+ */
+function overlayCurrentMeta(models) {
+  if (!Array.isArray(models)) return models
+  return models.map((m) => {
+    const meta = getModelMeta(m.id)
+    if (!meta) return m
+    return {
+      ...m,
+      alias: meta.alias || '',
+      note: meta.note || '',
+      noteSource: meta.noteSource || '',
+      favorite: meta.favorite === true,
+      nsfw: meta.nsfw === true,
+      rating: meta.rating || 0,
+      params: meta.params || null,
+      tags: meta.tags || [],
+      triggerWords: meta.triggerWords || '',
+      triggerWordsSource: meta.triggerWordsSource || '',
+      subCategory:
+        (m.type === 'lora' && m.folderSubCategory) ||
+        meta.subCategory ||
+        (m.type === 'checkpoint' ? 'base' : ''),
+      hash: meta.hash || m.hash || ''
+    }
+  })
+}
 
 /**
  * 确保指定根目录的关联存储已加载。
@@ -104,6 +150,7 @@ export function registerStoreHandlers() {
     try {
       const settings = await loadSettings()
       let metaMap = {}
+      let cachedIndex = null
       if (settings.modelsFolder) {
         // 已设置目录不存在（如磁盘离线/被移动）时不切换关联存储，
         // 防止后续元数据写入在不存在的路径下重建目录树。
@@ -132,16 +179,69 @@ export function registerStoreHandlers() {
             settings.autoRescan === true,
             settings.excludeDirs || []
           )
+          // F1：返回上次全量扫描的本地索引，渲染层可先秒开列表再后台校验
+          cachedIndex = await readLibraryIndex(settings.modelsFolder)
+          if (cachedIndex) {
+            cachedIndex = {
+              ...cachedIndex,
+              models: overlayCurrentMeta(cachedIndex.models)
+            }
+          }
         }
       }
       return {
         settings,
-        models: metaMap
+        models: metaMap,
+        cachedIndex
       }
     } finally {
       releaseMaintenance(token)
     }
   }, { errorPrefix: '数据加载失败' })
+
+  // F1：打开已保存的模型库并优先返回本地索引（秒切库）。
+  // 索引缺失/失效时 cached=false，由渲染层回退全量扫描。
+  wrapHandler('models:openLibrary', async (event, { folder } = {}) => {
+    const root = typeof folder === 'string' ? folder.trim() : ''
+    if (!root) return { error: '缺少模型文件夹' }
+    if (!isKnownLibrary(root)) {
+      logger.warn(`拒绝打开模型库列表之外的目录: ${root}`)
+      return { error: '该目录不在模型库列表中' }
+    }
+    const dirInvalid = await checkExistingDirectory(root, '模型文件夹不存在或不是目录')
+    if (dirInvalid) return { error: dirInvalid }
+
+    // 先探测索引：无可用索引时不切换主进程根目录，交由渲染层走
+    // scanModels 的 V-02 状态机（扫描失败可回滚旧库）
+    const cachedIndex = await readLibraryIndex(root)
+    if (!cachedIndex) {
+      logger.info(`模型库无可用本地索引，回退全量扫描: ${root}`)
+      return { root, cached: false }
+    }
+
+    const token = tryAcquireMaintenance('switch', root)
+    if (!token) return { error: maintenanceBusyMessage() }
+    try {
+      await ensureRootStore(root, { maintenanceToken: token })
+      // 切库成功后才提交激活库（与扫描链路同一 V-02 状态机）
+      await updateSettings({ modelsFolder: root })
+      const settings = getSettings()
+      syncWatcher(root, settings.autoRescan === true, settings.excludeDirs || [])
+      logger.info(
+        `模型库已打开（本地索引 ${cachedIndex.models.length} 个模型）: ${root}`
+      )
+      return {
+        root,
+        settings,
+        cached: true,
+        models: overlayCurrentMeta(cachedIndex.models),
+        savedAt: cachedIndex.savedAt,
+        durationMs: cachedIndex.durationMs
+      }
+    } finally {
+      releaseMaintenance(token)
+    }
+  }, { errorPrefix: '打开模型库失败' })
 
   // 选择模型根目录
   wrapHandler('models:chooseFolder', async (event) => {
