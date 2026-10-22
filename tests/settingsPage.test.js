@@ -196,6 +196,29 @@ describe('SettingsPage 主题跟随系统与自定义强调色', () => {
   })
 })
 
+describe('SettingsPage 后台哈希预热策略（O1）', () => {
+  it('切换策略后进入保存载荷（默认仅重复候选）', async () => {
+    window.api.settings.update.mockImplementation((patch) =>
+      Promise.resolve({ settings: { ...state.settings, ...patch } })
+    )
+    state.settings.hashWarmup = 'candidates'
+    const wrapper = await mountSettings()
+
+    expect(wrapper.text()).toContain('后台哈希预热')
+    const fullBtn = wrapper.findAll('.seg-btn').find((b) => b.text() === '全库')
+    expect(fullBtn).toBeTruthy()
+    await fullBtn.trigger('click')
+
+    const saveBtn = wrapper.findAll('button').find((b) => b.text() === '保存')
+    await saveBtn.trigger('click')
+    await flushPromises()
+    expect(window.api.settings.update).toHaveBeenCalledWith(
+      expect.objectContaining({ hashWarmup: 'full' })
+    )
+    wrapper.unmount()
+  })
+})
+
 describe('SettingsPage 模型库体检（V-07）', () => {
   it('展示体检结果，并在确认后调用一键修复', async () => {
     const wrapper = await mountSettings()

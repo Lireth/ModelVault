@@ -33,6 +33,7 @@ export {
   CARD_SIZE_PRESETS,
   CARD_SIZE_OPTIONS,
   SCAN_EXTENSION_OPTIONS,
+  HASH_WARMUP_OPTIONS,
   sortDirectional,
   tagsForType,
   typeInfo,

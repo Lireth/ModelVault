@@ -117,8 +117,13 @@ export function registerStoreHandlers() {
           await pruneOrphanCovers()
           metaMap = getMetaMapByAbsPath()
           // 启动后后台预热缺失的模型哈希（Civitai 识别加速）：仅入队，
-          // 由预热服务延迟逐个处理，已缓存/文件缺失的条目消费时秒级跳过
-          requestHashWarmup(Object.keys(metaMap))
+          // 由预热服务延迟逐个处理，已缓存/文件缺失的条目消费时秒级跳过。
+          // O1：启动时只有元数据键、没有体积——full=true 重置体积索引，
+          // candidates 策略下由 drain 逐个 stat 后按真实体积决定是否计算
+          requestHashWarmup(Object.keys(metaMap), {
+            mode: settings.hashWarmup,
+            full: true
+          })
           // 目录监控启动路径闭合（OPT-19）：启动时若 autoScan 关闭则不会触发扫描，
           // 此前 watcher 仅在扫描/设置更新时同步，导致 autoRescan 开启却静默不生效；
           // 此处按设置补一次同步（同根同状态时为幂等刷新）

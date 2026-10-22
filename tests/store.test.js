@@ -508,6 +508,17 @@ describe('应用设置规范化', () => {
     expect(s.theme).toBe('dark')
   })
 
+  it('hashWarmup 接受 candidates/full/off，未知值回退 candidates', async () => {
+    for (const mode of ['full', 'off', 'candidates']) {
+      await updateSettings({ hashWarmup: mode })
+      const s = await loadSettings()
+      expect(s.hashWarmup).toBe(mode)
+    }
+    await updateSettings({ hashWarmup: 'turbo' })
+    const s = await loadSettings()
+    expect(s.hashWarmup).toBe('candidates')
+  })
+
   it('viewMode 接受 grid/list，未知值回退 grid', async () => {
     await updateSettings({ viewMode: 'list' })
     let s = await loadSettings()

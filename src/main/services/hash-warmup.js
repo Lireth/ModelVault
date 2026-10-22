@@ -7,9 +7,14 @@ import { computeFileHash } from './civitai'
  * 模型哈希后台预热服务（Civitai 识别加速）：
  *
  * Civitai by-hash 反查要求完整的文件 SHA256，大文件（1-10GB）首次计算
- * 耗时数十秒。本服务在应用启动/扫描完成后于后台逐个预计算缺失的哈希并
+ * 耗时数十秒。本服务在应用启动/扫描完成后于后台预计算缺失的哈希并
  * 写入元数据缓存（hash/hashMtime，与识别链路共用同一缓存约定），用户点击
  * 识别时命中缓存即可秒回。
+ *
+ * O1 体积预筛：重复检测只可能发生在大小相同的文件之间（内容相同必然
+ * 大小相同）。默认 candidates 策略先按体积分组，仅对同尺寸成员数 ≥2 的
+ * 模型读盘计算，避免首次扫描后把整个模型库顺序读一遍；详情页/识别的
+ * 按需任务（priority）不受策略限制。全库预热与关闭策略由设置显式选择。
  *
  * 设计要点：
  * - 单文件串行处理：避免多路大文件读取争抢磁盘 I/O（与后台缩略图共用磁盘）；
@@ -29,6 +34,26 @@ const WARMUP_DELAY_MS = 3000
 
 /** 进度事件节流间隔（ms）：哈希每块（8MB）回调一次，高频事件须限流 */
 const PROGRESS_INTERVAL_MS = 300
+
+/**
+ * 哈希预热策略（O1）：
+ * - candidates：仅对「存在同尺寸文件」的模型计算 SHA256——内容相同的文件
+ *   必然大小相同，大小唯一的模型不可能存在重复副本，无需读盘哈希；
+ * - full：为全部缺失哈希的模型计算（旧行为，供设置显式选择）；
+ * - off：后台不预热，仅保留详情页/识别链路的按需计算。
+ * 服务层缺省 full 保持既有调用语义；应用入口始终显式传入设置值。
+ */
+const VALID_MODES = new Set(['candidates', 'full', 'off'])
+const DEFAULT_MODE = 'full'
+
+/**
+ * 已知模型体积/修改时间（id -> {size, mtimeMs}）：
+ * 候选预筛的数据源。full 请求（全量扫描/启动加载）整体替换；
+ * 局部扫描请求按 id 合并，允许保留历史体积用于跨子树的同尺寸碰撞判断。
+ */
+const knownInfo = new Map()
+/** 体积 -> 模型 id 集合（同尺寸反查，用于发现重复候选） */
+const sizeIndex = new Map()
 
 /** 进度事件推送监听（由 IPC 层经 setWarmupProgressListener 注册并广播渲染进程） */
 let progressListener = null
@@ -83,12 +108,22 @@ function emitProgress(snap, force = false) {
   }
 }
 
-/** 待预热队列（FIFO；优先任务 unshift 插队） */
+/**
+ * 待预热队列（FIFO；优先任务 unshift 插队）：
+ * 元素为 { id, force, mode }——force 标记详情页/识别的按需任务（不受策略限制），
+ * mode 记录入队时的策略快照，避免设置切换后对已排队任务产生歧义。
+ */
 const queue = []
 /** 队列去重集合（与 queue 同步维护） */
 const queued = new Set()
 /** 进行中的哈希任务：id -> { mtimeMs, promise }（供识别链路共享复用） */
 const inflight = new Map()
+/**
+ * 本轮已消费的模型 id（用于 done 计数去重）：
+ * 候选预筛在体积首次暴露碰撞时可能把先前跳过的模型重新入队，
+ * 同一模型不应被重复计数（否则进度显示会超过实际模型数）。
+ */
+const consumedIds = new Set()
 /** 延迟启动定时器（全局唯一，重复调度时保留更早的计划） */
 let drainTimer = null
 /** 定时器计划触发时间（ms 时间戳），用于比较保留更早计划 */
@@ -145,25 +180,187 @@ export function computeAndCacheHash(id, mtimeMs) {
   return promise
 }
 
+/** 规范化请求项：字符串或 {id, size, mtimeMs} 对象（扫描装饰结果可直接传入） */
+function normalizeRequestItems(items) {
+  const out = []
+  for (const item of Array.isArray(items) ? items : []) {
+    if (typeof item === 'string' && item) {
+      out.push({ id: item, size: null, mtimeMs: null })
+    } else if (item && typeof item === 'object' && typeof item.id === 'string' && item.id) {
+      out.push({
+        id: item.id,
+        size: Number.isFinite(item.size) ? item.size : null,
+        mtimeMs: Number.isFinite(item.mtimeMs) ? item.mtimeMs : null
+      })
+    }
+  }
+  return out
+}
+
+/** 策略值收口：未知值回退 full（保持既有调用方语义） */
+function normalizeMode(mode) {
+  return VALID_MODES.has(mode) ? mode : DEFAULT_MODE
+}
+
+/** 从体积反查索引中移除某 id（更新体积前调用） */
+function removeFromSizeIndex(id) {
+  const info = knownInfo.get(id)
+  if (!info || !Number.isFinite(info.size)) return
+  const set = sizeIndex.get(info.size)
+  if (!set) return
+  set.delete(id)
+  if (set.size === 0) sizeIndex.delete(info.size)
+}
+
 /**
- * 请求预热一批模型的哈希（去重入队，由 drain 后台串行消费）：
- * 已在队列/计算中的模型自动跳过；缓存是否有效由消费时按 mtime 复查。
- * @param {string[]} ids 模型绝对路径列表
- * @param {{priority?: boolean, delayMs?: number}} [opts]
- *   priority: 插队到队首并立即启动（详情页打开当前模型）；
+ * 记录/更新模型的体积与 mtime（体积未知时保留旧值，避免降级为无信息）。
+ * @param {string} id 模型绝对路径
+ * @param {number|null} size 文件字节数
+ * @param {number|null} mtimeMs 文件修改时间
+ */
+function rememberInfo(id, size, mtimeMs) {
+  const prev = knownInfo.get(id)
+  if (prev) removeFromSizeIndex(id)
+  const next = {
+    size: Number.isFinite(size)
+      ? size
+      : prev && Number.isFinite(prev.size)
+        ? prev.size
+        : null,
+    mtimeMs: Number.isFinite(mtimeMs)
+      ? mtimeMs
+      : prev && Number.isFinite(prev.mtimeMs)
+        ? prev.mtimeMs
+        : null
+  }
+  knownInfo.set(id, next)
+  if (Number.isFinite(next.size)) {
+    let set = sizeIndex.get(next.size)
+    if (!set) {
+      set = new Set()
+      sizeIndex.set(next.size, set)
+    }
+    set.add(id)
+  }
+}
+
+/** 缓存是否确定有效（哈希存在且 mtime 与已知值一致；mtime 未知时保守返回 false） */
+function hasValidCachedHash(id) {
+  const info = knownInfo.get(id)
+  const meta = getModelMeta(id)
+  return Boolean(
+    meta?.hash &&
+      info &&
+      Number.isFinite(info.mtimeMs) &&
+      meta.hashMtime === info.mtimeMs
+  )
+}
+
+/**
+ * 丢弃队列中尚未开始的普通后台任务（保留详情页/识别的 force 任务）。
+ * 全量快照请求代表「当前库 + 当前策略」的最新事实：旧排队项可能来自
+ * 已删除模型或旧策略（如用户切换到关闭/仅候选），必须作废后重新规划；
+ * 已在计算的单个文件不中断（与扫描暂停语义一致）。
+ */
+function dropQueuedBackground() {
+  for (let i = queue.length - 1; i >= 0; i--) {
+    if (queue[i].force) continue
+    queued.delete(queue[i].id)
+    queue.splice(i, 1)
+  }
+}
+
+/** 入队（force=true 时插队，供详情页/识别按需任务使用） */
+function pushQueue(id, force, mode) {
+  if (queued.has(id) || inflight.has(id)) return false
+  queued.add(id)
+  if (force) queue.unshift({ id, force: true, mode: 'full' })
+  else queue.push({ id, force: false, mode })
+  return true
+}
+
+/**
+ * 某体积分组出现 ≥2 个文件时，把组内尚未计算/缓存无效的模型一并入队。
+ * 候选预筛的关键闭环：先前因体积唯一而跳过的模型，在后续扫描/局部扫描
+ * 发现同尺寸文件时必须被补算，否则重复检测会漏掉「先出现的那一份」。
+ * @param {number} size 文件字节数
+ * @param {string|undefined} excludeId 当前正在处理的 id（避免重复入队自身）
+ * @returns {boolean} 是否有新任务入队
+ */
+function enqueueCollisionPeers(size, excludeId = undefined) {
+  const ids = sizeIndex.get(size)
+  if (!ids || ids.size < 2) return false
+  let added = false
+  for (const id of ids) {
+    if (id === excludeId) continue
+    if (queued.has(id) || inflight.has(id)) continue
+    if (hasValidCachedHash(id)) continue
+    if (pushQueue(id, false, 'candidates')) added = true
+  }
+  return added
+}
+
+/**
+ * 请求预热一批模型的哈希（去重入队，由 drain 后台串行消费）。
+ *
+ * O1：默认策略由应用入口显式传入。candidates 模式下先按体积分组，仅对
+ * 同尺寸成员数 ≥2 的模型计算 SHA256；full 模式保持旧行为；off 模式不入队
+ * （priority 按需任务始终生效）。体积未知的条目先入队，由 drain 在 stat
+ * 后按真实体积决定是否计算/是否补入同尺寸同伴。
+ *
+ * @param {Array<string|{id:string, size?:number, mtimeMs?:number}>} items 模型列表
+ * @param {{priority?: boolean, delayMs?: number, mode?: 'candidates'|'full'|'off',
+ *   full?: boolean}} [opts]
+ *   priority: 插队到队首并立即启动（详情页打开当前模型），不受策略限制；
+ *   mode: 预热策略（缺省 full，保持服务层既有语义）；
+ *   full: 本次请求是否代表完整库快照（全量扫描/启动加载 → 重置体积索引）；
  *   delayMs: 普通入队的延迟启动间隔（默认 3s）
  */
-export function requestHashWarmup(ids, opts = {}) {
+export function requestHashWarmup(items, opts = {}) {
   const priority = opts.priority === true
-  let added = false
-  for (const id of Array.isArray(ids) ? ids : []) {
-    if (typeof id !== 'string' || !id || queued.has(id) || inflight.has(id)) continue
-    queued.add(id)
-    if (priority) queue.unshift(id)
-    else queue.push(id)
-    added = true
+  const mode = priority ? 'full' : normalizeMode(opts.mode)
+  const list = normalizeRequestItems(items)
+  // 全量快照：作废旧策略/旧库的排队项，并整体替换体积索引，
+  // 清除已删除/已移出模型的陈旧记录（在途计算与 force 任务保留）
+  if (opts.full === true) {
+    dropQueuedBackground()
+    knownInfo.clear()
+    sizeIndex.clear()
   }
-  if (!added) return
+  for (const item of list) rememberInfo(item.id, item.size, item.mtimeMs)
+
+  let added = false
+  const touchedSizes = new Set()
+  for (const item of list) {
+    if (priority) {
+      if (pushQueue(item.id, true, 'full')) added = true
+      continue
+    }
+    if (mode === 'off') continue
+    if (mode === 'full') {
+      if (pushQueue(item.id, false, 'full')) added = true
+      continue
+    }
+    // candidates：体积已知则先记录分组，待全部条目登记后统一判定；
+    // 体积未知则入队，由 drain 在 stat 后按真实体积决定
+    const info = knownInfo.get(item.id)
+    if (Number.isFinite(info?.size)) touchedSizes.add(info.size)
+    else if (pushQueue(item.id, false, 'candidates')) added = true
+  }
+  if (mode === 'candidates') {
+    for (const size of touchedSizes) {
+      if (enqueueCollisionPeers(size)) added = true
+    }
+  }
+
+  if (!added) {
+    // 全量快照可能刚丢弃了旧排队项（如切换到关闭策略）：广播一次以清除
+    // 渲染层残留的「排队中」计数，避免界面显示已不存在的任务
+    if (opts.full === true) {
+      emitProgress({ active: false, id: '', percent: 0, hashedBytes: 0, totalBytes: 0 }, true)
+    }
+    return
+  }
   // 队列计数变化立即广播（渲染层可显示排队数）
   emitProgress({ active: false, id: '', percent: 0, hashedBytes: 0, totalBytes: 0 }, true)
   scheduleDrain(priority ? 0 : opts.delayMs ?? WARMUP_DELAY_MS)
@@ -195,29 +392,44 @@ function scheduleDrain(delayMs) {
   }, delayMs)
 }
 
-/** 串行消费队列：逐个 stat 复查 → 跳过有效缓存 → 计算并回写 */
+/** 串行消费队列：逐个 stat 复查 → 候选策略判定 → 跳过有效缓存 → 计算并回写 */
 async function drain() {
   if (draining) return
   draining = true
   try {
     while (queue.length > 0 && !paused) {
-      const id = queue.shift()
+      const task = queue.shift()
+      const id = task.id
       queued.delete(id)
-      // 出队即计消费（缓存命中/文件缺失的跳过条目同样计入，保持计数连贯）
-      doneCount += 1
+      // 出队即计消费（缓存命中/文件缺失/候选跳过的条目同样计入，保持计数连贯）；
+      // consumedIds 防止「候选碰撞后补入队」把同一模型重复计数
+      if (!consumedIds.has(id)) {
+        consumedIds.add(id)
+        doneCount += 1
+      }
       if (inflight.has(id)) continue
-      let mtimeMs
+      let stat
       try {
-        const stat = await fs.stat(id)
+        stat = await fs.stat(id)
         if (!stat.isFile()) continue
-        mtimeMs = stat.mtimeMs
       } catch {
         continue // 文件已被删除/移动：静默跳过
       }
+      // 以真实体积更新索引：扫描结果里的 size 可能已过期，stat 是候选判定的唯一依据
+      rememberInfo(id, stat.size, stat.mtimeMs)
+      if (!task.force) {
+        if (task.mode === 'off') continue
+        if (task.mode === 'candidates') {
+          const group = sizeIndex.get(stat.size)
+          if (!group || group.size < 2) continue // 体积唯一：不可能有重复副本
+          // 本次 stat 可能首次建立同尺寸分组：把组内其他尚未计算的模型补入队
+          enqueueCollisionPeers(stat.size, id)
+        }
+      }
       const meta = getModelMeta(id)
-      if (meta?.hash && meta.hashMtime === mtimeMs) continue // 缓存有效，免计算
+      if (meta?.hash && meta.hashMtime === stat.mtimeMs) continue // 缓存有效，免计算
       try {
-        await computeAndCacheHash(id, mtimeMs)
+        await computeAndCacheHash(id, stat.mtimeMs)
         logger.info(`后台哈希预热完成: ${id}`)
       } catch (err) {
         logger.warn(`后台哈希预热失败: ${id} ${err.message}`)
@@ -227,6 +439,7 @@ async function drain() {
       // 本轮批量清空：先广播最终计数，再归零供下一轮从 0 计数
       emitProgress({ active: false, id: '', percent: 0, hashedBytes: 0, totalBytes: 0 }, true)
       doneCount = 0
+      consumedIds.clear()
     }
   } finally {
     draining = false
@@ -247,6 +460,9 @@ export function resetHashWarmupForTests() {
   queue.length = 0
   queued.clear()
   inflight.clear()
+  knownInfo.clear()
+  sizeIndex.clear()
+  consumedIds.clear()
   paused = false
   draining = false
   doneCount = 0

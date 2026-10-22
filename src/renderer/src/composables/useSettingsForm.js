@@ -32,7 +32,8 @@ export function useSettingsForm() {
     showMtime: true,
     showParams: true,
     civitaiEnabled: true,
-    nsfwBlur: true
+    nsfwBlur: true,
+    hashWarmup: 'candidates'
   })
 
   let savedTheme = 'dark'
@@ -57,6 +58,7 @@ export function useSettingsForm() {
     form.showParams = state.settings.showParams !== false
     form.civitaiEnabled = state.settings.civitaiEnabled !== false
     form.nsfwBlur = state.settings.nsfwBlur !== false
+    form.hashWarmup = state.settings.hashWarmup || 'candidates'
     // 填充完成后建立脏检测基线（A9）：此后表单值与快照不一致即为脏
     savedSnapshot = formSnapshotValue()
   }
@@ -86,7 +88,8 @@ export function useSettingsForm() {
       showMtime: form.showMtime,
       showParams: form.showParams,
       civitaiEnabled: form.civitaiEnabled,
-      nsfwBlur: form.nsfwBlur
+      nsfwBlur: form.nsfwBlur,
+      hashWarmup: form.hashWarmup
     }
   }
 
@@ -107,6 +110,7 @@ export function useSettingsForm() {
       form.showParams !== s.showParams ||
       form.civitaiEnabled !== s.civitaiEnabled ||
       form.nsfwBlur !== s.nsfwBlur ||
+      form.hashWarmup !== s.hashWarmup ||
       form.scanExtensions.length !== s.scanExtensions.length ||
       form.scanExtensions.slice().sort().some((e, i) => e !== s.scanExtensions[i])
     )

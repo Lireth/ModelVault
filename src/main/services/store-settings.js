@@ -4,7 +4,12 @@ import path from 'node:path'
 import logger from '../logger'
 // A-12 枚举/默认值单一来源（src/shared）：校验集合与渲染层选项共用同一常量
 import { MODEL_EXTENSION_SET } from '../../shared/model-extensions'
-import { SORT_BY_KEYS, CARD_SIZE_KEYS, VIEW_MODE_KEYS } from '../../shared/app-enums'
+import {
+  SORT_BY_KEYS,
+  CARD_SIZE_KEYS,
+  VIEW_MODE_KEYS,
+  HASH_WARMUP_KEYS
+} from '../../shared/app-enums'
 import { DEFAULT_SETTINGS } from '../../shared/defaults'
 import { atomicWriteFile } from './atomic-write'
 import { notifyStoreSaveError } from './store-events'
@@ -92,6 +97,7 @@ function defaultLibrarySettings() {
     civitaiEnabled: base.civitaiEnabled,
     nsfwBlur: base.nsfwBlur,
     autoRescan: base.autoRescan,
+    hashWarmup: base.hashWarmup,
     savedViews: [...base.savedViews]
   }
 }
@@ -183,6 +189,7 @@ export function normalizeLibrarySettings(raw) {
     civitaiEnabled: raw.civitaiEnabled !== false,
     nsfwBlur: raw.nsfwBlur !== false,
     autoRescan: raw.autoRescan === true,
+    hashWarmup: HASH_WARMUP_KEYS.has(raw.hashWarmup) ? raw.hashWarmup : base.hashWarmup,
     savedViews: normalizeSavedViews(raw.savedViews)
   }
 }

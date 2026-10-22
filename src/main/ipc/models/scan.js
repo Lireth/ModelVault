@@ -215,8 +215,13 @@ export function registerScanHandlers() {
 
       // 后台预热缺失的模型哈希（Civitai 识别加速）：缓存缺失的条目按
       // mtime 逐个计算回写，已缓存/文件缺失的条目消费时秒级跳过；
-      // 扫描刚结束磁盘繁忙，预热服务延迟启动
-      requestHashWarmup(decorated.map((m) => m.id))
+      // 扫描刚结束磁盘繁忙，预热服务延迟启动。
+      // O1：传入装饰结果的 size/mtime 并标记为完整库快照——候选策略据此
+      // 只对同尺寸模型计算，full=true 同步重置体积索引（清除已删除模型）
+      requestHashWarmup(decorated, {
+        mode: appSettings.hashWarmup,
+        full: true
+      })
 
       // 扫描成功后与 settings.modelsFolder 保持一致（C6）：
       // 显式传入 folder 的扫描也持久化根目录，与 models:chooseFolder 行为闭环
@@ -338,8 +343,13 @@ export function registerScanHandlers() {
       // 装饰中新登记的缩略图任务经既有后台链生成并推送
       startThumbDrain(win)
 
-      // 受影响子树的哈希预热（同全量扫描，Civitai 识别加速）
-      requestHashWarmup(decorated.map((m) => m.id))
+      // 受影响子树的哈希预热（同全量扫描，Civitai 识别加速）。
+      // O1：局部扫描不是完整快照——按 id 合并体积索引，使新增文件与子树外
+      // 同尺寸模型也能被识别为重复候选
+      requestHashWarmup(decorated, {
+        mode: appSettings.hashWarmup,
+        full: false
+      })
 
       logger.info(
         `局部扫描完成：${subDirs.length} 个子树 → ${decorated.length} 个模型 / 重关联 ${relinkResult.relinked} 个`

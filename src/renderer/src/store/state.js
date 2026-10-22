@@ -7,7 +7,11 @@ import {
   CHECKPOINT_TAG_DEFS,
   BASE_FAMILIES
 } from '../../../shared/model-categories'
-import { SORT_OPTION_DEFS, CARD_SIZE_DEFS } from '../../../shared/app-enums'
+import {
+  SORT_OPTION_DEFS,
+  CARD_SIZE_DEFS,
+  HASH_WARMUP_DEFS
+} from '../../../shared/app-enums'
 import { MODEL_EXTENSIONS as SHARED_SCAN_EXTS } from '../../../shared/model-extensions'
 import { DEFAULT_SETTINGS } from '../../../shared/defaults'
 
@@ -75,6 +79,9 @@ export const CARD_SIZE_OPTIONS = CARD_SIZE_DEFS
 
 /** 可勾选的扫描文件类型选项（A-12 单一来源 shared/model-extensions.js） */
 export const SCAN_EXTENSION_OPTIONS = SHARED_SCAN_EXTS
+
+/** 后台哈希预热策略选项（O1 单一来源 shared/app-enums.js） */
+export const HASH_WARMUP_OPTIONS = HASH_WARMUP_DEFS
 
 /** 分类标签 key→显示信息映射（搜索域构建复用） */
 export const SUB_MAP = Object.fromEntries(
