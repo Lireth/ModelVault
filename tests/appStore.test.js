@@ -221,6 +221,48 @@ describe('partialScanModels 增量合并（A-03）', () => {
     expect(state.toasts.some((t) => t.type === 'error')).toBe(true)
   })
 
+  it('O3：子树超过上限时收敛为一级目录后发送，不静默截断', async () => {
+    setGrid([])
+    api.models.partialScan.mockResolvedValue({ models: [], dirs: ['bulk'], relinked: 0 })
+    const dirs = Array.from({ length: 205 }, (_, i) => `bulk/item-${i}`)
+
+    await partialScanModels(dirs)
+
+    expect(api.models.partialScan).toHaveBeenCalledWith({
+      folder: 'D:\\models',
+      dirs: ['bulk']
+    })
+  })
+
+  it('O3：一级目录仍超过上限时降级全量扫描', async () => {
+    setGrid([makeModel('keep-id')])
+    api.models.scan.mockResolvedValue({ models: [makeModel('keep-id')], errors: [] })
+    const dirs = Array.from({ length: 205 }, (_, i) => `top${i}`)
+
+    await partialScanModels(dirs)
+
+    expect(api.models.partialScan).not.toHaveBeenCalled()
+    expect(api.models.scan).toHaveBeenCalled()
+    expect(state.toasts.some((t) => t.type === 'warn' && t.text.includes('变更目录过多'))).toBe(
+      true
+    )
+  })
+
+  it('O3：主进程返回 fullScanRequired 时降级全量扫描', async () => {
+    setGrid([makeModel('keep-id')])
+    api.models.partialScan.mockResolvedValue({ fullScanRequired: true })
+    api.models.scan.mockResolvedValue({ models: [makeModel('keep-id')], errors: [] })
+
+    await partialScanModels(['lora'])
+    // fallback 全量扫描在 finalize 中异步发起
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(api.models.scan).toHaveBeenCalled()
+    expect(state.toasts.some((t) => t.type === 'warn' && t.text.includes('变更目录过多'))).toBe(
+      true
+    )
+  })
+
   it('请求发出后切库：旧根响应丢弃，不覆盖新库列表（B-01）', async () => {
     setGrid([makeModel('D:\\models\\lora\\a.safetensors', { name: 'a', relDir: 'lora' })])
     let resolveRequest

@@ -1,6 +1,11 @@
 import { state, replaceModels } from './state'
 import { toast } from './toast'
 import { scanModels } from './library'
+import {
+  MAX_PARTIAL_SCAN_DIRS,
+  collapseDirsToTopLevel,
+  dedupeAndPruneDescendants
+} from '../../../shared/scan-dirs'
 
 /**
  * 局部增量扫描（A-03，watcher 变更子树驱动，A-04 自 appStore.js 拆出）。
@@ -40,6 +45,26 @@ function normalizeDirs(dirs) {
     out.push(item)
   }
   return out
+}
+
+/**
+ * 发送前收敛子树（O3）：
+ * - 先去重/剔除后代；
+ * - 超过 IPC 上限时收敛到一级目录（scanner 递归整棵子树，语义等价覆盖）；
+ * - 一级目录仍超限时返回 fullScan，由调用方降级全量扫描，绝不截断。
+ * @param {string[]} dirs 已 trim 的子树
+ * @returns {{dirs: string[], fullScan: boolean}}
+ */
+function prepareScanDirs(dirs) {
+  const pruned = dedupeAndPruneDescendants(dirs)
+  if (pruned.length <= MAX_PARTIAL_SCAN_DIRS) {
+    return { dirs: pruned, fullScan: false }
+  }
+  const collapsed = collapseDirsToTopLevel(pruned)
+  if (collapsed.length <= MAX_PARTIAL_SCAN_DIRS) {
+    return { dirs: collapsed, fullScan: false }
+  }
+  return { dirs: [], fullScan: true }
 }
 
 /** 重置排队状态 */
@@ -87,12 +112,26 @@ export async function partialScanModels(dirs) {
   const root = state.folder
   if (!root) return
 
+  // O3：发送前收敛（去后代 / 一级目录压缩）。超过上限且无法收敛时
+  // 降级全量扫描——不允许把部分子树静默丢弃在陈旧状态。
+  const prepared = prepareScanDirs(normalizedDirs)
+  if (prepared.fullScan) {
+    toast('warn', '变更目录过多，已改为完整扫描')
+    if (state.partialScanning) {
+      enqueue(root, [])
+      return
+    }
+    clearQueue()
+    return scanModels()
+  }
+  const scanDirs = prepared.dirs
+
   // 在途：合并子树后串行补扫，避免并发局部扫描互相覆盖结果
   if (state.partialScanning) {
-    enqueue(root, normalizedDirs)
+    enqueue(root, scanDirs)
     return
   }
-  if (normalizedDirs.length === 0) {
+  if (scanDirs.length === 0) {
     clearQueue()
     return scanModels()
   }
@@ -144,9 +183,17 @@ export async function partialScanModels(dirs) {
   }
 
   try {
-    const res = await window.api.models.partialScan({ folder: root, dirs: normalizedDirs })
+    const res = await window.api.models.partialScan({ folder: root, dirs: scanDirs })
     if (res.canceled) {
       canceled = true
+      return
+    }
+    // 主进程侧仍超限（例如一级目录本身超过 200 个）：明确降级全量扫描
+    if (res.fullScanRequired) {
+      if (root !== state.folder || token !== scanToken) return
+      if (state.scanning) return
+      toast('warn', '变更目录过多，已改为完整扫描')
+      fallbackFull = true
       return
     }
     if (res.error) {
@@ -168,10 +215,14 @@ export async function partialScanModels(dirs) {
     const incoming = Array.isArray(res.models) ? res.models : []
     const incomingIds = new Set(incoming.map((m) => m.id))
     const removedIds = []
+    // 以主进程实际扫描的子树为准（主进程可能进一步收敛到一级目录），
+    // 避免合并范围与扫描范围不一致留下陈旧条目
+    const appliedDirs =
+      Array.isArray(res.dirs) && res.dirs.length > 0 ? res.dirs : scanDirs
 
     // 未受影响子树的旧模型原样保留；受影响的模型以局部扫描结果为准
     const untouched = state.models.filter((m) => {
-      if (!isRelDirAffected(m.relDir || '', normalizedDirs)) return true
+      if (!isRelDirAffected(m.relDir || '', appliedDirs)) return true
       if (incomingIds.has(m.id)) return false
       removedIds.push(m.id)
       return false

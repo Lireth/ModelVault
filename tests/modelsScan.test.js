@@ -51,6 +51,11 @@ import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
 import { scanModels } from '../src/main/services/scanner'
 import { syncWatcher } from '../src/main/services/watcher'
 import { getCurrentRoot, loadSettings, setDataRoot, updateSettings } from '../src/main/services/store'
+import {
+  MAX_PARTIAL_SCAN_DIRS,
+  collapseDirsToTopLevel,
+  normalizePartialScanDirs
+} from '../src/shared/scan-dirs'
 import { drainDeferredThumbs, getThumbPathDeferred } from '../src/main/services/thumbs'
 
 const settingsFile = path.join(fakeUserData, 'settings.json')
@@ -213,6 +218,31 @@ describe('models:partialScan（A-03）', () => {
     expect(vi.mocked(scanModels).mock.calls.at(-1)[2].subDirs).toEqual(['lora', 'vae/deep'])
   })
 
+  it('O3：子树超过业务上限时收敛为一级目录后继续局部扫描（不截断）', async () => {
+    const partial = getRegisteredHandler('models:partialScan')
+    await registerLibrary(root)
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+    const dirs = Array.from({ length: 205 }, (_, i) => `bulk/item-${i}`)
+
+    const res = await partial(makeEvent(), { folder: root, dirs })
+
+    expect(res.dirs).toEqual(['bulk'])
+    expect(vi.mocked(scanModels).mock.calls.at(-1)[2].subDirs).toEqual(['bulk'])
+  })
+
+  it('O3：一级目录仍超过业务上限时返回 fullScanRequired，不执行局部扫描', async () => {
+    const partial = getRegisteredHandler('models:partialScan')
+    await registerLibrary(root)
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+    const callsBefore = vi.mocked(scanModels).mock.calls.length
+    const dirs = Array.from({ length: 205 }, (_, i) => `top${i}`)
+
+    const res = await partial(makeEvent(), { folder: root, dirs })
+
+    expect(res).toEqual({ fullScanRequired: true })
+    expect(vi.mocked(scanModels).mock.calls.length).toBe(callsBefore)
+  })
+
   it('根直属空串与子树并存时两者都保留（语义不重叠）', async () => {
     const partial = getRegisteredHandler('models:partialScan')
     await registerLibrary(root)
@@ -251,6 +281,37 @@ describe('models:partialScan（A-03）', () => {
     expect(res.error).toBe('模型库已切换，请稍后重试')
     expect(getCurrentRoot()).toBe(root)
     expect(vi.mocked(scanModels).mock.calls.length).toBe(callsBefore)
+  })
+})
+
+describe('局部扫描子树超限（O3：不静默截断）', () => {
+  it('超过上限时收敛为一级目录，语义等价覆盖全部变更子树', () => {
+    const dirs = Array.from({ length: MAX_PARTIAL_SCAN_DIRS + 1 }, (_, i) => `bulk/item-${i}`)
+    const res = normalizePartialScanDirs(dirs)
+    expect(res).toEqual({ subDirs: ['bulk'], collapsed: true })
+  })
+
+  it('一级目录仍超过上限时返回 fullScanRequired，而不是丢弃部分子树', () => {
+    const dirs = Array.from({ length: MAX_PARTIAL_SCAN_DIRS + 1 }, (_, i) => `top${i}`)
+    const res = normalizePartialScanDirs(dirs)
+    expect(res).toEqual({ fullScanRequired: true })
+    expect(collapseDirsToTopLevel(dirs)).toHaveLength(MAX_PARTIAL_SCAN_DIRS + 1)
+  })
+
+  it('校验全部条目：超限输入里的非法项不会被数量上限掩盖', () => {
+    const dirs = Array.from({ length: MAX_PARTIAL_SCAN_DIRS }, (_, i) => `bulk/item-${i}`)
+    dirs.push('../escape')
+    expect(normalizePartialScanDirs(dirs)).toEqual({ error: '变更子树参数无效' })
+  })
+
+  it('去重与后代剔除后不超限时保持原始顺序', () => {
+    expect(
+      normalizePartialScanDirs(['vae', 'lora', 'lora/sub', 'vae/deep', 'lora'])
+    ).toEqual({ subDirs: ['vae', 'lora'] })
+  })
+
+  it('一级目录收敛保留根直属空串（不递归子目录，语义不重叠）', () => {
+    expect(collapseDirsToTopLevel(['', 'a/1', 'a/2', 'b/1'])).toEqual(['', 'a', 'b'])
   })
 })
 

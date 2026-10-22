@@ -152,11 +152,15 @@ describe('IPC payload 通道校验（validateIpcPayload）', () => {
     expect(validateIpcPayload('models:scan', { folder: 42 })).toBe('folder 须为字符串')
   })
 
-  it('models:partialScan：dirs 数量与元素类型', () => {
+  it('models:partialScan：dirs 数量与元素类型（业务上限由 handler 收敛，schema 仅设硬上限）', () => {
     expect(validateIpcPayload('models:partialScan', { folder: 'D:\\m', dirs: ['a', ''] })).toBe('')
+    // O3：超过业务上限（200）仍允许进入 handler，由其收敛或全量回退
     expect(
       validateIpcPayload('models:partialScan', { dirs: Array.from({ length: 201 }, () => 'a') })
-    ).toBe('dirs 数量超限（≤200）')
+    ).toBe('')
+    expect(
+      validateIpcPayload('models:partialScan', { dirs: Array.from({ length: 1001 }, () => 'a') })
+    ).toBe('dirs 数量超限（≤1000）')
     expect(
       validateIpcPayload('models:partialScan', { dirs: [123] })
     ).toBe('dirs[0] 须为字符串')

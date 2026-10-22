@@ -33,6 +33,8 @@
  * 测试环境均可直接导入。
  */
 
+import { MAX_PARTIAL_SCAN_DIRS_INPUT } from './scan-dirs'
+
 /**
  * 通道 schema 规则对象（构造器产物，kind 标识类型，其余为约束项）。
  * @typedef {object} SchemaRule
@@ -207,8 +209,9 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'models:partialScan': vObj({
     fields: {
       folder: vStr({ max: 1000 }),
-      // 子树语义校验（逃逸段/反斜杠）在 handler；此处只查类型与规模
-      dirs: vArr({ max: 200, items: vStr({ max: 1000 }) })
+      // 子树语义校验（逃逸段/反斜杠）与超限收敛在 handler（shared/scan-dirs）；
+      // 此处只设防御性硬上限，避免超大 payload 进入结构化克隆
+      dirs: vArr({ max: MAX_PARTIAL_SCAN_DIRS_INPUT, items: vStr({ max: 1000 }) })
     }
   }),
   'models:cancelScan': vVoid(),

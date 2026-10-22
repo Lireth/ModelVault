@@ -16,6 +16,7 @@ import { clearDeferredOwners, decorateModels, startThumbDrain } from './decorate
 import { ensureRootStore } from './store'
 import { getDecorateCacheRoot, awaitThumbDrain, resetDecorateCache } from './model-state'
 import { wrapHandler, checkExistingDirectory } from '../handler'
+import { normalizePartialScanDirs } from '../../../shared/scan-dirs'
 
 /**
  * 扫描链路：全量扫描模型目录（进度推送、可取消）、局部增量扫描与取消入口。
@@ -26,70 +27,12 @@ import { wrapHandler, checkExistingDirectory } from '../handler'
 /** 进度事件节流间隔（ms），避免大量小文件时 IPC 过载 */
 const PROGRESS_INTERVAL = 120
 
-/** 局部扫描子树入参上限（与 ipc-schema 声明保持一致） */
-const MAX_PARTIAL_DIRS = 200
-const MAX_PARTIAL_DIR_LEN = 1000
-
 /** 当前扫描的取消控制器（null 表示无进行中的扫描） */
 let scanAbort = null
 
 /** 判断两个模型根目录是否相同（Windows 大小写不敏感） */
 function isSameRoot(a, b) {
   return String(a).toLowerCase() === String(b).toLowerCase()
-}
-
-/**
- * 清洗并归一化局部扫描子树（B-01）：
- * - 拒绝逃逸段/反斜杠/绝对路径/超长/过量；
- * - 精确去重；
- * - 去掉被其它子树覆盖的后代（如同时传入 `lora` 与 `lora/sub`）。
- *
- * 后一项是必要防御：scanner 对每个非根子树递归全部后代，父子同时入栈会让
- * 同一文件被扫描两次，产出重复 id 的模型记录（卡片重复、统计翻倍）。
- * 空串代表「仅根目录直属文件」，不递归后代，因此不与任何子树构成覆盖关系。
- *
- * @param {unknown} dirs 渲染进程传入的变更子树
- * @returns {{subDirs: string[]} | {error: string}}
- */
-function normalizePartialScanDirs(dirs) {
-  if (!Array.isArray(dirs)) return { error: '缺少变更子树' }
-  const normalized = []
-  for (const raw of dirs.slice(0, MAX_PARTIAL_DIRS)) {
-    if (typeof raw !== 'string') return { error: '变更子树参数无效' }
-    const item = raw.trim()
-    if (item === '') {
-      normalized.push('')
-      continue
-    }
-    if (
-      item.length > MAX_PARTIAL_DIR_LEN ||
-      item.includes('\\') ||
-      item.startsWith('/') ||
-      /^[A-Za-z]:/.test(item) ||
-      item.split('/').some((seg) => seg === '' || seg === '..' || seg === '.')
-    ) {
-      return { error: '变更子树参数无效' }
-    }
-    normalized.push(item)
-  }
-  if (normalized.length === 0) return { error: '缺少变更子树' }
-
-  const unique = []
-  const seen = new Set()
-  for (const item of normalized) {
-    if (seen.has(item)) continue
-    seen.add(item)
-    unique.push(item)
-  }
-  // 去掉被祖先覆盖的后代（保持原顺序）；空串不参与覆盖判断
-  const subDirs = unique.filter((item, index) => {
-    if (item === '') return true
-    return !unique.some(
-      (other, otherIndex) =>
-        otherIndex !== index && other !== '' && item.startsWith(`${other}/`)
-    )
-  })
-  return { subDirs }
 }
 
 /**
@@ -294,7 +237,16 @@ export function registerScanHandlers() {
       // 子树清洗在锁内完成：失败路径统一经 finally 释放锁
       const normalized = normalizePartialScanDirs(dirs)
       if (normalized.error) return { error: normalized.error }
+      // O3：子树过多且一级目录收敛后仍超限——明确要求渲染层回退全量扫描，
+      // 绝不静默丢弃部分子树（丢弃会让这些子树停留在陈旧状态）
+      if (normalized.fullScanRequired) {
+        logger.warn('局部扫描子树过多，已要求渲染层改为完整扫描')
+        return { fullScanRequired: true }
+      }
       const subDirs = normalized.subDirs
+      if (normalized.collapsed) {
+        logger.info(`局部扫描子树过多，已收敛为 ${subDirs.length} 个一级目录`)
+      }
 
       // 与全量扫描一致的目录前置校验（白名单 + 存在性）
       if (!isKnownLibrary(root)) {
