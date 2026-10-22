@@ -1,6 +1,7 @@
 import { computed, watch } from 'vue'
 import { state, MODEL_TYPES, SUB_MAP, sortDirectional } from './state'
 import { normalizeBaseModel } from '../../../shared/model-categories'
+import { matchSearchFilters, parseSearchQuery } from './search-query'
 
 /**
  * 筛选/搜索/排序派生状态（A-04 自 appStore.js 拆出）。
@@ -97,7 +98,12 @@ export const duplicateWastedBytes = computed(() =>
  * 消除中间数组分配；无筛选条件时仅做一次遍历拷贝。
  */
 const filteredUnsorted = computed(() => {
-  const keyword = state.search.trim().toLowerCase()
+  // F3 高级语法：结构化 token（base:/tag:/size:>1gb…）与自由关键词由
+  // search-query 解析拆分；token 与侧栏筛选叠加（AND），自由关键词沿用
+  // 既有「合并搜索域子串包含」语义。token 命中判定不依赖搜索域 haystack
+  const { text, filters } = parseSearchQuery(state.search)
+  const keyword = text.toLowerCase()
+  const hasFilters = filters.length > 0
   const { typeFilter, subFilter, baseFilter, tagFilter, showFavoritesOnly, showDuplicatesOnly } = state
   // LoRA 分类筛选：仅选中 LoRA 分类且指定了子分类时生效
   const checkSub = typeFilter === 'lora' && subFilter
@@ -117,6 +123,7 @@ const filteredUnsorted = computed(() => {
     if (showFavoritesOnly && !m.favorite) continue
     if (dupes && !dupes.has(m.id)) continue
     if (keyword && !searchHaystack(m).includes(keyword)) continue
+    if (hasFilters && !matchSearchFilters(m, filters)) continue
     list.push(m)
   }
   return list

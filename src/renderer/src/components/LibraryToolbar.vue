@@ -47,7 +47,10 @@ defineExpose({ searchFieldEl, clearSearch })
 <template>
   <!-- 搜索 + 排序：位于模型清单上方（选择文件夹后显示） -->
   <div class="search-row">
-    <div class="search-box" title="搜索名称、备注名、备注与分类标签">
+    <div
+      class="search-box"
+      title="搜索名称、备注名、备注与分类标签；支持结构化语法（与筛选叠加）：base:pony tag:&quot;我的标签&quot; type:lora size:>1gb score:>=4 fav:yes nsfw:no"
+    >
       <span class="search-icon" aria-hidden="true">
         <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4.6" /><path d="M10.6 10.6 14 14" /></svg>
       </span>
@@ -55,7 +58,7 @@ defineExpose({ searchFieldEl, clearSearch })
         ref="searchFieldEl"
         v-model="searchInput"
         type="text"
-        placeholder="搜索名称 / 备注 / 触发词…（Ctrl+F 聚焦）"
+        placeholder="搜索名称 / 备注 / 触发词…（支持 base: tag: size:>1gb score:>=4 语法）"
         spellcheck="false"
       />
       <button v-if="searchInput" class="search-clear" title="清空搜索" @click="clearSearch">
