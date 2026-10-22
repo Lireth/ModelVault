@@ -78,6 +78,7 @@ export {
   renameModelMeta,
   relinkScannedMeta,
   saveStoreNow,
+  saveStoreDeltaNow,
   flushStoreSave,
   switchDataRoot
 } from './store-meta'

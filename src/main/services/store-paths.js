@@ -15,6 +15,11 @@ export const LEGACY_STORE_FILE = 'store.json'
 export const DATA_DIR = '.modelvault'
 /** 关联存储元数据文件名 */
 export const DATA_FILE = 'store.json'
+/**
+ * 元数据增量日志目录（O5）：背景保存只追加变化键的小批次文件，
+ * 达到阈值/退出/备份/切库时合并回 store.json 快照。
+ */
+export const JOURNAL_DIR = 'journal'
 /** 库设置文件名（位于模型根目录的 .modelvault/ 内，随模型文件夹走） */
 export const LIB_SETTINGS_FILE = 'settings.json'
 /** 封面图片目录名（位于 .modelvault/ 内） */
@@ -44,6 +49,11 @@ export function getDataDir(root = currentRoot) {
 /** 根目录下的关联存储元数据文件路径 */
 export function getDataFilePath(root = currentRoot) {
   return path.join(getDataDir(root), DATA_FILE)
+}
+
+/** 元数据增量日志目录路径 */
+export function getJournalDir(root = currentRoot) {
+  return path.join(getDataDir(root), JOURNAL_DIR)
 }
 
 /** 模型根目录下的库设置文件路径（.modelvault/settings.json，随模型文件夹走） */

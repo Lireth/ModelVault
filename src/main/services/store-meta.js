@@ -16,6 +16,7 @@ import {
   getCurrentRoot,
   getDataDir,
   getDataFilePath,
+  getJournalDir,
   setDataRoot,
   toRelKey
 } from './store-paths'
@@ -24,8 +25,9 @@ import {
  * 关联存储（C2 自 store.js 拆出）：
  * 模型的所有用户数据（封面、推荐参数、备注、收藏/评分/NSFW、哈希缓存等）
  * 按相对路径关联，统一存于模型根目录 .modelvault/store.json。
- * 写入采用防抖 + 原子替换；store.json 损坏时备份后重置；
- * 首次对某根目录启用时自动从旧版全局存储迁移。
+ * 写入采用防抖 + 原子替换；O5 起背景保存只写变化键增量日志
+ * （.modelvault/journal/），达到阈值/退出/备份/切库时合并为紧凑快照；
+ * store.json 损坏时备份后重置；首次对某根目录启用时自动从旧版全局存储迁移。
  */
 
 /**
@@ -37,12 +39,39 @@ const VALID_SUB_CATEGORIES = ALL_CATEGORY_KEYS
 /** 防抖落盘延迟（ms） */
 const SAVE_DELAY = 500
 
+/**
+ * 增量日志合并阈值（O5）：背景保存累计的脏键/日志条目达到该值即写一次
+ * 全量快照并清空日志；退出、备份、切库、备份恢复等路径强制快照。
+ */
+const JOURNAL_COMPACT_ENTRIES = 200
+
 /** 当前根目录的元数据，键为相对路径（'/' 分隔） */
 let data = null
 let saveTimer = null
 let saving = false
 /** 写盘进行期间收到的新保存请求（落盘完成后需补写一次，避免丢失） */
 let pendingSave = false
+/** 写盘期间又收到「强制快照」请求（flush/saveStoreNow） */
+let pendingSnapshot = false
+/** 自上次快照以来发生变更的元数据键（增量日志内容） */
+let dirtyKeys = new Set()
+/** 日志代际：快照记录已合并到的 seq，加载时跳过 ≤ 该值的日志批次 */
+let journalSeq = 0
+/** 自上次快照以来已写入日志的条目数（触发合并阈值） */
+let journalEntryCount = 0
+/** 当前根目录是否已存在可读的 store.json 快照 */
+let hasSnapshot = false
+/**
+ * 内存元数据变更版本：用于识别「序列化/写盘期间又发生变更」。
+ * 快照若在写盘期间有新变更，绝不整体清空 dirtyKeys（否则新变更静默丢失）。
+ */
+let mutationVersion = 0
+
+/** 标记脏键并递增变更版本（所有元数据变更的唯一入口） */
+function markDirty(key) {
+  dirtyKeys.add(key)
+  mutationVersion += 1
+}
 /**
  * 暂停元数据落盘（B-02）：备份恢复替换磁盘文件后、内存重载完成前，
  * 任何由旧内存触发的写入都会把恢复结果覆盖回去。重载窗口内直接丢弃
@@ -220,6 +249,7 @@ export function removeModelMeta(modelId) {
   const relKey = toRelKey(modelId)
   if (!relKey || !data.models[relKey]) return false
   delete data.models[relKey]
+  markDirty(relKey)
   scheduleSave()
   return true
 }
@@ -242,43 +272,125 @@ export function renameModelMeta(oldId, newId) {
   if (!meta) return false
   data.models[newKey] = meta
   delete data.models[oldKey]
+  markDirty(oldKey)
+  markDirty(newKey)
   scheduleSave()
   return true
 }
 
+/** 删除增量日志目录（快照成功后/快照损坏重置时；best-effort） */
+async function removeJournalDir() {
+  try {
+    await fs.rm(getJournalDir(), { recursive: true, force: true })
+  } catch (err) {
+    logger.warn(`增量日志目录清理失败: ${err.message}`)
+  }
+}
+
 /**
- * 加载当前根目录的关联存储数据。
+ * 回放增量日志（O5）：snapshotSeq 之前的批次已并入 store.json，跳过；
+ * 之后批次按 seq 升序应用 set/del。日志文件由 atomicWriteFile 原子写入，
+ * 损坏文件之后的批次不再应用（缺失前序 delta 时继续应用会造成状态错乱）。
+ * @param {number} snapshotSeq 快照已合并到的日志代际
+ */
+async function loadJournal(snapshotSeq) {
+  let files
+  try {
+    files = await fs.readdir(getJournalDir())
+  } catch (err) {
+    if (err.code !== 'ENOENT') logger.warn(`增量日志读取失败: ${err.message}`)
+    return
+  }
+  const batches = files
+    .filter((name) => /^delta-\d+\.json$/.test(name))
+    .sort()
+  for (const name of batches) {
+    const file = path.join(getJournalDir(), name)
+    let parsed
+    try {
+      parsed = JSON.parse(await fs.readFile(file, 'utf-8'))
+    } catch (err) {
+      // 原子写保证正常情况下不会出现；损坏批次隔离后继续回放后续批次，
+      // 避免一个坏文件让之后所有增量永久无法加载
+      logger.warn(`增量日志批次损坏，已隔离（${name}）: ${err.message}`)
+      try {
+        await fs.rm(file, { force: true })
+      } catch {
+        /* 隔离失败可忽略，下轮加载会再次尝试 */
+      }
+      continue
+    }
+    if (!parsed || !Number.isFinite(parsed.seq) || !Array.isArray(parsed.entries)) {
+      logger.warn(`增量日志批次格式异常，已隔离（${name}）`)
+      try {
+        await fs.rm(file, { force: true })
+      } catch {
+        /* 隔离失败可忽略 */
+      }
+      continue
+    }
+    if (parsed.seq <= snapshotSeq) continue // 快照已包含
+    for (const entry of parsed.entries) {
+      if (!entry || typeof entry.key !== 'string' || isUnsafeModelKey(entry.key)) continue
+      if (entry.op === 'set') {
+        const normalized = normalizeModelMeta(entry.meta)
+        if (normalized) data.models[entry.key] = normalized
+      } else if (entry.op === 'del') {
+        delete data.models[entry.key]
+      }
+    }
+    journalSeq = Math.max(journalSeq, parsed.seq)
+    journalEntryCount += parsed.entries.length
+  }
+}
+
+/**
+ * 加载当前根目录的关联存储数据（O5：store.json 快照 + 增量日志回放）。
  * store.json 不存在时创建空数据，并尝试从旧版全局存储迁移属于该目录的记录。
  */
 export async function loadData() {
   dataReset = false
+  dirtyKeys = new Set()
+  journalSeq = 0
+  journalEntryCount = 0
+  hasSnapshot = false
+  pendingSnapshot = false
+  mutationVersion = 0
   if (!getCurrentRoot()) {
     data = { version: 1, models: {} }
     return data
   }
   const file = getDataFilePath()
+  let snapshotSeq = 0
   try {
     const text = await fs.readFile(file, 'utf-8')
     const parsed = JSON.parse(text)
     // B-04：磁盘文件同样按不可信输入处理（可能由恶意备份写入或外部编辑）
     data = normalizeStoreData(parsed)
+    hasSnapshot = true
+    snapshotSeq = Number.isFinite(parsed?.journalSeq) ? parsed.journalSeq : 0
+    journalSeq = snapshotSeq
     logger.info(`关联存储加载完成：${Object.keys(data.models).length} 条记录（${file}）`)
   } catch (err) {
     if (err.code === 'ENOENT') {
       data = { version: 1, models: {} }
+      await loadJournal(0)
       await migrateLegacyData()
     } else {
       data = { version: 1, models: {} }
       dataReset = true
-      // store.json 损坏（如写入中断电、磁盘错误）：先备份原文件再重置，保留手动恢复机会
+      // store.json 损坏（如写入中断电、磁盘错误）：先备份原文件再重置，保留手动恢复机会。
+      // 增量日志同时丢弃——在缺失快照基线时回放 delta 可能把半套数据重新拼起来
       try {
         await fs.rename(file, `${file}.bak`)
         logger.error(`关联存储文件损坏，原文件已备份为 ${DATA_FILE}.bak 后重置: ${err.message}`)
       } catch (backupErr) {
         logger.error(`关联存储加载失败，已重置（备份失败: ${backupErr.message}）: ${err.message}`)
       }
+      await removeJournalDir()
     }
   }
+  if (!dataReset && hasSnapshot) await loadJournal(snapshotSeq)
   return data
 }
 
@@ -306,6 +418,7 @@ export async function reloadCurrentRootData() {
   // 3) 之后才从磁盘重载，保证内存基线就是恢复后的内容。
   saveSuppressed = true
   pendingSave = false
+  pendingSnapshot = false
   try {
     while (saving) {
       await new Promise((resolve) => setImmediate(resolve))
@@ -410,6 +523,7 @@ export function setModelMeta(modelId, meta) {
   const normalized = normalizeModelMeta(meta)
   if (!normalized) return null
   data.models[relKey] = normalized
+  markDirty(relKey)
   scheduleSave()
   return normalized
 }
@@ -429,32 +543,121 @@ function scheduleSave() {
       logger.warn('丢弃跨根目录的迟到防抖保存（数据已在切库前落盘）')
       return
     }
-    saveStoreNow().catch(notifyStoreSaveError)
+    // O5：防抖保存只落「变化键」增量日志，不再每次全量 pretty 序列化；
+    // 达到阈值/退出/备份/切库时由写盘链合并为紧凑快照
+    saveStoreDeltaNow().catch(notifyStoreSaveError)
   }, SAVE_DELAY)
 }
 
-/** 立即落盘（原子写入：临时文件 -> 重命名；并发请求排队补写，不会丢失） */
-export async function saveStoreNow() {
+/**
+ * 写全量快照（O5：紧凑 JSON，不再 pretty 缩进）+ 清空增量日志。
+ * 快照携带 journalSeq：即使快照成功后清理日志失败，加载时也会跳过
+ * seq ≤ snapshotSeq 的旧批次，不会用旧 delta 回滚快照内容。
+ */
+async function writeSnapshot() {
+  // 版本快照必须在同步序列化之前捕获：JSON.stringify 期间/写盘 await 期间
+  // 若有新变更，dirtyKeys 不能整体清空（否则丢失尚未落盘的修改）
+  const versionAtWrite = mutationVersion
+  const payload = { version: 1, models: data.models, journalSeq }
+  const text = JSON.stringify(payload)
+  await atomicWriteFile(getDataFilePath(), text)
+  hasSnapshot = true
+  journalEntryCount = 0
+  if (mutationVersion === versionAtWrite) dirtyKeys.clear()
+  await removeJournalDir()
+}
+
+/**
+ * 写一批增量日志（O5）：只序列化自上次快照以来发生变化的键。
+ * 每个批次经 atomicWriteFile 原子落盘（独立文件），避免 append 半行；
+ * seq 单调递增，快照合并后旧批次按代际跳过。
+ * @param {string[]} keys 脏键列表
+ */
+async function writeDeltaJournal(keys) {
+  const seq = journalSeq + 1
+  const entries = []
+  /** 写入内容对应的元数据引用：写盘期间被再次修改的键必须保留为脏 */
+  const written = new Map()
+  for (const key of keys) {
+    if (isUnsafeModelKey(key)) continue
+    const meta = data.models[key] || null
+    written.set(key, meta)
+    entries.push(meta ? { op: 'set', key, meta } : { op: 'del', key })
+  }
+  if (entries.length === 0) {
+    dirtyKeys.clear()
+    return
+  }
+  const file = path.join(
+    getJournalDir(),
+    `delta-${String(seq).padStart(12, '0')}.json`
+  )
+  await atomicWriteFile(file, JSON.stringify({ seq, entries }))
+  journalSeq = seq
+  journalEntryCount += entries.length
+  for (const [key, metaAtWrite] of written) {
+    // 引用一致 = 写盘期间未再修改该键；否则保留脏标记，下次增量补写最新值
+    if (metaAtWrite === null ? !data.models[key] : data.models[key] === metaAtWrite) {
+      dirtyKeys.delete(key)
+    }
+  }
+}
+
+/**
+ * 统一写盘入口：增量日志或全量快照。
+ * @param {boolean} forceSnapshot 是否强制写全量快照
+ */
+async function runSave(forceSnapshot) {
   if (!data || !getCurrentRoot() || saveSuppressed) return
   if (saving) {
-    // 写盘进行中又有新修改：标记待补写，由 finally 在落盘完成后触发补写
+    // 写盘进行中又有新修改：标记待补写；若其中有强制快照请求，补写也必须快照
     pendingSave = true
+    pendingSnapshot = pendingSnapshot || forceSnapshot
     return
   }
   saving = true
   try {
-    await atomicWriteFile(getDataFilePath(), JSON.stringify(data, null, 2))
+    const keys = [...dirtyKeys]
+    if (
+      forceSnapshot ||
+      !hasSnapshot ||
+      journalEntryCount + keys.length >= JOURNAL_COMPACT_ENTRIES
+    ) {
+      await writeSnapshot()
+    } else if (keys.length > 0) {
+      await writeDeltaJournal(keys)
+    }
   } catch (err) {
     notifyStoreSaveError(err)
   } finally {
     saving = false
     if (pendingSave) {
       pendingSave = false
+      const force = pendingSnapshot
+      pendingSnapshot = false
       // 补写读取的是当前最新 data，覆盖写盘期间的任何后续修改；
       // 若已进入恢复重载窗口则丢弃，绝不把旧内存写回刚恢复的文件
-      if (!saveSuppressed) saveStoreNow().catch(notifyStoreSaveError)
+      if (!saveSuppressed) {
+        (force ? runSave(true) : runSave(false)).catch(notifyStoreSaveError)
+      }
     }
   }
+}
+
+/**
+ * 增量落盘（防抖保存路径）：只写脏键日志；达到阈值时自动合并快照。
+ * @returns {Promise<void>}
+ */
+export async function saveStoreDeltaNow() {
+  return runSave(false)
+}
+
+/**
+ * 立即写全量快照（原子写入：临时文件 -> 重命名；并发请求排队补写，不会丢失）。
+ * 退出、备份、切库、备份恢复等需要磁盘为完整快照的场景使用。
+ */
+export async function saveStoreNow() {
+  return runSave(true)
 }
 
 /**
@@ -470,8 +673,17 @@ export async function flushStoreSave() {
     clearTimeout(saveTimer)
     saveTimer = null
   }
-  // 无待落盘内容时不要“为写而写”：空库首次导出/退出不应凭空创建 store.json
-  if (!hadPendingTimer && !saving && !pendingSave) return
+  // 无待落盘内容时不要“为写而写”：空库首次导出/退出不应凭空创建 store.json。
+  // 存在增量日志时必须强制快照——备份/退出读取的是 store.json 快照本身。
+  if (
+    !hadPendingTimer &&
+    !saving &&
+    !pendingSave &&
+    dirtyKeys.size === 0 &&
+    journalEntryCount === 0
+  ) {
+    return
+  }
   await saveStoreNow()
   while (saving || pendingSave) {
     await new Promise((resolve) => setImmediate(resolve))
@@ -561,12 +773,15 @@ export function relinkScannedMeta(scanned, options = {}) {
   for (const [oldKey, newKey] of relinks) {
     data.models[newKey] = data.models[oldKey]
     delete data.models[oldKey]
+    markDirty(oldKey)
+    markDirty(newKey)
   }
 
   let prunedEmpty = 0
   for (const key of unmatchedOrphanKeys) {
     if (isEmptyModelMeta(data.models[key])) {
       delete data.models[key]
+      markDirty(key)
       prunedEmpty += 1
     }
   }
