@@ -21,7 +21,7 @@ vi.mock('electron', () => ({
   net: { fetch: vi.fn() }
 }))
 vi.mock('node:child_process', () => ({
-  spawn: vi.fn(() => ({ unref: vi.fn() }))
+  spawn: vi.fn(() => ({ unref: vi.fn(), once: vi.fn() }))
 }))
 
 import { app, net } from 'electron'
@@ -207,14 +207,59 @@ describe('downloadUpdatePackage（下载 + SHA256 校验闭环）', () => {
     })
     await expect(downloadUpdatePackage()).resolves.toEqual({ canceled: true })
   })
+
+  it('版本号非法时拒绝下载，不发起网络请求（V-06 路径注入防护）', async () => {
+    setPendingUpdate(ASSETS, '../../evil')
+    const res = await downloadUpdatePackage()
+    expect(res.error).toContain('版本号非法')
+    expect(net.fetch).not.toHaveBeenCalled()
+  })
+
+  it('校验和重定向到 GitHub 白名单外主机时拒绝（V-06）', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response('', { status: 302, headers: { Location: 'https://evil.example.com/x' } })
+    )
+    setPendingUpdate(ASSETS, '0.2.0')
+    const res = await downloadUpdatePackage()
+    expect(res.error).toContain('重定向目标不在 GitHub 白名单')
+  })
+
+  it('校验和文件超过 64KB 上限时拒绝', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response('x', {
+        status: 200,
+        headers: { 'Content-Length': String(65 * 1024) }
+      })
+    )
+    setPendingUpdate(ASSETS, '0.2.0')
+    const res = await downloadUpdatePackage()
+    expect(res.error).toContain('校验和文件过大')
+  })
+
+  it('更新包 Content-Length 超过 600MB 时在落盘前拒绝', async () => {
+    vi.mocked(net.fetch).mockImplementation((url) => {
+      if (String(url).endsWith('.sha256')) {
+        return Promise.resolve(new Response(CHECKSUM_BODY, { status: 200 }))
+      }
+      return Promise.resolve(
+        new Response('x', {
+          status: 200,
+          headers: { 'Content-Length': String(601 * 1024 * 1024) }
+        })
+      )
+    })
+    setPendingUpdate(ASSETS, '0.2.0')
+    const res = await downloadUpdatePackage()
+    expect(res.error).toContain('体积异常')
+  })
 })
 
-describe('installUpdatePackage（延迟拉起新版本）', () => {
+describe('installUpdatePackage（拉起新版本并等待旧实例退出）', () => {
   it('未下载更新包时拒绝', () => {
     expect(installUpdatePackage()).toEqual({ error: '尚未下载更新包，请先下载更新' })
   })
 
-  it('下载成功后以延迟方式拉起新 EXE 并退出当前应用', async () => {
+  it('直接拉起新 EXE（带 --wait-for-pid），不经 shell，并退出当前应用', async () => {
     vi.useFakeTimers()
     try {
       mockFetchFlow(EXE_BYTES)
@@ -225,11 +270,13 @@ describe('installUpdatePackage（延迟拉起新版本）', () => {
       const install = installUpdatePackage()
       expect(install).toEqual({ ok: true })
       expect(spawn).toHaveBeenCalledTimes(1)
-      const [cmd, args] = vi.mocked(spawn).mock.calls[0]
-      expect(cmd).toBe('cmd.exe')
-      expect(args.join(' ')).toContain('ModelVault-0.2.0.exe')
-      expect(args.join(' ')).toContain('timeout /t 3')
-      // 延迟退出（等待单实例锁释放）
+      const [exe, args, options] = vi.mocked(spawn).mock.calls[0]
+      // 路径作为 spawn 参数直接传递：不经过 cmd/start，无命令拼接注入面
+      expect(String(exe)).toContain('ModelVault-0.2.0.exe')
+      expect(String(exe).toLowerCase()).not.toContain('cmd.exe')
+      expect(args).toEqual([`--wait-for-pid=${process.pid}`])
+      expect(options).toEqual(expect.objectContaining({ detached: true, windowsHide: true }))
+      // 立即拉起新实例；500ms 后退出当前实例释放单实例锁
       expect(app.quit).not.toHaveBeenCalled()
       vi.advanceTimersByTime(600)
       expect(app.quit).toHaveBeenCalledTimes(1)

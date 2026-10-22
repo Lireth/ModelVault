@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import logger from './logger'
 import { isValidImageFile, isImageBuffer } from './services/covers'
 import { getCurrentRoot } from './services/store'
-import { isAllowedCivitaiImageUrl, fetchCivitaiImage } from './services/civitai'
+import { isAllowedCivitaiImageUrl, fetchCivitaiImage, readCivitaiImageBody } from './services/civitai'
 import {
   civCacheContentType,
   getCivImageFromCache,
@@ -233,8 +233,15 @@ function registerCivimgHandler() {
         return new Response('Upstream Error', { status: 502 })
       }
       // 回源成功：整体读入后回写磁盘缓存（best-effort，失败不影响返回）。
-      // 仅缓存真实图片内容——魔数不符的字节（上游异常页等）不入缓存
-      const buf = Buffer.from(await upstream.arrayBuffer())
+      // 仅缓存真实图片内容——魔数不符的字节（上游异常页等）不入缓存。
+      // 读取受 50MB 上限约束（V-06），避免异常大响应打爆主进程堆。
+      let buf
+      try {
+        buf = await readCivitaiImageBody(upstream)
+      } catch (err) {
+        logger.warn(`civimg 上游内容读取失败: ${err.message}`)
+        return new Response('Upstream Error', { status: 502 })
+      }
       if (isImageBuffer(buf)) {
         await saveCivImageCache(target, buf)
       }

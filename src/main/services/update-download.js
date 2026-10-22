@@ -5,7 +5,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { app, net } from 'electron'
 import logger from '../logger'
-import { isAllowedExternalUrl } from '../utils'
+import { isAllowedExternalUrl, readResponseTextLimited } from '../utils'
 
 /**
  * 应用内更新下载与安装（F-6，portable 形态专用）：
@@ -18,8 +18,8 @@ import { isAllowedExternalUrl } from '../utils'
  *   无法把用户引向他站；
  * - 边下载边计算 SHA256，完成后与校验和文件比对，不匹配即删除重来；
  * - 写入临时 .part 文件，校验通过后原子改名，断电/崩溃不产生半成品误装；
- * - 安装 = 延迟 3s 拉起新 EXE 并退出当前实例：等待退出释放单实例锁，
- *   避免新实例因锁被占而闪退。
+ * - 安装 = 拉起新 EXE（携带 --wait-for-pid 等待旧实例释放单实例锁）并退出：
+ *   新实例不会因锁被占而闪退，且全程不经过 shell。
  * 缓存位置 %APPDATA%\modelvault\update\（机器本地，与 .modelvault 无关）。
  */
 
@@ -28,10 +28,24 @@ const UPDATE_DIR_NAME = 'update'
 const REQUEST_TIMEOUT_MS = 15000
 /** 更新包体积上限（B）：超限中止，防异常响应写满磁盘 */
 const MAX_UPDATE_BYTES = 600 * 1024 * 1024
+/** 校验和文件上限（V-06）：正常仅 65~100 字节 */
+const MAX_CHECKSUM_BYTES = 64 * 1024
+/** 更新下载允许的主机（V-06）：GitHub 页面与 Release 资产 CDN */
+const ALLOWED_UPDATE_HOSTS = new Set([
+  'api.github.com',
+  'github.com',
+  'objects.githubusercontent.com',
+  'release-assets.githubusercontent.com',
+  'github-releases.githubusercontent.com'
+])
+/** 重定向跟随上限（V-06：每一跳重新校验主机） */
+const MAX_REDIRECTS = 5
+/** 版本号白名单（V-06）：只允许纯数字三段，杜绝路径分隔符/命令字符进入文件名 */
+const VERSION_PATTERN = /^\d{1,5}\.\d{1,5}\.\d{1,5}$/
 /** 进度推送节流间隔（ms） */
 const PROGRESS_INTERVAL_MS = 200
-/** 安装延迟（ms）：等待当前实例退出并释放单实例锁 */
-const INSTALL_DELAY_MS = 3000
+/** 拉起新实例后退出当前实例的延迟（ms），给 spawn 完成进程创建留出时间 */
+const QUIT_DELAY_MS = 500
 
 /**
  * 校验和文本 → 64 位十六进制哈希（纯函数，单测锁定）：
@@ -46,6 +60,63 @@ export function parseChecksumHash(text) {
 }
 
 /**
+ * 版本号是否可用于拼接文件名（V-06）。
+ * 更新包路径由 `ModelVault-${latest}.exe` 生成，latest 来自 API 响应，
+ * 必须限定纯数字三段，避免 `../`、命令行分隔符等进入路径。
+ * @param {unknown} version 版本号（不含 v 前缀）
+ * @returns {boolean}
+ */
+export function isSafeUpdateVersion(version) {
+  return typeof version === 'string' && VERSION_PATTERN.test(version)
+}
+
+/** 是否为需要跟随的 HTTP 重定向状态 */
+function isRedirectStatus(status) {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308
+}
+
+/**
+ * 更新链路 URL 白名单（V-06）：https + GitHub 页面/API/Release 资产 CDN。
+ * @param {unknown} url 待校验 URL
+ * @returns {boolean}
+ */
+function isAllowedUpdateHost(url) {
+  try {
+    const parsed = new URL(String(url))
+    return parsed.protocol === 'https:' && ALLOWED_UPDATE_HOSTS.has(parsed.hostname.toLowerCase())
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 发起更新相关请求并手动跟随重定向（V-06）：
+ * net.fetch 默认跟随 302 时只校验初始 URL，白名单主机可把请求引向任意
+ * 站点。此处每一跳都校验主机，超出次数上限即失败。
+ * @param {string} url 初始 URL（调用方已校验）
+ * @param {RequestInit} options fetch 选项
+ * @returns {Promise<Response>} 最终响应
+ */
+export async function fetchAllowedUpdateUrl(url, options) {
+  if (!isAllowedUpdateHost(url)) {
+    throw new Error('更新下载地址不在 GitHub 白名单内，已拒绝')
+  }
+  let current = url
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const response = await net.fetch(current, { ...options, redirect: 'manual' })
+    if (!isRedirectStatus(response.status)) return response
+    const location = response.headers.get('location')
+    if (!location) return response
+    const next = new URL(location, current).toString()
+    if (!isAllowedUpdateHost(next)) {
+      throw new Error('更新下载重定向目标不在 GitHub 白名单内，已拒绝')
+    }
+    current = next
+  }
+  throw new Error('更新下载重定向次数过多，已拒绝')
+}
+
+/**
  * 从 GitHub API release 响应中提取更新包资产（纯函数，单测锁定）：
  * 仅接受与本版本命名约定完全一致的资产（ModelVault-<latest>.exe[.sha256]），
  * 下载地址必须命中外链白名单（B3：https + github.com）。
@@ -55,7 +126,7 @@ export function parseChecksumHash(text) {
  *   任一资产缺失或地址不合规返回 null（视为不可应用内更新，回退下载页引导）
  */
 export function findUpdateAssets(data, latest) {
-  if (!data || typeof latest !== 'string' || !latest) return null
+  if (!data || !isSafeUpdateVersion(latest)) return null
   const assets = Array.isArray(data.assets) ? data.assets : []
   const exeName = `ModelVault-${latest}.exe`
   const sumName = `${exeName}.sha256`
@@ -127,6 +198,10 @@ export async function downloadUpdatePackage(onProgress) {
   if (downloadAbort) return { error: '更新包正在下载中，请稍候' }
   if (!pendingAssets) return { error: '没有可用的更新信息，请先检查更新' }
   const { downloadUrl, checksumUrl, size, latest } = pendingAssets
+  // V-06：latest 参与文件名拼接，必须先通过纯数字三段白名单
+  if (!isSafeUpdateVersion(latest)) {
+    return { error: '更新信息格式异常（版本号非法），请前往下载页手动更新' }
+  }
   const dir = getUpdateDir()
   const target = path.join(dir, `ModelVault-${latest}.exe`)
   const tmp = `${target}.${process.pid}.part`
@@ -139,12 +214,17 @@ export async function downloadUpdatePackage(onProgress) {
       return { error: `创建更新目录失败: ${err.message}` }
     }
 
-    // 校验和：expected = sha256sum 兼容文件首 token
+    // 校验和：expected = sha256sum 兼容文件首 token。
+    // 重定向逐跳校验 + 文本大小上限（V-06）
     let expected
     try {
-      const res = await net.fetch(checksumUrl, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+      const res = await fetchAllowedUpdateUrl(checksumUrl, {
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+      })
       if (!res.ok) return { error: `校验和下载失败（HTTP ${res.status}）` }
-      expected = parseChecksumHash(await res.text())
+      expected = parseChecksumHash(
+        await readResponseTextLimited(res, MAX_CHECKSUM_BYTES, '校验和文件')
+      )
     } catch (err) {
       if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
         return { error: '校验和下载超时，请检查网络后重试' }
@@ -168,11 +248,15 @@ export async function downloadUpdatePackage(onProgress) {
     const hash = createHash('sha256')
     let received = 0
     let lastSent = 0
-    const response = await net.fetch(downloadUrl, { signal: downloadAbort.signal })
+    const response = await fetchAllowedUpdateUrl(downloadUrl, { signal: downloadAbort.signal })
     if (!response.ok || !response.body) {
       return { error: `更新包下载失败（HTTP ${response.status}）` }
     }
     const total = Number(response.headers.get('content-length')) || size
+    // Content-Length 预检（V-06）：异常大响应在写入磁盘前即拒绝
+    if (Number.isFinite(total) && total > MAX_UPDATE_BYTES) {
+      return { error: '更新包体积异常（超过 600MB），已中止下载' }
+    }
     const reader = response.body.getReader()
     const fh = await fsp.open(tmp, 'w')
     try {
@@ -229,26 +313,47 @@ export function cancelUpdateDownload() {
 }
 
 /**
- * 运行更新程序：延迟拉起新 EXE（等待当前实例退出并释放单实例锁）后退出。
- * 仅接受本服务下载并校验通过的文件路径——渲染层不传路径。
+ * 运行更新程序：拉起新 EXE 并退出当前实例。
+ * 新实例携带 `--wait-for-pid=<当前 pid>`，启动时先等待旧实例退出并释放
+ * 单实例锁，再正常启动（见 main/index.js 与 utils.waitForProcessExit）。
+ *
+ * 安全（V-06）：
+ * - 不经过 cmd/start，路径作为 spawn 的参数直接传递，无命令拼接注入面；
+ * - 仅接受本服务下载并校验通过、且位于 update 目录、文件名符合版本白名单的路径。
  * @returns {{ok: true} | {error: string}}
  */
 export function installUpdatePackage() {
   const file = downloadedFile
   if (!file) return { error: '尚未下载更新包，请先下载更新' }
+  const dir = getUpdateDir()
+  const resolved = path.resolve(file)
+  const inUpdateDir = resolved.toLowerCase().startsWith(`${dir.toLowerCase()}${path.sep}`)
+  if (!inUpdateDir || !/^ModelVault-\d{1,5}\.\d{1,5}\.\d{1,5}\.exe$/.test(path.basename(resolved))) {
+    logger.warn(`拒绝启动更新目录之外的更新包: ${resolved}`)
+    return { error: '更新包路径异常，请重新下载更新' }
+  }
   try {
-    // cmd 延迟启动：timeout 3s 后 start 新实例（路径经引号包裹，来源为本
-    // 服务生成的 userData 路径，无注入面）
-    spawn(
-      'cmd.exe',
-      ['/d', '/s', '/c', `timeout /t ${INSTALL_DELAY_MS / 1000} /nobreak >nul & start "" "${file}"`],
-      { windowsHide: true, detached: true, stdio: 'ignore' }
-    ).unref()
+    if (!fs.statSync(resolved).isFile()) {
+      return { error: '更新包不存在，请重新下载更新' }
+    }
+  } catch {
+    return { error: '更新包不存在，请重新下载更新' }
+  }
+  try {
+    const child = spawn(resolved, [`--wait-for-pid=${process.pid}`], {
+      windowsHide: true,
+      detached: true,
+      stdio: 'ignore'
+    })
+    child.once('error', (err) => {
+      logger.warn(`更新程序启动失败: ${err.message}`)
+    })
+    child.unref()
   } catch (err) {
     logger.warn(`更新程序启动失败: ${err.message}`)
     return { error: `启动更新程序失败: ${err.message}` }
   }
-  logger.info(`已计划启动更新程序（${INSTALL_DELAY_MS}ms 后）: ${file}`)
-  setTimeout(() => app.quit(), 500)
+  logger.info(`已拉起更新程序（等待当前实例退出）: ${resolved}`)
+  setTimeout(() => app.quit(), QUIT_DELAY_MS)
   return { ok: true }
 }

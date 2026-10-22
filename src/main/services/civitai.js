@@ -1,5 +1,6 @@
 import { net } from 'electron'
 import logger from '../logger'
+import { readResponseBytesLimited, readResponseTextLimited } from '../utils'
 import { computeFileHashOffThread } from './hash-worker-pool'
 
 /**
@@ -20,6 +21,10 @@ const IMAGE_TIMEOUT_MS = 30000
 const MAX_IMAGES = 30
 /** 示例图下载大小上限（与封面导入同一量级） */
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024
+/** API JSON 响应上限（V-06）：正常响应含描述/图片列表也远小于此值 */
+const MAX_API_JSON_BYTES = 8 * 1024 * 1024
+/** 允许跟随的重定向次数上限（V-06：每一跳都重新校验白名单） */
+const MAX_REDIRECTS = 3
 
 /**
  * Civitai API 全局限流（实测）：
@@ -41,6 +46,12 @@ const CIVITAI_429_MAX_WAIT_S = 90
 let lastCivitaiApiAt = 0
 /** 请求最小间隔（可经 setCivitaiApiInterval 注入，测试环境置 0 免真实等待） */
 let civitaiApiIntervalMs = CIVITAI_API_MIN_INTERVAL_MS
+/**
+ * 节流串行链（V-06）：并发调用若各自「读时间戳 → 睡眠 → 写时间戳」，
+ * 会同时睡醒后一起发请求，实际仍是一次突发。这里把间隔判定与时间戳
+ * 更新串成一条链，保证请求起点按最小间隔严格排队。
+ */
+let throttleChain = Promise.resolve()
 
 /**
  * 调整 Civitai API 请求最小间隔（测试钩子）：
@@ -55,11 +66,64 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** 全局节流：相邻 Civitai API 请求至少间隔 civitaiApiIntervalMs */
-async function throttleCivitaiApi() {
-  const wait = lastCivitaiApiAt + civitaiApiIntervalMs - Date.now()
-  if (wait > 0) await sleep(wait)
-  lastCivitaiApiAt = Date.now()
+/** 全局节流：相邻 Civitai API 请求至少间隔 civitaiApiIntervalMs（串行排队） */
+function throttleCivitaiApi() {
+  const run = throttleChain.then(async () => {
+    const wait = lastCivitaiApiAt + civitaiApiIntervalMs - Date.now()
+    if (wait > 0) await sleep(wait)
+    lastCivitaiApiAt = Date.now()
+  })
+  // 链本身吞掉异常，避免一次失败让后续请求永久排队
+  throttleChain = run.catch(() => {})
+  return run
+}
+
+/** 是否为需要跟随的 HTTP 重定向状态 */
+function isRedirectStatus(status) {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308
+}
+
+/**
+ * 发起请求并手动跟随重定向（V-06）：
+ * net.fetch 默认跟随 302 时只校验初始 URL，白名单主机可把请求引向任意
+ * 站点。这里改为 redirect: 'manual'，每一跳都用 isAllowed 重新校验，
+ * 超出次数上限即失败。
+ * @param {string} url 初始 URL（调用方已校验）
+ * @param {RequestInit} options fetch 选项
+ * @param {(url: string) => boolean} isAllowed 每一跳的 URL 校验
+ * @param {string} label 错误文案中的资源名
+ * @returns {Promise<Response>} 最终响应
+ */
+async function fetchWithAllowedRedirects(url, options, isAllowed, label) {
+  if (!isAllowed(url)) throw new Error(`${label}地址不在白名单内，已拒绝`)
+  let current = url
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const response = await net.fetch(current, { ...options, redirect: 'manual' })
+    if (!isRedirectStatus(response.status)) return response
+    const location = response.headers.get('location')
+    if (!location) return response
+    const next = new URL(location, current).toString()
+    if (!isAllowed(next)) {
+      throw new Error(`${label}重定向目标不在白名单内，已拒绝`)
+    }
+    current = next
+  }
+  throw new Error(`${label}重定向次数过多，已拒绝`)
+}
+
+/**
+ * Civitai API 域名白名单（含子域）：API 初始地址固定，此校验只用于重定向。
+ * @param {string} url 待校验 URL
+ * @returns {boolean}
+ */
+function isAllowedCivitaiApiUrl(url) {
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.toLowerCase()
+    return parsed.protocol === 'https:' && (host === 'civitai.com' || host.endsWith('.civitai.com'))
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -75,7 +139,12 @@ async function fetchCivitaiApi(url, options = {}) {
     await throttleCivitaiApi()
     let response
     try {
-      response = await net.fetch(url, options)
+      response = await fetchWithAllowedRedirects(
+        url,
+        options,
+        isAllowedCivitaiApiUrl,
+        'Civitai 请求'
+      )
     } catch (err) {
       return { networkError: err instanceof Error ? err : new Error(String(err)) }
     }
@@ -166,7 +235,9 @@ export async function fetchCivitaiVersionByHash(hash) {
   }
   let raw
   try {
-    raw = await response.json()
+    raw = JSON.parse(
+      await readResponseTextLimited(response, MAX_API_JSON_BYTES, 'Civitai 响应')
+    )
   } catch (err) {
     return { found: false, error: `响应解析失败: ${err.message}` }
   }
@@ -259,7 +330,9 @@ export async function fetchCivitaiModelType(modelId) {
   }
   let raw
   try {
-    raw = await response.json()
+    raw = JSON.parse(
+      await readResponseTextLimited(response, MAX_API_JSON_BYTES, 'Civitai 响应')
+    )
   } catch (err) {
     return { found: false, error: `响应解析失败: ${err.message}` }
   }
@@ -326,17 +399,33 @@ export function civitaiCompletePatch(meta, info) {
  * 发起 Civitai 图片请求（协议代理与导入下载共用）：
  * 不自定义 UA（保持 Electron 的 Chromium 默认 UA，规避 CDN 反爬挑战），
  * 携带 Referer 与 Accept 提高直连成功率。
+ * 重定向改为手动跟随并逐跳校验 CDN 白名单（V-06），返回最终响应。
  * @param {string} url 已通过 isAllowedCivitaiImageUrl 校验的图片地址
  * @returns {Promise<Response>}
  */
-export function fetchCivitaiImage(url) {
-  return net.fetch(url, {
-    headers: {
-      Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-      Referer: 'https://civitai.com/'
+export async function fetchCivitaiImage(url) {
+  return fetchWithAllowedRedirects(
+    url,
+    {
+      headers: {
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+        Referer: 'https://civitai.com/'
+      },
+      signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS)
     },
-    signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS)
-  })
+    isAllowedCivitaiImageUrl,
+    'Civitai 图片请求'
+  )
+}
+
+/**
+ * 读取 Civitai 图片响应体并强制大小上限（V-06）。
+ * 协议代理与图片导入共用，避免任意大小响应进入主进程堆。
+ * @param {Response} response fetch 响应
+ * @returns {Promise<Buffer>} 图片字节
+ */
+export function readCivitaiImageBody(response) {
+  return readResponseBytesLimited(response, MAX_IMAGE_BYTES, '图片内容')
 }
 
 /**
@@ -363,15 +452,12 @@ export async function downloadCivitaiImage(url) {
   }
   let buf
   try {
-    buf = Buffer.from(await response.arrayBuffer())
+    buf = await readCivitaiImageBody(response)
   } catch (err) {
     return { error: `图片内容读取失败: ${err.message}` }
   }
   if (buf.length === 0) {
     return { error: '图片内容为空' }
-  }
-  if (buf.length > MAX_IMAGE_BYTES) {
-    return { error: `图片过大（上限 ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)}MB）` }
   }
   // 内容校验：按响应 Content-Type 推断扩展名，URL 路径扩展名兜底
   const mime = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()

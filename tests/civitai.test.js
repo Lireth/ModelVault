@@ -13,6 +13,7 @@ vi.mock('electron', () => ({
 import { civitaiTagsToTag, civitaiTypeToTag } from '../src/shared/model-categories'
 import {
   civitaiCompletePatch,
+  downloadCivitaiImage,
   fetchCivitaiModelType,
   isAllowedCivitaiImageUrl,
   normalizeVersionInfo,
@@ -114,6 +115,83 @@ describe('fetchCivitaiModelType', () => {
     expect(res.found).toBe(false)
     expect(res.error).toContain('HTTP 429')
     expect(net.fetch).toHaveBeenCalledTimes(4)
+  })
+})
+
+describe('Civitai 网络边界（V-06）', () => {
+  it('API 重定向逐跳校验：白名单子域放行，外部主机拒绝', async () => {
+    vi.mocked(net.fetch).mockResolvedValueOnce(
+      new Response('', { status: 302, headers: { Location: 'https://evil.example.com/x' } })
+    )
+    const rejected = await fetchCivitaiModelType('1')
+    expect(rejected.found).toBe(false)
+    expect(rejected.error).toContain('重定向目标不在白名单')
+
+    vi.mocked(net.fetch)
+      .mockResolvedValueOnce(
+        new Response('', { status: 302, headers: { Location: 'https://civitai.com/api/v1/models/123' } })
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 1, type: 'LORA' }), { status: 200 }))
+    const allowed = await fetchCivitaiModelType('123')
+    expect(allowed).toEqual({ found: true, type: 'LORA', tags: [] })
+  })
+
+  it('API JSON 超过体积上限时拒绝读取', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response('{}', {
+        status: 200,
+        headers: { 'Content-Length': String(9 * 1024 * 1024) }
+      })
+    )
+    const res = await fetchCivitaiModelType('1')
+    expect(res.found).toBe(false)
+    expect(res.error).toContain('过大')
+  })
+
+  it('并发请求按最小间隔串行，不形成突发', async () => {
+    setCivitaiApiInterval(30)
+    try {
+      let inFlight = 0
+      let maxInFlight = 0
+      vi.mocked(net.fetch).mockImplementation(async () => {
+        inFlight += 1
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        inFlight -= 1
+        return new Response(JSON.stringify({ id: 1, type: 'LORA' }), { status: 200 })
+      })
+
+      await Promise.all([
+        fetchCivitaiModelType('1'),
+        fetchCivitaiModelType('2'),
+        fetchCivitaiModelType('3')
+      ])
+
+      // 旧实现三者在同一时刻睡醒后一起发请求（max=3）
+      expect(maxInFlight).toBe(1)
+      expect(net.fetch).toHaveBeenCalledTimes(3)
+    } finally {
+      setCivitaiApiInterval(0)
+    }
+  })
+
+  it('图片重定向到非 CDN 主机时拒绝', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response('', { status: 302, headers: { Location: 'https://evil.example.com/a.jpg' } })
+    )
+    const res = await downloadCivitaiImage('https://image.civitai.com/a.jpg')
+    expect(res.error).toContain('重定向目标不在白名单')
+  })
+
+  it('图片响应超过 50MB 上限时拒绝读取', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response('x', {
+        status: 200,
+        headers: { 'Content-Length': String(51 * 1024 * 1024) }
+      })
+    )
+    const res = await downloadCivitaiImage('https://image.civitai.com/a.jpg')
+    expect(res.error).toContain('过大')
   })
 })
 
