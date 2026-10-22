@@ -97,6 +97,14 @@ const api = {
     /** 取消进行中的扫描，返回 { ok } */
     cancelScan: () => invokeValidated('models:cancelScan'),
     /**
+     * F2：导入外部模型文件（复制/移动入台）
+     * @param {'copy'|'move'} mode 复制或移动
+     * @returns {Promise<{root:string,targetDir:string,targetRelDir:string,
+     *   imported:number,renamed:number,failed:object[],warnings:string[]} |
+     *   {canceled:true} | {error:string}>}
+     */
+    importModels: (mode) => invokeValidated('models:importModels', { mode }),
+    /**
      * 局部增量扫描（A-03）：只扫描指定变更子树，返回这些子树的模型现状。
      * payload 为 { folder, dirs }（dirs 为 POSIX 相对目录数组，'' 为根直属）
      */

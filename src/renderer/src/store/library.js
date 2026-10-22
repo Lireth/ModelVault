@@ -173,10 +173,10 @@ export async function saveSettings(patch) {
 
 /** 选择新的模型根目录并重新扫描 */
 export async function chooseFolder() {
-  // 扫描/增量刷新/后台校验进行中拒绝切换目录（S2/B-01）：
+  // 扫描/增量刷新/后台校验/导入进行中拒绝切换目录（S2/B-01）：
   // 否则目录已切、列表未刷新，留下半状态
-  if (state.scanning || state.partialScanning || state.backgroundScanning) {
-    toast('warn', '正在扫描或校验中，请稍候')
+  if (state.scanning || state.partialScanning || state.backgroundScanning || state.importing) {
+    toast('warn', '正在扫描、校验或导入中，请稍候')
     return
   }
   try {
@@ -198,8 +198,8 @@ export async function chooseFolder() {
  * @param {string} folder 目标根目录绝对路径
  */
 export async function switchRoot(folder) {
-  if (state.scanning || state.partialScanning || state.backgroundScanning) {
-    toast('warn', '正在扫描或校验中，请稍候')
+  if (state.scanning || state.partialScanning || state.backgroundScanning || state.importing) {
+    toast('warn', '正在扫描、校验或导入中，请稍候')
     return
   }
   if (!folder || folder === state.folder) return
@@ -269,9 +269,16 @@ export async function scanModels(folder = state.folder, options = {}) {
   }
   // 渲染层防重入（S2/B-01）：主进程虽会拒绝并发扫描，但入口先拦截可避免误导性错误弹窗。
   // 增量刷新在途时同样拒绝：它已持有主进程扫描锁，此时发起全量扫描只会被拒绝。
-  if (state.scanning || state.backgroundScanning || state.partialScanning) {
+  if (state.scanning || state.backgroundScanning || state.partialScanning || state.importing) {
     if (!background) {
-      toast('warn', state.partialScanning ? '正在增量刷新，请稍候' : '正在扫描或校验中，请稍候')
+      toast(
+        'warn',
+        state.partialScanning
+          ? '正在增量刷新，请稍候'
+          : state.importing
+            ? '正在导入模型，请稍候'
+            : '正在扫描或校验中，请稍候'
+      )
     }
     return false
   }

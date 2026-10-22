@@ -8,6 +8,7 @@ import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
 import {
   chooseFolder,
   closeSettings,
+  importModels,
   revealModel,
   saveSettings,
   CARD_SIZE_OPTIONS,
@@ -61,6 +62,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 /** 更改模型文件夹（复用全局逻辑：选择后自动重新扫描） */
 async function onChangeFolder() {
   await chooseFolder()
+}
+
+/** F2：导入外部模型文件（复制/移动入台） */
+async function onImportModels(mode) {
+  await importModels(mode)
 }
 
 async function onSave() {
@@ -137,6 +143,33 @@ async function onSave() {
           <div class="setting-actions">
             <button class="btn" @click="revealModel(state.folder)" :disabled="!state.folder">打开</button>
             <button class="btn btn-primary" :disabled="state.scanning" @click="onChangeFolder">更改文件夹</button>
+          </div>
+        </div>
+
+        <!-- F2：外部模型导入（原生文件选择 + 目标目录选择） -->
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-title">导入模型文件</span>
+            <span class="setting-desc">
+              从本机任意位置选择模型文件，复制或移动入台；同名 sidecar（说明/预览图/
+              civitai.info）一并搬运，重名自动追加编号，不覆盖库内文件
+            </span>
+          </div>
+          <div class="setting-actions">
+            <button
+              class="btn"
+              :disabled="state.importing || !state.folder"
+              @click="onImportModels('copy')"
+            >
+              {{ state.importing ? '导入中…' : '复制导入' }}
+            </button>
+            <button
+              class="btn"
+              :disabled="state.importing || !state.folder"
+              @click="onImportModels('move')"
+            >
+              移动导入
+            </button>
           </div>
         </div>
 

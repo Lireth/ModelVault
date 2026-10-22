@@ -131,7 +131,8 @@ const EXPECTED_EXPORTS = [
   'handleMenuAction',
   // 文件操作（批次 4）
   'toggleDisabledModel',
-  'moveModelTo'
+  'moveModelTo',
+  'importModels'
 ]
 
 describe('appStore 门面导出契约（A-04）', () => {

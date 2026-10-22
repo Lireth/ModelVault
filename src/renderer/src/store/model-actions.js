@@ -256,6 +256,57 @@ export async function moveModelTo(id) {
   return true
 }
 
+/**
+ * F2：导入外部模型文件（复制/移动入台）。
+ * 主进程完成文件搬运后，对目标子树执行局部扫描，让新模型即时入列。
+ * @param {'copy'|'move'} mode 复制或移动
+ * @returns {Promise<boolean>} 是否成功导入至少一个模型
+ */
+export async function importModels(mode = 'copy') {
+  if (state.importing) return false
+  if (state.scanning || state.partialScanning || state.backgroundScanning) {
+    toast('warn', '正在扫描或校验中，请稍候')
+    return false
+  }
+  state.importing = true
+  try {
+    const res = await window.api.models.importModels(mode)
+    if (res?.canceled) return false
+    if (res?.error) {
+      toast('error', res.error)
+      return false
+    }
+    const imported = Number.isFinite(res?.imported) ? res.imported : 0
+    const renamed = Number.isFinite(res?.renamed) ? res.renamed : 0
+    const failed = Array.isArray(res?.failed) ? res.failed : []
+    if (imported === 0) {
+      toast(
+        'warn',
+        failed.length > 0 ? `导入失败：${failed[0].error}` : '没有导入任何模型'
+      )
+      return false
+    }
+    const parts = [`已${mode === 'move' ? '移动' : '复制'}入台 ${imported} 个模型`]
+    if (renamed > 0) parts.push(`重命名 ${renamed} 个`)
+    if (failed.length > 0) parts.push(`${failed.length} 个失败`)
+    if (Array.isArray(res.warnings) && res.warnings.length > 0) {
+      parts.push(`${res.warnings.length} 个 sidecar 警告`)
+    }
+    toast(failed.length > 0 ? 'warn' : 'success', parts.join('，'))
+    // 先释放导入标记，再触发局部扫描（扫描/全量回退不应被导入互斥拦截）
+    state.importing = false
+    // 目标子树局部扫描（F1/O3 的增量链）；根目录导入传空串（仅根直属文件）
+    const { partialScanModels } = await import('./partial-scan')
+    await partialScanModels([res.targetRelDir ?? ''])
+    return true
+  } catch (err) {
+    toast('error', `导入失败: ${err.message}`)
+    return false
+  } finally {
+    state.importing = false
+  }
+}
+
 /** 文件改名/移动后的列表刷新：文件 id 已变，整表重扫是最可靠的收敛方式 */
 async function refreshAfterFileChange() {
   const { scanModels } = await import('./library')

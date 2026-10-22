@@ -68,6 +68,7 @@ function resetStoreState() {
   state.booting = false
   state.scanning = false
   state.backgroundScanning = false
+  state.importing = false
   state.scanError = ''
   state.progress = { dirs: 0, found: 0, current: '' }
   replaceModels([])

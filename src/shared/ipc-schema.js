@@ -219,6 +219,10 @@ export const IPC_PAYLOAD_SCHEMAS = {
     }
   }),
   'models:cancelScan': vVoid(),
+  // F2：外部模型导入（复制/移动入台），mode 枚举语义在 handler
+  'models:importModels': vObj({
+    fields: { mode: vStr({ required: true, max: 16 }) }
+  }),
 
   // ---------- 元数据域 ----------
   'models:saveModelData': vObj({

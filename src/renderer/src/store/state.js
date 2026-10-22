@@ -144,6 +144,8 @@ export const state = shallowReactive({
   // F1：基于本地索引秒开后的后台校验（不显示全屏扫描遮罩，
   // 但参与切库/互斥判断，校验完成后整体替换列表）
   backgroundScanning: false,
+  // F2：外部模型导入在途（按钮禁用/提示）
+  importing: false,
   // 局部增量扫描在途（B-01）：与全量 scanning 分离，不显示全屏扫描遮罩，
   // 但同样参与「切库/再次扫描」的互斥判断，避免旧根结果合并进新库。
   partialScanning: false,
