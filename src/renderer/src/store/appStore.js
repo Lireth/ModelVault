@@ -73,8 +73,12 @@ export {
   duplicateGroups,
   duplicateIdSet,
   duplicateWastedBytes,
-  allTags
+  allTags,
+  tagCounts
 } from './filter'
+
+// 全库标签管理（F4：设置页标签管理面板）
+export { renameTagGlobally, removeTagGlobally } from './tag-admin'
 
 // 智能视图（组合筛选收藏）
 export {

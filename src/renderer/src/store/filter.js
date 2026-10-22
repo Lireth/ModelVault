@@ -170,20 +170,27 @@ export const filteredModels = computed(() => {
 })
 
 /**
- * 全库自由标签池（F-5）：按使用次数降序（同频按中文名稳定排序），上限 50——
- * 筛选下拉的数据源；标签由详情页编辑器维护，随元数据即时落盘。
+ * 全库自由标签使用计数（F4 标签管理面板数据源）：标签 -> 使用模型数。
  */
-export const allTags = computed(() => {
+export const tagCounts = computed(() => {
   const counts = new Map()
   for (const m of state.models) {
     for (const t of m.tags || []) {
       counts.set(t, (counts.get(t) || 0) + 1)
     }
   }
-  return [...counts.keys()]
-    .sort((a, b) => (counts.get(b) || 0) - (counts.get(a) || 0) || zhCollator.compare(a, b))
-    .slice(0, 50)
+  return counts
 })
+
+/**
+ * 全库自由标签池（F-5）：按使用次数降序（同频按中文名稳定排序），上限 50——
+ * 筛选下拉的数据源；标签由详情页编辑器维护，随元数据即时落盘。
+ */
+export const allTags = computed(() =>
+  [...tagCounts.value.keys()]
+    .sort((a, b) => (tagCounts.value.get(b) || 0) - (tagCounts.value.get(a) || 0) || zhCollator.compare(a, b))
+    .slice(0, 50)
+)
 
 /**
  * 各分类的数量（含全部）：直接从模型列表派生，删除/新增后自动同步。

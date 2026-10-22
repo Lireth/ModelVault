@@ -62,8 +62,12 @@ const EXPECTED_EXPORTS = [
   'typeCounts',
   'duplicateGroups',
   'allTags',
+  'tagCounts',
   'duplicateIdSet',
   'duplicateWastedBytes',
+  // 标签管理（F4）
+  'renameTagGlobally',
+  'removeTagGlobally',
   // 智能视图（组合筛选收藏）
   'savedViews',
   'activeSavedViewId',

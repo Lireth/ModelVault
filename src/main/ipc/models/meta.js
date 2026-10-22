@@ -1,5 +1,10 @@
 import logger from '../../logger'
-import { getModelMeta, setModelMeta } from '../../services/store'
+import {
+  flushStoreSave,
+  getMetaMapByAbsPath,
+  getModelMeta,
+  setModelMeta
+} from '../../services/store'
 import { wrapHandler, checkModelId, checkModelIdInRoot } from '../handler'
 
 /**
@@ -8,6 +13,11 @@ import { wrapHandler, checkModelId, checkModelIdInRoot } from '../handler'
 
 /** 自由标签上限（与 store-meta normalizeTags 的截断一致，前置校验用） */
 const MAX_TAGS = 20
+
+/** 标签名称校验（F4 全库操作入口）：非空字符串（长度上限由 schema 门禁约束） */
+function checkTagName(tag) {
+  return typeof tag === 'string' && tag.trim() ? '' : '标签名称不能为空'
+}
 
 /**
  * 合并详情页保存的元数据字段（纯函数，不修改入参）。
@@ -95,4 +105,41 @@ export function registerMetaHandlers() {
     }
     return { meta }
   }, { errorPrefix: '标签保存失败' })
+
+  // 全库重命名自由标签（F4）：把当前库所有模型上的 from 替换为 to；
+  // 目标名已存在（或仅大小写不同）时自然合并——normalizeTags 的大小写
+  // 不敏感去重会收敛变体。仅在确有改动时等待落盘，避免无谓的磁盘写入
+  wrapHandler('models:renameTag', async (event, { from, to } = {}) => {
+    const invalid = checkTagName(from) || checkTagName(to)
+    if (invalid) return { error: invalid }
+    if (from === to) return { changed: 0 }
+    let changed = 0
+    for (const [id, meta] of Object.entries(getMetaMapByAbsPath())) {
+      if (!(meta.tags || []).includes(from)) continue
+      setModelMeta(id, { ...meta, tags: meta.tags.map((t) => (t === from ? to : t)) })
+      changed += 1
+    }
+    if (changed > 0) {
+      await flushStoreSave()
+      logger.info(`全库标签重命名: ${from} -> ${to}（${changed} 个模型）`)
+    }
+    return { changed }
+  }, { errorPrefix: '标签重命名失败' })
+
+  // 全库移除自由标签（F4）：仅摘除标签，不触碰其他标注
+  wrapHandler('models:removeTag', async (event, { tag } = {}) => {
+    const invalid = checkTagName(tag)
+    if (invalid) return { error: invalid }
+    let changed = 0
+    for (const [id, meta] of Object.entries(getMetaMapByAbsPath())) {
+      if (!(meta.tags || []).includes(tag)) continue
+      setModelMeta(id, { ...meta, tags: meta.tags.filter((t) => t !== tag) })
+      changed += 1
+    }
+    if (changed > 0) {
+      await flushStoreSave()
+      logger.info(`全库标签移除: ${tag}（${changed} 个模型）`)
+    }
+    return { changed }
+  }, { errorPrefix: '标签移除失败' })
 }

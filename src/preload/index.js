@@ -118,6 +118,10 @@ const api = {
     setMetaFlags: (payload) => invokeValidated('models:setMetaFlags', payload),
     /** 整体覆写模型自由标签（F-5，tags 为全量字符串数组），返回 { meta } 或 { error } */
     setModelTags: (id, tags) => invokeValidated('models:setModelTags', { id, tags }),
+    /** 全库重命名自由标签（F4，to 已存在时合并），返回 { changed } 或 { error } */
+    renameTag: (from, to) => invokeValidated('models:renameTag', { from, to }),
+    /** 全库移除自由标签（F4），返回 { changed } 或 { error } */
+    removeTag: (tag) => invokeValidated('models:removeTag', { tag }),
     /** 弹出模型右键菜单（原生菜单），动作经 onMenuAction 事件回传 */
     popupMenu: (id) => invokeValidated('models:popupMenu', { id }),
     /** 拖拽导入封面（sourcePath 为外部图片绝对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */

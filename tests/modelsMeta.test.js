@@ -309,3 +309,82 @@ describe('models:saveModelData / models:setMetaFlags 集成（D1）', () => {
     expect(res.meta.tags).toEqual(['Pony', 'Style'])
   })
 })
+describe('models:renameTag / models:removeTag 全库标签管理（F4）', () => {
+  let root
+
+  /** 在当前根目录内创建模型占位文件（含子目录），返回绝对路径 */
+  async function touchModel(rel) {
+    const abs = path.join(root, rel)
+    await fs.mkdir(path.dirname(abs), { recursive: true })
+    await fs.writeFile(abs, 'x')
+    return abs
+  }
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-meta-tag-'))
+    roots.push(root)
+    setDataRoot(root)
+    await loadData()
+    registerModelIpcHandlers()
+  })
+
+  it('重命名：替换当前库所有模型上的标签并等待落盘', async () => {
+    const a = await touchModel('a.safetensors')
+    const b = await touchModel('sub/b.safetensors')
+    setModelMeta(a, { tags: ['旧名', '风格'] })
+    setModelMeta(b, { tags: ['旧名'] })
+
+    const res = await getRegisteredHandler('models:renameTag')(makeEvent(), { from: '旧名', to: '新名' })
+
+    expect(res).toEqual({ changed: 2 })
+    expect(getModelMeta(a).tags).toEqual(['新名', '风格'])
+    expect(getModelMeta(b).tags).toEqual(['新名'])
+    // 落盘校验：handler 已 flush，重读磁盘数据一致
+    await loadData()
+    expect(getModelMeta(a).tags).toEqual(['新名', '风格'])
+  })
+
+  it('重命名到已存在标签时自然合并（大小写不敏感去重）', async () => {
+    const a = await touchModel('a.safetensors')
+    setModelMeta(a, { tags: ['风格', '旧名'] })
+
+    const res = await getRegisteredHandler('models:renameTag')(makeEvent(), { from: '旧名', to: '风格' })
+
+    expect(res).toEqual({ changed: 1 })
+    // normalizeTags 的大小写不敏感去重收敛重复项
+    expect(getModelMeta(a).tags).toEqual(['风格'])
+  })
+
+  it('同名重命名跳过；空名拒绝', async () => {
+    const a = await touchModel('a.safetensors')
+    setModelMeta(a, { tags: ['风格'] })
+
+    expect(await getRegisteredHandler('models:renameTag')(makeEvent(), { from: '风格', to: '风格' })).toEqual({ changed: 0 })
+    expect(await getRegisteredHandler('models:renameTag')(makeEvent(), { from: '', to: 'x' })).toEqual({ error: '标签名称不能为空' })
+    expect(await getRegisteredHandler('models:renameTag')(makeEvent(), { from: '风格', to: '  ' })).toEqual({ error: '标签名称不能为空' })
+    // 无一改动
+    expect(getModelMeta(a).tags).toEqual(['风格'])
+  })
+
+  it('移除：仅摘除指定标签，其余保留并落盘', async () => {
+    const a = await touchModel('a.safetensors')
+    const b = await touchModel('b.safetensors')
+    setModelMeta(a, { tags: ['废弃', '风格'] })
+    setModelMeta(b, { tags: ['风格'] })
+
+    const res = await getRegisteredHandler('models:removeTag')(makeEvent(), { tag: '废弃' })
+
+    expect(res).toEqual({ changed: 1 })
+    expect(getModelMeta(a).tags).toEqual(['风格'])
+    expect(getModelMeta(b).tags).toEqual(['风格'])
+    await loadData()
+    expect(getModelMeta(a).tags).toEqual(['风格'])
+  })
+
+  it('移除空名拒绝', async () => {
+    // 空串通过 schema（只查类型），语义文案由 handler 产出
+    expect(await getRegisteredHandler('models:removeTag')(makeEvent(), { tag: '' })).toEqual({ error: '标签名称不能为空' })
+    // 缺参在 schema 门禁即被拒（O1 fail-closed）
+    expect(await getRegisteredHandler('models:removeTag')(makeEvent(), {})).toEqual({ error: 'tag 缺失' })
+  })
+})

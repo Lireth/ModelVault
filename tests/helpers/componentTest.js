@@ -23,6 +23,8 @@ function makeComponentApiMock() {
       chooseFolder: vi.fn(),
       setMetaFlags: vi.fn(),
       setModelTags: vi.fn(() => Promise.resolve({ meta: { tags: [] } })),
+      renameTag: vi.fn(() => Promise.resolve({ changed: 0 })),
+      removeTag: vi.fn(() => Promise.resolve({ changed: 0 })),
       deleteModel: vi.fn(),
       popupMenu: vi.fn(),
       reveal: vi.fn(),

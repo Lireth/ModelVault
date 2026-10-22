@@ -236,6 +236,16 @@ export const IPC_PAYLOAD_SCHEMAS = {
       tags: vArr({ required: true, max: 20, items: vStr({ max: 32 }) })
     }
   }),
+  // 全库标签管理（F4）：重命名/合并与移除；长度上限与 normalizeTags 截断一致
+  'models:renameTag': vObj({
+    fields: {
+      from: vStr({ required: true, max: 32 }),
+      to: vStr({ required: true, max: 32 })
+    }
+  }),
+  'models:removeTag': vObj({
+    fields: { tag: vStr({ required: true, max: 32 }) }
+  }),
 
   // ---------- 封面域 ----------
   'models:uploadCover': vObj({ fields: { id: ID } }),

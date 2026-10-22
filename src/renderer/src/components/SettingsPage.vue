@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import SettingsAbout from './settings/SettingsAbout.vue'
 import SettingsBackup from './settings/SettingsBackup.vue'
+import SettingsTags from './settings/SettingsTags.vue'
 import { useSettingsForm } from '../composables/useSettingsForm'
 import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
 import {
@@ -21,6 +22,7 @@ import {
  * 设置页编排壳（O-4 拆分）：
  * - 表单状态/脏数据保护/实时预览 → composables/useSettingsForm.js
  * - 「关于」（应用信息/检查更新/日志诊断）→ settings/SettingsAbout.vue
+ * - 「标签管理」（全库重命名/合并/移除）→ settings/SettingsTags.vue
  * - 「数据管理」（备份恢复 + 全库示例图清理）→ settings/SettingsBackup.vue
  *   （恢复后 emit 重填表单）
  * - 共享设置原语样式（.setting-row/.switch 等）→ main.css 公共类
@@ -316,6 +318,9 @@ async function onSave() {
           <input v-model="form.showParams" type="checkbox" class="switch" />
         </label>
       </div>
+
+      <!-- 标签管理（F4 拆分：settings/SettingsTags.vue，全库重命名/合并/移除） -->
+      <SettingsTags />
 
       <!-- 数据管理（O-4 拆分：settings/SettingsBackup.vue，含备份恢复与全库示例图清理） -->
       <SettingsBackup @restored="fillForm" />
