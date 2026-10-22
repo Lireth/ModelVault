@@ -48,13 +48,15 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
+  /* 自适应水平缩进：与设置页同款（窄窗保底 24px，按比例扩展，宽窗封顶 140px） */
+  --page-inset: clamp(24px, 8%, 140px);
 }
 
 .stats-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
+  padding: 16px var(--page-inset);
   border-bottom: 1px solid var(--glass-border);
   flex-shrink: 0;
 }
@@ -63,9 +65,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   font-size: var(--font-lg);
 }
 
-/* 主体限宽居中：宽窗口下阅读密度与设置页一致 */
+/* 主体自适应缩进：与设置页一致，内容区随窗口保持适当占用 */
 .stats-body {
-  padding: 16px max(20px, calc((100% - 960px) / 2));
+  padding: 16px var(--page-inset);
   overflow-y: auto;
   scrollbar-gutter: stable;
 }

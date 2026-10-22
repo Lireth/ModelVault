@@ -6,6 +6,7 @@ import {
   duplicateWastedBytes,
   MODEL_TYPES,
   formatSize,
+  openDetail,
   state,
   typeInfo
 } from '../store/appStore'
@@ -77,6 +78,11 @@ function pctOf(n) {
   return total === 0 ? 0 : Math.round((n / total) * 100)
 }
 
+/** 单模型平均容量（空库返回 0）：辅助判断库内模型的普遍体积 */
+const avgBytes = computed(() =>
+  stats.value.total ? Math.round(stats.value.totalBytes / stats.value.total) : 0
+)
+
 /** 各分类行（含未覆盖到的类型归入其他展示） */
 const typeRows = computed(() => {
   const total = stats.value.total
@@ -104,13 +110,19 @@ const coverageRows = computed(() => [
   { key: 'cover', label: '有封面', value: stats.value.withCover }
 ])
 
-/** 最占空间 TOP 5（轻量占用分析：清理场景定位大头） */
-const topSize = computed(() =>
-  [...state.models]
+/** 最占空间 TOP 5（轻量占用分析：清理场景定位大头；pct 为占总容量的百分比） */
+const topSize = computed(() => {
+  const total = stats.value.totalBytes
+  return [...state.models]
     .sort((a, b) => (b.size || 0) - (a.size || 0))
     .slice(0, 5)
-    .map((m) => ({ id: m.id, name: m.alias || m.name, size: m.size }))
-)
+    .map((m) => ({
+      id: m.id,
+      name: m.alias || m.name,
+      size: m.size,
+      pct: total > 0 ? Math.round(((m.size || 0) / total) * 100) : 0
+    }))
+})
 
 /* ---------------- F-3 图表化增强 ---------------- */
 
@@ -179,6 +191,10 @@ const dupStats = computed(() => {
         <span class="stat-label">总容量</span>
       </div>
       <div class="stat-item">
+        <span class="stat-num">{{ formatSize(avgBytes) }}</span>
+        <span class="stat-label">平均容量</span>
+      </div>
+      <div class="stat-item">
         <span class="stat-num">{{ stats.favorites }}</span>
         <span class="stat-label">收藏</span>
       </div>
@@ -228,7 +244,7 @@ const dupStats = computed(() => {
             <div class="cov-bar">
               <div class="cov-fill" :style="{ width: `${pctOf(row.value)}%` }"></div>
             </div>
-            <span class="cov-value">{{ pctOf(row.value) }}%</span>
+            <span class="cov-value cov-wide">{{ row.value }} 项 · {{ pctOf(row.value) }}%</span>
           </div>
         </div>
         <p v-else class="stats-empty">尚未扫描模型</p>
@@ -249,7 +265,7 @@ const dupStats = computed(() => {
           <div class="cov-bar">
             <div class="cov-fill" :style="{ width: `${row.pct}%` }"></div>
           </div>
-          <span class="cov-value base-value">{{ row.count }} 个 · {{ row.pct }}%</span>
+          <span class="cov-value cov-wide">{{ row.count }} 个 · {{ row.pct }}%</span>
         </div>
       </div>
     </div>
@@ -271,13 +287,17 @@ const dupStats = computed(() => {
       <p class="stats-empty">在结果栏开启「重复」筛选并「选中冗余项」即可批量清理</p>
     </div>
 
-    <!-- 最占空间 TOP 5 -->
+    <!-- 最占空间 TOP 5：占比条直观看占用，点击行打开模型详情 -->
     <div v-if="topSize.length" class="stats-block">
       <h4>最占空间 TOP 5</h4>
       <ol class="top-list">
-        <li v-for="t in topSize" :key="t.id">
-          <span class="top-name" :title="t.id">{{ t.name }}</span>
+        <li v-for="t in topSize" :key="t.id" class="top-row" title="打开模型详情" @click="openDetail(t.id)">
+          <span class="top-name">{{ t.name }}</span>
+          <div class="top-bar">
+            <div class="top-fill" :style="{ width: `${t.pct}%` }"></div>
+          </div>
           <span class="top-size">{{ formatSize(t.size) }}</span>
+          <span class="top-pct">{{ t.pct }}%</span>
         </li>
       </ol>
     </div>
@@ -373,8 +393,9 @@ const dupStats = computed(() => {
   width: 88px;
 }
 
-.base-value {
-  width: 88px;
+/* 值列加宽（数量 + 百分比），覆盖率/基底分布共用 */
+.cov-wide {
+  width: 96px;
   white-space: nowrap;
 }
 
@@ -499,6 +520,19 @@ const dupStats = computed(() => {
   font-size: var(--font-xs);
 }
 
+/* TOP 行可点击：hover 高亮（负 margin 让高亮区外扩不出血） */
+.top-row {
+  cursor: pointer;
+  padding: 3px 8px;
+  margin: 0 -8px;
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.top-row:hover {
+  background: var(--bg-hover);
+}
+
 .top-list li::before {
   counter-increment: top;
   content: counter(top);
@@ -515,14 +549,38 @@ const dupStats = computed(() => {
 }
 
 .top-name {
-  flex: 1;
+  flex: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* 容量占比条：占总容量的比例，一眼看出单模型占用级别 */
+.top-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+
+.top-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent-grad);
+}
+
 .top-size {
   color: var(--text-muted);
+  min-width: 64px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.top-pct {
+  color: var(--text-muted);
+  min-width: 36px;
+  text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
