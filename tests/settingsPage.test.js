@@ -181,8 +181,9 @@ describe('SettingsPage 主题跟随系统与自定义强调色', () => {
     await violet.trigger('click')
     await flushPromises()
     expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#a78bfa')
-    // 有未保存修改 → 关闭需确认，确认后还原为默认 blue
-    const cancelBtn = wrapper.findAll('button').find((b) => b.text() === '关闭设置页面')
+    // 有未保存修改 → 关闭需确认，确认后还原为默认 blue（关闭入口为右上角「×」）
+    const cancelBtn = wrapper.find('button[title="关闭设置页面"]')
+    expect(cancelBtn.exists()).toBe(true)
     await cancelBtn.trigger('click')
     await flushPromises()
     expect(state.confirm.visible).toBe(true)

@@ -329,8 +329,8 @@ async function onSave() {
       <SettingsAbout />
     </div>
 
+    <!-- 关闭入口统一为右上角「×」（与 ESC 同一脏保护入口），底部仅保留保存 -->
     <footer class="settings-footer">
-      <button class="btn" @click="onCancel">关闭设置页面</button>
       <button class="btn btn-primary" :disabled="saving" @click="onSave">保存</button>
     </footer>
   </div>
