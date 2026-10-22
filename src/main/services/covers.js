@@ -6,7 +6,7 @@ import { IMAGE_EXTENSIONS } from './scanner'
 // 直接依赖存储子模块而非聚合门面（services/store.js）：门面的重导出链在
 // 模块初始化顺序变化时可能拿到尚未就绪的绑定（A-02 引入 meta-relink 后
 // vitest 曾现 getReferencedCovers is not a function）；服务层直连叶子依赖更稳
-import { COVERS_DIR, DATA_DIR, getCoversDir, relativizeCover } from './store-paths'
+import { COVERS_DIR, DATA_DIR, getCoversDir, getCurrentRoot, relativizeCover } from './store-paths'
 import { getReferencedCovers, wasDataReset } from './store-meta'
 
 /**
@@ -250,6 +250,7 @@ export async function pruneOrphanCovers() {
       return
     }
     const dir = getCoversDir()
+    const root = getCurrentRoot()
     const entries = await fs.readdir(dir)
     // 引用快照必须在 readdir 之后取（B4 修复）：封面导入链路中「文件落盘可见」
     // 与「appendCoverMeta 引用登记」处于同一同步块（copyFile 的 await 返回后
@@ -259,6 +260,11 @@ export async function pruneOrphanCovers() {
     // 最新引用状态处于同一同步段：登记先完成则快照含引用；登记未完成则
     // 文件尚未落盘、不在 entries 中——两种交错均安全
     const referenced = getReferencedCovers()
+    // V-02 防御：清理期间根目录被切换时，引用集合属于旧根，继续删除会误伤新根
+    if (getCurrentRoot() !== root) {
+      logger.warn('孤儿封面清理期间模型库已切换，已跳过本次清理')
+      return
+    }
     const prefix = `${DATA_DIR}/${COVERS_DIR}/`
     const stale = entries.filter((n) => !referenced.has(`${prefix}${n}`))
     if (stale.length === 0) return

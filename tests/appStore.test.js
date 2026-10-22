@@ -33,6 +33,7 @@ import {
   selectedModel,
   sortDirectional,
   state,
+  switchRoot,
   toast,
   toggleFavorite,
   typeCounts
@@ -314,6 +315,46 @@ describe('scanModels 重关联提示（A-02）', () => {
     const notice = state.toasts.find((t) => t.type === 'warn')
     expect(notice.text).toContain('1 个目录无法读取')
     expect(notice.text).toContain('自动重新关联 1 个')
+  })
+})
+
+describe('切库状态机（V-02）', () => {
+  it('目标库扫描成功后提交 state.folder 并替换列表', async () => {
+    state.folder = 'D:\\models'
+    replaceModels([makeModel('D:\\models\\old.safetensors')])
+    api.models.scan.mockResolvedValue({
+      root: 'D:\\other',
+      models: [makeModel('D:\\other\\new.safetensors')],
+      errors: []
+    })
+
+    await switchRoot('D:\\other')
+
+    expect(state.folder).toBe('D:\\other')
+    expect(state.models.map((m) => m.id)).toEqual(['D:\\other\\new.safetensors'])
+  })
+
+  it('目标库扫描失败时保持原库与旧列表', async () => {
+    state.folder = 'D:\\models'
+    replaceModels([makeModel('D:\\models\\old.safetensors')])
+    api.models.scan.mockResolvedValue({ error: '模型文件夹不存在或不是目录' })
+
+    await switchRoot('D:\\other')
+
+    expect(state.folder).toBe('D:\\models')
+    expect(state.models.map((m) => m.id)).toEqual(['D:\\models\\old.safetensors'])
+    expect(state.toasts.some((t) => t.type === 'error')).toBe(true)
+  })
+
+  it('扫描被取消时保持原库与旧列表', async () => {
+    state.folder = 'D:\\models'
+    replaceModels([makeModel('D:\\models\\old.safetensors')])
+    api.models.scan.mockResolvedValue({ canceled: true })
+
+    await switchRoot('D:\\other')
+
+    expect(state.folder).toBe('D:\\models')
+    expect(state.models.map((m) => m.id)).toEqual(['D:\\models\\old.safetensors'])
   })
 })
 

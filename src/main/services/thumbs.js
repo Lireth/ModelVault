@@ -152,10 +152,17 @@ export async function drainDeferredThumbs(onGenerated, concurrency = THUMB_GEN_C
  */
 export async function pruneThumbs(keepNames) {
   try {
-    const entries = await fs.readdir(getThumbsDir())
+    const root = getCurrentRoot()
+    const dir = getThumbsDir()
+    const entries = await fs.readdir(dir)
+    // V-02 防御：清理期间根目录被切换时，keepNames 属于旧根，继续删除会误伤新根
+    if (getCurrentRoot() !== root) {
+      logger.warn('缩略图清理期间模型库已切换，已跳过本次清理')
+      return
+    }
     const stale = entries.filter((n) => !keepNames.has(n))
     if (stale.length === 0) return
-    await Promise.all(stale.map((n) => fs.rm(path.join(getThumbsDir(), n), { force: true })))
+    await Promise.all(stale.map((n) => fs.rm(path.join(dir, n), { force: true })))
     logger.info(`已清理 ${stale.length} 个失效缩略图`)
   } catch (err) {
     if (err.code !== 'ENOENT') logger.warn(`缩略图清理失败: ${err.message}`)

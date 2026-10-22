@@ -16,6 +16,7 @@ import {
   zipBackupAsync
 } from '../src/main/services/backup'
 import { DATA_DIR, loadData, setDataRoot, setModelMeta } from '../src/main/services/store'
+import { releaseMaintenance, tryAcquireMaintenance } from '../src/main/services/maintenance-lock'
 import logger from '../src/main/logger'
 
 /**
@@ -467,6 +468,24 @@ describe('importBackup', () => {
 
     expect(res.error).toContain('超过 64MB 上限')
     expect(fs.existsSync(path.join(target, '.modelvault'))).toBe(false)
+  })
+
+  it('维护操作进行中时拒绝恢复，不触碰目标目录（V-02）', async () => {
+    const zipPath = makeBackupZip(path.join(mkTmp('modelvault-out-'), 'backup.zip'))
+    const target = mkTmp('modelvault-target-')
+    dialogMock.showOpenDialog
+      .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
+      .mockResolvedValueOnce({ canceled: false, filePaths: [target] })
+    // 模拟扫描正在持有全局维护锁
+    const token = tryAcquireMaintenance('scan', 'D:\\scanning-root')
+    expect(token).toBeTruthy()
+    try {
+      const res = await importBackup(null)
+      expect(res.error).toContain('正在扫描中')
+      expect(fs.existsSync(path.join(target, '.modelvault'))).toBe(false)
+    } finally {
+      releaseMaintenance(token)
+    }
   })
 
   it('拒绝无效备份：无 manifest 与 manifest 格式不符分别给出明确原因', async () => {

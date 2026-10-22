@@ -154,8 +154,9 @@ export async function chooseFolder() {
   try {
     const folder = await window.api.models.chooseFolder()
     if (!folder) return
-    state.folder = folder
-    await scanModels()
+    // V-02：选择阶段不提交 state.folder；扫描成功后由 scanModels 统一提交，
+    // 失败/取消时保持原库与旧列表
+    await scanModels(folder)
   } catch (err) {
     toast('error', `选择文件夹失败: ${err.message}`)
   }
@@ -172,8 +173,8 @@ export async function switchRoot(folder) {
     return
   }
   if (!folder || folder === state.folder) return
-  state.folder = folder
-  await scanModels()
+  // V-02：先扫描目标库，成功后才提交 state.folder（失败保持当前库）
+  await scanModels(folder)
 }
 
 /**
@@ -194,11 +195,18 @@ export async function removeRoot(folder) {
   if (ok) toast('success', '已从模型库列表移除（磁盘数据不受影响）')
 }
 
-/** 扫描当前模型目录 */
-export async function scanModels() {
-  if (!state.folder) {
+/**
+ * 扫描指定模型目录（缺省为当前库）。
+ * V-02 切库状态机：显式传入 folder 时，state.folder 只在扫描成功后提交；
+ * 失败/取消保持原库与旧列表不变。
+ * @param {string} [folder] 目标模型根目录（缺省为当前库）
+ * @returns {Promise<boolean>} 是否完成了一次成功扫描
+ */
+export async function scanModels(folder = state.folder) {
+  const targetRoot = typeof folder === 'string' && folder ? folder : state.folder
+  if (!targetRoot) {
     toast('warn', '请先选择模型文件夹')
-    return
+    return false
   }
   // 渲染层防重入（S2/B-01）：主进程虽会拒绝并发扫描，但入口先拦截可避免误导性错误弹窗。
   // 增量刷新在途时同样拒绝：它已持有主进程扫描锁，此时发起全量扫描只会被拒绝。
@@ -211,7 +219,7 @@ export async function scanModels() {
   state.scanError = ''
   state.progress = { dirs: 0, found: 0, current: '' }
   try {
-    const res = await window.api.models.scan(state.folder)
+    const res = await window.api.models.scan(targetRoot)
     if (res.canceled) {
       // 用户取消：保留上一次扫描结果，静默返回
       return false
@@ -219,9 +227,11 @@ export async function scanModels() {
     if (res.error) {
       state.scanError = res.error
       toast('error', res.error)
-      return
+      return false
     }
     replaceModels(res.models)
+    // 扫描成功后才提交激活库（主进程已在同一维护锁内完成切根）
+    state.folder = res.root || targetRoot
     state.lastScan = { count: res.models.length, durationMs: res.durationMs }
     // 库设置随模型库走：切库扫描（chooseFolder/switchRoot）返回目标库的设置，
     // 应用主题/排序/视图模式——与 saveSettings 相同的同步模式
@@ -241,9 +251,11 @@ export async function scanModels() {
     } else {
       toast('success', `扫描完成：发现 ${res.models.length} 个模型${relinkedSuffix}`)
     }
+    return true
   } catch (err) {
     state.scanError = err.message
     toast('error', `扫描失败: ${err.message}`)
+    return false
   } finally {
     state.scanning = false
   }

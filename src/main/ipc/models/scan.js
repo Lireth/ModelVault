@@ -1,11 +1,17 @@
 import { BrowserWindow } from 'electron'
 import logger from '../../logger'
-import { getSettings, relinkScannedMeta, updateSettings } from '../../services/store'
+import { getCurrentRoot, getSettings, relinkScannedMeta, updateSettings } from '../../services/store'
 import { scanModels } from '../../services/scanner'
 import { pruneOrphanCovers } from '../../services/covers'
 import { clearDeferredJobs } from '../../services/thumbs'
 import { syncWatcher } from '../../services/watcher'
 import { pauseHashWarmup, requestHashWarmup, resumeHashWarmup } from '../../services/hash-warmup'
+import {
+  getMaintenanceState,
+  maintenanceBusyMessage,
+  releaseMaintenance,
+  tryAcquireMaintenance
+} from '../../services/maintenance-lock'
 import { clearDeferredOwners, decorateModels, startThumbDrain } from './decorate'
 import { ensureRootStore } from './store'
 import { getDecorateCacheRoot, awaitThumbDrain, resetDecorateCache } from './model-state'
@@ -13,8 +19,8 @@ import { wrapHandler, checkExistingDirectory } from '../handler'
 
 /**
  * 扫描链路：全量扫描模型目录（进度推送、可取消）、局部增量扫描与取消入口。
- * scanning/scanAbort 为本模块私有状态，由 models:scan / models:partialScan
- * 共用（同一把互斥锁），models:cancelScan 读取。
+ * 并发互斥由 services/maintenance-lock 统一提供（与切库、备份恢复共用一把锁）；
+ * scanAbort 仅用于取消当前扫描。
  */
 
 /** 进度事件节流间隔（ms），避免大量小文件时 IPC 过载 */
@@ -24,9 +30,13 @@ const PROGRESS_INTERVAL = 120
 const MAX_PARTIAL_DIRS = 200
 const MAX_PARTIAL_DIR_LEN = 1000
 
-let scanning = false
 /** 当前扫描的取消控制器（null 表示无进行中的扫描） */
 let scanAbort = null
+
+/** 判断两个模型根目录是否相同（Windows 大小写不敏感） */
+function isSameRoot(a, b) {
+  return String(a).toLowerCase() === String(b).toLowerCase()
+}
 
 /**
  * 清洗并归一化局部扫描子树（B-01）：
@@ -100,26 +110,28 @@ export function registerScanHandlers() {
   // 扫描模型目录（耗时操作，进度通过 models:scanProgress 事件推送，
   // 可经 models:cancelScan 取消）
   wrapHandler('models:scan', async (event, { folder } = {}) => {
-    // 同步先检查并置位扫描状态：任何 await 之前完成，
-    // 防止并发请求在事件循环间隙双重进入（B4）
-    if (scanning) {
-      return { error: '正在扫描中，请稍候' }
+    // 复用内存中的设置（B3）：应用启动时已 loadSettings，热路径无需重读磁盘，
+    // 也避免 loadSettings 的损坏重置副作用在扫描路径被意外触发
+    const root = typeof folder === 'string' && folder ? folder : getSettings().modelsFolder
+    if (!root) {
+      return { error: '尚未设置模型文件夹' }
     }
-    scanning = true
+    // 同步获取全局维护锁（V-02）：任何 await 之前完成，防止并发扫描/切库/
+    // 备份恢复在事件循环间隙双重进入
+    const token = tryAcquireMaintenance('scan', root)
+    if (!token) {
+      return { error: maintenanceBusyMessage() }
+    }
     scanAbort = new AbortController()
     const signal = scanAbort.signal
     const startedAt = Date.now()
-    // 扫描期间暂停后台哈希预热取队（正在计算的单个文件不中断），结束后恢复
-    pauseHashWarmup()
-    let root
+    const previousRoot = getCurrentRoot()
+    let rootSwitched = false
+    let completed = false
 
     try {
-      // 复用内存中的设置（B3）：应用启动时已 loadSettings，热路径无需重读磁盘，
-      // 也避免 loadSettings 的损坏重置副作用在扫描路径被意外触发
-      root = typeof folder === 'string' && folder ? folder : getSettings().modelsFolder
-      if (!root) {
-        return { error: '尚未设置模型文件夹' }
-      }
+      // 扫描期间暂停后台哈希预热取队（正在计算的单个文件不中断），结束后恢复
+      pauseHashWarmup()
       // 扫描目录必须是已存在的目录（C6）：防止任意字符串路径（如已删除目录、
       // 或误传文件/系统根）在 ensureRootStore 中创建 .modelvault 写入元数据
       const dirInvalid = await checkExistingDirectory(root, '模型文件夹不存在或不是目录')
@@ -140,8 +152,10 @@ export function registerScanHandlers() {
 
       // 等待上一轮后台缩略图生成完成，避免与新扫描的缩略图清理逻辑竞争（C4 单一入口）
       await awaitThumbDrain()
-      // 切换/加载该根目录的关联存储，并清理孤儿封面文件
-      await ensureRootStore(root)
+      // 切换/加载该根目录的关联存储，并清理孤儿封面文件。
+      // 维护锁由本扫描持有，传入令牌避免 ensureRootStore 再次加锁
+      await ensureRootStore(root, { maintenanceToken: token })
+      rootSwitched = Boolean(previousRoot) && !isSameRoot(previousRoot, root)
       await pruneOrphanCovers()
       // 切换根目录后装饰缓存全部失效；延迟缩略图队列同步清空——
       // 残留的旧根条目会被下一轮 drain 以「新根」的 thumbs 目录生成（跨根写文件），
@@ -212,6 +226,7 @@ export function registerScanHandlers() {
       // 更新过 excludeDirs 时，旧快照会把 watcher 名单回退为扫描前的值
       syncWatcher(root, getSettings().autoRescan === true, getSettings().excludeDirs || [])
 
+      completed = true
       return {
         root,
         models: decorated,
@@ -225,15 +240,28 @@ export function registerScanHandlers() {
         settings: getSettings()
       }
     } finally {
-      scanning = false
+      // 扫描失败/取消且已经切到新根：回滚到原根，避免主进程根目录与
+      // 渲染层保留的旧列表不一致（V-02 切库状态机）
+      if (!completed && rootSwitched && previousRoot) {
+        try {
+          await ensureRootStore(previousRoot, { maintenanceToken: token })
+          logger.warn(`扫描未完成，已回滚模型库根目录: ${root} → ${previousRoot}`)
+        } catch (err) {
+          logger.error(`扫描失败后回滚模型库根目录失败: ${err.message}`)
+        }
+      }
       scanAbort = null
+      releaseMaintenance(token)
       resumeHashWarmup()
     }
   }, { errorPrefix: '扫描失败' })
 
   // 取消进行中的扫描（经 AbortController 中止，扫描返回 { canceled: true }）
   wrapHandler('models:cancelScan', () => {
-    if (scanning && scanAbort) {
+    const maintenance = getMaintenanceState()
+    const cancelable =
+      maintenance && (maintenance.kind === 'scan' || maintenance.kind === 'partial-scan')
+    if (cancelable && scanAbort) {
       scanAbort.abort()
       return { ok: true }
     }
@@ -241,16 +269,16 @@ export function registerScanHandlers() {
   })
 
   // 局部增量扫描（A-03）：watcher 检出变更子树后，仅重扫这些子树并装饰返回。
-  // 与全量扫描共用同一把 scanning 锁（互斥）；不做孤儿封面清理（全量扫描兜底）、
-  // 不回写设置/不重启 watcher；重关联限定在受影响子树内。
+  // 与全量扫描、切库、备份恢复共用全局维护锁（V-02）；不做孤儿封面清理
+  // （全量扫描兜底）、不回写设置/不重启 watcher；重关联限定在受影响子树内。
   wrapHandler('models:partialScan', async (event, { folder, dirs } = {}) => {
-    // 同步先检查并置位扫描状态：任何 await 之前完成（B-01）。
-    // 此前本 handler 在 checkExistingDirectory 之后才置位，await 间隙内可被
-    // 另一条局部扫描或全量扫描穿透，导致两条链路同时切根/装饰/清理缩略图。
-    if (scanning) {
-      return { error: '正在扫描中，请稍候' }
+    const root = typeof folder === 'string' && folder ? folder : getSettings().modelsFolder
+    if (!root) return { error: '尚未设置模型文件夹' }
+    // 同步获取维护锁（B-01/V-02）：任何 await 之前完成，防止并发穿透
+    const token = tryAcquireMaintenance('partial-scan', root)
+    if (!token) {
+      return { error: maintenanceBusyMessage() }
     }
-    scanning = true
     const abort = new AbortController()
     scanAbort = abort
     const signal = abort.signal
@@ -258,9 +286,7 @@ export function registerScanHandlers() {
     try {
       // 与全量扫描一致：扫描期间暂停后台哈希预热取队，结束后恢复
       pauseHashWarmup()
-      const root = typeof folder === 'string' && folder ? folder : getSettings().modelsFolder
-      if (!root) return { error: '尚未设置模型文件夹' }
-      // 子树清洗在锁内完成：失败路径统一经 finally 释放锁，不会残留 scanning=true
+      // 子树清洗在锁内完成：失败路径统一经 finally 释放锁
       const normalized = normalizePartialScanDirs(dirs)
       if (normalized.error) return { error: normalized.error }
       const subDirs = normalized.subDirs
@@ -274,8 +300,15 @@ export function registerScanHandlers() {
       if (dirInvalid) {
         return { error: dirInvalid }
       }
+      // 局部扫描只作用于当前根（V-02）：渲染层请求发出后根已切换时直接拒绝，
+      // 绝不能借 ensureRootStore 把主进程根目录切回旧库
+      const currentRoot = getCurrentRoot()
+      if (currentRoot && !isSameRoot(root, currentRoot)) {
+        logger.warn(`拒绝针对非当前根的局部扫描: ${root}（当前 ${currentRoot}）`)
+        return { error: '模型库已切换，请稍后重试' }
+      }
 
-      await ensureRootStore(root)
+      await ensureRootStore(root, { maintenanceToken: token })
       const appSettings = getSettings()
       const scanResult = await scanModels(root, null, {
         excludeDirs: appSettings.excludeDirs || [],
@@ -319,8 +352,8 @@ export function registerScanHandlers() {
         durationMs: Date.now() - startedAt
       }
     } finally {
-      scanning = false
       scanAbort = null
+      releaseMaintenance(token)
       resumeHashWarmup()
     }
   }, { errorPrefix: '局部扫描失败' })

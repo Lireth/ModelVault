@@ -4,6 +4,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { strToU8, Unzip, UnzipInflate, unzip, zip } from 'fflate'
 import logger from '../logger'
+import { runMaintenance } from './maintenance-lock'
 import {
   COVERS_DIR,
   DATA_DIR,
@@ -496,6 +497,21 @@ async function pruneRestoreArtifacts(root, keepBakName) {
  * @returns {Promise<{root: string, models: number, covers: number, skipped: number}>}
  */
 async function restoreLibrary(root, unzipped, libSettings = null, skippedCovers = 0) {
+  // V-02：恢复会整体替换目标库的 .modelvault，必须与扫描/局部扫描/切库互斥。
+  // 拿不到锁时抛出 EBUSY，由 importBackup 转换为「正在…，请稍候」
+  return runMaintenance('restore', root, () =>
+    restoreLibraryLocked(root, unzipped, libSettings, skippedCovers)
+  )
+}
+
+/**
+ * 恢复库数据（调用方已持有全局维护锁）。
+ * @param {string} root 目标模型根目录
+ * @param {Record<string, Uint8Array>} unzipped 解压出的备份条目
+ * @param {object|null} libSettings 随备份恢复的库设置
+ * @param {number} skippedCovers 解压阶段跳过的非法封面条目数
+ */
+async function restoreLibraryLocked(root, unzipped, libSettings = null, skippedCovers = 0) {
   const decoder = new TextDecoder()
   const storeText = decoder.decode(unzipped[`${LIB_PREFIX}${DATA_FILE}`])
   // 落盘前先校验 JSON 并规范化（B-04）：备份来自不可信来源，
@@ -695,7 +711,8 @@ export async function importBackup(win) {
   if (settingsPayload) {
     const root = getCurrentRoot()
     if (root) {
-      await saveLibrarySettings(root, settingsPayload)
+      // 与库恢复一致：设置写入也需与扫描/切库互斥（V-02）
+      await runMaintenance('restore', root, () => saveLibrarySettings(root, settingsPayload))
       logger.info(`备份中的库设置已写入当前模型库: ${root}`)
       return { settingsRestored: true }
     }

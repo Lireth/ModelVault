@@ -50,7 +50,7 @@ vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([])
 import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
 import { scanModels } from '../src/main/services/scanner'
 import { syncWatcher } from '../src/main/services/watcher'
-import { loadSettings, setDataRoot, updateSettings } from '../src/main/services/store'
+import { getCurrentRoot, loadSettings, setDataRoot, updateSettings } from '../src/main/services/store'
 import { drainDeferredThumbs, getThumbPathDeferred } from '../src/main/services/thumbs'
 
 const settingsFile = path.join(fakeUserData, 'settings.json')
@@ -237,6 +237,21 @@ describe('models:partialScan（A-03）', () => {
     const ok = await partial(makeEvent(), { folder: root, dirs: ['lora'] })
     expect(ok.error).toBeUndefined()
   })
+
+  it('请求根与当前根不一致时拒绝，绝不把主进程切回旧库（V-02）', async () => {
+    const rootB = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-partial-other-'))
+    roots.push(rootB)
+    await updateSettings({ modelsFolder: root, modelsFolders: [root, rootB] })
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+    const partial = getRegisteredHandler('models:partialScan')
+    const callsBefore = vi.mocked(scanModels).mock.calls.length
+
+    const res = await partial(makeEvent(), { folder: rootB, dirs: ['lora'] })
+
+    expect(res.error).toBe('模型库已切换，请稍后重试')
+    expect(getCurrentRoot()).toBe(root)
+    expect(vi.mocked(scanModels).mock.calls.length).toBe(callsBefore)
+  })
 })
 
 describe('局部扫描不清理子树外缩略图（OPT-1 修复）', () => {
@@ -404,6 +419,22 @@ describe('models:scan 目录校验与回写（C6）', () => {
     const { modelsFolder } = await loadSettings()
     expect(modelsFolder).toBe(rootB)
   })
+
+  it('切库扫描失败时回滚主进程根目录，保持原激活库（V-02）', async () => {
+    const rootB = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-rollback-'))
+    roots.push(rootB)
+    await updateSettings({ modelsFolder: root, modelsFolders: [root, rootB] })
+    vi.mocked(scanModels).mockRejectedValue(new Error('磁盘错误'))
+    const scan = getRegisteredHandler('models:scan')
+
+    const res = await scan(makeEvent(), { folder: rootB })
+
+    expect(res.error).toContain('磁盘错误')
+    // 已切到 rootB 后扫描失败：必须回滚到原根，避免渲染层旧列表与主进程根错位
+    expect(getCurrentRoot()).toBe(root)
+    const { modelsFolder } = await loadSettings()
+    expect(modelsFolder).toBe(root)
+  })
 })
 
 describe('扫描完成以最新设置同步目录监控（E8 竞态回归）', () => {
@@ -451,12 +482,14 @@ describe('models:loadStore', () => {
 })
 
 describe('models:chooseFolder', () => {
-  it('对话框确认后持久化并返回所选目录', async () => {
+  it('对话框确认后加入库列表并返回所选目录，激活由扫描成功后提交（V-02）', async () => {
     const chooseFolder = getRegisteredHandler('models:chooseFolder')
     vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [root] })
     expect(await chooseFolder(makeEvent())).toBe(root)
-    const { modelsFolder } = await loadSettings()
-    expect(modelsFolder).toBe(root)
+    const settings = await loadSettings()
+    // 目录进入库列表（供后续 models:scan 白名单校验），但不提前成为激活库
+    expect(settings.modelsFolders).toContain(root)
+    expect(settings.modelsFolder).not.toBe(root)
   })
 
   it('对话框取消返回 null 且不修改设置', async () => {
