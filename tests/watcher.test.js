@@ -30,6 +30,7 @@ vi.mock('electron', () => ({
 import {
   collectDirSnapshot,
   computeSnapshotDiff,
+  computeStatSnapshotDiff,
   snapshotsEqual,
   stopWatcher,
   syncWatcher
@@ -117,6 +118,38 @@ describe('collectDirSnapshot / snapshotsEqual', () => {
     await fs.mkdir(path.join(root, 'sub'))
     await expect(collectDirSnapshot(path.join(root, 'missing'), new Set())).rejects.toThrow()
   })
+
+  it('O4：withStats 采集文件 size/mtime，同名覆盖写入产生目录差异', async () => {
+    const file = path.join(root, 'overwrite.safetensors')
+    await fs.writeFile(file, 'small')
+    const before = await collectDirSnapshot(root, new Set(), { withStats: true })
+    const entry = before.get(root).find((e) => e.name === 'overwrite.safetensors')
+    expect(entry).toMatchObject({ size: 5 })
+    expect(Number.isFinite(entry.mtimeMs)).toBe(true)
+
+    // 同名、同条目名，仅内容/大小变化：名称快照无差异，内容快照必须命中
+    await fs.writeFile(file, 'much-longer-content')
+    const after = await collectDirSnapshot(root, new Set(), { withStats: true })
+
+    // 条目名完全一致（名称快照不会发现变化），内容快照必须命中
+    expect(before.get(root).map((e) => e.name)).toEqual(after.get(root).map((e) => e.name))
+    expect(computeStatSnapshotDiff(root, before, after)).toEqual([''])
+  })
+
+  it('O4：有界并发遍历（concurrency=1）仍完整收集嵌套目录', async () => {
+    for (let i = 0; i < 12; i++) {
+      const dir = path.join(root, `dir-${i}`, 'nested')
+      await fs.mkdir(dir, { recursive: true })
+      await fs.writeFile(path.join(dir, 'm.safetensors'), 'x')
+    }
+    const snapshot = await collectDirSnapshot(root, new Set(), {
+      withStats: true,
+      concurrency: 1
+    })
+    // 根 + 12 个一级目录 + 12 个 nested 目录
+    expect(snapshot.size).toBe(25)
+    expect(snapshot.has(path.join(root, 'dir-11', 'nested'))).toBe(true)
+  })
 })
 
 describe('computeSnapshotDiff（A-03 增量扫描的变更子树定位）', () => {
@@ -201,6 +234,39 @@ describe('syncWatcher 目录监控（A8）', () => {
     await sleep(350) // 等重置后的防抖结束
 
     expect(sentEvents).toHaveLength(1)
+  })
+
+  it('O4：同名覆盖写入经低频内容校验被发现并广播', async () => {
+    const file = path.join(root, 'overwrite.safetensors')
+    await fs.writeFile(file, 'small')
+    // 内容校验间隔调小到 30ms（生产默认 60s），名称轮询 20ms
+    syncWatcher(root, true, [], {
+      pollInterval: 20,
+      broadcastDebounce: 40,
+      contentCheckInterval: 30
+    })
+    await sleep(80) // 等基准内容快照建立
+    sentEvents.length = 0
+
+    // 条目名不变、仅内容/大小变化：名称快照不会触发，内容校验轮必须命中
+    await fs.writeFile(file, 'much-longer-content')
+    await waitFor(() => sentEvents.length >= 1, '同名覆盖写入未触发广播')
+
+    expect(sentEvents[0].channel).toBe('models:fsChanged')
+    expect(sentEvents[0].payload.root).toBe(root)
+    expect(sentEvents[0].payload.dirs).toEqual([''])
+  })
+
+  it('O4：contentCheckInterval≤0 时关闭内容校验（仅名称变更监控）', async () => {
+    const file = path.join(root, 'no-content.safetensors')
+    await fs.writeFile(file, 'small')
+    syncWatcher(root, true, [], { ...timing, contentCheckInterval: 0 })
+    await sleep(60)
+    sentEvents.length = 0
+
+    await fs.writeFile(file, 'much-longer-content')
+    await sleep(250)
+    expect(sentEvents).toHaveLength(0)
   })
 
   it('.modelvault 内的写入不触发广播（自激励防护）', async () => {
