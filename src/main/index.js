@@ -6,8 +6,14 @@ import { registerImageScheme, registerImageProtocolHandler } from './protocol'
 import { loadSettings } from './services/store'
 import { quitAfterFlush } from './quit'
 import { handleUncaughtException } from './fatal-error'
+import { runStartupSmoke } from './smoke'
 import { isAllowedExternalUrl } from './utils'
 import logger from './logger'
+
+// 启动冒烟使用独立 userData，避免污染真实用户配置与单实例锁
+if (process.env.MODELVAULT_SMOKE === '1' && process.env.MODELVAULT_SMOKE_USER_DATA) {
+  app.setPath('userData', process.env.MODELVAULT_SMOKE_USER_DATA)
+}
 
 // 自定义协议必须在 app ready 之前注册
 registerImageScheme()
@@ -83,9 +89,17 @@ if (!gotSingleInstanceLock) {
     })
 
     logger.info(`应用启动完成 (Electron ${process.versions.electron} / Node ${process.versions.node})`)
+
+    // 冒烟模式：完成启动链路检查后自行退出（仅 CI/手工 smoke 设置该环境变量）
+    if (process.env.MODELVAULT_SMOKE === '1') {
+      void runStartupSmoke(win)
+    }
   }).catch((error) => {
     logger.error(`应用初始化失败: ${error.stack || error.message}`)
-    dialog.showErrorBox('模匣 启动失败', String(error?.message || error))
+    // 冒烟模式不弹模态框：CI 无人工关闭，会表现为挂起而非明确失败
+    if (process.env.MODELVAULT_SMOKE !== '1') {
+      dialog.showErrorBox('模匣 启动失败', String(error?.message || error))
+    }
     app.quit()
   })
 }
