@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   atomicWriteFile,
+  flushSettingsSave,
   flushStoreSave,
   getModelMeta,
   getSettings,
@@ -346,6 +347,44 @@ describe('reloadCurrentRootData（备份恢复到当前根后的内存重载，B
     expect(disk.models['restored.safetensors']?.note).toBe('恢复数据')
     expect(disk.models[path.relative(root, abs).split(path.sep).join('/')]).toBeUndefined()
   })
+
+  it('等待在途原子写结束后再读取磁盘，避免重载与 rename 交错（B-02）', async () => {
+    const abs = await touchModel('inflight.safetensors')
+    setModelMeta(abs, { alias: '在途写入' })
+
+    const realRename = fs.rename.bind(fs)
+    let releaseRename = () => {}
+    const gate = new Promise((resolve) => {
+      releaseRename = resolve
+    })
+    let gated = false
+    vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
+      if (!gated && src.includes('store.json')) {
+        gated = true
+        await gate
+      }
+      return realRename(src, dst)
+    })
+
+    try {
+      const write = saveStoreNow() // 卡在 rename，构造在途写入
+      await vi.waitFor(() => expect(gated).toBe(true))
+
+      let reloaded = false
+      const reload = reloadCurrentRootData().then(() => {
+        reloaded = true
+      })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      // 在途写入未结束：重载必须等待，不能先读到旧文件
+      expect(reloaded).toBe(false)
+
+      releaseRename()
+      await Promise.all([write, reload])
+      expect(getModelMeta(abs)?.alias).toBe('在途写入')
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
 })
 
 describe('切换根目录与落盘链（A6）', () => {
@@ -607,6 +646,120 @@ describe('库设置并发落盘串行化（A1）', () => {
       expect(onDisk.cardSize).toBe('large')
     } finally {
       setStoreSaveErrorListener(null)
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('排队中的库设置写入使用调度时快照与根目录：切根后不会把新库补丁写进旧库（B-02）', async () => {
+    const libA = path.join(root, '.modelvault', 'settings.json')
+    const other = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-snapshot-'))
+    roots.push(other)
+    const libB = path.join(other, '.modelvault', 'settings.json')
+
+    const realRename = fs.rename.bind(fs)
+    let releaseFirstRename = () => {}
+    const firstRenameGate = new Promise((resolve) => {
+      releaseFirstRename = resolve
+    })
+    let gated = false
+    vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
+      if (!gated && src.includes('settings.json')) {
+        gated = true
+        await firstRenameGate
+      }
+      return realRename(src, dst)
+    })
+
+    try {
+      // 显式写入 cardSize，避免用例间共享的模块级 library 残留影响断言
+      const first = updateSettings({ theme: 'light', cardSize: 'normal' })
+      await vi.waitFor(() => expect(gated).toBe(true))
+      // 模拟切根窗口：新根已生效，随后又产生一条库字段补丁
+      setDataRoot(other)
+      const second = updateSettings({ cardSize: 'large' })
+      releaseFirstRename()
+      await Promise.all([first, second])
+
+      const onA = JSON.parse(await fs.readFile(libA, 'utf-8'))
+      const onB = JSON.parse(await fs.readFile(libB, 'utf-8'))
+      // 旧实现执行时读取全局 library，会把第二次补丁一并写进旧库 A
+      expect(onA.theme).toBe('light')
+      expect(onA.cardSize).toBe('normal')
+      expect(onB.cardSize).toBe('large')
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('flushSettingsSave 等待在途库设置写入完成后再返回（B-02）', async () => {
+    const realRename = fs.rename.bind(fs)
+    let releaseRename = () => {}
+    const gate = new Promise((resolve) => {
+      releaseRename = resolve
+    })
+    let gated = false
+    vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
+      if (!gated && src.includes('settings.json')) {
+        gated = true
+        await gate
+      }
+      return realRename(src, dst)
+    })
+
+    try {
+      const write = updateSettings({ theme: 'light' })
+      await vi.waitFor(() => expect(gated).toBe(true))
+
+      let flushed = false
+      const flush = flushSettingsSave().then(() => {
+        flushed = true
+      })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(flushed).toBe(false)
+
+      releaseRename()
+      await Promise.all([write, flush])
+      expect(flushed).toBe(true)
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('reloadLibrarySettings 等待旧库在途写入结束后再切换内存视图（B-02）', async () => {
+    const other = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-reload-'))
+    roots.push(other)
+
+    const realRename = fs.rename.bind(fs)
+    let releaseRename = () => {}
+    const gate = new Promise((resolve) => {
+      releaseRename = resolve
+    })
+    let gated = false
+    vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
+      if (!gated && src.includes('settings.json')) {
+        gated = true
+        await gate
+      }
+      return realRename(src, dst)
+    })
+
+    try {
+      const pendingWrite = updateSettings({ theme: 'light' })
+      await vi.waitFor(() => expect(gated).toBe(true))
+
+      let reloaded = false
+      const reload = reloadLibrarySettings(other).then(() => {
+        reloaded = true
+      })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      // 旧库写在途：重载必须等待，否则会先读到旧状态再被迟到写入影响
+      expect(reloaded).toBe(false)
+
+      releaseRename()
+      await Promise.all([pendingWrite, reload])
+      // 已切到 other：库设置为该库的默认值
+      expect(getSettings().theme).toBe('dark')
+    } finally {
       vi.restoreAllMocks()
     }
   })

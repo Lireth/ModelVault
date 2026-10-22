@@ -59,7 +59,8 @@ export {
   updateSettings,
   reloadLibrarySettings,
   saveLibrarySettings,
-  normalizeLibrarySettings
+  normalizeLibrarySettings,
+  flushSettingsSave
 } from './store-settings'
 
 /* ---------------- 关联存储（按模型根目录） ---------------- */

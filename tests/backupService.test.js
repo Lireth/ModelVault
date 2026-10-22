@@ -213,6 +213,7 @@ describe('exportBackup', () => {
   it('打包设置与当前库的 store.json/covers，thumbs 不纳入', async () => {
     const root = makeLibrary()
     setDataRoot(root)
+    await loadData()
     const outZip = path.join(mkTmp('modelvault-out-'), 'backup.zip')
     dialogMock.showSaveDialog.mockResolvedValue({ canceled: false, filePath: outZip })
 
@@ -240,6 +241,7 @@ describe('exportBackup', () => {
   it('无关联数据时仅备份应用设置', async () => {
     const root = mkTmp('modelvault-empty-lib-')
     setDataRoot(root)
+    await loadData()
     const outZip = path.join(mkTmp('modelvault-out-'), 'backup.zip')
     dialogMock.showSaveDialog.mockResolvedValue({ canceled: false, filePath: outZip })
 
@@ -255,9 +257,26 @@ describe('exportBackup', () => {
 
   it('用户取消保存对话框时返回 canceled', async () => {
     setDataRoot(makeLibrary())
+    await loadData()
     dialogMock.showSaveDialog.mockResolvedValue({ canceled: true })
     const res = await exportBackup(null)
     expect(res.canceled).toBe(true)
+  })
+
+  it('导出前先 flush 防抖写入：刚修改的备注进入备份（B-02）', async () => {
+    const root = makeLibrary()
+    setDataRoot(root)
+    await loadData()
+    // 防抖窗口内（500ms 未到）立即导出：不 flush 时备份读到旧磁盘内容
+    setModelMeta(path.join(root, 'a.safetensors'), { note: '刚修改的备注' })
+    const outZip = path.join(mkTmp('modelvault-out-'), 'backup.zip')
+    dialogMock.showSaveDialog.mockResolvedValue({ canceled: false, filePath: outZip })
+
+    const res = await exportBackup(null)
+
+    expect(res.error).toBeUndefined()
+    const store = JSON.parse(readZip(outZip)['library/store.json'])
+    expect(store.models['a.safetensors'].note).toBe('刚修改的备注')
   })
 })
 

@@ -43,6 +43,12 @@ let saveTimer = null
 let saving = false
 /** 写盘进行期间收到的新保存请求（落盘完成后需补写一次，避免丢失） */
 let pendingSave = false
+/**
+ * 暂停元数据落盘（B-02）：备份恢复替换磁盘文件后、内存重载完成前，
+ * 任何由旧内存触发的写入都会把恢复结果覆盖回去。重载窗口内直接丢弃
+ * 保存请求，待 loadData 完成后恢复；并发写入的互斥由维护锁（MV-02）保证。
+ */
+let saveSuppressed = false
 /** 元数据是否因损坏被重置（为 true 时应跳过孤儿封面清理，避免误删） */
 let dataReset = false
 
@@ -260,6 +266,19 @@ export async function reloadCurrentRootData() {
     clearTimeout(saveTimer)
     saveTimer = null
   }
+  // B-02 恢复屏障：
+  // 1) 丢弃挂起的补写请求，恢复窗口内不再调度新落盘；
+  // 2) 等待已开始的原子写结束（其 rename 不可取消），避免读到交换中的文件；
+  // 3) 之后才从磁盘重载，保证内存基线就是恢复后的内容。
+  saveSuppressed = true
+  pendingSave = false
+  try {
+    while (saving) {
+      await new Promise((resolve) => setImmediate(resolve))
+    }
+  } finally {
+    saveSuppressed = false
+  }
   return loadData()
 }
 
@@ -363,6 +382,8 @@ export function setModelMeta(modelId, meta) {
 
 /** 防抖保存：短时间内多次修改只落盘一次 */
 function scheduleSave() {
+  // 恢复重载窗口内不调度：定时器携带的是恢复前的旧内存
+  if (saveSuppressed) return
   if (saveTimer) clearTimeout(saveTimer)
   // 记录调度时的根目录（A6）：定时器触发时若根已切换，本次防抖携带的
   // 是旧根数据，直接落盘会写进新根目录的 store.json（跨库污染）——丢弃。
@@ -380,7 +401,7 @@ function scheduleSave() {
 
 /** 立即落盘（原子写入：临时文件 -> 重命名；并发请求排队补写，不会丢失） */
 export async function saveStoreNow() {
-  if (!data || !getCurrentRoot()) return
+  if (!data || !getCurrentRoot() || saveSuppressed) return
   if (saving) {
     // 写盘进行中又有新修改：标记待补写，由 finally 在落盘完成后触发补写
     pendingSave = true
@@ -395,8 +416,9 @@ export async function saveStoreNow() {
     saving = false
     if (pendingSave) {
       pendingSave = false
-      // 补写读取的是当前最新 data，覆盖写盘期间的任何后续修改
-      saveStoreNow().catch(notifyStoreSaveError)
+      // 补写读取的是当前最新 data，覆盖写盘期间的任何后续修改；
+      // 若已进入恢复重载窗口则丢弃，绝不把旧内存写回刚恢复的文件
+      if (!saveSuppressed) saveStoreNow().catch(notifyStoreSaveError)
     }
   }
 }
@@ -409,10 +431,13 @@ export async function saveStoreNow() {
  * （空闲则立即写入，写盘中则登记补写），随后等待写盘与补写全部完成。
  */
 export async function flushStoreSave() {
+  const hadPendingTimer = saveTimer !== null
   if (saveTimer) {
     clearTimeout(saveTimer)
     saveTimer = null
   }
+  // 无待落盘内容时不要“为写而写”：空库首次导出/退出不应凭空创建 store.json
+  if (!hadPendingTimer && !saving && !pendingSave) return
   await saveStoreNow()
   while (saving || pendingSave) {
     await new Promise((resolve) => setImmediate(resolve))

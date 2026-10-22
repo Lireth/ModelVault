@@ -8,6 +8,7 @@ import {
   DATA_DIR,
   DATA_FILE,
   LIB_SETTINGS_FILE,
+  flushSettingsSave,
   flushStoreSave,
   getCurrentRoot,
   getLibrarySettings,
@@ -179,6 +180,9 @@ async function pathExists(p) {
  *   | {canceled: true} | {error: string}>}
  */
 export async function exportBackup(win) {
+  // B-02：先静止两路写盘链再读磁盘——标注为 500ms 防抖落盘，
+  // 刚修改的备注/标签若不 flush 不会进入备份（用户以为已备份）。
+  await Promise.all([flushStoreSave(), flushSettingsSave()])
   // 库设置随模型库走：备份当前库的设置（不含引导字段）——恢复到任意
   // 模型文件夹时配置随包生效，且不会劫持本机的激活库/库列表
   const librarySettings = getLibrarySettings()
@@ -311,10 +315,11 @@ async function restoreLibrary(root, unzipped, libSettings = null) {
   const storeText = decoder.decode(unzipped[`${LIB_PREFIX}${DATA_FILE}`])
   // 落盘前先校验 JSON：损坏的备份不应触发任何目录交换
   const parsed = JSON.parse(storeText)
-  // 静止关联存储写盘链（B1 修复配套）：在途的防抖/原子写完成于目录交换之后时，
-  // 其 rename 会把恢复前的旧数据覆盖到刚恢复的 store.json 上。恢复目标为
-  // 当前激活根时风险最大；对其他根 flush 只是把旧根待落盘数据写进其自身文件，无副作用
-  await flushStoreSave()
+  // 静止两路写盘链（B1/B-02 修复配套）：在途的防抖/原子写完成于目录交换之后时，
+  // 其 rename 会把恢复前的旧数据覆盖到刚恢复的 store.json / settings.json 上。
+  // 恢复目标为当前激活根时风险最大；对其他根 flush 只是把当前根待落盘数据
+  // 写进其自身文件，无副作用
+  await Promise.all([flushStoreSave(), flushSettingsSave()])
 
   const dataDir = path.join(root, DATA_DIR)
   const stamp = Date.now()

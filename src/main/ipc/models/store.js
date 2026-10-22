@@ -9,7 +9,8 @@ import {
   switchDataRoot,
   reloadLibrarySettings,
   setStoreSaveErrorListener,
-  updateSettings
+  updateSettings,
+  flushSettingsSave
 } from '../../services/store'
 import { pruneOrphanCovers } from '../../services/covers'
 import { syncWatcher } from '../../services/watcher'
@@ -37,6 +38,9 @@ export async function ensureRootStore(root) {
   if (getCurrentRoot() !== root) {
     // 切换根目录前必须等待上一轮后台缩略图生成完成（B10，等待入口收敛于 model-state）
     await awaitThumbDrain()
+    // 旧根的库设置也先落盘（B-02）：随后 reloadLibrarySettings 会切换内存视图，
+    // 排队中的旧库快照必须在此之前写完（其 target root 已在调度时固定）
+    await flushSettingsSave()
     // 旧根待落盘数据先写入旧目录，再切换根目录（A6）
     await switchDataRoot(root)
     await loadData()

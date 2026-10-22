@@ -1,6 +1,6 @@
 import { app, dialog } from 'electron'
 import logger from './logger'
-import { flushStoreSave } from './services/store'
+import { flushSettingsSave, flushStoreSave } from './services/store'
 
 /**
  * 主进程未捕获异常处理（A3）。
@@ -40,9 +40,9 @@ export async function handleUncaughtException(error) {
   }
   handling = true
   try {
-    // 尽力保存：防抖中的元数据立即落盘，减少重启导致的数据丢失。
+    // 尽力保存：防抖中的元数据与设置立即落盘，减少重启导致的数据丢失。
     // 落盘失败不阻断重启——数据已可能不一致，续跑风险高于重启
-    await flushStoreSave().catch((err) => {
+    await Promise.all([flushStoreSave(), flushSettingsSave()]).catch((err) => {
       logger.warn(`致命错误处理中落盘失败: ${err.message}`)
     })
   } finally {

@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { flushStoreSave } from './services/store'
+import { flushSettingsSave, flushStoreSave } from './services/store'
 import { flushWindowStateSave } from './windows/mainWindow'
 import { stopWatcher } from './services/watcher'
 import logger from './logger'
@@ -34,7 +34,7 @@ export function quitAfterFlush() {
     )
     app.exit(0)
   }, FLUSH_TIMEOUT_MS)
-  Promise.all([flushStoreSave(), flushWindowStateSave()])
+  Promise.all([flushStoreSave(), flushSettingsSave(), flushWindowStateSave()])
     .catch((err) => {
       // 落盘失败不阻塞退出：flush* 内部已尽力保存并经通知链路告知用户
       logger.warn(`退出落盘未完全成功: ${err?.message || err}`)

@@ -238,7 +238,7 @@ async function loadLibrarySettings(root, seedRaw = null) {
       // 该库首次打开：以迁移种子（旧版全局设置遗留字段）或默认值初始化并落盘
       const seeded = normalizeLibrarySettings(seedRaw)
       try {
-        await atomicWriteFile(file, JSON.stringify(seeded, null, 2))
+        await enqueueLibraryWrite(root, JSON.stringify(seeded, null, 2))
         if (seedRaw) logger.info(`应用设置已迁移至模型库: ${file}`)
       } catch (writeErr) {
         // 目录只读/磁盘离线等：库文件不落盘，设置本次会话仅内存生效
@@ -361,6 +361,32 @@ let bootstrapWriteChain = Promise.resolve()
 let libraryWriteChain = Promise.resolve()
 
 /**
+ * 等待设置写盘链完全静止（B-02）：
+ * 切库、备份导出/恢复、退出等需要「磁盘已是最新设置」的场景调用。
+ * 循环比较链引用，覆盖等待期间又有新写入入队的情况。
+ */
+export async function flushSettingsSave() {
+  for (;;) {
+    const bootstrapTask = bootstrapWriteChain
+    const libraryTask = libraryWriteChain
+    await Promise.all([bootstrapTask.catch(() => {}), libraryTask.catch(() => {})])
+    if (bootstrapTask === bootstrapWriteChain && libraryTask === libraryWriteChain) return
+  }
+}
+
+/**
+ * 将库设置文本排入库层写盘链（唯一的库设置写入通道）。
+ * @param {string} root 目标库根目录
+ * @param {string} text 已序列化的设置快照
+ * @returns {Promise<void>} 本次写入完成（失败时 reject，链本身继续服务后续写入）
+ */
+function enqueueLibraryWrite(root, text) {
+  const task = libraryWriteChain.then(() => atomicWriteFile(getLibSettingsFilePath(root), text))
+  libraryWriteChain = task.catch(() => {})
+  return task
+}
+
+/**
  * 更新应用设置（规范化后按层拆分落盘，原子写入）：
  * - 引导字段 → %APPDATA%/modelvault/settings.json
  * - 库字段 → <当前模型根目录>/.modelvault/settings.json（无激活根时仅内存生效，
@@ -376,24 +402,23 @@ export async function updateSettings(patch) {
   const touchesBootstrap = 'modelsFolder' in patch || 'modelsFolders' in patch
   const touchesLibrary = Object.keys(patch).some((k) => !BOOTSTRAP_KEYS.has(k))
 
-  // 序列化在执行时求值：即使写盘期间又有新补丁合并进内存，本次落盘即为最新快照
+  // 调度时立即序列化快照（B-02）：执行时求值会读取可能已被切库/重载替换的
+  // 全局 library，导致旧库补丁写入新库。此处快照 + root 均在同步段捕获，
+  // 队列任务只写「本次调用所属库」的内容。
+  const bootstrapSnapshot = touchesBootstrap ? JSON.stringify(bootstrap, null, 2) : ''
+  const libraryRoot = touchesLibrary ? getCurrentRoot() : null
+  const librarySnapshot = libraryRoot ? JSON.stringify(library, null, 2) : ''
+
   const tasks = []
   if (touchesBootstrap) {
     const task = bootstrapWriteChain.then(() =>
-      atomicWriteFile(getSettingsFilePath(), JSON.stringify(bootstrap, null, 2))
+      atomicWriteFile(getSettingsFilePath(), bootstrapSnapshot)
     )
     bootstrapWriteChain = task.catch(() => {})
     tasks.push(task)
   }
-  if (touchesLibrary) {
-    const root = getCurrentRoot()
-    if (root) {
-      const task = libraryWriteChain.then(() =>
-        atomicWriteFile(getLibSettingsFilePath(root), JSON.stringify(library, null, 2))
-      )
-      libraryWriteChain = task.catch(() => {})
-      tasks.push(task)
-    }
+  if (libraryRoot) {
+    tasks.push(enqueueLibraryWrite(libraryRoot, librarySnapshot))
   }
   for (const task of tasks) {
     try {
@@ -413,6 +438,9 @@ export async function updateSettings(patch) {
  * @param {string|null} root 模型根目录绝对路径
  */
 export async function reloadLibrarySettings(root) {
+  // 先静止旧库写盘链（B-02）：排队中的补丁都携带旧库快照，必须写完再切换内存视图，
+  // 避免重载后的新库设置立刻被旧任务覆盖
+  await flushSettingsSave()
   library = root ? await loadLibrarySettings(root) : defaultLibrarySettings()
 }
 
@@ -426,7 +454,10 @@ export async function reloadLibrarySettings(root) {
  */
 export async function saveLibrarySettings(root, raw) {
   const normalized = normalizeLibrarySettings(raw)
-  await atomicWriteFile(getLibSettingsFilePath(root), JSON.stringify(normalized, null, 2))
+  // 与 updateSettings 共用同一条写盘链（B-02）：备份恢复写入库设置时，
+  // 若与在途的设置更新并发，共享临时文件会互相打断或让旧快照后落盘
+  const snapshot = JSON.stringify(normalized, null, 2)
+  await enqueueLibraryWrite(root, snapshot)
   const active = getCurrentRoot()
   if (root && active && root.toLowerCase() === active.toLowerCase()) {
     library = normalized

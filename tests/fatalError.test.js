@@ -13,6 +13,7 @@ import { fakeUserData } from './setup'
 
 const timeline = []
 const flushStoreSave = vi.fn()
+const flushSettingsSave = vi.fn()
 const showErrorBox = vi.fn()
 const relaunch = vi.fn()
 const exit = vi.fn()
@@ -34,7 +35,8 @@ vi.mock('../src/main/logger', () => ({
 }))
 
 vi.mock('../src/main/services/store', () => ({
-  flushStoreSave
+  flushStoreSave,
+  flushSettingsSave
 }))
 
 /** 每个用例以全新模块实例运行（处理中标记为模块级状态，跨用例需复位） */
@@ -75,6 +77,8 @@ describe('handleUncaughtException', () => {
     expect(loggerError).toHaveBeenCalledWith(expect.stringContaining('Error: boom'))
     // 顺序：先尽力保存数据，再提示用户，最后重启
     expect(timeline).toEqual(['flush', 'dialog', 'relaunch', 'exit'])
+    // 设置与元数据两路都尽力落盘
+    expect(flushSettingsSave).toHaveBeenCalledTimes(1)
     expect(showErrorBox).toHaveBeenCalledWith(
       expect.stringContaining('模匣'),
       expect.stringContaining('重启')

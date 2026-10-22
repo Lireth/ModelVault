@@ -13,6 +13,7 @@ import { fakeUserData } from './setup'
 const timeline = []
 const stopWatcher = vi.fn(() => timeline.push('stopWatcher'))
 const flushStoreSave = vi.fn(async () => timeline.push('flushStore'))
+const flushSettingsSave = vi.fn(async () => {})
 const flushWindowStateSave = vi.fn(async () => timeline.push('flushWindow'))
 const quit = vi.fn(() => timeline.push('quit'))
 const exit = vi.fn(() => timeline.push('exit'))
@@ -33,7 +34,8 @@ vi.mock('../src/main/logger', () => ({
 }))
 
 vi.mock('../src/main/services/store', () => ({
-  flushStoreSave
+  flushStoreSave,
+  flushSettingsSave
 }))
 
 vi.mock('../src/main/services/watcher', () => ({
@@ -72,6 +74,7 @@ describe('quitAfterFlush', () => {
 
     await vi.waitFor(() => expect(quit).toHaveBeenCalledTimes(1))
     expect(timeline).toEqual(['stopWatcher', 'flushStore', 'flushWindow', 'quit'])
+    expect(flushSettingsSave).toHaveBeenCalledTimes(1)
     expect(loggerInfo).toHaveBeenCalledWith(expect.stringContaining('应用退出'))
     // 未超时：不触发强制退出
     expect(exit).not.toHaveBeenCalled()
