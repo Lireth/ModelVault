@@ -350,13 +350,16 @@ async function onSave() {
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
+  /* 自适应水平缩进：窄窗保底 24px，随窗口按比例扩展，宽窗封顶 140px，
+     内容区始终占约 84% 宽度（头部/底部/正文共用，保持纵向对齐） */
+  --page-inset: clamp(24px, 8%, 140px);
 }
 
 .settings-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
+  padding: 16px var(--page-inset);
   border-bottom: 1px solid var(--glass-border);
   flex-shrink: 0;
 }
@@ -366,7 +369,7 @@ async function onSave() {
 }
 
 .settings-body {
-  padding: 16px max(20px, calc((100% - 960px) / 2));
+  padding: 16px var(--page-inset);
   overflow-y: auto;
   /* 预留滚动条空间，避免滚动条出现/消失时模块左右错位 */
   scrollbar-gutter: stable;
@@ -513,7 +516,7 @@ async function onSave() {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  padding: 16px 20px;
+  padding: 16px var(--page-inset);
   border-top: 1px solid var(--glass-border);
   flex-shrink: 0;
 }
