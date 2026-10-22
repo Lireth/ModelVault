@@ -12,16 +12,75 @@ import { getDecorateCacheRoot, awaitThumbDrain, resetDecorateCache } from './mod
 import { wrapHandler, checkExistingDirectory } from '../handler'
 
 /**
- * 扫描链路：全量扫描模型目录（进度推送、可取消）与取消入口。
- * scanning/scanAbort 为本模块私有状态，仅 models:scan 与 models:cancelScan 使用。
+ * 扫描链路：全量扫描模型目录（进度推送、可取消）、局部增量扫描与取消入口。
+ * scanning/scanAbort 为本模块私有状态，由 models:scan / models:partialScan
+ * 共用（同一把互斥锁），models:cancelScan 读取。
  */
 
 /** 进度事件节流间隔（ms），避免大量小文件时 IPC 过载 */
 const PROGRESS_INTERVAL = 120
 
+/** 局部扫描子树入参上限（与 ipc-schema 声明保持一致） */
+const MAX_PARTIAL_DIRS = 200
+const MAX_PARTIAL_DIR_LEN = 1000
+
 let scanning = false
 /** 当前扫描的取消控制器（null 表示无进行中的扫描） */
 let scanAbort = null
+
+/**
+ * 清洗并归一化局部扫描子树（B-01）：
+ * - 拒绝逃逸段/反斜杠/绝对路径/超长/过量；
+ * - 精确去重；
+ * - 去掉被其它子树覆盖的后代（如同时传入 `lora` 与 `lora/sub`）。
+ *
+ * 后一项是必要防御：scanner 对每个非根子树递归全部后代，父子同时入栈会让
+ * 同一文件被扫描两次，产出重复 id 的模型记录（卡片重复、统计翻倍）。
+ * 空串代表「仅根目录直属文件」，不递归后代，因此不与任何子树构成覆盖关系。
+ *
+ * @param {unknown} dirs 渲染进程传入的变更子树
+ * @returns {{subDirs: string[]} | {error: string}}
+ */
+function normalizePartialScanDirs(dirs) {
+  if (!Array.isArray(dirs)) return { error: '缺少变更子树' }
+  const normalized = []
+  for (const raw of dirs.slice(0, MAX_PARTIAL_DIRS)) {
+    if (typeof raw !== 'string') return { error: '变更子树参数无效' }
+    const item = raw.trim()
+    if (item === '') {
+      normalized.push('')
+      continue
+    }
+    if (
+      item.length > MAX_PARTIAL_DIR_LEN ||
+      item.includes('\\') ||
+      item.startsWith('/') ||
+      /^[A-Za-z]:/.test(item) ||
+      item.split('/').some((seg) => seg === '' || seg === '..' || seg === '.')
+    ) {
+      return { error: '变更子树参数无效' }
+    }
+    normalized.push(item)
+  }
+  if (normalized.length === 0) return { error: '缺少变更子树' }
+
+  const unique = []
+  const seen = new Set()
+  for (const item of normalized) {
+    if (seen.has(item)) continue
+    seen.add(item)
+    unique.push(item)
+  }
+  // 去掉被祖先覆盖的后代（保持原顺序）；空串不参与覆盖判断
+  const subDirs = unique.filter((item, index) => {
+    if (item === '') return true
+    return !unique.some(
+      (other, otherIndex) =>
+        otherIndex !== index && other !== '' && item.startsWith(`${other}/`)
+    )
+  })
+  return { subDirs }
+}
 
 /**
  * 目录是否属于模型库白名单（B1）：settings.modelsFolders（上限 20）。
@@ -185,51 +244,37 @@ export function registerScanHandlers() {
   // 与全量扫描共用同一把 scanning 锁（互斥）；不做孤儿封面清理（全量扫描兜底）、
   // 不回写设置/不重启 watcher；重关联限定在受影响子树内。
   wrapHandler('models:partialScan', async (event, { folder, dirs } = {}) => {
+    // 同步先检查并置位扫描状态：任何 await 之前完成（B-01）。
+    // 此前本 handler 在 checkExistingDirectory 之后才置位，await 间隙内可被
+    // 另一条局部扫描或全量扫描穿透，导致两条链路同时切根/装饰/清理缩略图。
     if (scanning) {
       return { error: '正在扫描中，请稍候' }
     }
-    const root = typeof folder === 'string' && folder ? folder : getSettings().modelsFolder
-    if (!Array.isArray(dirs)) return { error: '缺少变更子树' }
-    // 子树入参清洗：POSIX 相对目录（'' 代表根直属），拒绝逃逸段/反斜杠/超长/过量
-    const MAX_DIRS = 200
-    const MAX_DIR_LEN = 1000
-    const subDirs = []
-    for (const raw of dirs.slice(0, MAX_DIRS)) {
-      if (typeof raw !== 'string') return { error: '变更子树参数无效' }
-      const item = raw.trim()
-      if (item === '') {
-        subDirs.push('')
-        continue
-      }
-      if (
-        item.length > MAX_DIR_LEN ||
-        item.includes('\\') ||
-        item.split('/').some((seg) => seg === '..' || seg === '.' )
-      ) {
-        return { error: '变更子树参数无效' }
-      }
-      subDirs.push(item)
-    }
-    if (subDirs.length === 0) return { error: '缺少变更子树' }
-
-    // 与全量扫描一致的目录前置校验（白名单 + 存在性）
-    if (!isKnownLibrary(root)) {
-      logger.warn(`拒绝局部扫描模型库列表之外的目录: ${root}`)
-      return { error: '该目录不在模型库列表中' }
-    }
-    const dirInvalid = await checkExistingDirectory(root, '模型文件夹不存在或不是目录')
-    if (dirInvalid) {
-      return { error: dirInvalid }
-    }
-
-    const startedAt = Date.now()
     scanning = true
     const abort = new AbortController()
     scanAbort = abort
     const signal = abort.signal
-    // 与全量扫描一致：扫描期间暂停后台哈希预热取队，结束后恢复
-    pauseHashWarmup()
+    const startedAt = Date.now()
     try {
+      // 与全量扫描一致：扫描期间暂停后台哈希预热取队，结束后恢复
+      pauseHashWarmup()
+      const root = typeof folder === 'string' && folder ? folder : getSettings().modelsFolder
+      if (!root) return { error: '尚未设置模型文件夹' }
+      // 子树清洗在锁内完成：失败路径统一经 finally 释放锁，不会残留 scanning=true
+      const normalized = normalizePartialScanDirs(dirs)
+      if (normalized.error) return { error: normalized.error }
+      const subDirs = normalized.subDirs
+
+      // 与全量扫描一致的目录前置校验（白名单 + 存在性）
+      if (!isKnownLibrary(root)) {
+        logger.warn(`拒绝局部扫描模型库列表之外的目录: ${root}`)
+        return { error: '该目录不在模型库列表中' }
+      }
+      const dirInvalid = await checkExistingDirectory(root, '模型文件夹不存在或不是目录')
+      if (dirInvalid) {
+        return { error: dirInvalid }
+      }
+
       await ensureRootStore(root)
       const appSettings = getSettings()
       const scanResult = await scanModels(root, null, {

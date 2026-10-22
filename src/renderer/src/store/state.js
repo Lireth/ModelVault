@@ -134,6 +134,9 @@ export const state = shallowReactive({
   // 防止「开始使用」引导页对已配置过文件夹的用户闪现
   booting: true,
   scanning: false,
+  // 局部增量扫描在途（B-01）：与全量 scanning 分离，不显示全屏扫描遮罩，
+  // 但同样参与「切库/再次扫描」的互斥判断，避免旧根结果合并进新库。
+  partialScanning: false,
   scanError: '',
   progress: { dirs: 0, found: 0, current: '' }, // 每次整体替换，无需深响应
   lastScan: null, // { count, durationMs }

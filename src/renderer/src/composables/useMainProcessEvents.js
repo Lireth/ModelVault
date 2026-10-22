@@ -37,35 +37,45 @@ export function useMainProcessEvents() {
   /**
    * 安排一次二级防抖后的刷新（A-03）：
    * 有变更子树走局部增量扫描，空列表（旧载荷/无法定位）由 store 回退全量扫描。
+   * root 为事件发生时的库根快照（B-01）：定时器触发时若用户已切库，
+   * 旧根子树必须丢弃，不能用于新库。
    */
-  function scheduleFsRescan(dirs) {
+  function scheduleFsRescan(dirs, root) {
     clearTimeout(fsChangedTimer)
     fsChangedTimer = setTimeout(() => {
       fsChangedTimer = null
-      if (!state.scanning && state.settings.autoRescan) partialScanModels(dirs || [])
+      if (root !== state.folder || !state.settings.autoRescan) return
+      // 扫描/增量刷新已占用主进程扫描锁：本轮子树转入待处理，由忙闲侦听器补扫
+      if (state.scanning || state.partialScanning) {
+        if (!fsChangedPendingDirs) fsChangedPendingDirs = new Set()
+        for (const d of dirs || []) fsChangedPendingDirs.add(d)
+        return
+      }
+      partialScanModels(dirs || [])
     }, 1000)
   }
 
   function onFsChanged({ root, dirs }) {
     if (root !== state.folder || !state.settings.autoRescan) return
     const subDirs = Array.isArray(dirs) ? dirs : []
-    // 扫描进行中：累积变更子树，扫描结束后由侦听器补一次局部扫描，不丢弃事件
-    if (state.scanning) {
+    // 扫描/增量刷新进行中：累积变更子树，结束后由侦听器补一次局部扫描，不丢弃事件
+    if (state.scanning || state.partialScanning) {
       if (!fsChangedPendingDirs) fsChangedPendingDirs = new Set()
       for (const d of subDirs) fsChangedPendingDirs.add(d)
       return
     }
-    scheduleFsRescan(subDirs)
+    scheduleFsRescan(subDirs, root)
   }
 
-  // 扫描结束补决策（A-07a）：扫描中累积的变更子树在结束后补一次防抖局部扫描
+  // 扫描结束补决策（A-07a/B-01）：全量扫描或增量刷新结束后，
+  // 对期间累积的变更子树补一次防抖局部扫描
   watch(
-    () => state.scanning,
-    (scanning, wasScanning) => {
-      if (wasScanning && !scanning && fsChangedPendingDirs) {
+    () => state.scanning || state.partialScanning,
+    (busy, wasBusy) => {
+      if (wasBusy && !busy && fsChangedPendingDirs) {
         const pending = [...fsChangedPendingDirs]
         fsChangedPendingDirs = null
-        if (state.settings.autoRescan) scheduleFsRescan(pending)
+        if (state.settings.autoRescan) scheduleFsRescan(pending, state.folder)
       }
     }
   )

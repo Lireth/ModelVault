@@ -105,6 +105,10 @@ export async function scanModels(root, onProgress, options = {}) {
   const signal = options.signal
   const models = []
   const errors = []
+  // 同一次扫描内按绝对路径去重（B-01 防御）：子树集合若出现父子重叠，
+  // 同一文件会被递归访问两次。调用方已在入参层剔除后代，此处兜底保证
+  // 扫描结果永远不含重复 id（重复卡片、统计翻倍、缩略图重复登记）。
+  const seenIds = new Set()
   let dirCount = 0
 
   // A-03 子树局部扫描：subDirs 为相对根的 POSIX 目录列表，'' 表示根直属。
@@ -197,6 +201,8 @@ export async function scanModels(root, onProgress, options = {}) {
           return
         }
         const stat = s.value
+        if (seenIds.has(f.fullPath)) return
+        seenIds.add(f.fullPath)
         const ext = f.ext || path.extname(f.name).toLowerCase()
         models.push({
           id: f.fullPath,

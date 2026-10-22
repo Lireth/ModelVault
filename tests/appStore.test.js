@@ -96,6 +96,7 @@ beforeEach(() => {
   // 重置模块级单例状态，用例间互不污染
   state.folder = ''
   state.scanning = false
+  state.partialScanning = false
   state.scanError = ''
   replaceModels([])
   state.typeFilter = 'all'
@@ -217,6 +218,69 @@ describe('partialScanModels 增量合并（A-03）', () => {
 
     expect(state.models.map((m) => m.id)).toEqual(['keep-id'])
     expect(state.toasts.some((t) => t.type === 'error')).toBe(true)
+  })
+
+  it('请求发出后切库：旧根响应丢弃，不覆盖新库列表（B-01）', async () => {
+    setGrid([makeModel('D:\\models\\lora\\a.safetensors', { name: 'a', relDir: 'lora' })])
+    let resolveRequest
+    api.models.partialScan.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRequest = resolve
+      })
+    )
+
+    const pending = partialScanModels(['lora'])
+    // 模拟切库：根与列表已换成新库
+    state.folder = 'D:\\other'
+    replaceModels([makeModel('D:\\other\\new.safetensors', { name: 'new', relDir: '' })])
+    resolveRequest({
+      models: [makeModel('D:\\models\\lora\\b.safetensors', { name: 'b', relDir: 'lora' })],
+      dirs: ['lora'],
+      relinked: 0
+    })
+    await pending
+
+    expect(state.models.map((m) => m.id)).toEqual(['D:\\other\\new.safetensors'])
+    expect(state.partialScanning).toBe(false)
+  })
+
+  it('并发局部扫描串行化：在途变更合并后补扫一次（B-01）', async () => {
+    setGrid([makeModel('D:\\models\\keep.safetensors', { name: 'keep', relDir: '' })])
+    let resolveFirst
+    api.models.partialScan.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFirst = resolve
+      })
+    )
+
+    const first = partialScanModels(['lora'])
+    api.models.partialScan.mockResolvedValue({ models: [], dirs: ['vae'], relinked: 0 })
+    // 在途期间的新变更不并发发起，合并入队
+    await partialScanModels(['vae'])
+    expect(api.models.partialScan).toHaveBeenCalledTimes(1)
+
+    resolveFirst({ models: [], dirs: ['lora'], relinked: 0 })
+    await first
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(api.models.partialScan).toHaveBeenCalledTimes(2)
+    expect(api.models.partialScan.mock.calls[1][0]).toEqual({
+      folder: 'D:\\models',
+      dirs: ['vae']
+    })
+    expect(state.partialScanning).toBe(false)
+  })
+
+  it('局部扫描失败降级全量扫描时，不会因锁标志被自身拦截（B-01）', async () => {
+    setGrid([])
+    api.models.partialScan.mockResolvedValue({ error: '该目录不在模型库列表中' })
+    api.models.scan.mockResolvedValue({ models: [makeModel('m1')], errors: [] })
+
+    await partialScanModels(['lora'])
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(api.models.scan).toHaveBeenCalledTimes(1)
+    expect(state.partialScanning).toBe(false)
   })
 })
 

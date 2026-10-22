@@ -143,4 +143,35 @@ describe('A-07a 扫描中目录变更不丢失', () => {
 
     expect(window.api.models.scan).toHaveBeenCalledTimes(1)
   })
+
+  it('防抖触发前已切库：旧根变更子树丢弃，不作用于新库（B-01）', async () => {
+    const onFsChanged = await mountApp()
+    window.api.models.partialScan.mockClear()
+
+    onFsChanged({ root: 'D:\\models', dirs: ['lora'] })
+    // 防抖窗口内切库
+    state.folder = 'D:\\other-library'
+    await vi.advanceTimersByTimeAsync(1100)
+
+    expect(window.api.models.partialScan).not.toHaveBeenCalled()
+  })
+
+  it('增量刷新期间收到的变更不丢失：刷新结束后补扫一次（B-01）', async () => {
+    const onFsChanged = await mountApp()
+    state.partialScanning = true
+    await nextTick()
+    window.api.models.partialScan.mockClear()
+
+    onFsChanged({ root: 'D:\\models', dirs: ['vae'] })
+
+    state.partialScanning = false
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(1100)
+
+    expect(window.api.models.partialScan).toHaveBeenCalledTimes(1)
+    expect(window.api.models.partialScan.mock.calls[0][0]).toEqual({
+      folder: 'D:\\models',
+      dirs: ['vae']
+    })
+  })
 })

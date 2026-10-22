@@ -146,8 +146,8 @@ export async function saveSettings(patch) {
 
 /** 选择新的模型根目录并重新扫描 */
 export async function chooseFolder() {
-  // 扫描进行中拒绝切换目录（S2）：否则目录已切、列表未刷新，留下半状态
-  if (state.scanning) {
+  // 扫描/增量刷新进行中拒绝切换目录（S2/B-01）：否则目录已切、列表未刷新，留下半状态
+  if (state.scanning || state.partialScanning) {
     toast('warn', '正在扫描中，请稍候')
     return
   }
@@ -167,7 +167,7 @@ export async function chooseFolder() {
  * @param {string} folder 目标根目录绝对路径
  */
 export async function switchRoot(folder) {
-  if (state.scanning) {
+  if (state.scanning || state.partialScanning) {
     toast('warn', '正在扫描中，请稍候')
     return
   }
@@ -200,8 +200,13 @@ export async function scanModels() {
     toast('warn', '请先选择模型文件夹')
     return
   }
-  // 渲染层防重入（S2）：主进程虽会拒绝并发扫描，但入口先拦截可避免误导性错误弹窗
+  // 渲染层防重入（S2/B-01）：主进程虽会拒绝并发扫描，但入口先拦截可避免误导性错误弹窗。
+  // 增量刷新在途时同样拒绝：它已持有主进程扫描锁，此时发起全量扫描只会被拒绝。
   if (state.scanning) return false
+  if (state.partialScanning) {
+    toast('warn', '正在增量刷新，请稍候')
+    return false
+  }
   state.scanning = true
   state.scanError = ''
   state.progress = { dirs: 0, found: 0, current: '' }

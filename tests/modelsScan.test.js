@@ -178,6 +178,65 @@ describe('models:partialScan（A-03）', () => {
     expect(Array.isArray(extensions)).toBe(true)
     expect(extensions.length).toBeGreaterThan(0)
   })
+
+  it('局部扫描在首个 await 前持有扫描锁：并发局部请求立即拒绝（B-01）', async () => {
+    const partial = getRegisteredHandler('models:partialScan')
+    await registerLibrary(root)
+    hangScanModels()
+
+    const first = partial(makeEvent(), { folder: root, dirs: ['lora'] })
+    await waitForScanStarted()
+
+    // 此前锁在 checkExistingDirectory 之后才置位，此处会穿透并发出第二条扫描
+    const second = await partial(makeEvent(), { folder: root, dirs: ['vae'] })
+    expect(second).toEqual({ error: '正在扫描中，请稍候' })
+
+    releaseScan()
+    const result = await first
+    expect(result.error).toBeUndefined()
+    expect(result.dirs).toEqual(['lora'])
+  })
+
+  it('父子重叠与重复子树去重：只扫描祖先一次（B-01）', async () => {
+    const partial = getRegisteredHandler('models:partialScan')
+    await registerLibrary(root)
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+
+    const res = await partial(makeEvent(), {
+      folder: root,
+      dirs: ['lora', 'lora/sub', 'lora', 'vae/deep']
+    })
+
+    expect(res.error).toBeUndefined()
+    // 后代 lora/sub 被祖先 lora 覆盖；精确重复只保留一份
+    expect(res.dirs).toEqual(['lora', 'vae/deep'])
+    expect(vi.mocked(scanModels).mock.calls.at(-1)[2].subDirs).toEqual(['lora', 'vae/deep'])
+  })
+
+  it('根直属空串与子树并存时两者都保留（语义不重叠）', async () => {
+    const partial = getRegisteredHandler('models:partialScan')
+    await registerLibrary(root)
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+
+    const res = await partial(makeEvent(), { folder: root, dirs: ['', 'lora'] })
+
+    expect(res.dirs).toEqual(['', 'lora'])
+  })
+
+  it('参数非法时释放扫描锁，后续合法请求可正常进入（B-01）', async () => {
+    const partial = getRegisteredHandler('models:partialScan')
+    await registerLibrary(root)
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+
+    expect((await partial(makeEvent(), { folder: root, dirs: ['../escape'] })).error).toBe(
+      '变更子树参数无效'
+    )
+    expect((await partial(makeEvent(), { folder: root, dirs: ['C:/abs'] })).error).toBe(
+      '变更子树参数无效'
+    )
+    const ok = await partial(makeEvent(), { folder: root, dirs: ['lora'] })
+    expect(ok.error).toBeUndefined()
+  })
 })
 
 describe('局部扫描不清理子树外缩略图（OPT-1 修复）', () => {

@@ -171,6 +171,22 @@ describe('scanModels', () => {
     expect(models[0].name).toBe('b')
   })
 
+  it('子树重复/重叠时按 id 去重，扫描结果不含重复模型（B-01 防御）', async () => {
+    await fs.mkdir(path.join(root, 'lora', 'sub'), { recursive: true })
+    await fs.writeFile(path.join(root, 'lora', 'sub', 'nested.safetensors'), 'x')
+    try {
+      // 入参层已剔除后代；此处直接传入重叠集合，验证 scanner 自身兜底
+      const { models } = await scanModels(root, undefined, {
+        subDirs: ['lora', 'lora', 'lora/sub']
+      })
+      const nestedId = path.join(root, 'lora', 'sub', 'nested.safetensors')
+      expect(models.filter((m) => m.id === nestedId)).toHaveLength(1)
+      expect(new Set(models.map((m) => m.id)).size).toBe(models.length)
+    } finally {
+      await fs.rm(path.join(root, 'lora', 'sub'), { recursive: true, force: true })
+    }
+  })
+
   it('进度回调按发现顺序推送', async () => {
     const progressEvents = []
     await scanModels(root, (p) => progressEvents.push({ ...p }))
