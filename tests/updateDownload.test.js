@@ -34,7 +34,12 @@ import {
   resetUpdateStateForTest,
   downloadUpdatePackage,
   cancelUpdateDownload,
-  installUpdatePackage
+  installUpdatePackage,
+  normalizeThumbprint,
+  evaluateUpdateSignature,
+  verifyUpdateSignature,
+  setAuthenticodeQueryForTests,
+  setSignerThumbprintForTests
 } from '../src/main/services/update-download'
 
 const EXE_BYTES = Buffer.from('hello-exe')
@@ -64,6 +69,9 @@ function updateDir() {
 }
 
 beforeEach(() => {
+  // 隔离宿主环境变量：测试默认走「未配置指纹」的 SHA256 路径，
+  // 验签用例通过 setSignerThumbprintForTests 显式开启
+  delete process.env.MODELVAULT_SIGNER_THUMBPRINT
   vi.mocked(net.fetch).mockReset()
   vi.mocked(app.quit).mockClear()
   vi.mocked(spawn).mockClear()
@@ -71,6 +79,8 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
+  setAuthenticodeQueryForTests(null)
+  setSignerThumbprintForTests('')
   await fs.rm(updateDir(), { recursive: true, force: true }).catch(() => {})
 })
 
@@ -254,9 +264,107 @@ describe('downloadUpdatePackage（下载 + SHA256 校验闭环）', () => {
   })
 })
 
+describe('E1 Authenticode 更新包验签', () => {
+  const THUMB = 'A'.repeat(40)
+
+  it('指纹规范化与签名结果判定（Valid + 指纹一致才通过）', () => {
+    expect(normalizeThumbprint('aa bb:cc-dd')).toBe('AABBCCDD')
+    expect(evaluateUpdateSignature(null, THUMB)).toMatchObject({ ok: false })
+    expect(
+      evaluateUpdateSignature({ status: 'NotSigned', thumbprint: '' }, THUMB)
+    ).toMatchObject({ ok: false, error: expect.stringContaining('NotSigned') })
+    expect(
+      evaluateUpdateSignature({ status: 'Valid', thumbprint: 'B'.repeat(40) }, THUMB)
+    ).toMatchObject({ ok: false, error: expect.stringContaining('不一致') })
+    expect(
+      evaluateUpdateSignature(
+        { status: 'Valid', thumbprint: THUMB, subject: 'CN=ModelVault' },
+        THUMB
+      )
+    ).toEqual({
+      ok: true,
+      required: true,
+      thumbprint: THUMB,
+      subject: 'CN=ModelVault'
+    })
+  })
+
+  it('配置发布者指纹后，下载必须验签通过才落盘', async () => {
+    setSignerThumbprintForTests(THUMB)
+    setAuthenticodeQueryForTests(async () => ({
+      status: 'Valid',
+      thumbprint: THUMB,
+      subject: 'CN=ModelVault'
+    }))
+    mockFetchFlow(EXE_BYTES)
+    setPendingUpdate(ASSETS, '0.2.0')
+
+    const res = await downloadUpdatePackage()
+
+    expect(res.error).toBeUndefined()
+    await expect(fs.access(res.path)).resolves.toBeUndefined()
+    const sig = await verifyUpdateSignature(res.path)
+    expect(sig).toMatchObject({ ok: true, required: true })
+  })
+
+  it('验签失败时拒绝下载并删除临时文件', async () => {
+    setSignerThumbprintForTests(THUMB)
+    setAuthenticodeQueryForTests(async () => ({ status: 'HashMismatch', thumbprint: THUMB }))
+    mockFetchFlow(EXE_BYTES)
+    setPendingUpdate(ASSETS, '0.2.0')
+
+    const res = await downloadUpdatePackage()
+
+    expect(res.error).toContain('数字签名无效')
+    await expect(
+      fs.access(path.join(updateDir(), 'ModelVault-0.2.0.exe'))
+    ).rejects.toThrow()
+  })
+
+  it('安装前复验失败时拒绝执行（防止下载后文件被替换）', async () => {
+    setSignerThumbprintForTests(THUMB)
+    let valid = true
+    setAuthenticodeQueryForTests(async () =>
+      valid
+        ? { status: 'Valid', thumbprint: THUMB }
+        : { status: 'HashMismatch', thumbprint: THUMB }
+    )
+    mockFetchFlow(EXE_BYTES)
+    setPendingUpdate(ASSETS, '0.2.0')
+    const res = await downloadUpdatePackage()
+    expect(res.error).toBeUndefined()
+
+    valid = false
+    const install = await installUpdatePackage()
+
+    expect(install.error).toContain('数字签名无效')
+    expect(spawn).not.toHaveBeenCalled()
+  })
+
+  it('配置值非法时 fail-closed，不退化为仅 SHA256', async () => {
+    setSignerThumbprintForTests('not-a-thumbprint')
+    await expect(verifyUpdateSignature('/tmp/x.exe')).resolves.toMatchObject({
+      ok: false,
+      error: '发布者签名指纹配置无效'
+    })
+  })
+
+  it('未配置发布者指纹时跳过 Authenticode 查询（SHA256 闭环不变）', async () => {
+    const query = vi.fn()
+    setAuthenticodeQueryForTests(query)
+    mockFetchFlow(EXE_BYTES)
+    setPendingUpdate(ASSETS, '0.2.0')
+
+    const res = await downloadUpdatePackage()
+
+    expect(res.error).toBeUndefined()
+    expect(query).not.toHaveBeenCalled()
+  })
+})
+
 describe('installUpdatePackage（拉起新版本并等待旧实例退出）', () => {
-  it('未下载更新包时拒绝', () => {
-    expect(installUpdatePackage()).toEqual({ error: '尚未下载更新包，请先下载更新' })
+  it('未下载更新包时拒绝', async () => {
+    expect(await installUpdatePackage()).toEqual({ error: '尚未下载更新包，请先下载更新' })
   })
 
   it('直接拉起新 EXE（带 --wait-for-pid），不经 shell，并退出当前应用', async () => {
@@ -267,7 +375,7 @@ describe('installUpdatePackage（拉起新版本并等待旧实例退出）', ()
       const res = await downloadUpdatePackage()
       expect(res.error).toBeUndefined()
 
-      const install = installUpdatePackage()
+      const install = await installUpdatePackage()
       expect(install).toEqual({ ok: true })
       expect(spawn).toHaveBeenCalledTimes(1)
       const [exe, args, options] = vi.mocked(spawn).mock.calls[0]

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+/* global __MODELVAULT_SIGNER_THUMBPRINT__ */
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
@@ -18,6 +19,8 @@ import { isAllowedExternalUrl, readResponseTextLimited } from '../utils'
  *   无法把用户引向他站；
  * - 边下载边计算 SHA256，完成后与校验和文件比对，不匹配即删除重来；
  * - 写入临时 .part 文件，校验通过后原子改名，断电/崩溃不产生半成品误装；
+ * - E1：发布包使用 Windows 代码签名；配置发布者证书指纹后，下载复用与
+ *   安装前均强制 Authenticode 状态 Valid 且指纹一致（fail-closed）；
  * - 安装 = 拉起新 EXE（携带 --wait-for-pid 等待旧实例释放单实例锁）并退出：
  *   新实例不会因锁被占而闪退，且全程不经过 shell。
  * 缓存位置 %APPDATA%\modelvault\update\（机器本地，与 .modelvault 无关）。
@@ -46,6 +49,23 @@ const VERSION_PATTERN = /^\d{1,5}\.\d{1,5}\.\d{1,5}$/
 const PROGRESS_INTERVAL_MS = 200
 /** 拉起新实例后退出当前实例的延迟（ms），给 spawn 完成进程创建留出时间 */
 const QUIT_DELAY_MS = 500
+/** Authenticode 验签子进程超时（ms）：PowerShell 冷启动 + 大 EXE 解析留足余量 */
+const SIGNATURE_CHECK_TIMEOUT_MS = 20000
+/**
+ * 构建期注入的签名者证书 SHA1 指纹（E1）：
+ * - release CI 设置 MODELVAULT_SIGNER_THUMBPRINT 后由 Vite define 注入；
+ * - 未配置（本地开发/未签名发布）时为空串，验签策略退化为仅 SHA256；
+ * - 配置后强制要求更新包 Authenticode 状态 Valid 且指纹一致。
+ */
+const BUILD_SIGNER_THUMBPRINT =
+  typeof __MODELVAULT_SIGNER_THUMBPRINT__ === 'string'
+    ? __MODELVAULT_SIGNER_THUMBPRINT__
+    : ''
+
+/** 测试钩子：替换 PowerShell 查询结果（避免单测依赖真实证书/系统命令） */
+let authenticodeQueryOverride = null
+/** 测试钩子：覆盖预期签名指纹 */
+let signerThumbprintOverride = null
 
 /**
  * 校验和文本 → 64 位十六进制哈希（纯函数，单测锁定）：
@@ -185,6 +205,191 @@ async function hashFile(filePath) {
   return hash.digest('hex').toLowerCase()
 }
 
+/** 证书指纹规范化：去分隔符并统一大写（Get-AuthenticodeSignature 输出带空格） */
+export function normalizeThumbprint(value) {
+  return String(value || '').replace(/[^a-fA-F0-9]/g, '').toUpperCase()
+}
+
+/** 当前签名者指纹原始值：测试覆盖 > 运行期环境变量 > 构建期注入 */
+function signerThumbprintSetting() {
+  return String(
+    signerThumbprintOverride ||
+      process.env.MODELVAULT_SIGNER_THUMBPRINT ||
+      BUILD_SIGNER_THUMBPRINT ||
+      ''
+  ).trim()
+}
+
+/**
+ * 评估 Authenticode 查询结果（纯函数，便于单测）：
+ * - Status 必须为 Valid（证书链可信、文件未篡改）；
+ * - 指纹必须与预期发布者一致（配置了预期指纹时）。
+ * @param {{status?: string, thumbprint?: string, subject?: string}|null} info
+ * @param {string} expectedThumbprint 规范化后的预期指纹
+ * @returns {{ok: true, required: true, thumbprint: string, subject: string} |
+ *   {ok: false, required: true, error: string}}
+ */
+export function evaluateUpdateSignature(info, expectedThumbprint) {
+  if (!info) {
+    return { ok: false, required: true, error: '无法读取更新包数字签名（PowerShell 不可用或超时）' }
+  }
+  const status = String(info.status || 'Unknown')
+  if (status !== 'Valid') {
+    return { ok: false, required: true, error: `更新包数字签名无效（${status}）` }
+  }
+  const thumbprint = normalizeThumbprint(info.thumbprint)
+  if (!thumbprint || thumbprint !== expectedThumbprint) {
+    return { ok: false, required: true, error: '更新包签名者与预期发布者不一致' }
+  }
+  return {
+    ok: true,
+    required: true,
+    thumbprint,
+    subject: typeof info.subject === 'string' ? info.subject : ''
+  }
+}
+
+/** PowerShell 查询脚本：路径经环境变量传入，避免命令拼接注入 */
+const AUTHENTICODE_QUERY_SCRIPT = `
+$ErrorActionPreference = 'Stop'
+$sig = Get-AuthenticodeSignature -LiteralPath $env:MODELVAULT_VERIFY_PATH
+$cert = $sig.SignerCertificate
+$thumb = ''
+$subject = ''
+if ($cert) {
+  $thumb = [string]$cert.Thumbprint
+  $subject = [string]$cert.Subject
+}
+[pscustomobject]@{
+  status = [string]$sig.Status
+  thumbprint = $thumb
+  subject = $subject
+} | ConvertTo-Json -Compress
+`
+
+/**
+ * 调用 PowerShell Get-AuthenticodeSignature 查询签名信息。
+ * @param {string} filePath 待校验 EXE
+ * @returns {Promise<{status:string, thumbprint:string, subject:string}|null>}
+ */
+function queryAuthenticode(filePath) {
+  return new Promise((resolve) => {
+    let settled = false
+    let stdout = ''
+    let timer = null
+    let child = null
+    const finish = (value) => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      resolve(value)
+    }
+    try {
+      child = spawn(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-Command',
+          AUTHENTICODE_QUERY_SCRIPT
+        ],
+        {
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, MODELVAULT_VERIFY_PATH: filePath }
+        }
+      )
+    } catch {
+      finish(null)
+      return
+    }
+    timer = setTimeout(() => {
+      try {
+        child?.kill()
+      } catch {
+        /* 进程已退出 */
+      }
+      finish(null)
+    }, SIGNATURE_CHECK_TIMEOUT_MS)
+    timer.unref?.()
+    child.stdout?.on('data', (chunk) => {
+      stdout += chunk.toString()
+      if (stdout.length > 256 * 1024) {
+        try {
+          child.kill()
+        } catch {
+          /* 进程已退出 */
+        }
+        finish(null)
+      }
+    })
+    child.once('error', () => finish(null))
+    child.once('exit', (code) => {
+      if (code !== 0) {
+        finish(null)
+        return
+      }
+      try {
+        // PowerShell 管道可能带 UTF-8 BOM，先剥离再解析
+        const parsed = JSON.parse(stdout.replace(/^\uFEFF/, '').trim())
+        finish(parsed && typeof parsed === 'object' ? parsed : null)
+      } catch {
+        finish(null)
+      }
+    })
+  })
+}
+
+/**
+ * 校验更新包 Authenticode 签名（E1）：
+ * 未配置预期签名指纹时退化为仅 SHA256（保持未签名发布可更新）；
+ * 配置后强制 Valid + 指纹匹配，任何异常均 fail-closed。
+ * @param {string} filePath 更新包路径
+ * @returns {Promise<{ok: true, required: boolean, thumbprint?: string, subject?: string} |
+ *   {ok: false, required: true, error: string}>}
+ */
+export async function verifyUpdateSignature(filePath) {
+  const rawExpected = signerThumbprintSetting()
+  if (!rawExpected) return { ok: true, required: false }
+  const expected = normalizeThumbprint(rawExpected)
+  // 配置了值但不是合法 SHA1/SHA256 十六进制指纹：fail-closed，不能静默退化
+  if (expected.length !== 40 && expected.length !== 64) {
+    return { ok: false, required: true, error: '发布者签名指纹配置无效' }
+  }
+  if (process.platform !== 'win32') {
+    return { ok: false, required: true, error: '更新包验签仅支持 Windows' }
+  }
+  if (!filePath || typeof filePath !== 'string') {
+    return { ok: false, required: true, error: '更新包路径无效' }
+  }
+  try {
+    const info = authenticodeQueryOverride
+      ? await authenticodeQueryOverride(filePath)
+      : await queryAuthenticode(filePath)
+    return evaluateUpdateSignature(info, expected)
+  } catch (err) {
+    return {
+      ok: false,
+      required: true,
+      error: `更新包验签失败: ${err instanceof Error ? err.message : String(err)}`
+    }
+  }
+}
+
+/* ---------------- 仅供单元测试使用 ---------------- */
+
+/** 注入 Authenticode 查询结果（传 null 恢复真实 PowerShell 查询） */
+export function setAuthenticodeQueryForTests(fn) {
+  authenticodeQueryOverride = typeof fn === 'function' ? fn : null
+}
+
+/** 覆盖预期签名指纹（传空恢复构建期/环境配置） */
+export function setSignerThumbprintForTests(value) {
+  signerThumbprintOverride = typeof value === 'string' && value ? value : null
+}
+
 /**
  * 下载更新包（IPC 入口）：命中本地完整包直接复用；否则流式下载 +
  * 边下边哈希 + 校验和比对 + 原子落盘。
@@ -233,12 +438,17 @@ export async function downloadUpdatePackage(onProgress) {
     }
     if (!expected) return { error: '校验和文件格式异常' }
 
-    // 本地已有完整包（上次下载完成但未安装）：哈希命中直接复用
+    // 本地已有完整包（上次下载完成但未安装）：哈希命中且验签通过才复用
     try {
       if ((await fsp.stat(target)).isFile() && (await hashFile(target)) === expected) {
-        downloadedFile = target
-        logger.info(`更新包已存在且校验通过，直接复用: ${target}`)
-        return { path: target, size: size || 0, reused: true }
+        const signature = await verifyUpdateSignature(target)
+        if (signature.ok) {
+          downloadedFile = target
+          logger.info(`更新包已存在且校验通过，直接复用: ${target}`)
+          return { path: target, size: size || 0, reused: true }
+        }
+        logger.warn(`本地更新包验签失败，删除后重新下载: ${signature.error}`)
+        await fsp.rm(target, { force: true }).catch(() => {})
       }
     } catch {
       /* 不存在，走下载 */
@@ -287,6 +497,16 @@ export async function downloadUpdatePackage(onProgress) {
       logger.warn(`更新包校验和不匹配: 期望 ${expected} 实际 ${actual}`)
       return { error: '校验和不匹配，下载可能损坏或被篡改，已放弃本次下载' }
     }
+    // E1：哈希通过后再验 Authenticode（配置了发布者指纹时强制有效且指纹一致）
+    const signature = await verifyUpdateSignature(tmp)
+    if (!signature.ok) {
+      await fsp.rm(tmp, { force: true }).catch(() => {})
+      logger.warn(`更新包验签失败: ${signature.error}`)
+      return { error: signature.error }
+    }
+    if (signature.required) {
+      logger.info(`更新包验签通过（${signature.thumbprint}）`)
+    }
     // 原子落盘：先移除旧包再改名（Windows rename 对已存在目标不可靠）
     await fsp.rm(target, { force: true }).catch(() => {})
     await fsp.rename(tmp, target)
@@ -319,10 +539,12 @@ export function cancelUpdateDownload() {
  *
  * 安全（V-06）：
  * - 不经过 cmd/start，路径作为 spawn 的参数直接传递，无命令拼接注入面；
- * - 仅接受本服务下载并校验通过、且位于 update 目录、文件名符合版本白名单的路径。
- * @returns {{ok: true} | {error: string}}
+ * - 仅接受本服务下载并校验通过、且位于 update 目录、文件名符合版本白名单的路径；
+ * - E1：启动前再次校验 Authenticode（防止下载后文件被替换），配置了
+ *   发布者指纹时失败即拒绝执行。
+ * @returns {Promise<{ok: true} | {error: string}>}
  */
-export function installUpdatePackage() {
+export async function installUpdatePackage() {
   const file = downloadedFile
   if (!file) return { error: '尚未下载更新包，请先下载更新' }
   const dir = getUpdateDir()
@@ -338,6 +560,12 @@ export function installUpdatePackage() {
     }
   } catch {
     return { error: '更新包不存在，请重新下载更新' }
+  }
+  // 安装前复核签名：覆盖「下载后文件被替换」的窗口
+  const signature = await verifyUpdateSignature(resolved)
+  if (!signature.ok) {
+    logger.warn(`拒绝启动验签失败的更新包: ${signature.error}`)
+    return { error: signature.error }
   }
   try {
     const child = spawn(resolved, [`--wait-for-pid=${process.pid}`], {

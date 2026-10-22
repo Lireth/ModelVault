@@ -220,6 +220,7 @@ wrapHandler('my:channel', async (event, payload) => {
 
 - `ci.yml`：push 到 main / PR 时运行质量门禁（Node 22/24 矩阵：ESLint → 类型检查 → 单元测试 → 三端编译 → 产物完整性校验 → 覆盖率归档）
 - `release.yml`：推送 `v*` 标签触发 Windows 打包，自动创建 GitHub Release 并附加 EXE 与 SHA256 校验和
+- **代码签名（E1）**：配置仓库 Secrets `CSC_LINK`（base64 PFX）与 `CSC_KEY_PASSWORD` 后，electron-builder 自动为 EXE 做 SHA256 Authenticode 签名；`MODELVAULT_SIGNER_THUMBPRINT`（证书 SHA1 指纹）会在构建期注入主进程，应用内更新下载复用与安装前均强制「签名有效 + 指纹一致」。未配置证书时构建继续，应用内更新退化为仅 SHA256 校验
 
 ## 安全要点
 
@@ -227,4 +228,5 @@ wrapHandler('my:channel', async (event, payload) => {
 - `mvimg://` 图片协议仅允许访问当前模型根目录内文件（越界返回 403）；`civimg://` 远程图片代理仅放行 Civitai 官方 CDN 域名白名单（https 强制，防 SSRF）
 - 渲染进程导航一律拦截，外部链接经系统浏览器打开；HTML 含 CSP 策略
 - 模型删除移入系统回收站（非永久删除）；扫描根目录白名单校验；封面导入有图片魔数校验与大小预检
+- 应用内更新强制 SHA256 校验；配置发布者证书指纹后，下载复用与安装前还会校验 Authenticode（状态 Valid + 指纹一致），失败即拒绝执行
 - 开发类快捷键（DevTools/刷新）在生产环境禁用
