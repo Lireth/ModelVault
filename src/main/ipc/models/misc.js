@@ -3,6 +3,7 @@ import path from 'node:path'
 import { BrowserWindow, Menu, clipboard, shell } from 'electron'
 import logger from '../../logger'
 import { isInRoot, getModelMeta, removeModelMeta } from '../../services/store'
+import { checkLibraryHealth, repairLibraryHealth } from '../../services/library-health'
 import { SIDECAR_PREVIEW_EXTS } from '../../services/scanner'
 import { wrapHandler, checkModelId, checkModelIdInRoot } from '../handler'
 
@@ -128,4 +129,14 @@ export function registerMiscHandlers() {
     shell.showItemInFolder(targetPath)
     return { ok: true }
   }, { errorPrefix: '定位文件失败' })
+
+  // 模型库体检（V-07）：只读报告，不修改任何文件/元数据
+  wrapHandler('models:checkHealth', () => checkLibraryHealth(), {
+    errorPrefix: '模型库检查失败'
+  })
+
+  // 一键修复（V-07）：修复前备份 store.json，孤儿封面移入 .modelvault/trash
+  wrapHandler('models:repairHealth', () => repairLibraryHealth(), {
+    errorPrefix: '模型库修复失败'
+  })
 }

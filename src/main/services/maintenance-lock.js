@@ -18,7 +18,9 @@ const KIND_LABELS = {
   'partial-scan': '扫描中',
   switch: '切换模型库',
   load: '加载模型库',
-  restore: '恢复备份'
+  restore: '恢复备份',
+  health: '检查模型库',
+  repair: '修复模型库'
 }
 
 /** 当前持锁操作（null 表示空闲） */

@@ -258,6 +258,9 @@ export const IPC_PAYLOAD_SCHEMAS = {
   }),
   'models:clearCovers': vObj({ fields: { id: ID } }),
   'models:clearAllCovers': vVoid(), // 无 payload，清空范围以当前库为界
+  // 模型库体检与一键修复（V-07）：范围固定为当前库，无渲染层入参
+  'models:checkHealth': vVoid(),
+  'models:repairHealth': vVoid(),
   'models:importCover': vObj({
     fields: { id: ID, path: vStr({ max: 2000 }) }
   }),

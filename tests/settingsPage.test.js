@@ -196,6 +196,67 @@ describe('SettingsPage 主题跟随系统与自定义强调色', () => {
   })
 })
 
+describe('SettingsPage 模型库体检（V-07）', () => {
+  it('展示体检结果，并在确认后调用一键修复', async () => {
+    const wrapper = await mountSettings()
+    const report = {
+      root: 'D:\\models',
+      checkedAt: Date.now(),
+      totalModels: 12,
+      totalCoverRefs: 3,
+      missingFiles: [{ rel: 'gone.safetensors' }],
+      brokenCovers: [
+        { model: 'a.safetensors', cover: '.modelvault/covers/missing.jpg', reason: 'missing-file' }
+      ],
+      orphanCovers: [{ name: 'orphan.jpg', sizeBytes: 10 }],
+      duplicateHashes: [{ hash: 'a'.repeat(64), models: ['b.safetensors', 'c.safetensors'] }],
+      dataReset: false,
+      summary: {
+        missingFiles: 1,
+        brokenCovers: 1,
+        orphanCovers: 1,
+        duplicateHashes: 1,
+        repairable: 3
+      }
+    }
+    window.api.models.checkHealth.mockResolvedValue({ report })
+
+    const checkBtn = wrapper.findAll('button').find((b) => b.text().includes('检查模型库'))
+    expect(checkBtn).toBeTruthy()
+    await checkBtn.trigger('click')
+    await flushPromises()
+
+    const box = wrapper.find('.health-report')
+    expect(box.exists()).toBe(true)
+    expect(box.text()).toContain('缺失模型文件 1 个')
+    expect(box.text()).toContain('失效封面引用 1 条')
+    expect(box.text()).toContain('孤儿封面 1 个')
+    expect(box.text()).toContain('重复哈希 1 组')
+
+    window.api.models.repairHealth.mockResolvedValue({
+      report,
+      repaired: {
+        removedMetadata: 1,
+        fixedCoverModels: 1,
+        removedCoverRefs: 1,
+        movedOrphanCovers: 1
+      },
+      backupPath: 'D:\\models\\.modelvault\\backups\\store-health.json'
+    })
+    const repairBtn = wrapper.findAll('button').find((b) => b.text().includes('一键修复'))
+    expect(repairBtn).toBeTruthy()
+    await repairBtn.trigger('click')
+    await flushPromises()
+    expect(state.confirm.visible).toBe(true)
+    acceptConfirm()
+    await flushPromises()
+
+    expect(window.api.models.repairHealth).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.health-report').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
 describe('库统计页（F7，自设置页独立为 StatsPage）', () => {
   /** 构造带统计字段的模型（字段与装饰结果对齐） */
   function statModel(id, overrides = {}) {

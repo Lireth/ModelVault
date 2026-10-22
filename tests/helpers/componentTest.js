@@ -36,6 +36,8 @@ function makeComponentApiMock() {
       importCover: vi.fn(),
       partialScan: vi.fn(() => Promise.resolve({ models: [], dirs: [], relinked: 0 })),
       warmupHash: vi.fn(() => Promise.resolve({ ok: true })),
+      checkHealth: vi.fn(() => Promise.resolve({ report: null })),
+      repairHealth: vi.fn(() => Promise.resolve({ repaired: {} })),
       onScanProgress: vi.fn(() => () => {}),
       onWarmupProgress: vi.fn(() => () => {}),
       onMenuAction: vi.fn(() => () => {}),
