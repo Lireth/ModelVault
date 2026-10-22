@@ -15,8 +15,15 @@ import { fakeUserData } from './setup'
  */
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
-  nativeImage: { createFromPath: vi.fn(), createFromBuffer: vi.fn() }
+  app: { getPath: vi.fn(() => fakeUserData), isPackaged: true }
+}))
+
+// 缩略图渲染（P2 改造后经隐藏渲染进程）在测试中打桩：
+// 模拟「可缩放大图 → 返回 JPEG 字节」，使缩略图链路真实走完落盘路径
+vi.mock('../src/main/services/thumb-renderer', () => ({
+  renderThumbJpeg: vi.fn(),
+  destroyThumbRenderer: vi.fn(),
+  setThumbRenderTimeoutForTests: vi.fn()
 }))
 
 // scanner 侧 sidecar 纯函数保持真实实现；findSidecarText 单独可控，
@@ -32,7 +39,7 @@ import { loadData, setDataRoot, getModelMeta, setModelMeta, DATA_DIR, COVERS_DIR
 import { findSidecarText } from '../src/main/services/scanner'
 import { clearDeferredJobs } from '../src/main/services/thumbs'
 import * as thumbsModule from '../src/main/services/thumbs'
-import { nativeImage } from 'electron'
+import { renderThumbJpeg } from '../src/main/services/thumb-renderer'
 import logger from '../src/main/logger'
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
@@ -280,12 +287,8 @@ describe('startThumbDrain 窗口生命周期（A7）', () => {
     await fs.mkdir(coversDir, { recursive: true })
     await fs.writeFile(path.join(coversDir, 'cover.png'), PNG_MAGIC)
     setModelMeta(abs, { cover: `${DATA_DIR}/${COVERS_DIR}/cover.png` })
-    // nativeImage 桩：返回可缩放图像，使缩略图生成真实走完落盘路径
-    vi.mocked(nativeImage.createFromBuffer).mockReturnValue({
-      isEmpty: () => false,
-      getSize: () => ({ width: 800, height: 600 }),
-      resize: () => ({ toJPEG: () => Buffer.from('fake-jpeg') })
-    })
+    // 缩略图渲染桩：模拟可缩放大图，使缩略图生成真实走完落盘路径
+    vi.mocked(renderThumbJpeg).mockResolvedValue({ jpeg: Buffer.from('fake-jpeg') })
     const [decorated] = await decorateModels([makeModel(abs)])
     return { abs, decorated }
   }
@@ -452,7 +455,7 @@ describe('OPT-1 轮播封面复用缩略图管线', () => {
     vi.restoreAllMocks()
   })
 
-  /** 准备一个双封面模型（默认封面 c0），nativeImage 桩允许缩略图真实落盘 */
+  /** 准备一个双封面模型（默认封面 c0），缩略图渲染桩允许缩略图真实落盘 */
   async function setupMultiCover() {
     const abs = path.join(root, 'multi.safetensors')
     await fs.writeFile(abs, 'x')
@@ -466,11 +469,7 @@ describe('OPT-1 轮播封面复用缩略图管线', () => {
       cover: `${DATA_DIR}/${COVERS_DIR}/c0.png`,
       covers: [`${DATA_DIR}/${COVERS_DIR}/c0.png`, `${DATA_DIR}/${COVERS_DIR}/c1.png`]
     })
-    vi.mocked(nativeImage.createFromBuffer).mockReturnValue({
-      isEmpty: () => false,
-      getSize: () => ({ width: 1200, height: 900 }),
-      resize: () => ({ toJPEG: () => Buffer.from('fake-jpeg') })
-    })
+    vi.mocked(renderThumbJpeg).mockResolvedValue({ jpeg: Buffer.from('fake-jpeg') })
     return { abs, c0, c1 }
   }
 
@@ -526,11 +525,7 @@ describe('OPT-1 轮播封面复用缩略图管线', () => {
     // 同名 sidecar 预览图（非 covers 成员）
     const sidecar = path.join(root, 'sidecar-default.png')
     await fs.writeFile(sidecar, PNG_MAGIC)
-    vi.mocked(nativeImage.createFromBuffer).mockReturnValue({
-      isEmpty: () => false,
-      getSize: () => ({ width: 1200, height: 900 }),
-      resize: () => ({ toJPEG: () => Buffer.from('fake-jpeg') })
-    })
+    vi.mocked(renderThumbJpeg).mockResolvedValue({ jpeg: Buffer.from('fake-jpeg') })
 
     const win = { isDestroyed: () => false, webContents: { send: vi.fn() } }
     const [decorated] = await decorateModels([makeModel(abs)])

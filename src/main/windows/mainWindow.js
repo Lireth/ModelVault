@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
 import { getSettings, atomicWriteFile } from '../services/store'
+import { destroyThumbRenderer } from '../services/thumb-renderer'
 import { themeColors } from '../theme'
 
 /** 默认窗口尺寸 */
@@ -121,6 +122,10 @@ export async function createMainWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null
+    // 同步销毁缩略图渲染窗口（B13）：隐藏窗口同样计入 window-all-closed
+    // 判定，若残留会导致「主窗口已关、进程不退」的挂起；窗口关闭后也不
+    // 再有缩略图后台任务的有效接收方
+    destroyThumbRenderer()
   })
 
   // 拦截页面自身的导航尝试（如 location.href 跳转）：

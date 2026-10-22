@@ -1,4 +1,3 @@
-import { nativeImage } from 'electron'
 import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -7,6 +6,7 @@ import logger from '../logger'
 // 在模块初始化顺序变化时拿到未就绪绑定）
 import { getCurrentRoot } from './store-paths'
 import { runWithConcurrency } from '../utils'
+import { renderThumbJpeg } from './thumb-renderer'
 
 /**
  * 封面缩略图缓存：
@@ -15,7 +15,9 @@ import { runWithConcurrency } from '../utils'
  * - 缩略图保存在模型根目录的 .modelvault/thumbs/ 内（关联存储，
  *   随模型文件夹一起移动），文件名为「路径哈希-源图修改时间」，
  *   源图变化自动失效并重新生成；
- * - 生成失败（不支持的格式、损坏文件等）时回退使用原图，不影响功能。
+ * - 生成失败（不支持的格式、损坏文件等）时回退使用原图，不影响功能；
+ * - 解码/缩放/编码经隐藏渲染进程执行（thumb-renderer，P2 主进程非阻塞
+ *   改造），主进程仅承担 stat/读盘/落盘。
  */
 
 const THUMBS_DIR = 'thumbs'
@@ -26,8 +28,8 @@ const MIN_SOURCE_WIDTH = 720
 const JPEG_QUALITY = 82
 /**
  * 源图字节数上限（B2）：超过则跳过缩略图生成（回退原图显示）。
- * generateThumb 需整图读入内存再解码，批量处理数十 MB 的超大型 PNG 时
- * 瞬时内存峰值可达数百 MB 并挤占主进程事件循环；这类超大图直接用原图。
+ * generateThumb 需整图读入内存再传输渲染进程解码，批量处理数十 MB 的
+ * 超大型 PNG 时瞬时内存峰值可达数百 MB；这类超大图直接用原图。
  */
 const MAX_SOURCE_BYTES = 64 * 1024 * 1024
 /**
@@ -49,10 +51,10 @@ function thumbFileName(absCover, mtimeMs) {
 }
 
 /**
- * 生成缩略图核心逻辑：读取源图、按需缩放并写入缓存文件。
- * 经异步 readFile + createFromBuffer 解码：createFromPath 为同步 API，
- * 同步读盘+解码大封面图会阻塞主进程事件循环（B5），扫描后台补齐
- * 缩略图期间所有 IPC 处理会随之停摆。
+ * 生成缩略图核心逻辑：读取源图、经隐藏渲染进程缩放编码并写入缓存文件。
+ * 解码/缩放/JPEG 编码运行在独立渲染进程（P2 改造）：此前 nativeImage 的
+ * createFromBuffer/resize/toJPEG 为同步 API，大封面图会阻塞主进程事件循环
+ * （B5），扫描后台补齐缩略图期间所有 IPC 处理会随之停摆。
  * @returns {Promise<string>} 成功返回缩略图路径；源图过小/损坏返回 ''（回退原图）
  */
 async function generateThumb(absCover, mtimeMs, thumbPath) {
@@ -60,13 +62,14 @@ async function generateThumb(absCover, mtimeMs, thumbPath) {
   const sourceStat = await fs.stat(absCover)
   if (sourceStat.size > MAX_SOURCE_BYTES) return ''
   const buffer = await fs.readFile(absCover)
-  const image = nativeImage.createFromBuffer(buffer)
-  if (image.isEmpty()) return ''
-  const { width } = image.getSize()
-  if (width <= MIN_SOURCE_WIDTH) return ''
-  const resized = image.resize({ width: THUMB_WIDTH })
+  const result = await renderThumbJpeg(buffer, {
+    thumbWidth: THUMB_WIDTH,
+    minSourceWidth: MIN_SOURCE_WIDTH,
+    quality: JPEG_QUALITY / 100
+  })
+  if (result.small) return ''
   await fs.mkdir(getThumbsDir(), { recursive: true })
-  await fs.writeFile(thumbPath, resized.toJPEG(JPEG_QUALITY))
+  await fs.writeFile(thumbPath, result.jpeg)
   return thumbPath
 }
 

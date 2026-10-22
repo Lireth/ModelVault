@@ -2,41 +2,44 @@ import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { nativeImage } from 'electron'
 import { fakeUserData } from './setup'
 
 /**
- * thumbs.js 单元测试（B5 基线）：
- * - 缩略图生成走异步 readFile + createFromBuffer（不得回退 createFromPath 同步阻塞主进程）
- * - 小图/解码失败回退原图（返回 ''）
+ * thumbs.js 单元测试（B5 基线，P2 改造后更新）：
+ * - 缩略图解码/缩放/编码经隐藏渲染进程（thumb-renderer）执行，主进程不再
+ *   使用 nativeImage 同步 API（P2 主进程非阻塞改造）
+ * - 小图（small）/渲染失败回退原图（返回 ''）
  * - 缓存命中不重复生成
  * - 延迟生成队列（getThumbPathDeferred + drainDeferredThumbs）与回调推送
  */
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
-  nativeImage: {
-    createFromBuffer: vi.fn(),
-    createFromPath: vi.fn()
-  }
+  app: { getPath: vi.fn(() => fakeUserData), isPackaged: true }
+}))
+
+// 缩略图渲染打桩：真实实现依赖 Electron BrowserWindow，此处模拟其响应协议
+vi.mock('../src/main/services/thumb-renderer', () => ({
+  renderThumbJpeg: vi.fn(),
+  destroyThumbRenderer: vi.fn(),
+  setThumbRenderTimeoutForTests: vi.fn()
 }))
 
 import { getThumbPathDeferred, drainDeferredThumbs, clearDeferredJobs } from '../src/main/services/thumbs'
 import { setDataRoot } from '../src/main/services/store'
+import { renderThumbJpeg } from '../src/main/services/thumb-renderer'
 
 const roots = []
 let root
 let source
 
-/** 构造假解码图：可控宽高，链式 resize/toJPEG */
-function mockDecodedImage({ width = 1200, empty = false } = {}) {
-  const image = {
-    isEmpty: () => empty,
-    getSize: () => ({ width, height: 800 }),
-    resize: vi.fn(() => image),
-    toJPEG: vi.fn(() => Buffer.from('fake-jpeg'))
-  }
-  return image
+/**
+ * 配置渲染响应：宽图返回 JPEG 字节；小图返回 small；损坏图 reject。
+ * @param {{mode?: 'wide'|'small'|'broken'}} opts
+ */
+function mockRender({ mode = 'wide' } = {}) {
+  if (mode === 'wide') vi.mocked(renderThumbJpeg).mockResolvedValue({ jpeg: Buffer.from('fake-jpeg') })
+  else if (mode === 'small') vi.mocked(renderThumbJpeg).mockResolvedValue({ small: true })
+  else vi.mocked(renderThumbJpeg).mockRejectedValue(new Error('解码失败'))
 }
 
 /**
@@ -52,8 +55,7 @@ async function generateNow(src) {
 }
 
 beforeEach(async () => {
-  vi.mocked(nativeImage.createFromBuffer).mockReset()
-  vi.mocked(nativeImage.createFromPath).mockReset()
+  vi.mocked(renderThumbJpeg).mockReset()
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-thumbs-'))
   roots.push(root)
   setDataRoot(root)
@@ -67,47 +69,47 @@ afterAll(async () => {
   }
 })
 
-describe('缩略图生成（B5：异步解码）', () => {
-  it('宽图生成缩略图：经 createFromBuffer 解码，不使用同步 createFromPath', async () => {
-    vi.mocked(nativeImage.createFromBuffer).mockReturnValue(mockDecodedImage({ width: 1200 }))
+describe('缩略图生成（P2：渲染进程解码）', () => {
+  it('宽图生成缩略图：整图字节交渲染进程解码，主进程不触碰 nativeImage', async () => {
+    mockRender({ mode: 'wide' })
     const thumbPath = await generateNow(source)
     expect(thumbPath).toContain(path.join('.modelvault', 'thumbs'))
     expect(thumbPath.endsWith('.jpg')).toBe(true)
-    // B5 核心：同步 createFromPath 阻塞主进程，必须走异步读盘 + buffer 解码
-    expect(nativeImage.createFromBuffer).toHaveBeenCalledTimes(1)
-    expect(nativeImage.createFromPath).not.toHaveBeenCalled()
-    // 缩略图文件已写入且目标宽度为 640
+    // P2 核心：解码/缩放/编码在渲染进程执行；主进程只读盘并把完整字节传出
+    expect(renderThumbJpeg).toHaveBeenCalledTimes(1)
+    const [buffer, opts] = vi.mocked(renderThumbJpeg).mock.calls[0]
+    expect(buffer.toString()).toBe('png-bytes')
+    expect(opts).toEqual({ thumbWidth: 640, minSourceWidth: 720, quality: 0.82 })
+    // 缩略图文件已写入且内容为渲染进程回传的 JPEG 字节
     const written = await fs.readFile(thumbPath)
     expect(written.toString()).toBe('fake-jpeg')
-    const image = vi.mocked(nativeImage.createFromBuffer).mock.results[0].value
-    expect(image.resize).toHaveBeenCalledWith({ width: 640 })
   })
 
-  it('小图（宽度未超阈值）不生成缩略图，不写缓存', async () => {
-    vi.mocked(nativeImage.createFromBuffer).mockReturnValue(mockDecodedImage({ width: 600 }))
+  it('小图（渲染返回 small）不生成缩略图，不写缓存', async () => {
+    mockRender({ mode: 'small' })
     expect(await generateNow(source)).toBe('')
     const thumbsDir = path.join(root, '.modelvault', 'thumbs')
     await expect(fs.readdir(thumbsDir)).rejects.toThrow()
   })
 
-  it('解码失败（空图）不生成缩略图', async () => {
-    vi.mocked(nativeImage.createFromBuffer).mockReturnValue(mockDecodedImage({ empty: true }))
+  it('渲染失败（损坏文件/不支持格式）不生成缩略图', async () => {
+    mockRender({ mode: 'broken' })
     expect(await generateNow(source)).toBe('')
   })
 
-  it('缓存命中时不再重复解码', async () => {
-    vi.mocked(nativeImage.createFromBuffer).mockReturnValue(mockDecodedImage({ width: 1200 }))
+  it('缓存命中时不再重复渲染', async () => {
+    mockRender({ mode: 'wide' })
     const first = await generateNow(source)
-    // 已有缓存文件：deferred 直接返回路径，不再登记任务/解码
+    // 已有缓存文件：deferred 直接返回路径，不再登记任务/渲染
     const second = await getThumbPathDeferred(source)
     expect(second).toBe(first)
-    expect(nativeImage.createFromBuffer).toHaveBeenCalledTimes(1)
+    expect(renderThumbJpeg).toHaveBeenCalledTimes(1)
   })
 })
 
 describe('延迟生成队列（扫描装饰阶段专用）', () => {
   it('未命中登记返回空串，drain 后台生成并回调推送', async () => {
-    vi.mocked(nativeImage.createFromBuffer).mockReturnValue(mockDecodedImage({ width: 1200 }))
+    mockRender({ mode: 'wide' })
     // 首次：缓存未命中，登记后台任务，先回退原图
     expect(await getThumbPathDeferred(source)).toBe('')
     const generated = []
@@ -122,13 +124,13 @@ describe('延迟生成队列（扫描装饰阶段专用）', () => {
   })
 
   it('缓存命中直接返回缩略图路径，不登记队列', async () => {
-    vi.mocked(nativeImage.createFromBuffer).mockReturnValue(mockDecodedImage({ width: 1200 }))
+    mockRender({ mode: 'wide' })
     const thumbPath = await generateNow(source) // 先触发一次生成建立缓存
     expect(await getThumbPathDeferred(source)).toBe(thumbPath)
   })
 
   it('后台生成源图丢失时容错跳过，不推送回调', async () => {
-    vi.mocked(nativeImage.createFromBuffer).mockReturnValue(mockDecodedImage({ width: 1200 }))
+    mockRender({ mode: 'wide' })
     const missing = path.join(root, 'missing.png') // 不 stat 失败，不登记
     expect(await getThumbPathDeferred(missing)).toBe('')
     // 登记一个存在源图后删除源文件，drain 读盘失败容错
@@ -140,7 +142,7 @@ describe('延迟生成队列（扫描装饰阶段专用）', () => {
   })
 
   it('clearDeferredJobs 清空队列后 drain 无输出（C5 切根清理）', async () => {
-    vi.mocked(nativeImage.createFromBuffer).mockReturnValue(mockDecodedImage({ width: 1200 }))
+    mockRender({ mode: 'wide' })
     // 登记后清空：drain 不再生成
     expect(await getThumbPathDeferred(source)).toBe('')
     clearDeferredJobs()

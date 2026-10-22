@@ -1,7 +1,6 @@
-import { createHash } from 'node:crypto'
-import fs from 'node:fs/promises'
 import { net } from 'electron'
 import logger from '../logger'
+import { computeFileHashOffThread } from './hash-worker-pool'
 
 /**
  * Civitai 在线识别服务：
@@ -17,8 +16,6 @@ const CIVITAI_API_BASE = 'https://civitai.com/api/v1'
 const REQUEST_TIMEOUT_MS = 15000
 /** 图片下载超时（ms）：示例图普遍数 MB，放宽到 30s */
 const IMAGE_TIMEOUT_MS = 30000
-/** 流式哈希的读取块大小（8MB：大文件吞吐与内存占用的平衡点） */
-const HASH_CHUNK_SIZE = 8 * 1024 * 1024
 /** 识别结果携带的示例图上限（Civitai 热门模型可达数百张，UI 无需全量） */
 const MAX_IMAGES = 30
 /** 示例图下载大小上限（与封面导入同一量级） */
@@ -124,8 +121,11 @@ const MIME_EXT = {
 }
 
 /**
- * 流式计算文件 SHA256（hex 小写）。
- * 模型文件普遍 1-10GB，必须分块读取避免一次性载入内存。
+ * 流式计算文件 SHA256（hex 小写）——P1 改造后为线程池委托入口：
+ * 模型文件普遍 1-10GB，读盘与哈希 CPU 工作整体运行在 worker_threads
+ * （hash-worker-pool，串行队列），主进程事件循环在数 GB 哈希期间保持空闲。
+ * 语义与原主进程实现一致：分块读取、进度按块回调、AbortSignal 取消抛
+ * AbortError。
  * @param {string} filePath 文件绝对路径
  * @param {import('electron').AbortSignal} [signal] 取消信号（可选）
  * @param {(hashedBytes: number, totalBytes: number) => void} [onProgress]
@@ -133,30 +133,7 @@ const MIME_EXT = {
  * @returns {Promise<string>} 64 位十六进制哈希
  */
 export async function computeFileHash(filePath, signal, onProgress) {
-  const handle = await fs.open(filePath, 'r')
-  try {
-    const hash = createHash('sha256')
-    const buffer = Buffer.alloc(HASH_CHUNK_SIZE)
-    const totalBytes = (await handle.stat()).size
-    let position = 0
-    for (;;) {
-      if (signal?.aborted) {
-        const err = new Error('已取消')
-        err.name = 'AbortError'
-        throw err
-      }
-      const { bytesRead } = await handle.read(buffer, 0, HASH_CHUNK_SIZE, position)
-      if (bytesRead === 0) break
-      hash.update(buffer.subarray(0, bytesRead))
-      position += bytesRead
-      if (typeof onProgress === 'function') {
-        onProgress(position, totalBytes)
-      }
-    }
-    return hash.digest('hex')
-  } finally {
-    await handle.close()
-  }
+  return computeFileHashOffThread(filePath, signal, onProgress)
 }
 
 /**
