@@ -25,11 +25,13 @@ const DATA_DIR_NAME = '.modelvault'
 /** 基础轮询间隔（ms）：目录最近有变更时以此间隔巡检 */
 const DEFAULT_POLL_INTERVAL = 2000
 /**
- * 空闲退避阶梯（ms，A-07b）：连续巡检无变更时逐级拉长间隔，
+ * 空闲退避阶梯（ms，A-07b；O8 延长封顶）：连续巡检无变更时逐级拉长间隔，
  * 避免空闲库（尤其移动硬盘/网络盘）被高频全树 readdir 持续唤醒；
- * 一旦检测到变更立即回到基础间隔。
+ * 一旦检测到变更立即回到基础间隔。封顶 30s：可见挂机（应用开着、库空闲）
+ * 的巡检频率较 10s 封顶降 67%；外部改动的发现延迟最坏 30s+防抖，
+ * 而「操作完切回应用」场景由隐藏期探测的快速比对覆盖（见 nextDelay）。
  */
-const DEFAULT_BACKOFF = [2000, 5000, 10000]
+const DEFAULT_BACKOFF = [2000, 5000, 10000, 30000]
 /** 广播防抖（ms）：批量解压/移动文件时只触发一次重扫 */
 const DEFAULT_BROADCAST_DEBOUNCE = 3000
 
@@ -176,12 +178,17 @@ function windowsVisible() {
 }
 
 /**
- * 计算下一轮巡检延迟（A-07b 空闲退避）：
- * idleRounds 为连续无变更轮数；无 backoff 配置（旧 timing）时恒定基础间隔。
+ * 计算下一轮巡检延迟（A-07b 空闲退避；O8 可见性感知）：
+ * - 无 backoff 配置（旧 timing）时恒定基础间隔；
+ * - 窗口隐藏时恒为基础间隔：隐藏轮不读盘（runWalk 跳过），巡检只是轻量的
+ *   可见性探测——以基础间隔探测使「恢复可见后的首次比对」不受阶梯封顶值
+ *   拖累（否则封顶 30s 下，切回应用后最坏要等 30s 才发现隐藏期的变更）；
+ * - 可见且有阶梯：按连续空闲轮数爬梯（封顶取末档）。
  */
 function nextDelay(w) {
   const ladder = w.backoff
   if (!Array.isArray(ladder) || ladder.length === 0) return w.pollInterval
+  if (typeof w.isVisible === 'function' && !w.isVisible()) return w.pollInterval
   return ladder[Math.min(w.idleRounds, ladder.length - 1)]
 }
 
@@ -270,7 +277,7 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
     pendingDirs: new Set(),
     pollInterval: pollMs,
     // 退避阶梯：测试 timing 未传 backoff 时为 undefined（恒定间隔，旧行为）；
-    // 生产默认 2s→5s→10s（A-07b）
+    // 生产默认 2s→5s→10s→30s（A-07b；O8 延长封顶，见 DEFAULT_BACKOFF 注释）
     backoff: timing.backoff ?? (timing.pollInterval ? undefined : DEFAULT_BACKOFF),
     debounceMs: timing.broadcastDebounce ?? DEFAULT_BROADCAST_DEBOUNCE,
     isVisible: typeof timing.isVisible === 'function' ? timing.isVisible : windowsVisible,

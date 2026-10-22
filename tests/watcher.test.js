@@ -34,6 +34,7 @@ import {
   stopWatcher,
   syncWatcher
 } from '../src/main/services/watcher'
+import logger from '../src/main/logger'
 
 /** 测试用小间隔时序（ms）：轮询快、防抖短，用例百毫秒级完成 */
 const timing = { pollInterval: 20, broadcastDebounce: 40 }
@@ -346,5 +347,33 @@ describe('A-07b 自适应轮询', () => {
     await sleep(120)
     expect(scheduled.length).toBeGreaterThan(1)
     expect(scheduled.every((d) => d === timing.pollInterval)).toBe(true)
+  })
+
+  it('O8：窗口隐藏时探测间隔与阶梯解耦（恒为基础间隔，恢复响应不受封顶拖累）', async () => {
+    // 先可见空闲爬到封顶档 100，再隐藏：隐藏期的调度必须是基础档 20
+    //（隐藏轮不读盘，巡检只是轻量可见性探测；以基础间隔探测使恢复可见后
+    // ≤1 个基础间隔内即做比对，不受阶梯封顶拖累）
+    let visible = true
+    const scheduled = []
+    syncWatcher(root, true, [], {
+      ...timing,
+      backoff: [20, 50, 100],
+      isVisible: () => visible,
+      onPollScheduled: (d) => scheduled.push(d)
+    })
+    await waitFor(() => scheduled.at(-1) === 100, '空闲退避未爬到封顶档 100')
+
+    const hideAt = scheduled.length
+    visible = false
+    await waitFor(() => scheduled.length > hideAt + 1, '隐藏期未继续安排探测轮')
+    expect(scheduled.slice(hideAt).every((d) => d === timing.pollInterval)).toBe(true)
+  })
+
+  it('O8：生产默认阶梯封顶 30s（可见空闲全树巡检频率较 10s 降 67%）', async () => {
+    const infoSpy = vi.spyOn(logger, 'info')
+    syncWatcher(root, true, [])
+    const started = infoSpy.mock.calls.map((c) => c.join(' ')).find((t) => t.includes('目录监控已启动'))
+    expect(started).toContain('基础轮询 2000ms')
+    expect(started).toContain('空闲退避至 30000ms')
   })
 })
