@@ -403,6 +403,72 @@ describe('importBackup', () => {
     expect(fs.readdirSync(target).some((n) => n.includes('.restore-'))).toBe(false)
   })
 
+  it('备份中的危险元数据键被清洗，不写入目标库（B-04）', async () => {
+    const zipPath = path.join(mkTmp('modelvault-out-'), 'evil-meta.zip')
+    fs.writeFileSync(
+      zipPath,
+      zipSync({
+        'manifest.json': strToU8(
+          JSON.stringify({
+            app: BACKUP_FORMAT,
+            version: BACKUP_VERSION,
+            settings: true,
+            library: { root: 'D:\\old-lib', models: 2, covers: 0 }
+          })
+        ),
+        'library/store.json': strToU8(
+          '{"version":1,"models":{"__proto__":{"alias":"pwn"},' +
+            '"ok.safetensors":{"note":"ok"}}}'
+        )
+      })
+    )
+    const target = mkTmp('modelvault-target-')
+    dialogMock.showOpenDialog
+      .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
+      .mockResolvedValueOnce({ canceled: false, filePaths: [target] })
+
+    const res = await importBackup(null)
+
+    expect(res.error).toBeUndefined()
+    // 危险键被剔除，只保留合法条目
+    expect(res.libraryRestored.models).toBe(1)
+    const disk = JSON.parse(
+      fs.readFileSync(path.join(target, '.modelvault', 'store.json'), 'utf8')
+    )
+    expect(Object.prototype.hasOwnProperty.call(disk.models, '__proto__')).toBe(false)
+    expect(disk.models['ok.safetensors'].note).toBe('ok')
+    expect({}.alias).toBeUndefined()
+  })
+
+  it('单条封面解压后超限时拒绝恢复，不创建目标目录（B-04 压缩炸弹防护）', async () => {
+    const zipPath = path.join(mkTmp('modelvault-out-'), 'bomb.zip')
+    // 65MB 零字节压缩后很小，但解压后超过 64MB 单条上限
+    const huge = new Uint8Array(65 * 1024 * 1024)
+    fs.writeFileSync(
+      zipPath,
+      zipSync({
+        'manifest.json': strToU8(
+          JSON.stringify({
+            app: BACKUP_FORMAT,
+            version: BACKUP_VERSION,
+            settings: true,
+            library: { root: 'D:\\old-lib', models: 0, covers: 1 }
+          })
+        ),
+        'library/store.json': strToU8(JSON.stringify({ version: 1, models: {} })),
+        'library/covers/huge.png': huge
+      })
+    )
+    const target = mkTmp('modelvault-target-')
+    // 解压限额在目标文件夹选择之前触发：只需文件选择对话框响应
+    dialogMock.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
+
+    const res = await importBackup(null)
+
+    expect(res.error).toContain('超过 64MB 上限')
+    expect(fs.existsSync(path.join(target, '.modelvault'))).toBe(false)
+  })
+
   it('拒绝无效备份：无 manifest 与 manifest 格式不符分别给出明确原因', async () => {
     // 场景一：zip 内没有 manifest.json
     const noManifest = path.join(mkTmp('modelvault-out-'), 'no-manifest.zip')

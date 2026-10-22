@@ -12,6 +12,7 @@ import {
   isInRoot,
   loadData,
   loadSettings,
+  normalizeStoreData,
   reloadCurrentRootData,
   reloadLibrarySettings,
   removeModelMeta,
@@ -116,6 +117,46 @@ describe('元数据规范化', () => {
     const bad = setModelMeta(abs, { noteSource: 'other', triggerWordsSource: 1 })
     expect(bad.noteSource).toBe('')
     expect(bad.triggerWordsSource).toBe('')
+  })
+})
+
+describe('不可信 store.json 清洗（B-04）', () => {
+  it('normalizeStoreData 剔除 __proto__/constructor/prototype 键', () => {
+    const parsed = JSON.parse(
+      '{"models":{"__proto__":{"alias":"pwn"},"constructor":{"alias":"c"},' +
+        '"prototype":{"alias":"p"},"ok.safetensors":{"note":"ok"}}}'
+    )
+    const data = normalizeStoreData(parsed)
+    expect(Object.keys(data.models)).toEqual(['ok.safetensors'])
+    expect(Object.getPrototypeOf(data.models)).toBe(Object.prototype)
+    expect({}.alias).toBeUndefined()
+  })
+
+  it('磁盘加载时剔除危险键，后续保存也不会把危险键写回', async () => {
+    await fs.mkdir(path.join(root, '.modelvault'), { recursive: true })
+    await fs.writeFile(
+      path.join(root, '.modelvault', 'store.json'),
+      JSON.stringify({
+        version: 1,
+        models: {
+          ['__proto__']: { alias: 'pwn' },
+          'ok.safetensors': { note: 'ok' }
+        }
+      })
+    )
+
+    await loadData()
+    expect(getModelMeta(path.join(root, 'ok.safetensors'))?.note).toBe('ok')
+    // 危险键未成为 data.models 的自有属性
+    expect(getModelMeta(path.join(root, 'anything.safetensors'))).toBeNull()
+
+    setModelMeta(path.join(root, 'ok.safetensors'), { note: 'ok2' })
+    await flushStoreSave()
+    const disk = JSON.parse(
+      await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
+    )
+    expect(Object.prototype.hasOwnProperty.call(disk.models, '__proto__')).toBe(false)
+    expect(disk.models['ok.safetensors'].note).toBe('ok2')
   })
 })
 

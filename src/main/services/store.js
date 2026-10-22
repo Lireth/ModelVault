@@ -69,6 +69,8 @@ export {
   loadData,
   wasDataReset,
   reloadCurrentRootData,
+  normalizeStoreData,
+  isUnsafeModelKey,
   getModelMeta,
   getMetaMapByAbsPath,
   setModelMeta,

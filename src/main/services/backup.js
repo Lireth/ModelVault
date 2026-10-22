@@ -1,7 +1,8 @@
 import { app, dialog } from 'electron'
+import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { strToU8, unzip, zip } from 'fflate'
+import { strToU8, Unzip, UnzipInflate, unzip, zip } from 'fflate'
 import logger from '../logger'
 import {
   COVERS_DIR,
@@ -13,6 +14,7 @@ import {
   getCurrentRoot,
   getLibrarySettings,
   normalizeLibrarySettings,
+  normalizeStoreData,
   saveLibrarySettings
 } from './store'
 
@@ -46,11 +48,31 @@ const COVER_IO_CONCURRENCY = 8
 const ZIP_LEVEL = 6
 
 /**
- * 备份文件大小上限（O5）：fflate 解压为全内存操作，读入的 zip 字节与解出的
- * 全部条目双份驻留主进程堆；与导出侧封面上限同理由地拒绝超限输入，
- * 避免低内存机器在导入大备份时 OOM
+ * 备份文件大小上限（O5/B-04）：压缩包本身仍做上限校验，避免超大文件
+ * 长时间占用磁盘/CPU；解压侧另有逐条与总量限制，见下方 UNZIP_* 常量。
  */
 const MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024
+
+/* ---------------- 不可信 zip 解压限制（B-04） ---------------- */
+
+/** 流式读取压缩包的块大小（1MB：解压分片让出事件循环） */
+const UNZIP_CHUNK_SIZE = 1024 * 1024
+/** 条目数量上限：防止海量小条目拖垮解压与目录交换 */
+const MAX_BACKUP_ENTRIES = 20000
+/** 清单文件上限：正常仅数 KB，给足版本演进余量 */
+const MAX_MANIFEST_BYTES = 256 * 1024
+/** 库设置文件上限 */
+const MAX_SETTINGS_BYTES = 8 * 1024 * 1024
+/** store.json 上限（万级模型的标注仍远小于此值） */
+const MAX_STORE_BYTES = 256 * 1024 * 1024
+/** 单张封面上限（与导入封面时的 50MB 预检同量级） */
+const MAX_COVER_ENTRY_BYTES = 64 * 1024 * 1024
+/**
+ * 解压总量上限：封面总量上限 + 元数据/设置/清单上限。
+ * 该限制针对“声明大小缺失/伪造”的压缩包，以实际解出字节累计判定。
+ */
+const MAX_UNZIP_BYTES =
+  MAX_COVERS_BYTES + MAX_STORE_BYTES + MAX_SETTINGS_BYTES + MAX_MANIFEST_BYTES
 
 /**
  * 有限并发映射（A-01）：固定数量的 worker 抢占式领取任务，
@@ -161,6 +183,168 @@ export function safeCoverName(entryName) {
   // 驱动器相对路径（如 C:x.png）在 Windows 上会改变解析基准
   if (/^[a-zA-Z]:/.test(base)) return ''
   return base
+}
+
+/** 人类可读的 MB 文案（错误提示用） */
+function formatLimit(bytes) {
+  return `${Math.floor(bytes / 1024 / 1024)}MB`
+}
+
+/**
+ * 备份条目解压上限（B-04）：返回 0 表示不认识该条目，直接跳过不调用
+ * start()（fflate 不会为其分配解压缓冲）。
+ * @param {string} name zip 内条目名
+ * @returns {number} 字节上限
+ */
+function backupEntryLimit(name) {
+  if (name === 'manifest.json') return MAX_MANIFEST_BYTES
+  if (name === 'settings.json') return MAX_SETTINGS_BYTES
+  if (name === `${LIB_PREFIX}${DATA_FILE}`) return MAX_STORE_BYTES
+  if (safeCoverName(name)) return MAX_COVER_ENTRY_BYTES
+  return 0
+}
+
+/** 合并解压分块（空/单块避免额外分配） */
+function concatBytes(chunks, size) {
+  if (chunks.length === 0) return new Uint8Array(0)
+  if (chunks.length === 1) return chunks[0]
+  const out = new Uint8Array(size)
+  let offset = 0
+  for (const chunk of chunks) {
+    out.set(chunk, offset)
+    offset += chunk.length
+  }
+  return out
+}
+
+/**
+ * 流式解压备份 zip（B-04）：
+ * - 逐块读取文件，不把整个压缩包读入内存；
+ * - 只解压备份格式认识的条目，未知/不安全的封面条目直接跳过；
+ * - 逐条与总量都设上限，压缩比再高也会在超限时立即中止；
+ * - 重复条目直接拒绝（避免同名条目覆盖产生歧义）。
+ *
+ * @param {string} filePath zip 文件路径
+ * @param {{manifestOnly?: boolean, stats?: {skippedCovers: number}}} [options]
+ *   manifestOnly 仅解出 manifest.json；stats 用于回传被跳过的非法封面条目数
+ * @returns {Promise<Record<string, Uint8Array>>} 条目名 → 内容
+ */
+async function streamBackupZip(filePath, { manifestOnly = false, stats = null } = {}) {
+  // 无原型对象：条目名来自不可信 zip，避免任何特殊键影响查找语义
+  const entries = Object.create(null)
+  const seen = new Set()
+  let entryCount = 0
+  let totalBytes = 0
+  let failure = null
+  const fail = (err) => {
+    if (!failure) failure = err
+  }
+
+  const unzipper = new Unzip()
+  unzipper.register(UnzipInflate)
+  unzipper.onfile = (file) => {
+    if (failure) return
+    entryCount += 1
+    if (entryCount > MAX_BACKUP_ENTRIES) {
+      fail(new Error(`备份条目数量超过上限（${MAX_BACKUP_ENTRIES}）`))
+      return
+    }
+    const limit = manifestOnly
+      ? file.name === 'manifest.json'
+        ? MAX_MANIFEST_BYTES
+        : 0
+      : backupEntryLimit(file.name)
+    // 不认识的条目（含路径穿越的封面名）不解压，直接跳过
+    if (!limit) {
+      if (!manifestOnly && stats && file.name.startsWith(LIB_COVERS_PREFIX)) {
+        stats.skippedCovers += 1
+      }
+      return
+    }
+    if (seen.has(file.name)) {
+      fail(new Error(`备份包含重复条目: ${file.name}`))
+      return
+    }
+    seen.add(file.name)
+    // 头部声明大小可提前拒绝明显的压缩炸弹（缺失时由实际字节上限兜底）
+    if (typeof file.originalSize === 'number' && file.originalSize > limit) {
+      fail(new Error(`备份条目 ${file.name} 解压后超过 ${formatLimit(limit)} 上限`))
+      return
+    }
+
+    const chunks = []
+    let received = 0
+    file.ondata = (err, chunk, final) => {
+      if (failure) return
+      if (err) {
+        fail(err)
+        return
+      }
+      if (chunk && chunk.length > 0) {
+        received += chunk.length
+        totalBytes += chunk.length
+        if (received > limit) {
+          fail(new Error(`备份条目 ${file.name} 解压后超过 ${formatLimit(limit)} 上限`))
+          file.terminate?.()
+          return
+        }
+        if (totalBytes > MAX_UNZIP_BYTES) {
+          fail(new Error(`备份解压总量超过 ${formatLimit(MAX_UNZIP_BYTES)} 上限`))
+          file.terminate?.()
+          return
+        }
+        chunks.push(chunk)
+      }
+      if (final) entries[file.name] = concatBytes(chunks, received)
+    }
+    try {
+      file.start()
+    } catch (err) {
+      fail(err)
+    }
+  }
+
+  const stream = createReadStream(filePath, { highWaterMark: UNZIP_CHUNK_SIZE })
+  try {
+    for await (const chunk of stream) {
+      if (failure) break
+      try {
+        unzipper.push(chunk, false)
+      } catch (err) {
+        fail(err)
+        break
+      }
+    }
+    if (failure) throw failure
+    // 结束流：触发剩余条目收尾（空条目在 final 时写入 entries）
+    unzipper.push(new Uint8Array(0), true)
+    if (failure) throw failure
+    return entries
+  } finally {
+    stream.destroy()
+  }
+}
+
+/**
+ * 第一遍：只读 manifest.json（B-04 manifest-first）。
+ * 校验格式/版本通过后再进行完整解压，避免为无效备份付出解压成本。
+ * @param {string} filePath zip 文件路径
+ * @returns {Promise<Uint8Array|null>} 清单内容；不存在返回 null
+ */
+async function readBackupManifest(filePath) {
+  const entries = await streamBackupZip(filePath, { manifestOnly: true })
+  return entries['manifest.json'] || null
+}
+
+/**
+ * 第二遍：解出恢复所需的设置/元数据/封面（带逐条与总量上限）。
+ * @param {string} filePath zip 文件路径
+ * @returns {Promise<{files: Record<string, Uint8Array>, skippedCovers: number}>}
+ */
+async function unzipBackupEntries(filePath) {
+  const stats = { skippedCovers: 0 }
+  const files = await streamBackupZip(filePath, { stats })
+  return { files, skippedCovers: stats.skippedCovers }
 }
 
 /** 路径存在性判断（不区分文件/目录） */
@@ -308,13 +492,26 @@ async function pruneRestoreArtifacts(root, keepBakName) {
  * @param {Record<string, Uint8Array>} unzipped 解压出的备份条目
  * @param {object|null} [libSettings] 随备份恢复的库设置（写入目标库的
  *   .modelvault/settings.json，随目录交换原子生效；空则不写）
+ * @param {number} [skippedCovers] 解压阶段跳过的非法封面条目数（B-04）
  * @returns {Promise<{root: string, models: number, covers: number, skipped: number}>}
  */
-async function restoreLibrary(root, unzipped, libSettings = null) {
+async function restoreLibrary(root, unzipped, libSettings = null, skippedCovers = 0) {
   const decoder = new TextDecoder()
   const storeText = decoder.decode(unzipped[`${LIB_PREFIX}${DATA_FILE}`])
-  // 落盘前先校验 JSON：损坏的备份不应触发任何目录交换
+  // 落盘前先校验 JSON 并规范化（B-04）：备份来自不可信来源，
+  // store.json 的键与字段必须按与磁盘加载相同的规则清洗（原型污染/超大字段）
   const parsed = JSON.parse(storeText)
+  const sanitized = normalizeStoreData(parsed)
+  const sanitizedText = JSON.stringify(sanitized, null, 2)
+  const sourceCount =
+    parsed && typeof parsed === 'object' && parsed.models && typeof parsed.models === 'object'
+      ? Object.keys(parsed.models).length
+      : 0
+  if (Object.keys(sanitized.models).length !== sourceCount) {
+    logger.warn(
+      `备份元数据已清洗: ${sourceCount} → ${Object.keys(sanitized.models).length} 条（剔除非法键/字段）`
+    )
+  }
   // 静止两路写盘链（B1/B-02 修复配套）：在途的防抖/原子写完成于目录交换之后时，
   // 其 rename 会把恢复前的旧数据覆盖到刚恢复的 store.json / settings.json 上。
   // 恢复目标为当前激活根时风险最大；对其他根 flush 只是把当前根待落盘数据
@@ -327,7 +524,7 @@ async function restoreLibrary(root, unzipped, libSettings = null) {
   await fs.rm(tmpDir, { recursive: true, force: true })
   try {
     await fs.mkdir(path.join(tmpDir, COVERS_DIR), { recursive: true })
-    await fs.writeFile(path.join(tmpDir, DATA_FILE), storeText)
+    await fs.writeFile(path.join(tmpDir, DATA_FILE), sanitizedText)
     if (libSettings) {
       // 库设置随备份恢复（设置随模型库走）：写入临时目录，随目录交换原子生效
       await fs.writeFile(
@@ -337,7 +534,7 @@ async function restoreLibrary(root, unzipped, libSettings = null) {
     }
 
     let covers = 0
-    let skipped = 0
+    let skipped = skippedCovers
     // 封面有限并发写入（A-01）；JS 单线程下计数器在 await 间隙无竞态
     const coverEntries = Object.entries(unzipped).filter(([entryName]) =>
       entryName.startsWith(LIB_COVERS_PREFIX)
@@ -373,7 +570,7 @@ async function restoreLibrary(root, unzipped, libSettings = null) {
 
     // 残留治理（OPT-18）：更早的 .bak 仅保留本次一份；历史 .restore 临时目录清除
     await pruneRestoreArtifacts(root, bakDir ? path.basename(bakDir) : '')
-    return { root, models: Object.keys(parsed?.models || {}).length, covers, skipped }
+    return { root, models: Object.keys(sanitized.models).length, covers, skipped }
   } catch (err) {
     // 失败兜底：清理本次解出的临时目录，不在用户模型目录留垃圾
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
@@ -397,24 +594,33 @@ export async function importBackup(win) {
   if (pick.canceled || !pick.filePaths[0]) return { canceled: true }
   const filePath = pick.filePaths[0]
 
-  let unzipped
+  let manifestBytes
   try {
-    // 大小预检（O5）：先于整文件读入——超大备份的全内存解压会挤爆低内存
-    // 机器的主进程堆，超限引导手动复制 .modelvault 文件夹
+    // 大小预检（O5）：先于读取——超大压缩包长时间占用磁盘/CPU；
+    // 解压侧另有逐条与总量上限（B-04）
     const fileStat = await fs.stat(filePath)
     if (fileStat.size > MAX_BACKUP_BYTES) {
       return {
         error: `备份文件超过 ${Math.floor(MAX_BACKUP_BYTES / 1024 / 1024 / 1024)}GB，为避免内存占用过高已停止恢复；请手动复制 .modelvault 文件夹`
       }
     }
-    // 异步分片解压（A-01）：zip 较大时不阻塞主进程事件循环
-    unzipped = await unzipBackupAsync(new Uint8Array(await fs.readFile(filePath)))
+    // 第一遍：流式只读 manifest（B-04）。无效备份不进入完整解压。
+    manifestBytes = await readBackupManifest(filePath)
   } catch (err) {
     return { error: `备份文件读取失败: ${err.message}` }
   }
-  const parsedManifest = parseBackupManifest(unzipped['manifest.json'])
+  const parsedManifest = parseBackupManifest(manifestBytes)
   if (!parsedManifest.ok) return { error: parsedManifest.error }
   const manifest = parsedManifest.manifest
+
+  let unpacked
+  try {
+    // 第二遍：流式解出已知条目，逐条/总量限额，未知条目直接跳过
+    unpacked = await unzipBackupEntries(filePath)
+  } catch (err) {
+    return { error: `备份文件解压失败: ${err.message}` }
+  }
+  const { files: unzipped, skippedCovers } = unpacked
 
   // 设置恢复（库设置随模型库走）：先规范化并暂存——含库数据时随目录交换
   // 写入目标库的 .modelvault/settings.json；仅设置的备份（或旧格式 settings-only）
@@ -464,7 +670,12 @@ export async function importBackup(win) {
       }
     }
     try {
-      const libraryRestored = await restoreLibrary(root, unzipped, settingsPayload)
+      const libraryRestored = await restoreLibrary(
+        root,
+        unzipped,
+        settingsPayload,
+        skippedCovers
+      )
       logger.info(
         `备份已恢复: ${filePath} → ${root}（${libraryRestored.models} 模型 / ${libraryRestored.covers} 封面）`
       )

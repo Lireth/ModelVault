@@ -53,6 +53,43 @@ let saveSuppressed = false
 let dataReset = false
 
 /**
+ * 危险对象键（原型污染防御，B-04）：备份 zip 与磁盘 store.json 均属
+ * 不可信输入。JSON.parse 会为 "__proto__" 生成自有属性，直接写入普通
+ * 对象会改写其原型；constructor/prototype 一并拒绝，避免后续任何
+ * 基于原型链的回退查找命中伪造元数据。
+ */
+const UNSAFE_MODEL_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+
+/**
+ * 键是否可用于元数据表（拒绝空键与原型相关危险键）。
+ * @param {unknown} key 相对路径键
+ * @returns {boolean}
+ */
+export function isUnsafeModelKey(key) {
+  return typeof key !== 'string' || key === '' || UNSAFE_MODEL_KEYS.has(key)
+}
+
+/**
+ * 将任意来源的 store.json 结构规范化为可信元数据表（纯函数，B-04）：
+ * - 剔除危险键，杜绝原型污染；
+ * - 逐条走 normalizeModelMeta（字段截断/类型校验/绝对封面自愈）。
+ * @param {unknown} parsed JSON.parse 结果（可能缺字段或为恶意构造）
+ * @returns {{version: number, models: Record<string, object>}}
+ */
+export function normalizeStoreData(parsed) {
+  const models = {}
+  const source = parsed && typeof parsed === 'object' ? parsed.models : null
+  if (source && typeof source === 'object') {
+    for (const [key, meta] of Object.entries(source)) {
+      if (isUnsafeModelKey(key)) continue
+      const normalized = normalizeModelMeta(meta)
+      if (normalized) models[key] = normalized
+    }
+  }
+  return { version: 1, models }
+}
+
+/**
  * 规范化单条封面引用（A7 绝对路径自愈）：
  * - 相对路径原样保留（规范存储格式）；
  * - 绝对路径是历史数据残留（如根目录移动前的旧位置），协议层只放行当前根目录，
@@ -223,11 +260,8 @@ export async function loadData() {
   try {
     const text = await fs.readFile(file, 'utf-8')
     const parsed = JSON.parse(text)
-    data = { version: 1, models: {} }
-    for (const [key, meta] of Object.entries(parsed?.models || {})) {
-      const normalized = normalizeModelMeta(meta)
-      if (normalized) data.models[key] = normalized
-    }
+    // B-04：磁盘文件同样按不可信输入处理（可能由恶意备份写入或外部编辑）
+    data = normalizeStoreData(parsed)
     logger.info(`关联存储加载完成：${Object.keys(data.models).length} 条记录（${file}）`)
   } catch (err) {
     if (err.code === 'ENOENT') {
@@ -305,7 +339,7 @@ async function migrateLegacyData() {
     let imported = 0
     for (const [absId, meta] of Object.entries(parsed?.models || {})) {
       const relKey = toRelKey(absId)
-      if (!relKey) continue
+      if (!relKey || isUnsafeModelKey(relKey)) continue
       // 旧版封面是 %APPDATA% 下的绝对路径，A7 的规范化会将其剔除，
       // 必须在规范化之前先取出原始引用，供下方迁移复制使用
       const legacyCover =
@@ -369,7 +403,7 @@ export function getMetaMapByAbsPath() {
 export function setModelMeta(modelId, meta) {
   if (!data || typeof modelId !== 'string' || !modelId) return null
   const relKey = toRelKey(modelId)
-  if (!relKey) {
+  if (!relKey || isUnsafeModelKey(relKey)) {
     logger.warn(`模型不在当前根目录内，忽略保存: ${modelId}`)
     return null
   }
