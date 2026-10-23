@@ -150,6 +150,41 @@ describe('collectDirSnapshot / snapshotsEqual', () => {
     expect(snapshot.size).toBe(25)
     expect(snapshot.has(path.join(root, 'dir-11', 'nested'))).toBe(true)
   })
+
+  it('与 scanner 共享排除策略与最大深度：隐藏项/内置目录/put_/深层子树不进快照', async () => {
+    await fs.mkdir(path.join(root, 'node_modules', 'pkg'), { recursive: true })
+    await fs.writeFile(path.join(root, 'node_modules', 'pkg', 'a.js'), 'x')
+    await fs.mkdir(path.join(root, '.git'), { recursive: true })
+    await fs.writeFile(path.join(root, '.git', 'config'), 'x')
+    await fs.mkdir(path.join(root, '$RECYCLE.BIN'), { recursive: true })
+    await fs.writeFile(path.join(root, '$RECYCLE.BIN', 'old.safetensors'), 'x')
+    // 大小写变体：共享排除集按小写比较
+    await fs.mkdir(path.join(root, 'System volume information'), { recursive: true })
+    await fs.writeFile(path.join(root, 'System volume information', 'sys.safetensors'), 'x')
+    await fs.writeFile(path.join(root, 'put_temp.safetensors'), 'x')
+    await fs.writeFile(path.join(root, '.hidden.safetensors'), 'x')
+
+    // MAX_SCAN_DEPTH=8：8 段目录在快照内，9 段目录及其文件不进入
+    const depth8 = path.join(root, ...Array.from({ length: 8 }, (_, i) => `d${i}`))
+    const depth9 = path.join(depth8, 'd8')
+    await fs.mkdir(depth9, { recursive: true })
+    await fs.writeFile(path.join(depth8, 'm8.safetensors'), 'x')
+    await fs.writeFile(path.join(depth9, 'm9.safetensors'), 'x')
+
+    const snapshot = await collectDirSnapshot(root)
+
+    const rootEntries = snapshot.get(root)
+    expect(rootEntries).not.toContain('node_modules')
+    expect(rootEntries).not.toContain('.git')
+    expect(rootEntries).not.toContain('$RECYCLE.BIN')
+    expect(rootEntries).not.toContain('System volume information')
+    expect(rootEntries).not.toContain('put_temp.safetensors')
+    expect(rootEntries).not.toContain('.hidden.safetensors')
+    expect(snapshot.has(path.join(root, 'node_modules'))).toBe(false)
+    expect(snapshot.has(path.join(root, '.git'))).toBe(false)
+    expect(snapshot.has(depth8)).toBe(true)
+    expect(snapshot.has(depth9)).toBe(false)
+  })
 })
 
 describe('computeSnapshotDiff（A-03 增量扫描的变更子树定位）', () => {

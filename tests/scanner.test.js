@@ -106,6 +106,13 @@ describe('scanModels', () => {
     await fs.writeFile(path.join(root, 'temp', 'c.safetensors'), 'x')
     await fs.mkdir(path.join(root, '$RECYCLE.BIN'))
     await fs.writeFile(path.join(root, '$RECYCLE.BIN', 'd.safetensors'), 'x')
+    await fs.mkdir(path.join(root, 'node_modules'))
+    await fs.writeFile(path.join(root, 'node_modules', 'nm.safetensors'), 'x')
+    await fs.mkdir(path.join(root, '.git'))
+    await fs.writeFile(path.join(root, '.git', 'secret.safetensors'), 'x')
+    // 大小写变体：内置排除目录按小写比较（Windows 文件系统不区分大小写）
+    await fs.mkdir(path.join(root, 'System volume information'))
+    await fs.writeFile(path.join(root, 'System volume information', 'sys.safetensors'), 'x')
     await fs.writeFile(path.join(root, 'put_interfaces.bin'), 'x')
     await fs.writeFile(path.join(root, 'empty.safetensors'), 'x')
   })
@@ -153,6 +160,9 @@ describe('scanModels', () => {
     expect(ids).not.toContain(path.join(root, 'notes', 'readme.txt'))
     expect(ids).not.toContain(path.join(root, 'temp', 'c.safetensors'))
     expect(ids).not.toContain(path.join(root, '$RECYCLE.BIN', 'd.safetensors'))
+    expect(ids).not.toContain(path.join(root, 'node_modules', 'nm.safetensors'))
+    expect(ids).not.toContain(path.join(root, '.git', 'secret.safetensors'))
+    expect(ids).not.toContain(path.join(root, 'System volume information', 'sys.safetensors'))
     expect(ids).not.toContain(path.join(root, 'put_interfaces.bin'))
     // 分类
     const b = models.find((m) => m.name === 'b')
