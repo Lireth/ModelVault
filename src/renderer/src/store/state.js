@@ -193,6 +193,40 @@ export const state = shallowReactive({
 })
 
 /**
+ * 后台哈希预热回填覆盖（O7）：
+ * 预热完成事件以「模型 id → SHA256」写入独立响应式映射，不再逐模型整体替换
+ * 对象——元素替换会让 filteredModels/typeCounts/tagCounts/duplicateGroups 等
+ * 全量派生反复失效并重排，同时使搜索域 WeakMap 缓存随对象换身失效。
+ * 消费方统一经 effectiveModelHash 读取「覆盖值优先、模型自带值兜底」。
+ */
+const hashOverrides = reactive(new Map())
+
+/** 模型的有效文件哈希（覆盖优先，无覆盖回退模型自带值） */
+export function effectiveModelHash(model) {
+  if (!model) return ''
+  return hashOverrides.get(model.id) || model.hash || ''
+}
+
+/** 写入一条哈希覆盖（调用方已确认 id 属于当前列表） */
+export function setHashOverride(id, hash) {
+  if (typeof id !== 'string' || !id || typeof hash !== 'string' || !hash) return
+  hashOverrides.set(id, hash)
+}
+
+/**
+ * 清理哈希覆盖：不传 ids 清空全部（全量扫描/切库后扫描结果已携带权威哈希），
+ * 传数组时仅清理指定模型（局部扫描返回的新对象自带最新哈希）。
+ * @param {string[]|null} [ids]
+ */
+export function clearHashOverrides(ids = null) {
+  if (!ids) {
+    hashOverrides.clear()
+    return
+  }
+  for (const id of ids) hashOverrides.delete(id)
+}
+
+/**
  * 模型 id → 数组下标索引（O2）：批量事件回填时避免每次 O(n) findIndex/重建 Map。
  * 仅在 models 数组引用变化时重建；元素级替换不改变 id 与下标，索引保持有效。
  */
@@ -239,6 +273,10 @@ export function modelIndexOf(id) {
 export function replaceModels(list) {
   state.models = shallowReactive(list)
   rebuildModelIndex()
+  // 哈希覆盖只对当前列表内 id 有意义：移除已不存在的条目，避免陈旧哈希复活
+  for (const id of hashOverrides.keys()) {
+    if (!modelIndexById.has(id)) hashOverrides.delete(id)
+  }
 }
 
 /**

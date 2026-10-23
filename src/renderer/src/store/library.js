@@ -1,4 +1,13 @@
-import { state, defaultSettings, modelIndexOf, replaceModels, replaceSettings } from './state'
+import {
+  state,
+  defaultSettings,
+  modelIndexOf,
+  replaceModels,
+  replaceSettings,
+  effectiveModelHash,
+  setHashOverride,
+  clearHashOverrides
+} from './state'
 import { applyCoverOverrides, clearCoverOverrides } from './cover-overrides'
 import { toast } from './toast'
 import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
@@ -62,6 +71,8 @@ export async function initApp() {
       // 秒开上次索引；autoScan 开启时后台校验，关闭时保持缓存展示
       // OP-02：索引装饰结果自带最新缩略图 URL，展示覆盖从空开始
       clearCoverOverrides()
+      // O7：索引中的哈希是权威值，清空后台预热覆盖
+      clearHashOverrides()
       replaceModels(cached.models)
       state.lastScan = {
         count: cached.models.length,
@@ -215,6 +226,8 @@ export async function switchRoot(folder) {
     if (res?.cached && Array.isArray(res.models)) {
       // OP-02：切库后覆盖映射属于旧库，清空后以索引装饰结果为准
       clearCoverOverrides()
+      // O7：旧库的哈希覆盖一并清空，避免跨库 id/hash 残留
+      clearHashOverrides()
       replaceModels(res.models)
       state.folder = res.root || folder
       state.lastScan = {
@@ -312,6 +325,8 @@ export async function scanModels(folder = state.folder, options = {}) {
     // OP-02：全量扫描装饰结果已携带缓存命中的缩略图 URL，清空旧覆盖后
     // 以新结果为准（缺失缩略图由后续 thumbsReady 重新写入覆盖）
     clearCoverOverrides()
+    // O7：全量扫描结果携带权威哈希，清空后台预热覆盖
+    clearHashOverrides()
     replaceModels(res.models)
     // 扫描成功后才提交激活库（主进程已在同一维护锁内完成切根）
     state.folder = res.root || targetRoot
@@ -366,12 +381,13 @@ export function applyThumbUpdates(updates) {
 
 /**
  * 应用后台哈希预热的完成事件（FEAT-1）：预热链路为缺失哈希的模型计算
- * SHA256 后经 warmupProgress 推送（active=false 且携带 hash），此处回填到
- * 对应模型对象——重复检测（filter.duplicateGroups）据此渐进可用，无需等待
- * 下次扫描。已在扫描装饰中携带哈希的模型不会产生完成事件，无冲突。
- * O2：主进程会把同一时间窗内的多个完成事件合批为
- * `{ active: false, completions: [{id, hash}] }`；仍兼容旧的单条
- * `{ active: false, id, hash }` 载荷。索引查找走持久 id→下标缓存（O(1)）。
+ * SHA256 后经 warmupProgress 推送（active=false 且携带 hash），此处写入
+ * 独立的哈希覆盖映射——重复检测/哈希搜索据此渐进可用，无需等待下次扫描。
+ * O7：不再逐模型整体替换对象，列表派生（筛选/排序/分类计数/搜索域缓存）
+ * 保持有效，仅重复分组等真正依赖哈希的派生重算；已在扫描阶段携带哈希的
+ * 模型不会产生完成事件，无冲突。O2：主进程会把同一时间窗内的多个完成事件
+ * 合批为 `{ active: false, completions: [{id, hash}] }`，仍兼容单条载荷；
+ * 索引查找走持久 id→下标缓存（O(1)）。
  * @param {{active?: boolean, id?: string, hash?: string,
  *   completions?: Array<{id: string, hash: string}>}} progress 预热进度快照
  */
@@ -382,9 +398,8 @@ export function applyHashUpdate(progress) {
   for (const { id, hash } of updates) {
     if (!id || !hash) continue
     const idx = modelIndexOf(id)
-    if (idx === undefined || state.models[idx].hash === hash) continue
-    // O3 约定：浅响应下元素级整体替换（替换会使 selectedModel 指向新引用，
-    // 详情页 formDirty 保护与缩略图回填路径一致）
-    state.models[idx] = { ...state.models[idx], hash }
+    if (idx === undefined) continue
+    if (effectiveModelHash(state.models[idx]) === hash) continue
+    setHashOverride(id, hash)
   }
 }

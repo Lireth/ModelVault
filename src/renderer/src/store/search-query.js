@@ -121,8 +121,8 @@ function parseFilter(prefix, value) {
   }
 }
 
-/** 单条件命中判定（与 parseFilter 的 kind 一一对应） */
-function matchFilter(m, f) {
+/** 单条件命中判定（与 parseFilter 的 kind 一一对应；resolveHash 为 O7 覆盖解析器） */
+function matchFilter(m, f, resolveHash) {
   switch (f.kind) {
     case 'base': {
       const base = m.baseModel || m.autoInfo?.baseModel || ''
@@ -161,7 +161,7 @@ function matchFilter(m, f) {
         .includes(f.text)
     }
     case 'hash':
-      return String(m.hash || '').toLowerCase().startsWith(f.text)
+      return String(resolveHash(m) || '').toLowerCase().startsWith(f.text)
     default:
       return true
   }
@@ -195,11 +195,13 @@ export function parseSearchQuery(raw) {
  * 判定模型是否满足全部结构化条件（空列表恒命中）。
  * @param {object} m 模型对象
  * @param {object[]} filters parseSearchQuery 产出的条件列表
+ * @param {(model: any) => string} [resolveHash] 有效哈希解析器
+ *   （默认读取模型自带 hash；渲染层传入覆盖映射解析器，O7）
  * @returns {boolean}
  */
-export function matchSearchFilters(m, filters) {
+export function matchSearchFilters(m, filters, resolveHash = (model) => model.hash || '') {
   for (const f of filters) {
-    if (!matchFilter(m, f)) return false
+    if (!matchFilter(m, f, resolveHash)) return false
   }
   return true
 }

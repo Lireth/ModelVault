@@ -1,4 +1,4 @@
-import { state, replaceModels } from './state'
+import { state, replaceModels, clearHashOverrides } from './state'
 import { clearModelCoverOverrides } from './cover-overrides'
 import { toast } from './toast'
 import { scanModels } from './library'
@@ -225,6 +225,8 @@ export async function partialScanModels(dirs) {
     // 模型的旧封面覆盖，避免历史缩略图地址遮住新装饰结果；子树外模型的
     // 覆盖继续保留（它们本轮未被重新装饰）。
     clearModelCoverOverrides(incomingIds)
+    // O7：局部扫描返回的新对象自带最新哈希，清理这些 id 的预热覆盖
+    clearHashOverrides(incomingIds)
     replaceModels(untouched.concat(incoming))
     state.lastScan = {
       count: state.models.length,

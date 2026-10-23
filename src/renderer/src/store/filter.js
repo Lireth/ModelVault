@@ -1,5 +1,11 @@
 import { computed, watch } from 'vue'
-import { state, MODEL_TYPES, SUB_MAP, sortDirectional } from './state'
+import {
+  state,
+  MODEL_TYPES,
+  SUB_MAP,
+  sortDirectional,
+  effectiveModelHash
+} from './state'
 import { normalizeBaseModel } from '../../../shared/model-categories'
 import { matchSearchFilters, parseSearchQuery } from './search-query'
 
@@ -62,10 +68,12 @@ function searchHaystack(m) {
 export const duplicateGroups = computed(() => {
   const byHash = new Map()
   for (const m of state.models) {
-    if (!m.hash) continue
-    const list = byHash.get(m.hash)
+    // O7：后台预热回填走独立覆盖映射，模型对象保持引用稳定
+    const hash = effectiveModelHash(m)
+    if (!hash) continue
+    const list = byHash.get(hash)
     if (list) list.push(m)
-    else byHash.set(m.hash, [m])
+    else byHash.set(hash, [m])
   }
   const groups = []
   for (const [hash, models] of byHash) {
@@ -123,7 +131,7 @@ const filteredUnsorted = computed(() => {
     if (showFavoritesOnly && !m.favorite) continue
     if (dupes && !dupes.has(m.id)) continue
     if (keyword && !searchHaystack(m).includes(keyword)) continue
-    if (hasFilters && !matchSearchFilters(m, filters)) continue
+    if (hasFilters && !matchSearchFilters(m, filters, effectiveModelHash)) continue
     list.push(m)
   }
   return list
@@ -164,7 +172,11 @@ export const filteredModels = computed(() => {
   // 顺序），组内相对顺序保持上方排序结果——散落的同组文件会破坏「逐组清理」
   // 的浏览流。筛选语义下此排序随筛选开启/关闭自动生效与退出
   if (state.showDuplicatesOnly) {
-    list.sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0))
+    list.sort((a, b) => {
+      const ha = effectiveModelHash(a)
+      const hb = effectiveModelHash(b)
+      return ha < hb ? -1 : ha > hb ? 1 : 0
+    })
   }
   return list
 })

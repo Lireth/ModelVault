@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setModelCoverUrl } from '../src/renderer/src/store/cover-overrides'
+import { effectiveModelHash } from '../src/renderer/src/store/state'
 import {
   acceptConfirm,
   allFilteredSelected,
@@ -133,6 +134,7 @@ beforeEach(() => {
   state.typeFilter = 'all'
   state.subFilter = ''
   state.showFavoritesOnly = false
+  state.showDuplicatesOnly = false
   state.search = ''
   state.sortBy = 'name'
   state.sortAsc = true
@@ -1586,15 +1588,14 @@ describe('applyThumbUpdates', () => {
 
 describe('重复模型检测与筛选（FEAT-1）', () => {
   /** 注入两重复组 + 干扰项：A 组（p1/p2 同哈希，p2 评分更高）、B 组（q1/q2 同哈希）、s 独立。
-   * 须经 replaceModels 注入（包 shallowReactive）——applyHashUpdate 走元素级
-   * 索引替换，裸数组赋值会令其失去响应性（state.js 更新约定） */
+   * 须经 replaceModels 注入（包 shallowReactive）；s 与 A 组同大小，便于回填同哈希后入组 */
   function seedDupes() {
     replaceModels([
       makeModel('p1', { hash: 'a'.repeat(64), size: 100, mtimeMs: 1, rating: 0 }),
       makeModel('p2', { hash: 'a'.repeat(64), size: 100, mtimeMs: 2, rating: 4 }),
       makeModel('q1', { hash: 'b'.repeat(64), size: 50, mtimeMs: 1 }),
       makeModel('q2', { hash: 'b'.repeat(64), size: 50, mtimeMs: 2 }),
-      makeModel('s', { hash: '', size: 5 })
+      makeModel('s', { hash: '', size: 100 })
     ])
   }
 
@@ -1617,10 +1618,8 @@ describe('重复模型检测与筛选（FEAT-1）', () => {
     expect(filteredModels.value.map((m) => m.id)).toEqual(['p1', 'p2', 'q1', 'q2'])
 
     // 独立模型的哈希经预热完成事件回填为与 p1 相同 → 立即进入重复组
-    // （先就地对齐文件大小，满足「同哈希文件大小一致」的现实前提）
-    state.models[4] = { ...state.models[4], size: 100 }
     applyHashUpdate({ active: false, id: 's', hash: 'a'.repeat(64) })
-    expect(state.models.find((m) => m.id === 's').hash).toBe('a'.repeat(64))
+    expect(effectiveModelHash(state.models.find((m) => m.id === 's'))).toBe('a'.repeat(64))
     expect(duplicateGroups.value[0].models.map((m) => m.id)).toEqual(['p1', 'p2', 's'])
     // a 组 3 成员冗余 2×100，b 组 2 成员冗余 1×50
     expect(duplicateWastedBytes.value).toBe(250)
@@ -1645,29 +1644,28 @@ describe('重复模型检测与筛选（FEAT-1）', () => {
     expect(filteredModels.value.map((m) => m.id)).toEqual(['p2', 'p1', 'q2', 'q1'])
   })
 
-  it('applyHashUpdate：进行中事件与未知 id 忽略，同值幂等不替换元素', () => {
+  it('applyHashUpdate：写覆盖映射且对象引用不变；进行中/未知/同值安全跳过', () => {
     seedDupes()
     const sIdx = 4 // s 为 seedDupes 的最后一个模型
     const before = state.models[sIdx]
     // 进行中事件（active=true）不回填
     applyHashUpdate({ active: true, id: 's', hash: 'c'.repeat(64) })
-    expect(state.models[sIdx].hash).toBe('')
-    // 未知 id 忽略
+    expect(effectiveModelHash(state.models[sIdx])).toBe('')
+    // 未知 id / 空 hash 忽略
     applyHashUpdate({ active: false, id: 'no-such', hash: 'c'.repeat(64) })
-    // 空 hash 忽略
     applyHashUpdate({ active: false, id: 's', hash: '' })
     expect(state.models[sIdx]).toBe(before)
-    // 首次回填：元素级整体替换
+    // 首次回填：O7 写覆盖映射，模型对象保持引用稳定（列表派生不失效）
     applyHashUpdate({ active: false, id: 's', hash: 'c'.repeat(64) })
-    const afterFirst = state.models[sIdx]
-    expect(afterFirst).not.toBe(before)
-    expect(afterFirst.hash).toBe('c'.repeat(64))
-    // 同值幂等：引用不变（避免无意义的响应式失效）
+    expect(state.models[sIdx]).toBe(before)
+    expect(state.models[sIdx].hash).toBe('')
+    expect(effectiveModelHash(state.models[sIdx])).toBe('c'.repeat(64))
+    // 同值幂等：覆盖值不变
     applyHashUpdate({ active: false, id: 's', hash: 'c'.repeat(64) })
-    expect(state.models[sIdx]).toBe(afterFirst)
+    expect(effectiveModelHash(state.models[sIdx])).toBe('c'.repeat(64))
   })
 
-  it('O2 批次：completions 一次回填多个模型，未知/同值项安全跳过', () => {
+  it('O7 批次：completions 一次回填多个模型，未知/同值项安全跳过且不换对象', () => {
     seedDupes()
     const beforeP1 = state.models[0]
     applyHashUpdate({
@@ -1677,13 +1675,31 @@ describe('重复模型检测与筛选（FEAT-1）', () => {
       completions: [
         { id: 'p1', hash: 'c'.repeat(64) },
         { id: 'no-such', hash: 'd'.repeat(64) },
-        { id: 'p2', hash: 'a'.repeat(64) } // 同值：引用不变
+        { id: 'p2', hash: 'a'.repeat(64) } // 同值
       ]
     })
 
-    expect(state.models[0]).not.toBe(beforeP1)
-    expect(state.models[0].hash).toBe('c'.repeat(64))
-    expect(state.models[1].hash).toBe('a'.repeat(64))
+    expect(state.models[0]).toBe(beforeP1)
+    expect(effectiveModelHash(state.models[0])).toBe('c'.repeat(64))
+    expect(effectiveModelHash(state.models[1])).toBe('a'.repeat(64))
+  })
+
+  it('哈希搜索使用覆盖映射（O7）：无需重扫即可按 hash: 前缀命中', () => {
+    seedDupes()
+    applyHashUpdate({ active: false, id: 's', hash: 'c'.repeat(64) })
+    state.search = `hash:${'c'.repeat(8)}`
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['s'])
+  })
+
+  it('replaceModels 清理已移除 id 的哈希覆盖（避免陈旧哈希复活）', () => {
+    seedDupes()
+    applyHashUpdate({ active: false, id: 's', hash: 'c'.repeat(64) })
+    expect(effectiveModelHash(state.models[4])).toBe('c'.repeat(64))
+
+    // 移除 s 后再以无哈希对象重新加入：旧覆盖不得复活
+    replaceModels(state.models.filter((m) => m.id !== 's'))
+    replaceModels([...state.models, makeModel('s', { hash: '' })])
+    expect(effectiveModelHash(state.models.find((m) => m.id === 's'))).toBe('')
   })
 
   it('关闭重复筛选后视图恢复全量（筛选随开关生效与退出）', () => {
