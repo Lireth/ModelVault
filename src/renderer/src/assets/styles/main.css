@@ -12,8 +12,6 @@
   --accent: #5aa3fa;
   /* 强调色第二端点（渐变/极光紫）：自定义强调色时与 --accent 一并内联覆盖 */
   --accent-2: #b18cff;
-  /* 强调色 hover 态：暗色混黑加深，浅色主题覆盖为混白提亮 */
-  --accent-hover: color-mix(in srgb, var(--accent) 88%, #000);
   --danger: #e5484d;
   /* 警示色（F6 疑似损坏角标/警示条） */
   --warning: #e6a700;
@@ -69,8 +67,6 @@
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
-  --space-5: 20px;
-  --space-6: 24px;
   /* ---------- 圆角：小控件/按钮输入/卡片/大面板/胶囊 ---------- */
   --radius-sm: 6px;
   --radius-md: 8px;
@@ -92,7 +88,6 @@
   /* ---------- 动效 ---------- */
   --dur-fast: 120ms;
   --dur-base: 200ms;
-  --dur-slow: 340ms;
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
   /* 弹层层级：详情 < 画廊 < Toast < 确认层 */
   --z-detail: 100;
@@ -113,7 +108,6 @@ html.light {
   --text-muted: #68758a;
   --accent: #2f7fe0;
   --accent-2: #8a5fe8;
-  --accent-hover: color-mix(in srgb, var(--accent) 88%, #fff);
   --danger: #d93036;
   /* 浅色主题用更深的警示色保证在白色背景上的可读性 */
   --warning: #b98200;

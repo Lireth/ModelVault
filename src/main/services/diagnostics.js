@@ -249,6 +249,9 @@ function zipFiles(files) {
   })
 }
 
+/** 诊断包内报告文件名（测试与支持文档共用） */
+export const DIAGNOSTICS_JSON_ENTRY = 'diagnostics.json'
+
 /**
  * 导出诊断包：弹出保存对话框，聚合报告与最近日志打包为 zip。
  * @param {import('electron').BrowserWindow | null} win 父窗口
@@ -275,7 +278,7 @@ export async function exportDiagnostics(win) {
   if (result.canceled || !result.filePath) return { canceled: true }
 
   const files = {
-    'diagnostics.json': strToU8(JSON.stringify(report, null, 2))
+    [DIAGNOSTICS_JSON_ENTRY]: strToU8(JSON.stringify(report, null, 2))
   }
   for (const log of logs) {
     files[`logs/${log.name}`] = strToU8(log.text)
@@ -297,6 +300,3 @@ export async function exportDiagnostics(win) {
     return { error: `诊断包导出失败: ${err.message}` }
   }
 }
-
-/** 诊断包内报告文件名（测试与支持文档共用） */
-export const DIAGNOSTICS_JSON_ENTRY = 'diagnostics.json'

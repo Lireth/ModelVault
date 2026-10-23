@@ -95,7 +95,7 @@ const UNSAFE_MODEL_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
  * @param {unknown} key 相对路径键
  * @returns {boolean}
  */
-export function isUnsafeModelKey(key) {
+function isUnsafeModelKey(key) {
   return typeof key !== 'string' || key === '' || UNSAFE_MODEL_KEYS.has(key)
 }
 

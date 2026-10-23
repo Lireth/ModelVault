@@ -21,7 +21,7 @@ export const MAX_PARTIAL_SCAN_DIRS = 200
  */
 export const MAX_PARTIAL_SCAN_DIRS_INPUT = 1000
 /** 单个子树相对路径长度上限 */
-export const MAX_PARTIAL_SCAN_DIR_LEN = 1000
+const MAX_PARTIAL_SCAN_DIR_LEN = 1000
 
 /**
  * 去重并剔除被祖先覆盖的后代，保持输入首次出现顺序。

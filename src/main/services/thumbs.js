@@ -58,7 +58,7 @@ function thumbFileName(absCover, mtimeMs) {
  * （B5），扫描后台补齐缩略图期间所有 IPC 处理会随之停摆。
  * @returns {Promise<string>} 成功返回缩略图路径；源图过小/损坏返回 ''（回退原图）
  */
-async function generateThumb(absCover, mtimeMs, thumbPath) {
+async function generateThumb(absCover, thumbPath) {
   // 大文件跳过（B2）：先 stat 校验字节数，避免超大图整读入内存
   const sourceStat = await fs.stat(absCover)
   if (sourceStat.size > MAX_SOURCE_BYTES) return ''
@@ -137,7 +137,7 @@ export async function drainDeferredThumbs(onGenerated, concurrency = THUMB_GEN_C
     async ({ absCover, mtimeMs }) => {
       const thumbPath = path.join(getThumbsDir(), thumbFileName(absCover, mtimeMs))
       try {
-        const generated = await generateThumb(absCover, mtimeMs, thumbPath)
+        const generated = await generateThumb(absCover, thumbPath)
         if (generated) onGenerated(absCover, generated)
       } catch (err) {
         logger.warn(`后台缩略图生成失败（回退原图）: ${err.message}`)
