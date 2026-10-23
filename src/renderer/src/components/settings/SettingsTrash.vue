@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { formatSize, scanModels, state, toast } from '../../store/appStore'
+import { formatDate, formatSize, scanModels, state, toast } from '../../store/appStore'
 
 /**
  * 设置页「最近删除」板块（F-2 回收站桥接）：

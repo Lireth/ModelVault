@@ -44,6 +44,12 @@ function makeComponentApiMock() {
       deleteCover: vi.fn(),
       importCover: vi.fn(),
       partialScan: vi.fn(() => Promise.resolve({ models: [], dirs: [], relinked: 0 })),
+      transferToLibrary: vi.fn(() =>
+        Promise.resolve({ transferred: 0, skipped: [], failed: [] })
+      ),
+      listDeleted: vi.fn(() => Promise.resolve({ entries: [] })),
+      restoreDeleted: vi.fn(() => Promise.resolve({ ok: true })),
+      forgetDeleted: vi.fn(() => Promise.resolve({ ok: true })),
       warmupHash: vi.fn(() => Promise.resolve({ ok: true })),
       checkHealth: vi.fn(() => Promise.resolve({ report: null })),
       repairHealth: vi.fn(() => Promise.resolve({ repaired: {} })),

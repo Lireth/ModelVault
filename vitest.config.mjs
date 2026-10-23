@@ -14,11 +14,10 @@ export default defineConfig({
     setupFiles: ['./tests/setup.js'],
     // D8：setup.js 已改为每测试文件独立 fakeUserData（mkdtemp + 自动清理），
     // 跨文件磁盘竞态消除，文件级并行恢复默认开启
-    // 失败重试 1 次（保险丝）：挂载真实 App 的 jsdom 时序类用例
-    // （appShortcuts 等）在 CI 慢虚拟机/高并行下存在残余调度抖动，
-    // 根因已在用例内修复（beforeEach 状态复位 + booting 轮询），此处
-    // 仅兜底偶发；真回归重试仍会失败并阻断 CI
-    retry: 1,
+    // O4：不配置 retry（原 retry:1 会把偶发时序缺陷掩盖成「通过」）。
+    // 时序类用例（appShortcuts 等）已通过 beforeEach 状态复位与 booting
+    // 轮询消除抖动；再出现偶发失败应作为缺陷定位修复，而非靠重试放行。
+    retry: 0,
     coverage: {
       // A-14 覆盖率防退化门禁（O-3 棘轮渐进上调）：门禁 = 实际基线下浮 ~2pt，
       // 为环境波动留余量。棘轮历史：2026-10-20 Dependabot 升级（vue 3.5.44/

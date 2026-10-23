@@ -5,6 +5,7 @@ import {
   allFilteredSelected,
   applyHashUpdate,
   applyThumbUpdates,
+  applyUpdateAvailable,
   clearCoverOverrides,
   coverThumbUrl,
   modelCoverUrl,
@@ -17,7 +18,9 @@ import {
   batchAssignCivitaiTags,
   batchOrganizeByTags,
   clearAllCovers,
+  closeTransfer,
   confirmDialog,
+  confirmTransfer,
   deleteModel,
   dismissToast,
   duplicateGroups,
@@ -29,20 +32,30 @@ import {
   importCoversFromDrop,
   importModels,
   initApp,
+  moveModelTo,
   multiSelectIdSet,
+  openTransferToLibrary,
   partialScanModels,
   rejectConfirm,
+  revealModel,
   replaceModels,
   requestBatchCancel,
   saveSettings,
   scanModels,
   selectedModel,
+  setModelTags,
+  showContextMenu,
   sortDirectional,
   state,
   switchRoot,
+  targetDisplayName,
   toast,
+  toggleDisabledModel,
   toggleFavorite,
-  typeCounts
+  transferState,
+  transferTargets,
+  typeCounts,
+  updateAvailable
 } from '../src/renderer/src/store/appStore'
 
 /**
@@ -65,7 +78,9 @@ function makeApiMock() {
       cancelScan: vi.fn(() => Promise.resolve({ ok: false })),
       chooseFolder: vi.fn(),
       setMetaFlags: vi.fn(),
+      setModelTags: vi.fn(),
       toggleDisabled: vi.fn(),
+      moveModelTo: vi.fn(),
       deleteModel: vi.fn(),
       popupMenu: vi.fn(),
       reveal: vi.fn(),
@@ -80,6 +95,7 @@ function makeApiMock() {
       civitaiCategory: vi.fn(),
       organizeByTags: vi.fn(),
       civitaiImportImages: vi.fn(),
+      transferToLibrary: vi.fn(),
       partialScan: vi.fn(),
       warmupHash: vi.fn(() => Promise.resolve({ ok: true })),
       onScanProgress: vi.fn(() => () => {}),
@@ -127,6 +143,9 @@ beforeEach(() => {
   if (state.confirm.resolve) state.confirm.resolve(false)
   // O3：state 为 shallowReactive，confirm 是内嵌深响应集合，就地表合并复位
   Object.assign(state.confirm, { visible: false, text: '', resolve: null })
+  // 跨库传输浮层与启动更新提示均为模块级单例：用例间复位
+  Object.assign(transferState, { visible: false, ids: [], mode: 'copy', busy: false })
+  updateAvailable.value = null
 })
 
 describe('partialScanModels 增量合并（A-03）', () => {
@@ -1787,5 +1806,257 @@ describe('批量拖拽导入封面（OPT-9）', () => {
     const res2 = await importCoversFromDrop('m1', null)
     expect(res2.total).toBe(0)
     expect(api.models.importCover).not.toHaveBeenCalled()
+  })
+})
+
+describe('跨库传输编排（F-3）', () => {
+  beforeEach(() => {
+    state.folder = 'D:\\models\\A'
+    state.settings.modelsFolders = ['D:\\models\\A', 'D:\\models\\B']
+    api.models.scan.mockResolvedValue({ models: [], errors: [], byType: {}, durationMs: 1 })
+  })
+
+  it('可选目标库排除当前库；无其他库时不打开浮层并提示', () => {
+    expect(transferTargets.value).toEqual(['D:\\models\\B'])
+
+    state.settings.modelsFolders = ['D:\\models\\A']
+    expect(transferTargets.value).toEqual([])
+    openTransferToLibrary('D:\\models\\A\\x.safetensors')
+
+    expect(transferState.visible).toBe(false)
+    expect(state.toasts.some((t) => t.text.includes('当前只有这一个模型库'))).toBe(true)
+  })
+
+  it('单模型默认移动、多模型默认复制；空输入不改变浮层', () => {
+    openTransferToLibrary('D:\\models\\A\\x.safetensors')
+    expect(transferState).toMatchObject({
+      visible: true,
+      mode: 'move',
+      ids: ['D:\\models\\A\\x.safetensors']
+    })
+
+    closeTransfer()
+    openTransferToLibrary(['a', 'b'])
+    expect(transferState).toMatchObject({ visible: true, mode: 'copy', ids: ['a', 'b'] })
+
+    closeTransfer()
+    openTransferToLibrary([])
+    expect(transferState.visible).toBe(false)
+  })
+
+  it('目标库显示名取目录名，盘符根回退规范化路径', () => {
+    expect(targetDisplayName('D:\\libs\\B\\')).toBe('B')
+    expect(targetDisplayName('D:\\')).toBe('D:')
+  })
+
+  it('传输进行中不可关闭；空闲关闭清空待传输 id', () => {
+    openTransferToLibrary('a')
+    transferState.busy = true
+    closeTransfer()
+    expect(transferState.visible).toBe(true)
+    expect(transferState.ids).toEqual(['a'])
+
+    transferState.busy = false
+    closeTransfer()
+    expect(transferState.visible).toBe(false)
+    expect(transferState.ids).toEqual([])
+  })
+
+  it('复制成功：payload 正确、汇总提示、关闭浮层并重扫', async () => {
+    openTransferToLibrary(['a', 'b'])
+    api.models.transferToLibrary.mockResolvedValue({
+      transferred: 2,
+      mode: 'copy',
+      skipped: [],
+      failed: []
+    })
+
+    await confirmTransfer('D:\\models\\B')
+
+    expect(api.models.transferToLibrary).toHaveBeenCalledWith({
+      ids: ['a', 'b'],
+      targetRoot: 'D:\\models\\B',
+      mode: 'copy'
+    })
+    expect(transferState.visible).toBe(false)
+    expect(transferState.ids).toEqual([])
+    expect(
+      state.toasts.some((t) => t.type === 'success' && t.text.includes('跨库传输完成：复制 2 个'))
+    ).toBe(true)
+    expect(api.models.scan).toHaveBeenCalledTimes(1)
+  })
+
+  it('部分跳过/失败以 warn 汇总；零传输以 info 提示并关闭浮层', async () => {
+    openTransferToLibrary(['a', 'b', 'c'])
+    api.models.transferToLibrary.mockResolvedValue({
+      transferred: 1,
+      mode: 'copy',
+      skipped: [{ id: 'b', reason: 'exists' }],
+      failed: [{ id: 'c', error: '磁盘错误' }]
+    })
+
+    await confirmTransfer('D:\\models\\B')
+
+    const warn = state.toasts.find((t) => t.type === 'warn' && t.text.includes('跨库传输完成'))
+    expect(warn.text).toContain('跳过 1 个')
+    expect(warn.text).toContain('失败 1 个')
+
+    state.toasts.splice(0, state.toasts.length)
+    openTransferToLibrary('a')
+    api.models.transferToLibrary.mockResolvedValue({
+      transferred: 0,
+      mode: 'move',
+      skipped: [{ id: 'a', reason: 'exists' }],
+      failed: []
+    })
+    await confirmTransfer('D:\\models\\B')
+
+    expect(state.toasts.some((t) => t.type === 'info' && t.text.includes('未传输任何模型'))).toBe(
+      true
+    )
+    expect(transferState.visible).toBe(false)
+  })
+
+  it('主进程返回 error：提示并保留浮层便于重试，不触发重扫', async () => {
+    openTransferToLibrary('a')
+    api.models.transferToLibrary.mockResolvedValue({ error: '目标库不可用' })
+
+    await confirmTransfer('D:\\models\\B')
+
+    expect(transferState.visible).toBe(true)
+    expect(transferState.busy).toBe(false)
+    expect(state.toasts.some((t) => t.type === 'error' && t.text.includes('目标库不可用'))).toBe(
+      true
+    )
+    expect(api.models.scan).not.toHaveBeenCalled()
+  })
+
+  it('IPC reject：错误提示并复位 busy', async () => {
+    openTransferToLibrary('a')
+    api.models.transferToLibrary.mockRejectedValue(new Error('通道断开'))
+
+    await confirmTransfer('D:\\models\\B')
+
+    expect(transferState.busy).toBe(false)
+    expect(state.toasts.some((t) => t.type === 'error' && t.text.includes('跨库传输失败'))).toBe(
+      true
+    )
+  })
+
+  it('缺少目标库 / 无待传输项 / busy 时不发 IPC', async () => {
+    await confirmTransfer('')
+    expect(api.models.transferToLibrary).not.toHaveBeenCalled()
+
+    await confirmTransfer('D:\\models\\B')
+    expect(api.models.transferToLibrary).not.toHaveBeenCalled()
+
+    openTransferToLibrary('a')
+    transferState.busy = true
+    await confirmTransfer('D:\\models\\B')
+    expect(api.models.transferToLibrary).not.toHaveBeenCalled()
+  })
+})
+
+describe('启动自动检查更新结果（O-3）', () => {
+  it('无效载荷（空/无更新/缺版本）忽略且不打扰', () => {
+    applyUpdateAvailable(null)
+    applyUpdateAvailable({ hasUpdate: false, latest: '0.5.0' })
+    applyUpdateAvailable({ hasUpdate: true })
+
+    expect(updateAvailable.value).toBeNull()
+    expect(state.toasts).toHaveLength(0)
+  })
+
+  it('有效载荷记录并提示当前/最新版本', () => {
+    const payload = {
+      hasUpdate: true,
+      current: '0.4.0',
+      latest: '0.5.0',
+      releaseUrl: 'https://github.com/Lireth/ModelVault/releases/tag/v0.5.0'
+    }
+
+    applyUpdateAvailable(payload)
+
+    // ref 会对对象做响应式包装，比较结构而非引用
+    expect(updateAvailable.value).toEqual(payload)
+    const tip = state.toasts.at(-1)
+    expect(tip.type).toBe('success')
+    expect(tip.text).toContain('发现新版本 v0.5.0')
+    expect(tip.text).toContain('当前 v0.4.0')
+  })
+
+  it('后续有效结果覆盖上一次记录', () => {
+    applyUpdateAvailable({ hasUpdate: true, current: '0.4.0', latest: '0.5.0' })
+    applyUpdateAvailable({ hasUpdate: true, current: '0.4.0', latest: '0.6.0' })
+
+    expect(updateAvailable.value.latest).toBe('0.6.0')
+  })
+})
+
+describe('文件操作编排（F10/F11）', () => {
+  beforeEach(() => {
+    state.folder = 'D:\\models'
+    api.models.scan.mockResolvedValue({ models: [], errors: [], byType: {}, durationMs: 1 })
+  })
+
+  it('setModelTags 成功同步标签；业务错误保留原值并提示', async () => {
+    replaceModels([makeModel('m1', { tags: ['旧标签'] })])
+    api.models.setModelTags.mockResolvedValue({ meta: { tags: ['新A', '新B'] } })
+
+    expect(await setModelTags('m1', ['新A', '新B'])).toBe(true)
+    expect(state.models[0].tags).toEqual(['新A', '新B'])
+
+    api.models.setModelTags.mockResolvedValue({ error: '标签超限' })
+    expect(await setModelTags('m1', ['x'])).toBe(false)
+    expect(state.models[0].tags).toEqual(['新A', '新B'])
+    expect(state.toasts.some((t) => t.text.includes('标签超限'))).toBe(true)
+  })
+
+  it('revealModel 调用定位 IPC；失败时提示错误', async () => {
+    api.models.reveal.mockResolvedValue({ ok: true })
+    await revealModel('D:\\models\\a.safetensors')
+    expect(api.models.reveal).toHaveBeenCalledWith('D:\\models\\a.safetensors')
+
+    api.models.reveal.mockResolvedValue({ error: '路径越界' })
+    await revealModel('D:\\models\\a.safetensors')
+    expect(state.toasts.some((t) => t.text.includes('路径越界'))).toBe(true)
+  })
+
+  it('toggleDisabledModel 成功提示并重扫；扫描进行中不重扫', async () => {
+    api.models.toggleDisabled.mockResolvedValue({ path: 'D:\\models\\a.safetensors.disabled' })
+
+    expect(await toggleDisabledModel('a', true)).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('已禁用'))).toBe(true)
+    expect(api.models.scan).toHaveBeenCalledTimes(1)
+
+    state.scanning = true
+    api.models.scan.mockClear()
+    expect(await toggleDisabledModel('a', false)).toBe(true)
+    expect(api.models.scan).not.toHaveBeenCalled()
+  })
+
+  it('moveModelTo：取消静默返回、成功提示并重扫、错误提示', async () => {
+    api.models.moveModelTo.mockResolvedValue({ canceled: true })
+    expect(await moveModelTo('a')).toBe(false)
+    expect(api.models.scan).not.toHaveBeenCalled()
+
+    api.models.moveModelTo.mockResolvedValue({ path: 'D:\\models\\LoRA\\a.safetensors' })
+    expect(await moveModelTo('a')).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('已移动到'))).toBe(true)
+    expect(api.models.scan).toHaveBeenCalledTimes(1)
+
+    api.models.moveModelTo.mockResolvedValue({ error: '目标目录不可写' })
+    expect(await moveModelTo('a')).toBe(false)
+    expect(state.toasts.some((t) => t.text.includes('目标目录不可写'))).toBe(true)
+  })
+
+  it('showContextMenu 调用原生菜单；IPC 异常时提示错误', async () => {
+    api.models.popupMenu.mockResolvedValue({ ok: true })
+    await showContextMenu('m1')
+    expect(api.models.popupMenu).toHaveBeenCalledWith('m1')
+
+    api.models.popupMenu.mockRejectedValue(new Error('窗口已关闭'))
+    await showContextMenu('m1')
+    expect(state.toasts.some((t) => t.text.includes('打开右键菜单失败'))).toBe(true)
   })
 })
