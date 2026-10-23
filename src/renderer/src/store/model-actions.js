@@ -1,4 +1,4 @@
-import { state, replaceModels } from './state'
+import { state, replaceModels, modelIndexOf } from './state'
 import { toast, confirmDialog } from './toast'
 import { applyMetaFlags } from './meta-apply'
 import { openDetail } from './detail'
@@ -30,8 +30,9 @@ export async function setModelTags(id, tags) {
     return false
   }
   const next = res?.meta?.tags || []
-  const idx = state.models.findIndex((m) => m.id === id)
-  if (idx >= 0) {
+  // O2：走 state 的 id→下标索引（O(1)），不再全表 findIndex
+  const idx = modelIndexOf(id)
+  if (idx !== undefined) {
     state.models[idx] = { ...state.models[idx], tags: next }
   }
   return true
@@ -69,9 +70,11 @@ export async function deleteModel(id, opts = {}) {
     toast('error', res.error)
     return false
   }
-  const idx = state.models.findIndex((m) => m.id === id)
-  // O3 约定：整体替换须经 replaceModels（保持数组代理，元素级更新才可触发）
-  if (idx >= 0) replaceModels(state.models.filter((m) => m.id !== id))
+  // O2：存在性判定走 id 索引；移除后仍按约定整体替换数组
+  if (modelIndexOf(id) !== undefined) {
+    // O3 约定：整体替换须经 replaceModels（保持数组代理，元素级更新才可触发）
+    replaceModels(state.models.filter((m) => m.id !== id))
+  }
   if (state.selectedId === id) state.selectedId = null
   if (!opts.silent) toast('success', '模型已移入回收站')
   return true
@@ -108,8 +111,8 @@ function enqueueMetaFlag(id, task) {
  */
 export function toggleFavorite(id) {
   return enqueueMetaFlag(id, async () => {
-    const m = state.models.find((x) => x.id === id)
-    const next = !m?.favorite
+    const idx = modelIndexOf(id)
+    const next = !(idx !== undefined && state.models[idx].favorite)
     let res
     try {
       res = await window.api.models.setMetaFlags({ id, favorite: next })
@@ -198,8 +201,9 @@ export async function handleMenuAction(id, action) {
       await moveModelTo(id)
       break
     case 'deleteModel': {
-      const m = state.models.find((x) => x.id === id)
-      if (!m) break
+      const idx = modelIndexOf(id)
+      if (idx === undefined) break
+      const m = state.models[idx]
       if (!(await confirmDialog(`确定将「${m.alias || m.name}」移入系统回收站吗？可稍后在设置-最近删除中恢复。`))) break
       await deleteModel(id)
       break

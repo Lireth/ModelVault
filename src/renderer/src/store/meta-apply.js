@@ -1,4 +1,4 @@
-import { state } from './state'
+import { state, modelIndexOf } from './state'
 
 /**
  * 主进程元数据结果应用到本地模型列表的共享工具（A-04 自 appStore.js 拆出）。
@@ -7,8 +7,9 @@ import { state } from './state'
 
 /** 将快捷标记同步到本地模型列表 */
 export function applyMetaFlags(id, meta) {
-  const idx = state.models.findIndex((m) => m.id === id)
-  if (idx >= 0) {
+  // O2：走 id→下标索引（O(1)），收藏/评分等高频标注不再全表扫描
+  const idx = modelIndexOf(id)
+  if (idx !== undefined) {
     state.models[idx] = {
       ...state.models[idx],
       favorite: meta.favorite === true,

@@ -1,4 +1,4 @@
-import { state } from '../state'
+import { state, modelIndexOf } from '../state'
 import { toast, confirmDialog } from '../toast'
 import { applyMetaUpdates } from '../meta-apply'
 import { setModelCoverUrl } from '../cover-overrides'
@@ -269,9 +269,10 @@ export async function batchCivitaiImages() {
       }
       okModels += 1
       addedTotal += imp.added || 0
-      // 封面结果就地同步（串行逐个应用，量级小；结构与 covers-store 同一约定）
-      const idx = state.models.findIndex((mm) => mm.id === id)
-      if (idx >= 0) {
+      // 封面结果就地同步（串行逐个应用；结构与 covers-store 同一约定）。
+      // O2：批量循环内走 id→下标索引，避免每个模型一次全表 findIndex（O(n×m)）
+      const idx = modelIndexOf(id)
+      if (idx !== undefined) {
         state.models[idx] = {
           ...state.models[idx],
           cover: imp.cover,

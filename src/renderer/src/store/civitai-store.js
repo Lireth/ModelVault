@@ -1,4 +1,4 @@
-import { state } from './state'
+import { state, modelIndexOf } from './state'
 import { setModelCoverUrl } from './cover-overrides'
 import { toast } from './toast'
 
@@ -17,8 +17,8 @@ const APPLIED_LABELS = {
 /** 将主进程返回的元数据同步到本地模型列表对应条目 */
 function applyModelMeta(id, meta) {
   if (!meta) return
-  const idx = state.models.findIndex((m) => m.id === id)
-  if (idx >= 0) {
+  const idx = modelIndexOf(id)
+  if (idx !== undefined) {
     state.models[idx] = {
       ...state.models[idx],
       civitaiUrl: meta.civitaiUrl || '',
@@ -81,8 +81,8 @@ export async function civitaiComplete(id) {
 
 /** 将封面操作结果同步到本地模型列表（与 covers-store 同一结构约定） */
 function applyCoverResult(id, res) {
-  const idx = state.models.findIndex((m) => m.id === id)
-  if (idx >= 0) {
+  const idx = modelIndexOf(id)
+  if (idx !== undefined) {
     state.models[idx] = {
       ...state.models[idx],
       cover: res.cover,

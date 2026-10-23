@@ -1,4 +1,4 @@
-import { state } from './state'
+import { state, modelIndexOf } from './state'
 import { setModelCoverUrl } from './cover-overrides'
 import { toast } from './toast'
 
@@ -24,8 +24,8 @@ export async function saveModelData(id, payload, opts = {}) {
     toast('error', res.error)
     return false
   }
-  const idx = state.models.findIndex((m) => m.id === id)
-  if (idx >= 0 && res.meta) {
+  const idx = modelIndexOf(id)
+  if (idx !== undefined && res.meta) {
     state.models[idx] = {
       ...state.models[idx],
       params: res.meta.params,
@@ -41,8 +41,8 @@ export async function saveModelData(id, payload, opts = {}) {
 
 /** 将封面操作结果同步到本地模型列表 */
 function applyCoverResult(id, res) {
-  const idx = state.models.findIndex((m) => m.id === id)
-  if (idx >= 0) {
+  const idx = modelIndexOf(id)
+  if (idx !== undefined) {
     state.models[idx] = {
       ...state.models[idx],
       cover: res.cover,
