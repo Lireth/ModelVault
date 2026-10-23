@@ -2,7 +2,8 @@ import fs from 'node:fs/promises'
 import { BrowserWindow, Menu, clipboard, dialog, shell } from 'electron'
 import logger from '../../logger'
 import { atomicWriteFile } from '../../services/atomic-write'
-import { getModelMeta, removeModelMeta } from '../../services/store'
+import { getCurrentRoot, getModelMeta, removeModelMeta } from '../../services/store'
+import { updateLibraryIndex } from '../../services/library-index'
 import { checkLibraryHealth, repairLibraryHealth } from '../../services/library-health'
 import {
   forgetDeletedModel,
@@ -84,6 +85,8 @@ export function registerMiscHandlers() {
     // 供「最近删除」一键恢复；失败仅告警，不阻塞删除主流程
     await recordModelDeletion(id, sidecarFilesFor(id))
     removeModelMeta(id)
+    // O8：即时从本地索引移除，切库秒开不再回放已删除模型
+    await updateLibraryIndex(getCurrentRoot(), { removeIds: [id] })
     logger.info(`模型已移入回收站: ${id}`)
     return { ok: true }
   }, { errorPrefix: '删除失败' })

@@ -17,7 +17,7 @@ import { ensureRootStore } from './store'
 import { getDecorateCacheRoot, awaitThumbDrain, resetDecorateCache } from './model-state'
 import { wrapHandler, checkExistingDirectory } from '../handler'
 import { normalizePartialScanDirs } from '../../../shared/scan-dirs'
-import { writeLibraryIndex } from '../../services/library-index'
+import { updateLibraryIndex, writeLibraryIndex } from '../../services/library-index'
 
 /**
  * 扫描链路：全量扫描模型目录（进度推送、可取消）、局部增量扫描与取消入口。
@@ -310,6 +310,13 @@ export function registerScanHandlers() {
         forceRefresh: true
       })
       models.length = 0 // 同全量扫描：装饰后立即释放原始数组（O8）
+
+      // O8：把本次局部结果合并进本地索引（读改写串行；索引缺失时跳过，
+      // 不凭空创建不完整索引）。切库秒开数据不再回放已删除/缺少新增模型。
+      await updateLibraryIndex(root, {
+        upsertModels: decorated,
+        affectedDirs: subDirs
+      })
 
       const win = BrowserWindow.fromWebContents(event.sender)
       // 装饰中新登记的缩略图任务经既有后台链生成并推送

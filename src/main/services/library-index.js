@@ -1,7 +1,9 @@
 import fs from 'node:fs/promises'
+import path from 'node:path'
 import logger from '../logger'
 import { atomicWriteFile } from './atomic-write'
 import { getIndexFilePath } from './store-paths'
+import { isRelDirInScope } from '../../shared/scan-dirs'
 
 /**
  * 每库本地扫描索引（F1）：
@@ -26,6 +28,32 @@ const MAX_INDEX_MODELS = 200000
 /** 根目录比较：Windows 大小写不敏感 */
 function sameRoot(a, b) {
   return String(a).toLowerCase() === String(b).toLowerCase()
+}
+
+/** 索引读改写串行链（O8）：全量覆盖与增量合并不得交错丢失更新 */
+let indexChain = Promise.resolve()
+
+/**
+ * 将索引写任务排入全局串行链（失败不阻断后续任务）。
+ * @template T
+ * @param {() => Promise<T>} task 索引读改写任务
+ * @returns {Promise<T>} 任务结果
+ */
+function serializeIndexTask(task) {
+  const run = indexChain.then(task, task)
+  indexChain = run.then(
+    () => {},
+    () => {}
+  )
+  return run
+}
+
+/** 从模型 id 推导库内相对目录（POSIX；旧索引缺 relDir 时兜底） */
+function relDirFromId(root, id) {
+  const rel = path.relative(root, id)
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return ''
+  const dir = path.dirname(rel)
+  return dir === '.' ? '' : dir.split(path.sep).join('/')
 }
 
 /** 记录结构的最低可信校验（保留装饰层额外字段） */
@@ -93,6 +121,11 @@ export async function writeLibraryIndex(root, payload) {
     durationMs: Number.isFinite(payload.durationMs) ? payload.durationMs : 0,
     models
   }
+  return serializeIndexTask(() => writeIndexBody(root, body))
+}
+
+/** 索引体统一写入（大小上限 + 原子写；失败只记日志） */
+async function writeIndexBody(root, body) {
   try {
     const text = JSON.stringify(body)
     if (Buffer.byteLength(text, 'utf-8') > MAX_INDEX_BYTES) {
@@ -105,4 +138,60 @@ export async function writeLibraryIndex(root, payload) {
     logger.warn(`本地索引写入失败（不影响扫描）: ${err.message}`)
     return false
   }
+}
+
+/**
+ * 增量维护本地索引（O8）：局部扫描/删除后把变化即时并入 index.json，
+ * 避免切库秒开时回放已删除模型或缺少新增模型。
+ * 仅基于已存在的有效索引做读改写——索引缺失/损坏时不凭空创建
+ * （局部数据不足以构成完整库快照，交由下一次全量扫描重建）。
+ * @param {string} root 模型库根目录
+ * @param {{upsertModels?: object[], removeIds?: string[],
+ *   affectedDirs?: string[]|null}} payload
+ *   upsertModels 新增/更新的装饰模型；removeIds 需移除的模型绝对路径；
+ *   affectedDirs 本次扫描覆盖的相对子树（这些目录内未出现在 upsertModels
+ *   的旧记录会被移除，语义与渲染层局部合并一致）
+ * @returns {Promise<boolean>} 是否完成写入（索引缺失/失败返回 false）
+ */
+export async function updateLibraryIndex(root, payload = {}) {
+  if (!root || typeof root !== 'string') return false
+  return serializeIndexTask(async () => {
+    try {
+      const existing = await readLibraryIndex(root)
+      if (!existing) return false
+      const removeSet = new Set(
+        (Array.isArray(payload.removeIds) ? payload.removeIds : [])
+          .map((id) => String(id).toLowerCase())
+          .filter(Boolean)
+      )
+      const upserts = /** @type {any[]} */ (
+        (Array.isArray(payload.upsertModels) ? payload.upsertModels : []).filter(isUsableModel)
+      )
+      const upsertIds = new Set(upserts.map((m) => String(m.id).toLowerCase()))
+      const affectedDirs = Array.isArray(payload.affectedDirs) ? payload.affectedDirs : null
+      const existingModels = /** @type {any[]} */ (existing.models)
+      const kept = existingModels.filter((m) => {
+        const idLower = String(m.id).toLowerCase()
+        if (removeSet.has(idLower) || upsertIds.has(idLower)) return false
+        if (!affectedDirs) return true
+        const relDir = typeof m.relDir === 'string' ? m.relDir : relDirFromId(root, m.id)
+        return !isRelDirInScope(relDir, affectedDirs)
+      })
+      const models = kept.concat(upserts)
+      if (models.length > MAX_INDEX_MODELS) {
+        logger.warn(`本地索引增量更新超限（${models.length}），跳过写入`)
+        return false
+      }
+      return await writeIndexBody(root, {
+        version: INDEX_VERSION,
+        root,
+        savedAt: Date.now(),
+        durationMs: existing.durationMs,
+        models
+      })
+    } catch (err) {
+      logger.warn(`本地索引增量更新失败（忽略）: ${err.message}`)
+      return false
+    }
+  })
 }

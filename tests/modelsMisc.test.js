@@ -30,6 +30,7 @@ vi.mock('electron', () => ({
 }))
 
 import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
+import { readLibraryIndex, writeLibraryIndex } from '../src/main/services/library-index'
 import { getModelMeta, loadData, setModelMeta, setDataRoot } from '../src/main/services/store'
 
 const roots = []
@@ -74,6 +75,30 @@ describe('models:deleteModel', () => {
     expect(trashed).toContain(preview)
     expect(trashed).toContain(jpg)
     expect(getModelMeta(abs)).toBeNull()
+  })
+
+  it('删除后即时从本地索引移除（O8）', async () => {
+    const abs = path.join(root, 'indexed.safetensors')
+    await fs.writeFile(abs, 'x')
+    await writeLibraryIndex(root, {
+      models: [
+        {
+          id: abs,
+          name: 'indexed.safetensors',
+          type: 'lora',
+          ext: '.safetensors',
+          size: 1,
+          mtimeMs: 1,
+          relDir: ''
+        }
+      ]
+    })
+
+    const handler = getRegisteredHandler('models:deleteModel')
+    expect(await handler(makeEvent(), { id: abs })).toEqual({ ok: true })
+
+    const cached = await readLibraryIndex(root)
+    expect(cached.models.some((m) => m.id === abs)).toBe(false)
   })
 
   it('无效模型标识拒绝', async () => {

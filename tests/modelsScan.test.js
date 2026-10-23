@@ -48,6 +48,7 @@ vi.mock('../src/main/services/watcher.js', async (importOriginal) => {
 vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([])
 
 import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
+import { readLibraryIndex, writeLibraryIndex } from '../src/main/services/library-index'
 import { scanModels } from '../src/main/services/scanner'
 import { syncWatcher } from '../src/main/services/watcher'
 import {
@@ -307,6 +308,56 @@ describe('models:partialScan（A-03）', () => {
     )
     const ok = await partial(makeEvent(), { folder: root, dirs: ['lora'] })
     expect(ok.error).toBeUndefined()
+  })
+
+  it('局部扫描后增量合并本地索引：子树外保留、子树内增删同步（O8）', async () => {
+    await registerLibrary(root)
+    const rootModel = {
+      id: path.join(root, 'a.safetensors'),
+      name: 'a.safetensors',
+      type: 'checkpoint',
+      ext: '.safetensors',
+      size: 1,
+      mtimeMs: 1,
+      relDir: ''
+    }
+    const oldLora = {
+      id: path.join(root, 'lora', 'old.safetensors'),
+      name: 'old.safetensors',
+      type: 'lora',
+      ext: '.safetensors',
+      size: 1,
+      mtimeMs: 1,
+      relDir: 'lora'
+    }
+    await writeLibraryIndex(root, { models: [rootModel, oldLora], durationMs: 42 })
+
+    const newLora = {
+      id: path.join(root, 'lora', 'new.safetensors'),
+      name: 'new.safetensors',
+      type: 'lora',
+      ext: '.safetensors',
+      size: 1,
+      mtimeMs: 1,
+      relDir: 'lora'
+    }
+    await fs.mkdir(path.join(root, 'lora'), { recursive: true })
+    await fs.writeFile(newLora.id, 'x')
+    vi.mocked(scanModels).mockResolvedValue({ models: [newLora], errors: [], dirCount: 1 })
+
+    const res = await getRegisteredHandler('models:partialScan')(makeEvent(), {
+      folder: root,
+      dirs: ['lora']
+    })
+    expect(res.error).toBeUndefined()
+
+    const cached = await readLibraryIndex(root)
+    const ids = cached.models.map((m) => m.id)
+    expect(ids).toContain(rootModel.id)
+    expect(ids).toContain(newLora.id)
+    expect(ids).not.toContain(oldLora.id)
+    // 全量扫描耗时元数据保留，不因局部合并被清零
+    expect(cached.durationMs).toBe(42)
   })
 
   it('请求根与当前根不一致时拒绝，绝不把主进程切回旧库（V-02）', async () => {
