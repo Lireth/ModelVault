@@ -187,6 +187,13 @@ const api = {
     restoreDeleted: (absPath) => invokeValidated('models:restoreDeleted', { absPath }),
     /** 忽略一条删除记录（文件仍在系统回收站），返回 { ok } */
     forgetDeleted: (absPath) => invokeValidated('models:forgetDeleted', { absPath }),
+    /**
+     * 跨库移动/复制模型（F-3）：ids 为当前库内模型路径，targetRoot 为已保存的
+     * 其他模型库，mode 为 'copy'|'move'；保持相对路径与元数据关联（封面/标注
+     * 随条目迁移），返回 { transferred, mode, targetRoot, failed, skipped }
+     * 或 { error }
+     */
+    transferToLibrary: (payload) => invokeValidated('models:transferToLibrary', payload),
     /** 在资源管理器中显示文件 */
     reveal: (path) => invokeValidated('models:reveal', { path }),
     /** 订阅扫描进度，返回取消监听函数 */

@@ -2,6 +2,7 @@ import { state, replaceModels } from './state'
 import { toast, confirmDialog } from './toast'
 import { applyMetaFlags } from './meta-apply'
 import { openDetail } from './detail'
+import { openTransferToLibrary } from './transfer'
 
 /**
  * 单模型文件操作、即时标注、自由标签（F-5）、右键菜单
@@ -201,6 +202,11 @@ export async function handleMenuAction(id, action) {
       if (!m) break
       if (!(await confirmDialog(`确定将「${m.alias || m.name}」移入系统回收站吗？可稍后在设置-最近删除中恢复。`))) break
       await deleteModel(id)
+      break
+    }
+    case 'transferToLibrary': {
+      // 跨库移动/复制（F-3）：打开目标库选择层
+      openTransferToLibrary([id])
       break
     }
     default:

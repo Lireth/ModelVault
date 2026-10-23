@@ -1,5 +1,4 @@
 import fs from 'node:fs/promises'
-import path from 'node:path'
 import { BrowserWindow, Menu, clipboard, dialog, shell } from 'electron'
 import logger from '../../logger'
 import { atomicWriteFile } from '../../services/atomic-write'
@@ -11,7 +10,7 @@ import {
   recordModelDeletion,
   restoreDeletedModel
 } from '../../services/trash-log'
-import { SIDECAR_PREVIEW_EXTS } from '../../services/scanner'
+import { sidecarFilesFor } from '../../services/scanner'
 import { wrapHandler, checkModelId, checkModelIdInRoot } from '../handler'
 
 /**
@@ -19,17 +18,9 @@ import { wrapHandler, checkModelId, checkModelIdInRoot } from '../handler'
  * 右键上下文菜单、资源管理器定位。
  */
 
-/** 模型同名的 sidecar 文件（SD WebUI 惯例：同名预览图 + 说明文本）。
- * 图片候选与展示侧共用 SIDECAR_PREVIEW_EXTS，保证清理集与展示集一致（B17） */
-export function sidecarFilesFor(absModelPath) {
-  const dir = path.dirname(absModelPath)
-  const base = path.basename(absModelPath, path.extname(absModelPath))
-  const files = [path.join(dir, `${base}.txt`)]
-  for (const ext of SIDECAR_PREVIEW_EXTS) {
-    files.push(path.join(dir, `${base}${ext}`))
-  }
-  return files
-}
+// sidecarFilesFor 实现位于 services/scanner（F-3 跨库传输共用）；
+// 此处 re-export 维持 misc 的既有导入路径（tests/modelsStore.test.js 等）
+export { sidecarFilesFor }
 
 /** 将推荐参数格式化为可复制的文本（用于右键菜单「复制推荐参数」） */
 export function paramSummaryFromMeta(params) {
@@ -122,6 +113,8 @@ export function registerMiscHandlers() {
       },
       // 库内移动（F11）
       { label: '移动到…', click: () => send('moveModel') },
+      // 跨库移动/复制（F-3）：选择层在渲染进程弹出
+      { label: '移动/复制到其他库…', click: () => send('transferToLibrary') },
       { type: 'separator' },
       { label: meta.favorite ? '取消收藏' : '收藏', click: () => send('toggleFavorite') },
       { label: '移入回收站', click: () => send('deleteModel') }

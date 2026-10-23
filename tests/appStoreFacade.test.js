@@ -104,6 +104,13 @@ const EXPECTED_EXPORTS = [
   // 启动自动检查更新（O-3）
   'updateAvailable',
   'applyUpdateAvailable',
+  // 跨库移动/复制（F-3）
+  'transferState',
+  'transferTargets',
+  'targetDisplayName',
+  'openTransferToLibrary',
+  'closeTransfer',
+  'confirmTransfer',
   // 查找派生
   'modelById',
   // 详情

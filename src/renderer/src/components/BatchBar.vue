@@ -17,6 +17,7 @@ import {
   invertSelectionFiltered,
   multiSelectedModels,
   openCompare,
+  openTransferToLibrary,
   state,
   toggleSelectAllFiltered
 } from '../store/appStore'
@@ -174,6 +175,13 @@ onUnmounted(() => {
           >获取示例图</button>
         </template>
         <div class="bb-menu-label">文件</div>
+        <button
+          class="bb-menu-item"
+          role="menuitem"
+          :disabled="!batchReady"
+          title="把选中的模型移动/复制到另一个已保存的模型库（保持相对路径，标注与封面一并迁移）"
+          @click="runMore(openTransferToLibrary, [...state.multiSelect.ids])"
+        >跨库传输</button>
         <button
           class="bb-menu-item"
           role="menuitem"

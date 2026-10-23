@@ -252,6 +252,17 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'models:forgetDeleted': vObj({
     fields: { absPath: vStr({ required: true, max: 2000 }) }
   }),
+  // F-3 跨库传输：ids 为当前库内模型路径；targetRoot 必须是已保存的其他
+  // 模型库（handler 校验 ∈ settings.modelsFolders 且 ≠ 当前根）；mode 枚举
+  // 语义在 handler（copy/move）
+  'models:transferToLibrary': vObj({
+    max: 20,
+    fields: {
+      ids: vArr({ required: true, max: 500, items: vStr({ max: 1000 }) }),
+      targetRoot: vStr({ required: true, max: 1000 }),
+      mode: vStr({ required: true, max: 8 })
+    }
+  }),
   // 自由标签（F-5）：整体覆写语义；逐项去重/截断规范化在 store-meta
   'models:setModelTags': vObj({
     fields: {

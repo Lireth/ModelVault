@@ -4,6 +4,7 @@ import TopBar from './components/TopBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import BatchBar from './components/BatchBar.vue'
 import ConfirmOverlay from './components/ConfirmOverlay.vue'
+import LibraryPickerOverlay from './components/LibraryPickerOverlay.vue'
 import LibraryStates from './components/LibraryStates.vue'
 import LibraryToolbar from './components/LibraryToolbar.vue'
 import ModelCompare from './components/ModelCompare.vue'
@@ -142,6 +143,8 @@ onUnmounted(() => {
     <!-- 自定义确认层（U4，O9 拆分为 ConfirmOverlay 组件）：
          替代 window.confirm，覆盖区不包含标题栏（保持窗口控制可达） -->
     <ConfirmOverlay />
+    <!-- 跨库传输选择层（F-3）：目标库列表 + 复制/移动模式 -->
+    <LibraryPickerOverlay />
   </div>
 </template>
 

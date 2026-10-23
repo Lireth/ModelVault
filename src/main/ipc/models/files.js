@@ -14,6 +14,7 @@ import {
   releaseMaintenance,
   tryAcquireMaintenance
 } from '../../services/maintenance-lock'
+import { transferModelsToLibrary } from '../../services/library-transfer'
 import { wrapHandler, checkModelIdInRoot } from '../handler'
 
 /**
@@ -372,6 +373,18 @@ export function registerFilesHandlers() {
     logger.info(`模型已移动: ${id} -> ${newPath}`)
     return { path: newPath }
   }, { errorPrefix: '移动失败' })
+
+  // 跨库移动/复制（F-3）：目标必须是已保存的其他模型库；文件/sidecar/封面/
+  // 元数据保持相对路径整体迁移，安全校验与维护锁在服务层（library-transfer）
+  wrapHandler('models:transferToLibrary', async (event, { ids, targetRoot, mode } = {}) => {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return { error: '没有可传输的模型' }
+    }
+    if (ids.length > 500) {
+      return { error: '单次最多传输 500 个模型' }
+    }
+    return transferModelsToLibrary({ ids, targetRoot, mode })
+  }, { errorPrefix: '跨库传输失败' })
 
   // 一键移动文件（自动标签整理）：根目录创建 LoRA 文件夹及其下 7 个标签
   // 子文件夹（已存在不动），已标注 LoRA 移入 LoRA/<标签>/，未标注 LoRA 移入

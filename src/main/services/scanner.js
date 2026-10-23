@@ -285,6 +285,23 @@ export const SIDECAR_PREVIEW_EXTS = [
 ]
 
 /**
+ * 模型同名的 sidecar 文件清单（SD WebUI 惯例：同名预览图 + 说明文本）。
+ * 图片候选与展示侧共用 SIDECAR_PREVIEW_EXTS，保证清理集与展示集一致（B17）。
+ * 删除清理（ipc/models/misc.js）与跨库传输（library-transfer.js）共用本函数。
+ * @param {string} absModelPath 模型文件绝对路径
+ * @returns {string[]} sidecar 文件绝对路径候选
+ */
+export function sidecarFilesFor(absModelPath) {
+  const dir = path.dirname(absModelPath)
+  const base = path.basename(absModelPath, path.extname(absModelPath))
+  const files = [path.join(dir, `${base}.txt`)]
+  for (const ext of SIDECAR_PREVIEW_EXTS) {
+    files.push(path.join(dir, `${base}${ext}`))
+  }
+  return files
+}
+
+/**
  * 查找模型文件的自动预览图（ComfyUI/WebUI 生成的同名 sidecar 图片）。
  * 命中顺序见 SIDECAR_PREVIEW_EXTS。
  * @param {string} modelPath 模型文件绝对路径
