@@ -35,6 +35,7 @@ vi.mock('electron', () => ({
 }))
 
 vi.mock('../src/main/services/civitai.js', () => ({
+  CIVITAI_DISABLED_ERROR: 'Civitai 功能已关闭',
   civitaiCompletePatch: vi.fn(),
   downloadCivitaiImage: vi.fn(),
   fetchCivitaiModelType: vi.fn(),
@@ -63,7 +64,10 @@ vi.mock('../src/main/ipc/models/decorate.js', () => ({
   resolveCoverSafe: vi.fn((p) => p || '')
 }))
 
-import { registerCivitaiHandlers } from '../src/main/ipc/models/civitai'
+import {
+  registerCivitaiHandlers,
+  setupWarmupProgressForwarding
+} from '../src/main/ipc/models/civitai'
 import {
   civitaiCompletePatch,
   downloadCivitaiImage,
@@ -71,14 +75,18 @@ import {
   fetchCivitaiVersionByHash,
   parseCivitaiModelId
 } from '../src/main/services/civitai'
-import { computeAndCacheHash, requestHashWarmup } from '../src/main/services/hash-warmup'
+import {
+  computeAndCacheHash,
+  requestHashWarmup,
+  setWarmupProgressListener
+} from '../src/main/services/hash-warmup'
 import { saveCoverBuffer } from '../src/main/services/covers'
 import {
   appendCoverMeta,
   buildCoverResponse,
   refreshCoverThumbnail
 } from '../src/main/ipc/models/covers'
-import { getModelMeta, loadData, setDataRoot, setModelMeta } from '../src/main/services/store'
+import { getModelMeta, loadData, setDataRoot, setModelMeta, updateSettings } from '../src/main/services/store'
 
 const roots = []
 let root
@@ -169,8 +177,27 @@ describe('models:civitaiIdentify', () => {
 
     await getRegisteredHandler('models:civitaiIdentify')(makeEvent(), { id })
 
-    expect(computeAndCacheHash).toHaveBeenCalledWith(id, mtimeMs)
+    expect(computeAndCacheHash).toHaveBeenCalledWith(id, mtimeMs, { priority: true })
     expect(fetchCivitaiVersionByHash).toHaveBeenCalledWith('fresh-hash')
+  })
+
+  it('共享哈希被其他前台任务抢占时自动重试一次', async () => {
+    const id = await touchModel('retry.safetensors')
+    const { mtimeMs } = await fs.stat(id)
+    const preempted = new Error('让路')
+    preempted.name = 'PreemptedError'
+    computeAndCacheHash
+      .mockRejectedValueOnce(preempted)
+      .mockResolvedValueOnce('retry-hash')
+    fetchCivitaiVersionByHash.mockResolvedValue({ found: false })
+
+    const res = await getRegisteredHandler('models:civitaiIdentify')(makeEvent(), { id })
+
+    expect(res).toEqual({ found: false })
+    expect(computeAndCacheHash).toHaveBeenCalledTimes(2)
+    expect(computeAndCacheHash).toHaveBeenNthCalledWith(1, id, mtimeMs, { priority: true })
+    expect(computeAndCacheHash).toHaveBeenNthCalledWith(2, id, mtimeMs, { priority: true })
+    expect(fetchCivitaiVersionByHash).toHaveBeenCalledWith('retry-hash')
   })
 
   it('已有 baseModel 不覆盖（宁留旧不覆盖）；无匹配与 API 错误透传', async () => {
@@ -376,5 +403,91 @@ describe('models:warmupHash', () => {
     const res = await getRegisteredHandler('models:warmupHash')(makeEvent(), { id: 'D:\\outside\\x' })
     expect(res).toEqual({ error: '模型不在当前根目录内' })
     expect(requestHashWarmup).not.toHaveBeenCalled()
+  })
+})
+
+describe('Civitai 隐私开关（civitaiEnabled）', () => {
+  it('关闭后四个网络入口均拒绝，本地哈希预热仍可用', async () => {
+    const id = await touchModel('LoRA\\off.safetensors')
+    setModelMeta(id, { civitaiUrl: 'https://civitai.com/models/123' })
+    computeAndCacheHash.mockResolvedValue('h')
+    fetchCivitaiVersionByHash.mockResolvedValue({ found: false })
+    fetchCivitaiModelType.mockResolvedValue({ found: false })
+    downloadCivitaiImage.mockResolvedValue({ error: '不应执行' })
+
+    await updateSettings({ civitaiEnabled: false })
+    try {
+      const disabled = { error: 'Civitai 功能已关闭' }
+      const event = makeEvent()
+      expect(await getRegisteredHandler('models:civitaiIdentify')(event, { id })).toEqual(disabled)
+      expect(await getRegisteredHandler('models:civitaiComplete')(event, { id })).toEqual(disabled)
+      expect(await getRegisteredHandler('models:civitaiCategory')(event, { id })).toEqual(disabled)
+      expect(
+        await getRegisteredHandler('models:civitaiImportImages')(event, {
+          id,
+          images: [{ url: 'https://image.civitai.com/a.jpeg' }]
+        })
+      ).toEqual(disabled)
+
+      // 关闭开关不得触发哈希/API/图片下载（隐私边界）
+      expect(computeAndCacheHash).not.toHaveBeenCalled()
+      expect(fetchCivitaiVersionByHash).not.toHaveBeenCalled()
+      expect(fetchCivitaiModelType).not.toHaveBeenCalled()
+      expect(downloadCivitaiImage).not.toHaveBeenCalled()
+
+      // 纯本地哈希预热不属于 Civitai 网络功能，仍应可用
+      expect(await getRegisteredHandler('models:warmupHash')(event, { id })).toEqual({ ok: true })
+      expect(requestHashWarmup).toHaveBeenCalledWith([id], { priority: true })
+    } finally {
+      await updateSettings({ civitaiEnabled: true })
+    }
+  })
+})
+
+describe('预热完成事件合批（O2）', () => {
+  /** 注册转发器并取回其内部 listener */
+  function setupForwarding(wins) {
+    vi.mocked(BrowserWindow.getAllWindows).mockReturnValue(wins)
+    setupWarmupProgressForwarding()
+    return vi.mocked(setWarmupProgressListener).mock.calls.at(-1)[0]
+  }
+
+  it('时间窗内的多个完成事件合并为一次 completions 推送', () => {
+    vi.useFakeTimers()
+    try {
+      const win = makeWindow()
+      const listener = setupForwarding([win])
+
+      listener({ active: false, id: 'a', hash: 'h1', done: 1, remaining: 1 })
+      listener({ active: false, id: 'b', hash: 'h2', done: 2, remaining: 0 })
+      expect(win.webContents.send).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(160)
+      expect(win.webContents.send).toHaveBeenCalledTimes(1)
+      const [channel, payload] = win.webContents.send.mock.calls[0]
+      expect(channel).toBe('models:warmupProgress')
+      expect(payload).toMatchObject({ active: false, done: 2, remaining: 0 })
+      expect(payload.completions).toEqual([
+        { id: 'a', hash: 'h1' },
+        { id: 'b', hash: 'h2' }
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('后续进行中进度到达前先刷新完成批次，状态顺序不倒置', () => {
+    const win = makeWindow()
+    const listener = setupForwarding([win])
+
+    listener({ active: false, id: 'a', hash: 'h1', done: 1, remaining: 1 })
+    listener({ active: true, id: 'b', percent: 10, done: 1, remaining: 1 })
+
+    // 第一次发送 = 完成批次，第二次 = 新的进行中进度
+    expect(win.webContents.send).toHaveBeenCalledTimes(2)
+    expect(win.webContents.send.mock.calls[0][1].completions).toEqual([
+      { id: 'a', hash: 'h1' }
+    ])
+    expect(win.webContents.send.mock.calls[1][1]).toMatchObject({ active: true, id: 'b' })
   })
 })

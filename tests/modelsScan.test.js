@@ -50,8 +50,20 @@ vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([])
 import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
 import { scanModels } from '../src/main/services/scanner'
 import { syncWatcher } from '../src/main/services/watcher'
-import { getCurrentRoot, loadSettings, setDataRoot, updateSettings } from '../src/main/services/store'
+import {
+  getCurrentRoot,
+  loadData,
+  loadSettings,
+  setDataRoot,
+  updateSettings
+} from '../src/main/services/store'
+import {
+  MAX_PARTIAL_SCAN_DIRS,
+  collapseDirsToTopLevel,
+  normalizePartialScanDirs
+} from '../src/shared/scan-dirs'
 import { drainDeferredThumbs, getThumbPathDeferred } from '../src/main/services/thumbs'
+import { decorateModels } from '../src/main/ipc/models/decorate'
 
 const settingsFile = path.join(fakeUserData, 'settings.json')
 const roots = []
@@ -154,6 +166,40 @@ describe('models:partialScan（A-03）', () => {
     expect(vi.mocked(scanModels).mock.calls.at(-1)[2].subDirs).toEqual(['lora'])
   })
 
+  it('OPT-07：局部扫描跳过装饰缓存，新增 sidecar 即时导入', async () => {
+    await registerLibrary(root)
+    const abs = path.join(root, 'late-sidecar.safetensors')
+    await fs.writeFile(abs, 'x')
+    const model = {
+      id: abs,
+      name: 'late-sidecar',
+      ext: '.safetensors',
+      relDir: '',
+      folder: root,
+      type: 'lora',
+      size: 1,
+      mtimeMs: 1
+    }
+    // 该测试文件不经过 loadStore 链路；显式加载当前根元数据，使 sidecar
+    // 导入的 setModelMeta 能落到内存存储（与生产启动时序一致）
+    await loadData()
+    // 首次装饰建立缓存（此时无 sidecar）
+    await decorateModels([model])
+    await fs.writeFile(
+      path.join(root, 'late-sidecar.civitai.info'),
+      JSON.stringify({ trainedWords: ['late-tag'] })
+    )
+    vi.mocked(scanModels).mockResolvedValue({ models: [model], errors: [], dirCount: 1 })
+
+    const res = await getRegisteredHandler('models:partialScan')(makeEvent(), {
+      folder: root,
+      dirs: ['']
+    })
+
+    // 模型 mtime 未变，仍必须重新检查 sidecar（forceRefresh 由局部扫描传入）
+    expect(res.models[0].triggerWords).toBe('late-tag')
+  })
+
   it('局部扫描应用用户配置的扫描扩展名（B3：与全量结果一致）', async () => {
     const partial = getRegisteredHandler('models:partialScan')
     await registerLibrary(root)
@@ -213,6 +259,31 @@ describe('models:partialScan（A-03）', () => {
     expect(vi.mocked(scanModels).mock.calls.at(-1)[2].subDirs).toEqual(['lora', 'vae/deep'])
   })
 
+  it('O3：子树超过业务上限时收敛为一级目录后继续局部扫描（不截断）', async () => {
+    const partial = getRegisteredHandler('models:partialScan')
+    await registerLibrary(root)
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+    const dirs = Array.from({ length: 205 }, (_, i) => `bulk/item-${i}`)
+
+    const res = await partial(makeEvent(), { folder: root, dirs })
+
+    expect(res.dirs).toEqual(['bulk'])
+    expect(vi.mocked(scanModels).mock.calls.at(-1)[2].subDirs).toEqual(['bulk'])
+  })
+
+  it('O3：一级目录仍超过业务上限时返回 fullScanRequired，不执行局部扫描', async () => {
+    const partial = getRegisteredHandler('models:partialScan')
+    await registerLibrary(root)
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+    const callsBefore = vi.mocked(scanModels).mock.calls.length
+    const dirs = Array.from({ length: 205 }, (_, i) => `top${i}`)
+
+    const res = await partial(makeEvent(), { folder: root, dirs })
+
+    expect(res).toEqual({ fullScanRequired: true })
+    expect(vi.mocked(scanModels).mock.calls.length).toBe(callsBefore)
+  })
+
   it('根直属空串与子树并存时两者都保留（语义不重叠）', async () => {
     const partial = getRegisteredHandler('models:partialScan')
     await registerLibrary(root)
@@ -251,6 +322,37 @@ describe('models:partialScan（A-03）', () => {
     expect(res.error).toBe('模型库已切换，请稍后重试')
     expect(getCurrentRoot()).toBe(root)
     expect(vi.mocked(scanModels).mock.calls.length).toBe(callsBefore)
+  })
+})
+
+describe('局部扫描子树超限（O3：不静默截断）', () => {
+  it('超过上限时收敛为一级目录，语义等价覆盖全部变更子树', () => {
+    const dirs = Array.from({ length: MAX_PARTIAL_SCAN_DIRS + 1 }, (_, i) => `bulk/item-${i}`)
+    const res = normalizePartialScanDirs(dirs)
+    expect(res).toEqual({ subDirs: ['bulk'], collapsed: true })
+  })
+
+  it('一级目录仍超过上限时返回 fullScanRequired，而不是丢弃部分子树', () => {
+    const dirs = Array.from({ length: MAX_PARTIAL_SCAN_DIRS + 1 }, (_, i) => `top${i}`)
+    const res = normalizePartialScanDirs(dirs)
+    expect(res).toEqual({ fullScanRequired: true })
+    expect(collapseDirsToTopLevel(dirs)).toHaveLength(MAX_PARTIAL_SCAN_DIRS + 1)
+  })
+
+  it('校验全部条目：超限输入里的非法项不会被数量上限掩盖', () => {
+    const dirs = Array.from({ length: MAX_PARTIAL_SCAN_DIRS }, (_, i) => `bulk/item-${i}`)
+    dirs.push('../escape')
+    expect(normalizePartialScanDirs(dirs)).toEqual({ error: '变更子树参数无效' })
+  })
+
+  it('去重与后代剔除后不超限时保持原始顺序', () => {
+    expect(
+      normalizePartialScanDirs(['vae', 'lora', 'lora/sub', 'vae/deep', 'lora'])
+    ).toEqual({ subDirs: ['vae', 'lora'] })
+  })
+
+  it('一级目录收敛保留根直属空串（不递归子目录，语义不重叠）', () => {
+    expect(collapseDirsToTopLevel(['', 'a/1', 'a/2', 'b/1'])).toEqual(['', 'a', 'b'])
   })
 })
 
@@ -517,11 +619,40 @@ describe('settings:update', () => {
     expect(modelsFolder).toBe('')
   })
 
-  it('变更 modelsFolder 为真实存在的目录时接受', async () => {
+  it('已登记模型库可被设置为激活根', async () => {
+    const rootB = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-b-'))
+    roots.push(rootB)
+    await updateSettings({ modelsFolder: root, modelsFolders: [root, rootB] })
     const update = getRegisteredHandler('settings:update')
-    const res = await update(makeEvent(), { modelsFolder: root })
+    const res = await update(makeEvent(), { modelsFolder: rootB })
     expect(res.error).toBeUndefined()
-    expect(res.settings.modelsFolder).toBe(root)
+    expect(res.settings.modelsFolder).toBe(rootB)
+  })
+
+  it('变更 modelsFolder 为真实存在但未登记的目录时拒绝且不落盘（新增库只能走对话框）', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-outside-'))
+    roots.push(outside)
+    const update = getRegisteredHandler('settings:update')
+    const res = await update(makeEvent(), { modelsFolder: outside })
+    expect(res.error).toContain('不在模型库列表')
+    const settings = await loadSettings()
+    expect(settings.modelsFolder).toBe('')
+    expect(settings.modelsFolders).toEqual([])
+  })
+
+  it('modelsFolders 新增未登记目录时拒绝，移除现有库仍允许', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-outside-'))
+    roots.push(outside)
+    const update = getRegisteredHandler('settings:update')
+    const rejected = await update(makeEvent(), { modelsFolders: [root, outside] })
+    expect(rejected.error).toContain('不在模型库列表')
+
+    await updateSettings({ modelsFolder: root, modelsFolders: [root] })
+    const removed = await update(makeEvent(), { modelsFolders: [] })
+    expect(removed.error).toBeUndefined()
+    const settings = await loadSettings()
+    // 激活库恒保留在列表中，移除仅作用于其余条目
+    expect(settings.modelsFolders).toEqual([root])
   })
 
   it('modelsFolder 与当前值相同时跳过存在性校验（目录暂时离线仍可保存其他设置）', async () => {

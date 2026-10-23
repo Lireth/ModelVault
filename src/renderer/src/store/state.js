@@ -7,7 +7,11 @@ import {
   CHECKPOINT_TAG_DEFS,
   BASE_FAMILIES
 } from '../../../shared/model-categories'
-import { SORT_OPTION_DEFS, CARD_SIZE_DEFS } from '../../../shared/app-enums'
+import {
+  SORT_OPTION_DEFS,
+  CARD_SIZE_DEFS,
+  HASH_WARMUP_DEFS
+} from '../../../shared/app-enums'
 import { MODEL_EXTENSIONS as SHARED_SCAN_EXTS } from '../../../shared/model-extensions'
 import { DEFAULT_SETTINGS } from '../../../shared/defaults'
 
@@ -76,6 +80,9 @@ export const CARD_SIZE_OPTIONS = CARD_SIZE_DEFS
 /** 可勾选的扫描文件类型选项（A-12 单一来源 shared/model-extensions.js） */
 export const SCAN_EXTENSION_OPTIONS = SHARED_SCAN_EXTS
 
+/** 后台哈希预热策略选项（O1 单一来源 shared/app-enums.js） */
+export const HASH_WARMUP_OPTIONS = HASH_WARMUP_DEFS
+
 /** 分类标签 key→显示信息映射（搜索域构建复用） */
 export const SUB_MAP = Object.fromEntries(
   [...SUB_CATEGORIES, ...LORA_TAGS, ...CHECKPOINT_TAGS].map((t) => [t.key, t])
@@ -134,6 +141,11 @@ export const state = shallowReactive({
   // 防止「开始使用」引导页对已配置过文件夹的用户闪现
   booting: true,
   scanning: false,
+  // F1：基于本地索引秒开后的后台校验（不显示全屏扫描遮罩，
+  // 但参与切库/互斥判断，校验完成后整体替换列表）
+  backgroundScanning: false,
+  // F2：外部模型导入在途（按钮禁用/提示）
+  importing: false,
   // 局部增量扫描在途（B-01）：与全量 scanning 分离，不显示全屏扫描遮罩，
   // 但同样参与「切库/再次扫描」的互斥判断，避免旧根结果合并进新库。
   partialScanning: false,
@@ -181,15 +193,52 @@ export const state = shallowReactive({
 })
 
 /**
+ * 模型 id → 数组下标索引（O2）：批量事件回填时避免每次 O(n) findIndex/重建 Map。
+ * 仅在 models 数组引用变化时重建；元素级替换不改变 id 与下标，索引保持有效。
+ */
+let indexedModelsRef = null
+let modelIndexById = new Map()
+
+/** 按当前 models 数组重建 id 索引 */
+function rebuildModelIndex() {
+  indexedModelsRef = state.models
+  modelIndexById = new Map()
+  for (let i = 0; i < state.models.length; i++) {
+    modelIndexById.set(state.models[i].id, i)
+  }
+}
+
+/**
+ * 确保索引与当前 models 数组引用一致。
+ * 正常链路全部经 replaceModels；此处兜底直接赋值数组的旧调用方/测试，
+ * 数组引用变化时惰性重建一次，元素级更新不会触发重建。
+ */
+function ensureModelIndex() {
+  if (indexedModelsRef !== state.models) rebuildModelIndex()
+}
+
+/**
+ * 查询模型在 state.models 中的下标（O(1)，未找到返回 undefined）。
+ * @param {string} id 模型绝对路径
+ * @returns {number|undefined}
+ */
+export function modelIndexOf(id) {
+  ensureModelIndex()
+  return modelIndexById.get(id)
+}
+
+/**
  * 整体替换模型列表（models 数组级更新的唯一入口）：
  * 传入数组包一层 shallowReactive 后整体赋值——数组代理负责拦截索引读写
  * 与遍历（元素级 `state.models[i] = {...}` 因此可触发更新），元素对象保持
  * 原始引用（零代理开销，O3 目标不变）。传入已是 shallowReactive 的数组时
  * 幂等（Vue 对已代理目标原样返回）。
+ * 同时重建 id→下标索引，后续批量封面/哈希回填均走 O(1) 查找。
  * @param {Array} list 新模型列表（原始数组或已代理数组）
  */
 export function replaceModels(list) {
   state.models = shallowReactive(list)
+  rebuildModelIndex()
 }
 
 /**

@@ -33,6 +33,8 @@
  * 测试环境均可直接导入。
  */
 
+import { MAX_PARTIAL_SCAN_DIRS_INPUT } from './scan-dirs'
+
 /**
  * 通道 schema 规则对象（构造器产物，kind 标识类型，其余为约束项）。
  * @typedef {object} SchemaRule
@@ -193,6 +195,10 @@ export const IPC_PAYLOAD_SCHEMAS = {
 
   // ---------- 存储域 ----------
   'models:loadStore': vVoid(),
+  // F1：按路径打开已保存模型库（优先返回本地索引）
+  'models:openLibrary': vObj({
+    fields: { folder: vStr({ required: true, max: 1000 }) }
+  }),
   'models:chooseFolder': vVoid(),
 
   // ---------- 设置域 ----------
@@ -207,11 +213,16 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'models:partialScan': vObj({
     fields: {
       folder: vStr({ max: 1000 }),
-      // 子树语义校验（逃逸段/反斜杠）在 handler；此处只查类型与规模
-      dirs: vArr({ max: 200, items: vStr({ max: 1000 }) })
+      // 子树语义校验（逃逸段/反斜杠）与超限收敛在 handler（shared/scan-dirs）；
+      // 此处只设防御性硬上限，避免超大 payload 进入结构化克隆
+      dirs: vArr({ max: MAX_PARTIAL_SCAN_DIRS_INPUT, items: vStr({ max: 1000 }) })
     }
   }),
   'models:cancelScan': vVoid(),
+  // F2：外部模型导入（复制/移动入台），mode 枚举语义在 handler
+  'models:importModels': vObj({
+    fields: { mode: vStr({ required: true, max: 16 }) }
+  }),
 
   // ---------- 元数据域 ----------
   'models:saveModelData': vObj({
@@ -258,6 +269,9 @@ export const IPC_PAYLOAD_SCHEMAS = {
   }),
   'models:clearCovers': vObj({ fields: { id: ID } }),
   'models:clearAllCovers': vVoid(), // 无 payload，清空范围以当前库为界
+  // 模型库体检与一键修复（V-07）：范围固定为当前库，无渲染层入参
+  'models:checkHealth': vVoid(),
+  'models:repairHealth': vVoid(),
   'models:importCover': vObj({
     fields: { id: ID, path: vStr({ max: 2000 }) }
   }),

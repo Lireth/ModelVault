@@ -2,6 +2,7 @@ import { BrowserWindow, dialog } from 'electron'
 import logger from '../../logger'
 import {
   getMetaMapByAbsPath,
+  getModelMeta,
   getCurrentRoot,
   getSettings,
   loadSettings,
@@ -22,14 +23,61 @@ import {
 } from '../../services/maintenance-lock'
 import { awaitThumbDrain } from './model-state'
 import { wrapHandler, checkExistingDirectory } from '../handler'
+import { readLibraryIndex } from '../../services/library-index'
 
 /**
  * 存储与设置链路：持久化数据加载、模型根目录选择、应用设置更新。
  * ensureRootStore 是全域切换关联存储的唯一入口（扫描与 loadStore 共用）。
  * 目录存在性校验收敛于 ipc/handler.js 的 checkExistingDirectory（O2）：
- * 拦截渲染进程经 settings:update 写入的任意字符串路径——若不做校验，
- * 后续任意一次元数据写入即在该目录创建 .modelvault/（任意目录写入原语）。
+ * settings:update 只允许激活/移除/重排已登记库列表中的根目录，未登记路径
+ * 一律拒绝（新增只能经 models:chooseFolder 对话框）——否则任意已存在目录
+ * 都可被提升为库根，后续元数据写入即在该目录创建 .modelvault/
+ * （任意目录写入原语）。
  */
+
+/**
+ * 目录是否属于模型库列表（与 scan.js 同规则：Windows 大小写不敏感）。
+ * @param {string} dir 目标目录
+ * @returns {boolean}
+ */
+function isKnownLibrary(dir) {
+  const list = getSettings().modelsFolders || []
+  const lower = String(dir).toLowerCase()
+  return list.some((f) => typeof f === 'string' && f.toLowerCase() === lower)
+}
+
+/**
+ * F1：用当前内存元数据覆盖索引中的用户标注字段。
+ * 索引是上一次全量扫描的快照；收藏/评分/备注等可能在扫描后修改。
+ * 覆盖标量标注保证秒开列表即刻准确；封面/缩略图仍由后台校验刷新。
+ * @param {object[]} models 索引中的装饰模型
+ * @returns {object[]} 合并后的模型列表
+ */
+function overlayCurrentMeta(models) {
+  if (!Array.isArray(models)) return models
+  return models.map((m) => {
+    const meta = getModelMeta(m.id)
+    if (!meta) return m
+    return {
+      ...m,
+      alias: meta.alias || '',
+      note: meta.note || '',
+      noteSource: meta.noteSource || '',
+      favorite: meta.favorite === true,
+      nsfw: meta.nsfw === true,
+      rating: meta.rating || 0,
+      params: meta.params || null,
+      tags: meta.tags || [],
+      triggerWords: meta.triggerWords || '',
+      triggerWordsSource: meta.triggerWordsSource || '',
+      subCategory:
+        (m.type === 'lora' && m.folderSubCategory) ||
+        meta.subCategory ||
+        (m.type === 'checkpoint' ? 'base' : ''),
+      hash: meta.hash || m.hash || ''
+    }
+  })
+}
 
 /**
  * 确保指定根目录的关联存储已加载。
@@ -104,6 +152,7 @@ export function registerStoreHandlers() {
     try {
       const settings = await loadSettings()
       let metaMap = {}
+      let cachedIndex = null
       if (settings.modelsFolder) {
         // 已设置目录不存在（如磁盘离线/被移动）时不切换关联存储，
         // 防止后续元数据写入在不存在的路径下重建目录树。
@@ -117,8 +166,13 @@ export function registerStoreHandlers() {
           await pruneOrphanCovers()
           metaMap = getMetaMapByAbsPath()
           // 启动后后台预热缺失的模型哈希（Civitai 识别加速）：仅入队，
-          // 由预热服务延迟逐个处理，已缓存/文件缺失的条目消费时秒级跳过
-          requestHashWarmup(Object.keys(metaMap))
+          // 由预热服务延迟逐个处理，已缓存/文件缺失的条目消费时秒级跳过。
+          // O1：启动时只有元数据键、没有体积——full=true 重置体积索引，
+          // candidates 策略下由 drain 逐个 stat 后按真实体积决定是否计算
+          requestHashWarmup(Object.keys(metaMap), {
+            mode: settings.hashWarmup,
+            full: true
+          })
           // 目录监控启动路径闭合（OPT-19）：启动时若 autoScan 关闭则不会触发扫描，
           // 此前 watcher 仅在扫描/设置更新时同步，导致 autoRescan 开启却静默不生效；
           // 此处按设置补一次同步（同根同状态时为幂等刷新）
@@ -127,16 +181,69 @@ export function registerStoreHandlers() {
             settings.autoRescan === true,
             settings.excludeDirs || []
           )
+          // F1：返回上次全量扫描的本地索引，渲染层可先秒开列表再后台校验
+          cachedIndex = await readLibraryIndex(settings.modelsFolder)
+          if (cachedIndex) {
+            cachedIndex = {
+              ...cachedIndex,
+              models: overlayCurrentMeta(cachedIndex.models)
+            }
+          }
         }
       }
       return {
         settings,
-        models: metaMap
+        models: metaMap,
+        cachedIndex
       }
     } finally {
       releaseMaintenance(token)
     }
   }, { errorPrefix: '数据加载失败' })
+
+  // F1：打开已保存的模型库并优先返回本地索引（秒切库）。
+  // 索引缺失/失效时 cached=false，由渲染层回退全量扫描。
+  wrapHandler('models:openLibrary', async (event, { folder } = {}) => {
+    const root = typeof folder === 'string' ? folder.trim() : ''
+    if (!root) return { error: '缺少模型文件夹' }
+    if (!isKnownLibrary(root)) {
+      logger.warn(`拒绝打开模型库列表之外的目录: ${root}`)
+      return { error: '该目录不在模型库列表中' }
+    }
+    const dirInvalid = await checkExistingDirectory(root, '模型文件夹不存在或不是目录')
+    if (dirInvalid) return { error: dirInvalid }
+
+    // 先探测索引：无可用索引时不切换主进程根目录，交由渲染层走
+    // scanModels 的 V-02 状态机（扫描失败可回滚旧库）
+    const cachedIndex = await readLibraryIndex(root)
+    if (!cachedIndex) {
+      logger.info(`模型库无可用本地索引，回退全量扫描: ${root}`)
+      return { root, cached: false }
+    }
+
+    const token = tryAcquireMaintenance('switch', root)
+    if (!token) return { error: maintenanceBusyMessage() }
+    try {
+      await ensureRootStore(root, { maintenanceToken: token })
+      // 切库成功后才提交激活库（与扫描链路同一 V-02 状态机）
+      await updateSettings({ modelsFolder: root })
+      const settings = getSettings()
+      syncWatcher(root, settings.autoRescan === true, settings.excludeDirs || [])
+      logger.info(
+        `模型库已打开（本地索引 ${cachedIndex.models.length} 个模型）: ${root}`
+      )
+      return {
+        root,
+        settings,
+        cached: true,
+        models: overlayCurrentMeta(cachedIndex.models),
+        savedAt: cachedIndex.savedAt,
+        durationMs: cachedIndex.durationMs
+      }
+    } finally {
+      releaseMaintenance(token)
+    }
+  }, { errorPrefix: '打开模型库失败' })
 
   // 选择模型根目录
   wrapHandler('models:chooseFolder', async (event) => {
@@ -163,12 +270,16 @@ export function registerStoreHandlers() {
 
   // 更新应用设置（通用/扫描/外观），返回规范化后的完整设置
   wrapHandler('settings:update', async (event, patch = {}) => {
-    // modelsFolder / modelsFolders（E7 多根目录）的变更项必须是真实存在的目录：
-    // 防止渲染进程写入任意路径后，经元数据写入在该目录创建 .modelvault
-    // （任意目录写入原语）。与当前值相同的路径不重复校验：
-    // 模型目录所在磁盘暂时离线时仍可保存其他设置
+    // 模型库根目录写入收敛（OPT-04）：settings:update 不得新增库根目录。
+    // modelsFolder / modelsFolders 中所有未出现在当前列表内的路径一律拒绝——
+    // 新增库只能经 models:chooseFolder 的原生对话框（用户确认）写入；主进程
+    // 扫描成功链路只更新已登记库的激活根，不新增条目。否则渲染进程可把任意
+    // 已存在目录提升为库根，随后经 ensureRootStore 在该目录创建 .modelvault
+    //（任意目录写入原语）。已在当前列表/当前激活根中的路径跳过校验：
+    // 目录暂时离线时仍可保存设置。
+    const current = getSettings()
     const currentKeys = new Set(
-      [getSettings().modelsFolder, ...(getSettings().modelsFolders || [])]
+      [current.modelsFolder, ...(current.modelsFolders || [])]
         .filter((f) => typeof f === 'string' && f)
         .map((f) => f.toLowerCase())
     )
@@ -183,6 +294,8 @@ export function registerStoreHandlers() {
     }
     for (const folder of candidates) {
       if (currentKeys.has(folder.toLowerCase())) continue
+      // 先做存在性校验，保留原有「目录不存在/不是目录」的明确提示；
+      // 已存在的目录仍必须命中当前库列表，否则拒绝新增。
       const dirInvalid = await checkExistingDirectory(
         folder,
         `模型文件夹不存在或不是目录: ${folder}`
@@ -191,6 +304,8 @@ export function registerStoreHandlers() {
         logger.warn(`拒绝设置不存在的模型目录: ${folder}`)
         return { error: dirInvalid }
       }
+      logger.warn(`拒绝经 settings:update 新增模型库根目录: ${folder}`)
+      return { error: '该目录不在模型库列表中，新增模型库请通过「更改文件夹」选择' }
     }
     await updateSettings(patch)
     const settings = getSettings()

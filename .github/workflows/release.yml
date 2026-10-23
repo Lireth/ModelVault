@@ -114,11 +114,20 @@ jobs:
         run: npm test
 
       - name: 编译主进程 / preload / 渲染进程
+        env:
+          # E1：签名者证书指纹注入主进程（运行时更新包验签依据）。
+          # 未配置 secret 时为空串，应用退化为仅 SHA256 校验。
+          MODELVAULT_SIGNER_THUMBPRINT: ${{ secrets.MODELVAULT_SIGNER_THUMBPRINT }}
         run: npm run build
 
       # 不用 npm run dist（其会重复执行 build）；显式 --publish never
-      # 禁用 electron-builder 的自动发布，发布统一由下方专用步骤控制
+      # 禁用 electron-builder 的自动发布，发布统一由下方专用步骤控制。
+      # E1：CSC_LINK / CSC_KEY_PASSWORD 为可选的 Windows 代码签名证书
+      # （base64 PFX + 密码）；配置后 electron-builder 自动签名。
       - name: 打包单文件便携版 EXE
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
         run: npx electron-builder --win --publish never
 
       # ---------- 4. 构建产物验证 ----------
@@ -163,6 +172,42 @@ jobs:
           Write-Host "SHA256: $hash"
           Write-Host "校验和文件: $checksumFile"
           "file=$checksumFile" >> $env:GITHUB_OUTPUT
+
+      # E1：校验 EXE Authenticode 签名。配置了签名证书时必须 Valid，
+      # 且指纹与 MODELVAULT_SIGNER_THUMBPRINT 一致；未配置证书时仅警告。
+      - name: 校验代码签名（E1）
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          EXPECTED_THUMBPRINT: ${{ secrets.MODELVAULT_SIGNER_THUMBPRINT }}
+        run: |
+          $exePath = "dist/$($env:VERSION)/ModelVault-$($env:VERSION).exe"
+          $sig = Get-AuthenticodeSignature -LiteralPath $exePath
+          $hasCert = -not [string]::IsNullOrWhiteSpace($env:CSC_LINK)
+
+          if ($sig.Status -ne "Valid") {
+            if ($hasCert) {
+              Write-Host "::error::已配置代码签名证书，但产物签名状态为 $($sig.Status)"
+              exit 1
+            }
+            Write-Host "::warning::未配置 CSC_LINK，产物未签名；应用内更新将退化为 SHA256 校验"
+            exit 0
+          }
+
+          $thumb = $sig.SignerCertificate.Thumbprint
+          Write-Host "代码签名有效：$($sig.SignerCertificate.Subject)"
+          Write-Host "证书指纹：$thumb"
+          if (-not [string]::IsNullOrWhiteSpace($env:EXPECTED_THUMBPRINT)) {
+            $expected = ($env:EXPECTED_THUMBPRINT -replace '[^a-fA-F0-9]', '').ToUpper()
+            $actual = ($thumb -replace '[^a-fA-F0-9]', '').ToUpper()
+            if ($actual -ne $expected) {
+              Write-Host "::error::签名证书指纹与 MODELVAULT_SIGNER_THUMBPRINT 不一致（实际 $thumb）"
+              exit 1
+            }
+          } else {
+            Write-Host "::warning::未配置 MODELVAULT_SIGNER_THUMBPRINT，应用内更新不会强制校验发布者指纹"
+          }
 
       # ---------- 5. 发布与产物归档 ----------
 

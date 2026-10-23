@@ -16,6 +16,8 @@ import { clearDeferredOwners, decorateModels, startThumbDrain } from './decorate
 import { ensureRootStore } from './store'
 import { getDecorateCacheRoot, awaitThumbDrain, resetDecorateCache } from './model-state'
 import { wrapHandler, checkExistingDirectory } from '../handler'
+import { normalizePartialScanDirs } from '../../../shared/scan-dirs'
+import { writeLibraryIndex } from '../../services/library-index'
 
 /**
  * 扫描链路：全量扫描模型目录（进度推送、可取消）、局部增量扫描与取消入口。
@@ -26,10 +28,6 @@ import { wrapHandler, checkExistingDirectory } from '../handler'
 /** 进度事件节流间隔（ms），避免大量小文件时 IPC 过载 */
 const PROGRESS_INTERVAL = 120
 
-/** 局部扫描子树入参上限（与 ipc-schema 声明保持一致） */
-const MAX_PARTIAL_DIRS = 200
-const MAX_PARTIAL_DIR_LEN = 1000
-
 /** 当前扫描的取消控制器（null 表示无进行中的扫描） */
 let scanAbort = null
 
@@ -39,64 +37,11 @@ function isSameRoot(a, b) {
 }
 
 /**
- * 清洗并归一化局部扫描子树（B-01）：
- * - 拒绝逃逸段/反斜杠/绝对路径/超长/过量；
- * - 精确去重；
- * - 去掉被其它子树覆盖的后代（如同时传入 `lora` 与 `lora/sub`）。
- *
- * 后一项是必要防御：scanner 对每个非根子树递归全部后代，父子同时入栈会让
- * 同一文件被扫描两次，产出重复 id 的模型记录（卡片重复、统计翻倍）。
- * 空串代表「仅根目录直属文件」，不递归后代，因此不与任何子树构成覆盖关系。
- *
- * @param {unknown} dirs 渲染进程传入的变更子树
- * @returns {{subDirs: string[]} | {error: string}}
- */
-function normalizePartialScanDirs(dirs) {
-  if (!Array.isArray(dirs)) return { error: '缺少变更子树' }
-  const normalized = []
-  for (const raw of dirs.slice(0, MAX_PARTIAL_DIRS)) {
-    if (typeof raw !== 'string') return { error: '变更子树参数无效' }
-    const item = raw.trim()
-    if (item === '') {
-      normalized.push('')
-      continue
-    }
-    if (
-      item.length > MAX_PARTIAL_DIR_LEN ||
-      item.includes('\\') ||
-      item.startsWith('/') ||
-      /^[A-Za-z]:/.test(item) ||
-      item.split('/').some((seg) => seg === '' || seg === '..' || seg === '.')
-    ) {
-      return { error: '变更子树参数无效' }
-    }
-    normalized.push(item)
-  }
-  if (normalized.length === 0) return { error: '缺少变更子树' }
-
-  const unique = []
-  const seen = new Set()
-  for (const item of normalized) {
-    if (seen.has(item)) continue
-    seen.add(item)
-    unique.push(item)
-  }
-  // 去掉被祖先覆盖的后代（保持原顺序）；空串不参与覆盖判断
-  const subDirs = unique.filter((item, index) => {
-    if (item === '') return true
-    return !unique.some(
-      (other, otherIndex) =>
-        otherIndex !== index && other !== '' && item.startsWith(`${other}/`)
-    )
-  })
-  return { subDirs }
-}
-
-/**
  * 目录是否属于模型库白名单（B1）：settings.modelsFolders（上限 20）。
- * 列表条目只能经 models:chooseFolder（对话框确认）或 settings:update
- * （存在性校验）写入，是「.modelvault 写入点可以指向哪里」的唯一可信
- * 来源；渲染进程直接传入的任意路径不得成为关联存储根。
+ * 列表条目只能经 models:chooseFolder（用户对话框确认）写入；主进程扫描成功
+ * 链路只更新已登记库的激活根，不新增条目；settings:update 仅允许激活/移除/
+ * 重排已登记库，不能再新增根目录。该列表是「.modelvault 写入点可以指向
+ * 哪里」的唯一可信来源；渲染进程直接传入的任意路径不得成为关联存储根。
  * Windows 大小写不敏感比较。
  */
 function isKnownLibrary(dir) {
@@ -141,7 +86,7 @@ export function registerScanHandlers() {
       // 白名单校验（B1）：扫描目录必须已在模型库列表中。存在性校验只保证
       // 「路径可用」，不保证「用户想把这里当库」——无白名单时任意可写目录
       // 都能经 ensureRootStore 落 .modelvault，构成渲染可控的任意目录写入
-      // 原语。新增库只能走 models:chooseFolder / settings:update
+      // 原语。新增库只能走 models:chooseFolder（用户对话框确认）
       if (!isKnownLibrary(root)) {
         logger.warn(`拒绝扫描模型库列表之外的目录: ${root}`)
         return { error: '该目录不在模型库列表中' }
@@ -210,13 +155,25 @@ export function registerScanHandlers() {
         logger.warn(`扫描错误详情: ${JSON.stringify(errors.slice(0, 20))}`)
       }
 
+      // F1：全量扫描完成后写入本地索引（秒切库/启动缓存）。
+      // 索引只作展示缓存，写失败不影响本次扫描结果
+      await writeLibraryIndex(root, {
+        models: decorated,
+        durationMs: Date.now() - startedAt
+      })
+
       // 响应先返回，缺失的缩略图由后台队列补齐（完成后推送 thumbsReady 更新）
       startThumbDrain(win)
 
       // 后台预热缺失的模型哈希（Civitai 识别加速）：缓存缺失的条目按
       // mtime 逐个计算回写，已缓存/文件缺失的条目消费时秒级跳过；
-      // 扫描刚结束磁盘繁忙，预热服务延迟启动
-      requestHashWarmup(decorated.map((m) => m.id))
+      // 扫描刚结束磁盘繁忙，预热服务延迟启动。
+      // O1：传入装饰结果的 size/mtime 并标记为完整库快照——候选策略据此
+      // 只对同尺寸模型计算，full=true 同步重置体积索引（清除已删除模型）
+      requestHashWarmup(decorated, {
+        mode: appSettings.hashWarmup,
+        full: true
+      })
 
       // 扫描成功后与 settings.modelsFolder 保持一致（C6）：
       // 显式传入 folder 的扫描也持久化根目录，与 models:chooseFolder 行为闭环
@@ -289,7 +246,16 @@ export function registerScanHandlers() {
       // 子树清洗在锁内完成：失败路径统一经 finally 释放锁
       const normalized = normalizePartialScanDirs(dirs)
       if (normalized.error) return { error: normalized.error }
+      // O3：子树过多且一级目录收敛后仍超限——明确要求渲染层回退全量扫描，
+      // 绝不静默丢弃部分子树（丢弃会让这些子树停留在陈旧状态）
+      if (normalized.fullScanRequired) {
+        logger.warn('局部扫描子树过多，已要求渲染层改为完整扫描')
+        return { fullScanRequired: true }
+      }
       const subDirs = normalized.subDirs
+      if (normalized.collapsed) {
+        logger.info(`局部扫描子树过多，已收敛为 ${subDirs.length} 个一级目录`)
+      }
 
       // 与全量扫描一致的目录前置校验（白名单 + 存在性）
       if (!isKnownLibrary(root)) {
@@ -330,16 +296,27 @@ export function registerScanHandlers() {
       // pruneThumbs=false（OPT-1 修复）：局部装饰仅覆盖变更子树，若按局部
       // usedThumbs 清理会把子树外模型的全部缩略图误删（缓存命中路径不会重新
       // 生成，坏图将持续到元数据变化）。失效缩略图与孤儿封面同一约定：
-      // 由下一次全量扫描兜底清理
-      const decorated = await decorateModels(models, signal, { pruneThumbs: false })
+      // 由下一次全量扫描兜底清理。
+      // forceRefresh（OPT-07）：变更子树内的 sidecar/封面文件变化不会改动
+      // 模型 mtime，必须跳过装饰缓存重新检查，否则新增/修改的 sidecar 与
+      // 预览图会被旧缓存遮蔽。
+      const decorated = await decorateModels(models, signal, {
+        pruneThumbs: false,
+        forceRefresh: true
+      })
       models.length = 0 // 同全量扫描：装饰后立即释放原始数组（O8）
 
       const win = BrowserWindow.fromWebContents(event.sender)
       // 装饰中新登记的缩略图任务经既有后台链生成并推送
       startThumbDrain(win)
 
-      // 受影响子树的哈希预热（同全量扫描，Civitai 识别加速）
-      requestHashWarmup(decorated.map((m) => m.id))
+      // 受影响子树的哈希预热（同全量扫描，Civitai 识别加速）。
+      // O1：局部扫描不是完整快照——按 id 合并体积索引，使新增文件与子树外
+      // 同尺寸模型也能被识别为重复候选
+      requestHashWarmup(decorated, {
+        mode: appSettings.hashWarmup,
+        full: false
+      })
 
       logger.info(
         `局部扫描完成：${subDirs.length} 个子树 → ${decorated.length} 个模型 / 重关联 ${relinkResult.relinked} 个`

@@ -189,6 +189,50 @@ describe('decorateModels 元数据装饰', () => {
   })
 })
 
+describe('OPT-07 局部扫描缓存感知 sidecar/封面变化', () => {
+  it('forceRefresh 重新读取新增 civitai.info sidecar（模型 mtime 未变）', async () => {
+    const abs = path.join(root, 'late-info-lora.safetensors')
+    await fs.writeFile(abs, 'x')
+    const model = makeModel(abs, { type: 'lora' })
+    const [first] = await decorateModels([model])
+    expect(first.triggerWords).toBe('')
+
+    // sidecar 新增不改变模型文件 mtime，默认缓存命中仍返回旧结果
+    await fs.writeFile(
+      path.join(root, 'late-info-lora.civitai.info'),
+      JSON.stringify({ trainedWords: ['late-trigger'] })
+    )
+    const [cached] = await decorateModels([{ ...model }])
+    expect(cached.triggerWords).toBe('')
+
+    // 局部扫描携带 forceRefresh：重新读取 sidecar 并导入触发词
+    const [refreshed] = await decorateModels([{ ...model }], undefined, {
+      forceRefresh: true
+    })
+    expect(refreshed.triggerWords).toBe('late-trigger')
+    expect(refreshed.triggerWordsSource).toBe('civitai')
+  })
+
+  it('forceRefresh 重新识别新增同名预览图（默认封面变化）', async () => {
+    const abs = path.join(root, 'late-preview.safetensors')
+    await fs.writeFile(abs, 'x')
+    const model = makeModel(abs)
+    const [first] = await decorateModels([model])
+    expect(first.cover).toBe('')
+
+    const preview = path.join(root, 'late-preview.png')
+    await fs.writeFile(preview, PNG_MAGIC)
+    const [cached] = await decorateModels([{ ...model }])
+    expect(cached.cover).toBe('')
+
+    const [refreshed] = await decorateModels([{ ...model }], undefined, {
+      forceRefresh: true
+    })
+    expect(refreshed.cover).toBe(preview)
+    expect(refreshed.coverUrl).toContain('mvimg://local/')
+  })
+})
+
 describe('sidecar 导入与用户并发保存的竞态（E3 回归）', () => {
   afterEach(() => {
     vi.mocked(findSidecarText).mockReset()
@@ -490,10 +534,11 @@ describe('OPT-1 轮播封面复用缩略图管线', () => {
       expect.stringContaining('thumbs'),
       expect.stringContaining('thumbs')
     ])
+    // O2：同一轮 drain 的两张缩略图完成事件合并为一次 thumbsReady 推送
+    const readyCalls = win.webContents.send.mock.calls.filter((c) => c[0] === 'models:thumbsReady')
+    expect(readyCalls).toHaveLength(1)
     // 推送载荷：默认封面条目 coverUrl + coverThumb 双字段；非默认仅 coverThumb
-    const updates = win.webContents.send.mock.calls
-      .filter((c) => c[0] === 'models:thumbsReady')
-      .flatMap((c) => c[1].updates)
+    const updates = readyCalls.flatMap((c) => c[1].updates)
     expect(updates).toHaveLength(2)
     const defaultUpdate = updates.find((u) => u.coverUrl)
     const carouselUpdate = updates.find((u) => !u.coverUrl)

@@ -38,3 +38,18 @@ export const VIEW_MODE_DEFS = [
 
 /** 合法视图模式 key 集合 */
 export const VIEW_MODE_KEYS = new Set(VIEW_MODE_DEFS.map((d) => d.key))
+
+/**
+ * 后台哈希预热策略（O1 单一来源：主进程校验与设置页展示共用）：
+ * - candidates：仅对同尺寸模型计算（内容相同的文件必然同大小）；
+ * - full：全库缺失哈希都计算（旧行为）；
+ * - off：后台不预热，仅详情页/识别按需计算。
+ */
+export const HASH_WARMUP_DEFS = [
+  { key: 'candidates', label: '仅重复候选' },
+  { key: 'full', label: '全库' },
+  { key: 'off', label: '关闭' }
+]
+
+/** 合法哈希预热策略 key 集合（主进程校验用） */
+export const HASH_WARMUP_KEYS = new Set(HASH_WARMUP_DEFS.map((d) => d.key))

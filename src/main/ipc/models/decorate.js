@@ -81,25 +81,84 @@ export function trackDeferredOwner(modelId, absCover) {
 }
 
 /**
- * 向窗口推送若干卡片的缩略图就绪事件（载荷格式与 drain 推送一致：{updates}）。
+ * 缩略图完成事件合批（O2）：
+ * drain 每生成一张缩略图都会产生一次更新；数千个封面时若逐条 IPC 推送，
+ * 渲染层每个事件都要做一次回填（旧实现每次重建全量 id→下标 Map）。
+ * 这里在时间窗内累积更新，一次事件携带整批（上限兜底），
+ * drain 结束时强制刷新，保证「响应先返回、后台补齐」的最终一致性。
+ */
+const THUMB_EVENT_FLUSH_MS = 120
+const THUMB_EVENT_MAX_BATCH = 200
+
+/** 待发送批次：{ win, updates, timer }（同一时刻只服务一个窗口） */
+let pendingThumbBatch = null
+
+/** 底层发送（不做批次刷新，避免 flush 递归） */
+function deliverThumbReady(win, updates) {
+  if (!win || typeof win.isDestroyed !== 'function' || win.isDestroyed() || !updates?.length) {
+    return
+  }
+  win.webContents.send('models:thumbsReady', { updates })
+}
+
+/** 立即发送已累积的缩略图更新并清空定时器 */
+export function flushThumbReadyUpdates() {
+  if (!pendingThumbBatch) return
+  const batch = pendingThumbBatch
+  pendingThumbBatch = null
+  if (batch.timer) clearTimeout(batch.timer)
+  deliverThumbReady(batch.win, batch.updates)
+}
+
+/** 丢弃尚未发送的旧批次（切根/窗口关闭时避免把旧根更新推给新库） */
+function dropPendingThumbBatch() {
+  if (!pendingThumbBatch) return
+  if (pendingThumbBatch.timer) clearTimeout(pendingThumbBatch.timer)
+  pendingThumbBatch = null
+}
+
+/** 累积一条/一批缩略图更新；达到阈值立即发送，否则在时间窗后合并发送 */
+function queueThumbReady(win, updates) {
+  if (!win || typeof win.isDestroyed !== 'function' || win.isDestroyed() || !updates?.length) {
+    return
+  }
+  // 多窗口场景：切换目标窗口前先送达上一窗口，避免更新错投/丢失
+  if (pendingThumbBatch && pendingThumbBatch.win !== win) flushThumbReadyUpdates()
+  if (!pendingThumbBatch) {
+    pendingThumbBatch = { win, updates: [], timer: null }
+  }
+  pendingThumbBatch.updates.push(...updates)
+  if (pendingThumbBatch.updates.length >= THUMB_EVENT_MAX_BATCH) {
+    flushThumbReadyUpdates()
+    return
+  }
+  if (pendingThumbBatch.timer) return
+  pendingThumbBatch.timer = setTimeout(flushThumbReadyUpdates, THUMB_EVENT_FLUSH_MS)
+  pendingThumbBatch.timer.unref?.()
+}
+
+/**
+ * 向窗口推送若干卡片的缩略图就绪事件（载荷格式为 {updates}）。
  * update 形状：{ id, coverUrl?, coverThumb? }——coverUrl 为默认封面缩略图
  * （OPT-1 前 updates 恒有此字段），coverThumb 为轮播封面条目更新
  * { path, thumbUrl }（OPT-1：轮播复用缩略图管线后新增，二者至少其一）。
+ * 直接发送入口（封面缓存命中链路）：先送达已累积批次，保证新旧更新顺序。
  * @param {object|null} win 来源窗口（null/已销毁时静默跳过）
  * @param {Array<{id:string, coverUrl?:string, coverThumb?:{path:string, thumbUrl:string}}>} updates
  */
 export function sendThumbReady(win, updates) {
-  if (!win || win.isDestroyed() || !updates?.length) return
-  win.webContents.send('models:thumbsReady', { updates })
+  flushThumbReadyUpdates()
+  deliverThumbReady(win, updates)
 }
 
 /**
  * 清空延迟缩略图归属表（切换模型根目录时调用，C5）。
  * 残留的旧根条目会在下一轮 startThumbDrain 中把新根生成的缩略图
- * 推送给旧根的模型卡片（无效更新）。
+ * 推送给旧根的模型卡片（无效更新）。未发送的旧根批次一并丢弃。
  */
 export function clearDeferredOwners() {
   deferredOwners.clear()
+  dropPendingThumbBatch()
 }
 
 /**
@@ -118,8 +177,8 @@ export function startThumbDrain(win) {
   deferredOwners.clear()
   const prev = getThumbDrainPromise()
   const drainPromise = (prev ? prev.catch(() => {}) : Promise.resolve())
-    .then(() =>
-      drainDeferredThumbs((absCover, thumbPath) => {
+    .then(async () => {
+      await drainDeferredThumbs((absCover, thumbPath) => {
         const ids = ownersSnapshot.get(absCover)
         if (!ids?.size) return
         const thumbUrl = toImageUrl(thumbPath)
@@ -145,9 +204,12 @@ export function startThumbDrain(win) {
           }
           if (update.coverUrl || update.coverThumb) updates.push(update)
         }
-        sendThumbReady(win, updates)
+        // O2：累积到时间窗批次，避免每张缩略图一次 IPC
+        queueThumbReady(win, updates)
       })
-    )
+      // 本轮结束强制刷新：保证最后一批更新在 drain promise 完成前送达
+      flushThumbReadyUpdates()
+    })
     .finally(() => {
       // 仍是本轮时才清除：排队执行保证了这里只会在链尾清空，防御性校验
       // 避免极端情况下误清新一轮的登记
@@ -203,13 +265,21 @@ export function resolveCoverSafe(cover) {
   }
 }
 
-/** 单模型的元数据装饰（封面列表校验、默认封面回退 sidecar 预览图） */
-async function decorateOne(model, usedThumbs) {
+/**
+ * 单模型的元数据装饰（封面列表校验、默认封面回退 sidecar 预览图）。
+ * @param {object} model 扫描出的模型
+ * @param {Set<string>} usedThumbs 缩略图保留名单
+ * @param {boolean} [forceRefresh] 跳过装饰缓存（局部扫描变更子树使用：
+ *   sidecar/封面文件变化不会改变模型 mtime，不能靠 mtime + 元数据签名识别）
+ */
+async function decorateOne(model, usedThumbs, forceRefresh = false) {
   const meta0 = getModelMeta(model.id) || {}
   const cached = decorateCache.get(model.id)
   // 增量扫描缓存命中：mtime 与元数据签名均未变化时复用上次结果
-  //（命中路径不做任何文件 IO，sidecar 导入仅发生在缓存未命中时）
-  if (cached && cached.mtimeMs === model.mtimeMs && cached.signature === metaSignature(meta0)) {
+  //（命中路径不做任何文件 IO，sidecar 导入仅发生在缓存未命中时）。
+  // forceRefresh 由局部扫描在变更子树上置位：即使模型文件 mtime 未变，
+  // 也必须重新检查 sidecar/封面文件，避免新增/修改的 sidecar 被缓存遮蔽。
+  if (!forceRefresh && cached && cached.mtimeMs === model.mtimeMs && cached.signature === metaSignature(meta0)) {
     // 刷新插入顺序实现简易 LRU
     decorateCache.delete(model.id)
     decorateCache.set(model.id, cached)
@@ -345,19 +415,25 @@ async function decorateOne(model, usedThumbs) {
  * 末尾按已使用的缩略图清单清理失效缩略图文件。
  * @param {Array<object>} models 扫描出的模型列表
  * @param {AbortSignal} [signal] 取消信号（批间检查）
- * @param {{pruneThumbs?: boolean}} [opts] pruneThumbs=false 跳过末尾的失效
- *   缩略图清理（局部增量扫描必传）：局部装饰仅覆盖变更子树，usedThumbs 不含
- *   子树外模型的缩略图，此时按名单清理会把子树外有效缩略图全部误删——且
- *   装饰缓存命中路径不会重新生成，坏图将持续到元数据变化。失效缩略图与孤儿
- *   封面同一约定（scan.js：「不做孤儿清理，全量扫描兜底」）。
+ * @param {{pruneThumbs?: boolean, forceRefresh?: boolean}} [opts]
+ *   pruneThumbs=false 跳过末尾的失效缩略图清理（局部增量扫描必传）：
+ *   局部装饰仅覆盖变更子树，usedThumbs 不含子树外模型的缩略图，此时按名单
+ *   清理会把子树外有效缩略图全部误删——且装饰缓存命中路径不会重新生成，
+ *   坏图将持续到元数据变化。失效缩略图与孤儿封面同一约定（scan.js：
+ *   「不做孤儿清理，全量扫描兜底」）。
+ *   forceRefresh=true 跳过缓存重新装饰（局部扫描必传）：变更子树内的
+ *   sidecar/封面文件可能变化而未改动模型 mtime，缓存命中会遮蔽这些变化。
  */
 export async function decorateModels(models, signal, opts = {}) {
   const usedThumbs = new Set()
   const result = []
+  const forceRefresh = opts.forceRefresh === true
   for (let i = 0; i < models.length; i += DECORATE_BATCH_SIZE) {
     if (signal?.aborted) throw abortError()
     const batch = models.slice(i, i + DECORATE_BATCH_SIZE)
-    const decoratedBatch = await Promise.all(batch.map((m) => decorateOne(m, usedThumbs)))
+    const decoratedBatch = await Promise.all(
+      batch.map((m) => decorateOne(m, usedThumbs, forceRefresh))
+    )
     result.push(...decoratedBatch)
   }
   if (opts.pruneThumbs !== false) await pruneThumbs(usedThumbs)

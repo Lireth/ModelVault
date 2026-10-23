@@ -7,7 +7,7 @@ import { loadSettings } from './services/store'
 import { quitAfterFlush } from './quit'
 import { handleUncaughtException } from './fatal-error'
 import { runStartupSmoke } from './smoke'
-import { isAllowedExternalUrl } from './utils'
+import { isAllowedExternalUrl, parseWaitForPid, waitForProcessExit } from './utils'
 import logger from './logger'
 
 // 启动冒烟使用独立 userData，避免污染真实用户配置与单实例锁
@@ -43,13 +43,24 @@ process.on('unhandledRejection', (reason) => {
 
 /**
  * 单实例锁：确保 Windows 下同一时刻只运行一个应用实例。
+ * 更新安装拉起的新实例带 --wait-for-pid=<旧 pid>（V-06）：先等待旧实例
+ * 退出释放锁，再申请单实例锁，避免“更新后新版本闪退”。
  */
-const gotSingleInstanceLock = app.requestSingleInstanceLock()
+async function startApp() {
+  const waitPid = parseWaitForPid(process.argv)
+  if (waitPid) {
+    logger.info(`更新启动：等待上一实例退出（pid=${waitPid}）`)
+    const exited = await waitForProcessExit(waitPid, { timeoutMs: 15000 })
+    if (!exited) logger.warn(`等待上一实例超时，继续尝试启动（pid=${waitPid}）`)
+  }
 
-if (!gotSingleInstanceLock) {
-  logger.warn('检测到已有实例在运行，当前实例即将退出')
-  app.quit()
-} else {
+  const gotSingleInstanceLock = app.requestSingleInstanceLock()
+  if (!gotSingleInstanceLock) {
+    logger.warn('检测到已有实例在运行，当前实例即将退出')
+    app.quit()
+    return
+  }
+
   // 第二实例启动时，聚焦已有窗口
   app.on('second-instance', () => {
     const win = getMainWindow()
@@ -103,6 +114,8 @@ if (!gotSingleInstanceLock) {
     app.quit()
   })
 }
+
+void startApp()
 
 // Windows 平台惯例：所有窗口关闭后退出应用（退出编排见 quit.js：
 // 停监控 -> 等两路落盘 -> quit，落盘超时强制退出，A4）

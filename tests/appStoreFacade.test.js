@@ -25,6 +25,7 @@ const EXPECTED_EXPORTS = [
   'CARD_SIZE_PRESETS',
   'CARD_SIZE_OPTIONS',
   'SCAN_EXTENSION_OPTIONS',
+  'HASH_WARMUP_OPTIONS',
   'sortDirectional',
   'tagsForType',
   'typeInfo',
@@ -130,7 +131,8 @@ const EXPECTED_EXPORTS = [
   'handleMenuAction',
   // 文件操作（批次 4）
   'toggleDisabledModel',
-  'moveModelTo'
+  'moveModelTo',
+  'importModels'
 ]
 
 describe('appStore 门面导出契约（A-04）', () => {

@@ -19,7 +19,15 @@ export default defineConfig({
   // 主进程：外部化所有依赖，仅打包业务代码（fflate 除外——打进 bundle 后
   // electron-builder 可整个排除 node_modules，避免 asar 携带无用的依赖树）
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: ['fflate'] })]
+    plugins: [externalizeDepsPlugin({ exclude: ['fflate'] })],
+    // E1：将发布签名者证书指纹注入主进程 bundle。CI 设置该环境变量后，
+    // 更新下载/安装链路会强制 Authenticode 验签；本地/未签名构建为空串，
+    // 退化为仅 SHA256 校验。
+    define: {
+      __MODELVAULT_SIGNER_THUMBPRINT__: JSON.stringify(
+        process.env.MODELVAULT_SIGNER_THUMBPRINT || ''
+      )
+    }
   },
   // 预加载脚本
   preload: {

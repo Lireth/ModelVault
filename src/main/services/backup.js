@@ -1,8 +1,17 @@
 import { app, dialog } from 'electron'
-import { createReadStream } from 'node:fs'
+import { createReadStream, createWriteStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { strToU8, Unzip, UnzipInflate, unzip, zip } from 'fflate'
+import {
+  strToU8,
+  Unzip,
+  UnzipInflate,
+  unzip,
+  zip,
+  Zip,
+  ZipDeflate,
+  ZipPassThrough
+} from 'fflate'
 import logger from '../logger'
 import { runMaintenance } from './maintenance-lock'
 import {
@@ -122,6 +131,73 @@ export function zipBackupAsync(files) {
 }
 
 /**
+ * 流式写出备份 zip（OPT-10）：封面逐个读取并直接写入压缩流，不再把所有
+ * 封面字节聚合进内存后再整体压缩；内存峰值从「全部封面」降为「单个读块」。
+ * JSON 使用 deflate，封面通常已是压缩格式，使用 pass-through 避免无意义 CPU。
+ * @param {string} filePath 输出 zip 路径
+ * @param {{settingsText: string, storeText?: string, manifestText: string,
+ *   covers?: Array<{name: string, path: string}>}} contents
+ * @returns {Promise<void>} 写入完成
+ */
+function writeBackupZipToFile(filePath, contents) {
+  return new Promise((resolve, reject) => {
+    const out = createWriteStream(filePath)
+    let settled = false
+    const fail = (err) => {
+      if (settled) return
+      settled = true
+      out.destroy()
+      reject(err)
+    }
+    out.on('error', fail)
+    out.on('finish', () => {
+      if (settled) return
+      settled = true
+      resolve()
+    })
+
+    const archive = new Zip((err, data, final) => {
+      if (err) return fail(err)
+      if (data && data.length > 0) out.write(Buffer.from(data))
+      if (final) out.end()
+    })
+
+    const addText = (name, text) => {
+      const file = new ZipDeflate(name, { level: ZIP_LEVEL })
+      archive.add(file)
+      file.push(strToU8(text), true)
+    }
+
+    /** 逐个封面流式写入：只保留当前读块 */
+    const addCover = (cover) =>
+      new Promise((resolveCover, rejectCover) => {
+        const file = new ZipPassThrough(`${LIB_COVERS_PREFIX}${cover.name}`)
+        archive.add(file)
+        const stream = createReadStream(cover.path, { highWaterMark: UNZIP_CHUNK_SIZE })
+        stream.on('data', (chunk) => file.push(new Uint8Array(chunk)))
+        stream.on('end', () => {
+          file.push(new Uint8Array(0), true)
+          resolveCover()
+        })
+        stream.on('error', rejectCover)
+      })
+
+    try {
+      addText('settings.json', contents.settingsText)
+      if (contents.storeText) addText(`${LIB_PREFIX}${DATA_FILE}`, contents.storeText)
+      ;(async () => {
+        for (const cover of contents.covers || []) await addCover(cover)
+        // manifest 放在最后：前面的条目均已成功加入后，清单才声明完整内容
+        addText('manifest.json', contents.manifestText)
+        archive.end()
+      })().catch(fail)
+    } catch (err) {
+      fail(err)
+    }
+  })
+}
+
+/**
  * 异步解压备份包（A-01）：与 zipBackupAsync 同理，解压 GB 级 zip 时
  * 分片让出事件循环，避免 importBackup 期间界面冻结。
  * @param {Uint8Array} bytes zip 字节
@@ -226,14 +302,22 @@ function concatBytes(chunks, size) {
  * - 重复条目直接拒绝（避免同名条目覆盖产生歧义）。
  *
  * @param {string} filePath zip 文件路径
- * @param {{manifestOnly?: boolean, stats?: {skippedCovers: number}}} [options]
- *   manifestOnly 仅解出 manifest.json；stats 用于回传被跳过的非法封面条目数
- * @returns {Promise<Record<string, Uint8Array>>} 条目名 → 内容
+ * @param {{manifestOnly?: boolean, stats?: {skippedCovers: number},
+ *   coverWriter?: ((name: string, data: Uint8Array) => Promise<void>) | null,
+ *   skipCovers?: boolean}} [options]
+ *   manifestOnly 仅解出 manifest.json；stats 用于回传被跳过的非法封面条目数；
+ *   coverWriter 在封面条目解压完成时直接交给调用方落盘（OPT-10：不在内存
+ *   聚合全部封面）；skipCovers 连封面解压也跳过（仅设置恢复场景）
+ * @returns {Promise<Record<string, Uint8Array>>} 非封面条目名 → 内容
  */
-async function streamBackupZip(filePath, { manifestOnly = false, stats = null } = {}) {
+async function streamBackupZip(
+  filePath,
+  { manifestOnly = false, stats = null, coverWriter = null, skipCovers = false } = {}
+) {
   // 无原型对象：条目名来自不可信 zip，避免任何特殊键影响查找语义
   const entries = Object.create(null)
   const seen = new Set()
+  const coverWrites = []
   let entryCount = 0
   let totalBytes = 0
   let failure = null
@@ -250,6 +334,11 @@ async function streamBackupZip(filePath, { manifestOnly = false, stats = null } 
       fail(new Error(`备份条目数量超过上限（${MAX_BACKUP_ENTRIES}）`))
       return
     }
+    const isCover = file.name.startsWith(LIB_COVERS_PREFIX)
+    if (isCover && skipCovers) {
+      if (stats) stats.skippedCovers += 1
+      return
+    }
     const limit = manifestOnly
       ? file.name === 'manifest.json'
         ? MAX_MANIFEST_BYTES
@@ -257,7 +346,7 @@ async function streamBackupZip(filePath, { manifestOnly = false, stats = null } 
       : backupEntryLimit(file.name)
     // 不认识的条目（含路径穿越的封面名）不解压，直接跳过
     if (!limit) {
-      if (!manifestOnly && stats && file.name.startsWith(LIB_COVERS_PREFIX)) {
+      if (!manifestOnly && stats && isCover) {
         stats.skippedCovers += 1
       }
       return
@@ -296,7 +385,22 @@ async function streamBackupZip(filePath, { manifestOnly = false, stats = null } 
         }
         chunks.push(chunk)
       }
-      if (final) entries[file.name] = concatBytes(chunks, received)
+      if (!final) return
+      const data = concatBytes(chunks, received)
+      if (isCover && coverWriter) {
+        // 封面在解压完成时立即交给调用方落盘；chunks 引用随条目结束释放，
+        // 不会像旧实现那样把全部封面留在 entries 中直到恢复结束
+        const name = safeCoverName(file.name)
+        coverWrites.push(
+          Promise.resolve()
+            .then(() => coverWriter(name, data))
+            .catch((writeErr) => {
+              fail(writeErr)
+            })
+        )
+        return
+      }
+      entries[file.name] = data
     }
     try {
       file.start()
@@ -316,9 +420,11 @@ async function streamBackupZip(filePath, { manifestOnly = false, stats = null } 
         break
       }
     }
-    if (failure) throw failure
-    // 结束流：触发剩余条目收尾（空条目在 final 时写入 entries）
-    unzipper.push(new Uint8Array(0), true)
+    // 结束流：触发剩余条目收尾（空条目在 final 时写入 entries/封面落盘）。
+    // 即使中途已记录失败，也先等待已开始的封面写盘结束，再由调用方清理临时目录，
+    // 避免删除目录时仍有写入在途。
+    if (!failure) unzipper.push(new Uint8Array(0), true)
+    if (coverWrites.length > 0) await Promise.all(coverWrites)
     if (failure) throw failure
     return entries
   } finally {
@@ -342,9 +448,13 @@ async function readBackupManifest(filePath) {
  * @param {string} filePath zip 文件路径
  * @returns {Promise<{files: Record<string, Uint8Array>, skippedCovers: number}>}
  */
-async function unzipBackupEntries(filePath) {
+async function unzipBackupEntries(filePath, options = {}) {
   const stats = { skippedCovers: 0 }
-  const files = await streamBackupZip(filePath, { stats })
+  const files = await streamBackupZip(filePath, {
+    stats,
+    coverWriter: options.coverWriter || null,
+    skipCovers: options.skipCovers === true
+  })
   return { files, skippedCovers: stats.skippedCovers }
 }
 
@@ -372,8 +482,7 @@ export async function exportBackup(win) {
   // 模型文件夹时配置随包生效，且不会劫持本机的激活库/库列表
   const librarySettings = getLibrarySettings()
   const root = getCurrentRoot()
-  /** @type {Record<string, Uint8Array>} */
-  const files = {}
+  const settingsText = JSON.stringify(librarySettings, null, 2)
   const manifest = {
     app: BACKUP_FORMAT,
     version: BACKUP_VERSION,
@@ -381,14 +490,14 @@ export async function exportBackup(win) {
     appVersion: app.getVersion(),
     settings: true
   }
-  files['settings.json'] = strToU8(JSON.stringify(librarySettings, null, 2))
 
   let models = 0
   let covers = 0
+  let storeText = ''
+  const coverFiles = []
   if (root) {
     const storeFile = path.join(root, DATA_DIR, DATA_FILE)
     const coversDir = path.join(root, DATA_DIR, COVERS_DIR)
-    let storeText = ''
     try {
       storeText = await fs.readFile(storeFile, 'utf-8')
       models = Object.keys(JSON.parse(storeText)?.models || {}).length
@@ -399,7 +508,7 @@ export async function exportBackup(win) {
       // 该库尚未生成过关联数据：仅备份应用设置
     }
     if (storeText) {
-      // 封面整体纳入前先统计总字节，超限拒绝（内存打包的保护阀）。
+      // 封面写入前先统计总字节，超限拒绝。
       // O5：统计并发化（复用下方读取的同一并发度）——数百封面下逐个串行
       // await stat 的统计阶段比 8 路并发的读取阶段还慢，成为备份瓶颈
       const coverNames = await fs.readdir(coversDir).catch(() => [])
@@ -407,31 +516,22 @@ export async function exportBackup(win) {
         fs.stat(path.join(coversDir, name)).catch(() => null)
       )
       let totalBytes = 0
-      for (const stat of stats) {
-        if (stat?.isFile()) totalBytes += stat.size
+      for (let i = 0; i < coverNames.length; i++) {
+        const stat = stats[i]
+        if (!stat?.isFile()) continue
+        totalBytes += stat.size
+        coverFiles.push({ name: coverNames[i], path: path.join(coversDir, coverNames[i]) })
       }
       if (totalBytes > MAX_COVERS_BYTES) {
         return {
           error: `封面数据总量超过 ${Math.floor(MAX_COVERS_BYTES / 1024 / 1024)}MB，为避免内存占用过高已停止备份；请手动复制 .modelvault 文件夹`
         }
       }
-      files[`${LIB_PREFIX}${DATA_FILE}`] = strToU8(storeText)
-      manifest.library = { root, models }
-      // 封面有限并发读取（A-01）：串行 await 数百张封面时耗时叠加，
-      // 8 路并发显著缩短备份时间，且不会一次性占满文件句柄
-      const buffers = await mapLimit(coverNames, COVER_IO_CONCURRENCY, (name) =>
-        fs.readFile(path.join(coversDir, name)).catch(() => null)
-      )
-      for (let i = 0; i < coverNames.length; i++) {
-        const buf = buffers[i]
-        if (!buf) continue
-        files[`${LIB_COVERS_PREFIX}${coverNames[i]}`] = new Uint8Array(buf)
-        covers += 1
-      }
-      manifest.library.covers = covers
+      covers = coverFiles.length
+      manifest.library = { root, models, covers }
     }
   }
-  files['manifest.json'] = strToU8(JSON.stringify(manifest, null, 2))
+  const manifestText = JSON.stringify(manifest, null, 2)
 
   const date = new Date().toISOString().slice(0, 10)
   const result = await dialog.showSaveDialog(win, {
@@ -441,18 +541,26 @@ export async function exportBackup(win) {
   })
   if (result.canceled || !result.filePath) return { canceled: true }
   try {
-    // 异步分片压缩（A-01）：数百 MB 封面期间主进程事件循环保持响应
-    const zipped = await zipBackupAsync(files)
-    await fs.writeFile(result.filePath, zipped)
+    // OPT-10：封面逐个读入压缩流，不再把所有封面缓冲进内存。
+    // 压缩期间主进程仅保留当前读块，内存峰值与封面总量解耦。
+    await writeBackupZipToFile(result.filePath, {
+      settingsText,
+      storeText,
+      manifestText,
+      covers: coverFiles
+    })
+    const outStat = await fs.stat(result.filePath)
     logger.info(`备份已导出: ${result.filePath}（${models} 模型 / ${covers} 封面）`)
     return {
       path: result.filePath,
-      sizeBytes: zipped.byteLength,
+      sizeBytes: outStat.size,
       library: Boolean(manifest.library),
       models,
       covers
     }
   } catch (err) {
+    // 失败时清理半成品，避免用户误以为备份可用
+    await fs.rm(result.filePath, { force: true }).catch(() => {})
     logger.warn(`备份导出失败: ${err.message}`)
     return { error: `备份写入失败: ${err.message}` }
   }
@@ -486,48 +594,33 @@ async function pruneRestoreArtifacts(root, keepBakName) {
 }
 
 /**
- * 从备份恢复库数据到目标模型根目录（解出 → 校验 → 目录交换）：
+ * 从备份恢复库数据到目标模型根目录（流式解出 → 校验 → 目录交换）：
  * 既有数据留 .bak 而非直接删除，恢复中断可回滚；失败即清理本次临时目录，
  * 成功后按「仅保留最新 .bak」治理残留（OPT-18）。
+ * OPT-10：封面在解压完成时直接写入临时目录，不再先聚合到内存条目表；
+ * store/settings 等小条目仍保留在内存中用于校验与规范化。
  * @param {string} root 目标模型根目录
- * @param {Record<string, Uint8Array>} unzipped 解压出的备份条目
- * @param {object|null} [libSettings] 随备份恢复的库设置（写入目标库的
- *   .modelvault/settings.json，随目录交换原子生效；空则不写）
+ * @param {string} filePath 备份 zip 路径
  * @param {number} [skippedCovers] 解压阶段跳过的非法封面条目数（B-04）
- * @returns {Promise<{root: string, models: number, covers: number, skipped: number}>}
+ * @param {boolean} [restoreSettings] 是否恢复备份中的库设置（manifest.settings）
+ * @returns {Promise<{root: string, models: number, covers: number, skipped: number,
+ *   settingsRestored: boolean}>}
  */
-async function restoreLibrary(root, unzipped, libSettings = null, skippedCovers = 0) {
+async function restoreLibrary(root, filePath, skippedCovers = 0, restoreSettings = true) {
   // V-02：恢复会整体替换目标库的 .modelvault，必须与扫描/局部扫描/切库互斥。
   // 拿不到锁时抛出 EBUSY，由 importBackup 转换为「正在…，请稍候」
   return runMaintenance('restore', root, () =>
-    restoreLibraryLocked(root, unzipped, libSettings, skippedCovers)
+    restoreLibraryLocked(root, filePath, skippedCovers, restoreSettings)
   )
 }
 
 /**
  * 恢复库数据（调用方已持有全局维护锁）。
  * @param {string} root 目标模型根目录
- * @param {Record<string, Uint8Array>} unzipped 解压出的备份条目
- * @param {object|null} libSettings 随备份恢复的库设置
+ * @param {string} filePath 备份 zip 路径
  * @param {number} skippedCovers 解压阶段跳过的非法封面条目数
  */
-async function restoreLibraryLocked(root, unzipped, libSettings = null, skippedCovers = 0) {
-  const decoder = new TextDecoder()
-  const storeText = decoder.decode(unzipped[`${LIB_PREFIX}${DATA_FILE}`])
-  // 落盘前先校验 JSON 并规范化（B-04）：备份来自不可信来源，
-  // store.json 的键与字段必须按与磁盘加载相同的规则清洗（原型污染/超大字段）
-  const parsed = JSON.parse(storeText)
-  const sanitized = normalizeStoreData(parsed)
-  const sanitizedText = JSON.stringify(sanitized, null, 2)
-  const sourceCount =
-    parsed && typeof parsed === 'object' && parsed.models && typeof parsed.models === 'object'
-      ? Object.keys(parsed.models).length
-      : 0
-  if (Object.keys(sanitized.models).length !== sourceCount) {
-    logger.warn(
-      `备份元数据已清洗: ${sourceCount} → ${Object.keys(sanitized.models).length} 条（剔除非法键/字段）`
-    )
-  }
+async function restoreLibraryLocked(root, filePath, skippedCovers = 0, restoreSettings = true) {
   // 静止两路写盘链（B1/B-02 修复配套）：在途的防抖/原子写完成于目录交换之后时，
   // 其 rename 会把恢复前的旧数据覆盖到刚恢复的 store.json / settings.json 上。
   // 恢复目标为当前激活根时风险最大；对其他根 flush 只是把当前根待落盘数据
@@ -537,37 +630,53 @@ async function restoreLibraryLocked(root, unzipped, libSettings = null, skippedC
   const dataDir = path.join(root, DATA_DIR)
   const stamp = Date.now()
   const tmpDir = `${dataDir}.restore-${stamp}`
+  const coversDir = path.join(tmpDir, COVERS_DIR)
   await fs.rm(tmpDir, { recursive: true, force: true })
+  let covers = 0
   try {
-    await fs.mkdir(path.join(tmpDir, COVERS_DIR), { recursive: true })
-    await fs.writeFile(path.join(tmpDir, DATA_FILE), sanitizedText)
-    if (libSettings) {
-      // 库设置随备份恢复（设置随模型库走）：写入临时目录，随目录交换原子生效
-      await fs.writeFile(
-        path.join(tmpDir, LIB_SETTINGS_FILE),
-        JSON.stringify(libSettings, null, 2)
+    await fs.mkdir(coversDir, { recursive: true })
+    const stats = { skippedCovers }
+    const decoder = new TextDecoder()
+    // 封面解压完成即落盘：临时目录仅承载文件，内存中只保留当前封面字节
+    const unzipped = await streamBackupZip(filePath, {
+      stats,
+      // name 由 safeCoverName 校验过（不安全条目在解压阶段已跳过），此处可直接落盘
+      coverWriter: async (name, data) => {
+        await fs.writeFile(path.join(coversDir, name), data)
+        covers += 1
+      }
+    })
+
+    const storeBytes = unzipped[`${LIB_PREFIX}${DATA_FILE}`]
+    if (!storeBytes) throw new Error('备份缺少库元数据')
+    const storeText = decoder.decode(storeBytes)
+    // 落盘前先校验 JSON 并规范化（B-04）：备份来自不可信来源，
+    // store.json 的键与字段必须按与磁盘加载相同的规则清洗（原型污染/超大字段）
+    const parsed = JSON.parse(storeText)
+    const sanitized = normalizeStoreData(parsed)
+    const sanitizedText = JSON.stringify(sanitized, null, 2)
+    const sourceCount =
+      parsed && typeof parsed === 'object' && parsed.models && typeof parsed.models === 'object'
+        ? Object.keys(parsed.models).length
+        : 0
+    if (Object.keys(sanitized.models).length !== sourceCount) {
+      logger.warn(
+        `备份元数据已清洗: ${sourceCount} → ${Object.keys(sanitized.models).length} 条（剔除非法键/字段）`
       )
     }
+    await fs.writeFile(path.join(tmpDir, DATA_FILE), sanitizedText)
 
-    let covers = 0
-    let skipped = skippedCovers
-    // 封面有限并发写入（A-01）；JS 单线程下计数器在 await 间隙无竞态
-    const coverEntries = Object.entries(unzipped).filter(([entryName]) =>
-      entryName.startsWith(LIB_COVERS_PREFIX)
-    )
-    await mapLimit(coverEntries, COVER_IO_CONCURRENCY, async ([entryName, data]) => {
-      const name = safeCoverName(entryName)
-      if (!name) {
-        skipped += 1
-        logger.warn(`恢复时跳过不安全的备份条目: ${entryName}`)
-        return
-      }
-      await fs.writeFile(path.join(tmpDir, COVERS_DIR, name), data)
-      // 写盘后立即释放该条目（O5）：数百 MB 的解压封面集不再整体驻留到
-      // 恢复流程结束，堆峰值随写入推进递减
-      unzipped[entryName] = null
-      covers += 1
-    })
+    let settingsRestored = false
+    if (restoreSettings && unzipped['settings.json']) {
+      // 库设置随备份恢复（设置随模型库走）：写入临时目录，随目录交换原子生效
+      const parsedSettings = JSON.parse(decoder.decode(unzipped['settings.json']))
+      const normalizedSettings = normalizeLibrarySettings(parsedSettings)
+      await fs.writeFile(
+        path.join(tmpDir, LIB_SETTINGS_FILE),
+        JSON.stringify(normalizedSettings, null, 2)
+      )
+      settingsRestored = true
+    }
 
     // 交换：既有目录让位到 .bak，临时目录上位；上位失败则回滚，目标目录不留半成品
     let bakDir = ''
@@ -586,7 +695,13 @@ async function restoreLibraryLocked(root, unzipped, libSettings = null, skippedC
 
     // 残留治理（OPT-18）：更早的 .bak 仅保留本次一份；历史 .restore 临时目录清除
     await pruneRestoreArtifacts(root, bakDir ? path.basename(bakDir) : '')
-    return { root, models: Object.keys(sanitized.models).length, covers, skipped }
+    return {
+      root,
+      models: Object.keys(sanitized.models).length,
+      covers,
+      skipped: stats.skippedCovers,
+      settingsRestored
+    }
   } catch (err) {
     // 失败兜底：清理本次解出的临时目录，不在用户模型目录留垃圾
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
@@ -629,31 +744,12 @@ export async function importBackup(win) {
   if (!parsedManifest.ok) return { error: parsedManifest.error }
   const manifest = parsedManifest.manifest
 
-  let unpacked
-  try {
-    // 第二遍：流式解出已知条目，逐条/总量限额，未知条目直接跳过
-    unpacked = await unzipBackupEntries(filePath)
-  } catch (err) {
-    return { error: `备份文件解压失败: ${err.message}` }
-  }
-  const { files: unzipped, skippedCovers } = unpacked
-
-  // 设置恢复（库设置随模型库走）：先规范化并暂存——含库数据时随目录交换
-  // 写入目标库的 .modelvault/settings.json；仅设置的备份（或旧格式 settings-only）
-  // 写入当前激活库。引导字段（激活库/库列表）一律剥离：恢复到任意文件夹
-  // 不得劫持本机的库列表（兼容旧格式备份中的完整设置快照）
-  let settingsPayload = null
-  if (manifest.settings && unzipped['settings.json']) {
-    try {
-      const parsed = JSON.parse(new TextDecoder().decode(unzipped['settings.json']))
-      settingsPayload = normalizeLibrarySettings(parsed)
-    } catch (err) {
-      return { error: `备份中的设置数据损坏: ${err.message}` }
-    }
-  }
-
-  // 库数据恢复：需要用户指定目标模型文件夹
-  if (manifest.library && unzipped[`${LIB_PREFIX}${DATA_FILE}`]) {
+  // 第二遍在确定恢复路径后再执行：
+  // - 含库数据：先选目标目录，再在维护锁内流式解压，封面逐张落盘；
+  // - 仅设置：跳过封面解压，只读取设置/元数据。
+  // 库设置随模型库走：含库数据时写入目标库的 .modelvault/settings.json；
+  // 引导字段（激活库/库列表）一律剥离，避免恢复到任意文件夹时劫持本机库列表。
+  if (manifest.library) {
     const target = await dialog.showOpenDialog(win, {
       title: '选择要恢复到的模型文件夹',
       properties: ['openDirectory']
@@ -688,15 +784,15 @@ export async function importBackup(win) {
     try {
       const libraryRestored = await restoreLibrary(
         root,
-        unzipped,
-        settingsPayload,
-        skippedCovers
+        filePath,
+        0,
+        manifest.settings === true
       )
       logger.info(
         `备份已恢复: ${filePath} → ${root}（${libraryRestored.models} 模型 / ${libraryRestored.covers} 封面）`
       )
       return {
-        settingsRestored: settingsPayload !== null,
+        settingsRestored: libraryRestored.settingsRestored,
         libraryRestored,
         skipped: libraryRestored.skipped
       }
@@ -707,7 +803,23 @@ export async function importBackup(win) {
   }
 
   // 仅设置的备份（无库数据，含旧格式 settings-only）：写入当前激活库随库生效；
-  // 尚无激活库时无处落盘，保持未恢复状态
+  // 尚无激活库时无处落盘，保持未恢复状态。
+  // skipCovers：此路径不恢复库数据，封面条目连解压都不做，避免无效内存/CPU。
+  let unpacked
+  try {
+    unpacked = await unzipBackupEntries(filePath, { skipCovers: true })
+  } catch (err) {
+    return { error: `备份文件解压失败: ${err.message}` }
+  }
+  let settingsPayload = null
+  if (manifest.settings && unpacked.files['settings.json']) {
+    try {
+      const parsed = JSON.parse(new TextDecoder().decode(unpacked.files['settings.json']))
+      settingsPayload = normalizeLibrarySettings(parsed)
+    } catch (err) {
+      return { error: `备份中的设置数据损坏: ${err.message}` }
+    }
+  }
   if (settingsPayload) {
     const root = getCurrentRoot()
     if (root) {

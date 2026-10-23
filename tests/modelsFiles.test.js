@@ -23,9 +23,16 @@ vi.mock('electron', () => ({
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() }
 }))
 
-import { planOrganizeMoves, registerFilesHandlers } from '../src/main/ipc/models/files'
+import {
+  isImportableModelFile,
+  planImportTarget,
+  planOrganizeMoves,
+  registerFilesHandlers,
+  splitModelFileName
+} from '../src/main/ipc/models/files'
 import { getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
 import { getModelMeta, loadData, setDataRoot, setModelMeta } from '../src/main/services/store'
+import { dialog } from 'electron'
 
 /** 本文件创建的全部临时目录（afterAll 只清理这些，不动系统临时目录） */
 const roots = []
@@ -176,5 +183,138 @@ describe('models:organizeByTags handler', () => {
   it('空 moves 拒绝执行', async () => {
     expect(await handler(makeEvent(), {})).toEqual({ error: '没有需要移动的模型' })
     expect(await handler(makeEvent(), { moves: [] })).toEqual({ error: '没有需要移动的模型' })
+  })
+})
+
+describe('F2 模型导入（复制/移动入台）', () => {
+  let root
+  let srcDir
+  let handler
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-import-root-'))
+    srcDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-import-src-'))
+    roots.push(root, srcDir)
+    setDataRoot(root)
+    await loadData()
+    registerFilesHandlers()
+    handler = getRegisteredHandler('models:importModels')
+    vi.mocked(dialog.showOpenDialog).mockReset()
+  })
+
+  async function makeSource(name = 'a.safetensors', content = 'model-data') {
+    const file = path.join(srcDir, name)
+    await fs.writeFile(file, content)
+    return file
+  }
+
+  function mockDialogs(files, targetDir) {
+    vi.mocked(dialog.showOpenDialog)
+      .mockResolvedValueOnce({ canceled: false, filePaths: files })
+      .mockResolvedValueOnce({ canceled: false, filePaths: [targetDir] })
+  }
+
+  it('复制导入：模型与 .txt/.civitai.info/预览图 sidecar 一并复制，源文件保留', async () => {
+    const source = await makeSource()
+    await fs.writeFile(path.join(srcDir, 'a.txt'), 'note')
+    await fs.writeFile(path.join(srcDir, 'a.civitai.info'), '{"trainedWords":["x"]}')
+    await fs.writeFile(path.join(srcDir, 'a.preview.png'), 'png')
+    const target = path.join(root, 'lora')
+    await fs.mkdir(target, { recursive: true })
+    mockDialogs([source], target)
+
+    const res = await handler(makeEvent(), { mode: 'copy' })
+
+    expect(res.error).toBeUndefined()
+    expect(res.imported).toBe(1)
+    expect(res.targetRelDir).toBe('lora')
+    await expect(fs.readFile(path.join(target, 'a.safetensors'), 'utf-8')).resolves.toBe('model-data')
+    await expect(fs.readFile(path.join(target, 'a.txt'), 'utf-8')).resolves.toBe('note')
+    await expect(fs.readFile(path.join(target, 'a.civitai.info'), 'utf-8')).resolves.toContain('trainedWords')
+    await expect(fs.readFile(path.join(target, 'a.preview.png'), 'utf-8')).resolves.toBe('png')
+    await expect(fs.access(source)).resolves.toBeUndefined()
+  })
+
+  it('移动导入：源模型与 sidecar 移走，源位置不存在', async () => {
+    const source = await makeSource('b.safetensors')
+    await fs.writeFile(path.join(srcDir, 'b.txt'), 'note')
+    const target = path.join(root, 'checkpoints')
+    await fs.mkdir(target, { recursive: true })
+    mockDialogs([source], target)
+
+    const res = await handler(makeEvent(), { mode: 'move' })
+
+    expect(res.imported).toBe(1)
+    await expect(fs.access(source)).rejects.toThrow()
+    await expect(fs.access(path.join(srcDir, 'b.txt'))).rejects.toThrow()
+    await expect(fs.access(path.join(target, 'b.safetensors'))).resolves.toBeUndefined()
+    await expect(fs.access(path.join(target, 'b.txt'))).resolves.toBeUndefined()
+  })
+
+  it('同名冲突自动追加编号，不覆盖库内已有文件', async () => {
+    const source = await makeSource()
+    const target = path.join(root, 'lora')
+    await fs.mkdir(target, { recursive: true })
+    await fs.writeFile(path.join(target, 'a.safetensors'), 'existing')
+    mockDialogs([source], target)
+
+    const res = await handler(makeEvent(), { mode: 'copy' })
+
+    expect(res.imported).toBe(1)
+    expect(res.renamed).toBe(1)
+    await expect(fs.readFile(path.join(target, 'a.safetensors'), 'utf-8')).resolves.toBe('existing')
+    await expect(fs.readFile(path.join(target, 'a (1).safetensors'), 'utf-8')).resolves.toBe('model-data')
+  })
+
+  it('源文件已在库内 / 扩展名不支持 / 目标目录越界时拒绝', async () => {
+    const inside = path.join(root, 'inside.safetensors')
+    await fs.writeFile(inside, 'x')
+    const target = path.join(root, 'lora')
+    await fs.mkdir(target, { recursive: true })
+    mockDialogs([inside], target)
+    const insideRes = await handler(makeEvent(), { mode: 'copy' })
+    expect(insideRes.failed[0].error).toContain('已在当前模型库内')
+
+    const bad = path.join(srcDir, 'bad.txt')
+    await fs.writeFile(bad, 'x')
+    mockDialogs([bad], target)
+    const badRes = await handler(makeEvent(), { mode: 'copy' })
+    expect(badRes.failed[0].error).toContain('不支持')
+
+    const outsideTarget = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-import-out-'))
+    roots.push(outsideTarget)
+    const good = await makeSource('c.safetensors')
+    mockDialogs([good], outsideTarget)
+    const outRes = await handler(makeEvent(), { mode: 'copy' })
+    expect(outRes.error).toBe('目标文件夹不在当前模型库内')
+
+    const storeTarget = path.join(root, '.modelvault')
+    await fs.mkdir(storeTarget, { recursive: true })
+    mockDialogs([good], storeTarget)
+    const storeRes = await handler(makeEvent(), { mode: 'copy' })
+    expect(storeRes.error).toBe('不能导入到关联存储目录')
+  })
+
+  it('纯函数：.disabled 拆分、扩展名白名单与重名规划', async () => {
+    expect(splitModelFileName('a.safetensors.disabled')).toEqual({
+      base: 'a',
+      ext: '.safetensors',
+      disabled: true
+    })
+    expect(isImportableModelFile('a.safetensors')).toBe(true)
+    expect(isImportableModelFile('a.safetensors.disabled')).toBe(true)
+    expect(isImportableModelFile('a.txt')).toBe(false)
+
+    const dir = path.join(root, 'plan')
+    await fs.mkdir(dir, { recursive: true })
+    await fs.writeFile(path.join(dir, 'm.safetensors'), 'x')
+    const plan = await planImportTarget(dir, 'm.safetensors')
+    expect(plan.fileName).toBe('m (1).safetensors')
+  })
+
+  it('取消任一对话框返回 canceled 且不写文件', async () => {
+    vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({ canceled: true, filePaths: [] })
+    expect(await handler(makeEvent(), { mode: 'copy' })).toEqual({ canceled: true })
+    expect(await handler(makeEvent(), { mode: 'bad' })).toEqual({ error: '无效的导入方式' })
   })
 })

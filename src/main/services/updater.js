@@ -1,7 +1,12 @@
-import { app, net } from 'electron'
+import { app } from 'electron'
 import logger from '../logger'
-import { isAllowedExternalUrl } from '../utils'
-import { findUpdateAssets, setPendingUpdate } from './update-download'
+import { isAllowedExternalUrl, readResponseTextLimited } from '../utils'
+import {
+  fetchAllowedUpdateUrl,
+  findUpdateAssets,
+  isSafeUpdateVersion,
+  setPendingUpdate
+} from './update-download'
 
 /**
  * 应用内检查更新（E1，F-6 扩展下载链路）：
@@ -18,6 +23,8 @@ const UPDATE_REPO = 'Lireth/ModelVault'
 
 /** 请求超时（ms） */
 const REQUEST_TIMEOUT_MS = 10000
+/** GitHub Release JSON 上限（V-06）：正常响应远小于此值 */
+const MAX_UPDATE_JSON_BYTES = 2 * 1024 * 1024
 
 /**
  * 比较两个 semver 风格版本号（仅数字段，如 0.1.2）。
@@ -47,13 +54,16 @@ export function compareVersions(a, b) {
 export async function checkForUpdate() {
   const current = app.getVersion()
   try {
-    const response = await net.fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
-      headers: {
-        'User-Agent': `ModelVault/${current}`,
-        Accept: 'application/vnd.github+json'
-      },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-    })
+    const response = await fetchAllowedUpdateUrl(
+      `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`,
+      {
+        headers: {
+          'User-Agent': `ModelVault/${current}`,
+          Accept: 'application/vnd.github+json'
+        },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+      }
+    )
     if (response.status === 404) {
       // 仓库尚无任何 release：视为已是最新
       return { current, hasUpdate: false }
@@ -63,11 +73,21 @@ export async function checkForUpdate() {
     }
     let data
     try {
-      data = await response.json()
+      data = JSON.parse(
+        await readResponseTextLimited(response, MAX_UPDATE_JSON_BYTES, '更新信息')
+      )
     } catch (err) {
       return { error: `更新信息解析失败: ${err.message}`, current }
     }
     const latest = typeof data?.tag_name === 'string' ? data.tag_name.replace(/^v/, '') : ''
+    if (!latest) {
+      return { error: '更新信息格式异常（缺少版本号）', current }
+    }
+    // V-06：版本号参与更新包文件名，必须限定纯数字三段
+    if (!isSafeUpdateVersion(latest)) {
+      logger.warn(`更新信息版本号非法，已忽略: ${String(data?.tag_name).slice(0, 80)}`)
+      return { error: '更新信息格式异常（版本号非法）', current }
+    }
     // 下载页地址必须命中外链白名单（B3）：API 响应不可信时不得把用户
     // 引向白名单外站点（渲染层据空串隐藏「前往下载」入口）
     let releaseUrl = ''
@@ -78,9 +98,6 @@ export async function checkForUpdate() {
     }
     const releaseNotes =
       typeof data?.body === 'string' && data.body ? data.body.slice(0, 500) : ''
-    if (!latest) {
-      return { error: '更新信息格式异常（缺少版本号）', current }
-    }
     const hasUpdate = compareVersions(latest, current) > 0
     // 应用内下载资产（F-6）：命名约定 + 白名单双校验通过才可用；
     // 结果保存模块态（下载入口的唯一合法 URL 来源），渲染层仅得可用性标志

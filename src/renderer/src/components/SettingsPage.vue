@@ -8,9 +8,11 @@ import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
 import {
   chooseFolder,
   closeSettings,
+  importModels,
   revealModel,
   saveSettings,
   CARD_SIZE_OPTIONS,
+  HASH_WARMUP_OPTIONS,
   SCAN_EXTENSION_OPTIONS,
   SORT_OPTIONS,
   scanModels,
@@ -62,6 +64,11 @@ async function onChangeFolder() {
   await chooseFolder()
 }
 
+/** F2：导入外部模型文件（复制/移动入台） */
+async function onImportModels(mode) {
+  await importModels(mode)
+}
+
 async function onSave() {
   saving.value = true
   try {
@@ -71,9 +78,11 @@ async function onSave() {
     const scanChanged =
       JSON.stringify([...form.scanExtensions].sort()) !==
       JSON.stringify([...(state.settings.scanExtensions || [])].sort())
+    const hashWarmupChanged = form.hashWarmup !== state.settings.hashWarmup
     const ok = await saveSettings({
       autoScan: form.autoScan,
       autoRescan: form.autoRescan,
+      hashWarmup: form.hashWarmup,
       excludeDirs,
       theme: form.theme,
       accentColor: form.accentColor,
@@ -89,14 +98,19 @@ async function onSave() {
     if (!ok) return
     // 默认排序方式立即生效
     state.sortBy = form.sortBy
+    const rescanNeeded = excludeChanged || scanChanged || hashWarmupChanged
+    const rescanReason = excludeChanged
+      ? `排除 ${excludeDirs.length} 个目录`
+      : scanChanged
+        ? '扫描类型已更新'
+        : '哈希预热策略已更新'
     toast(
       'success',
-      excludeChanged || scanChanged
-        ? `设置已保存（${excludeChanged ? `排除 ${excludeDirs.length} 个目录` : '扫描类型已更新'}），正在重新扫描`
-        : '设置已保存'
+      rescanNeeded ? `设置已保存（${rescanReason}），正在重新扫描` : '设置已保存'
     )
-    // 扫描规则（排除目录/文件类型）变化且已设置模型文件夹时，自动重新扫描使规则生效
-    if ((excludeChanged || scanChanged) && state.folder && !state.scanning) {
+    // 扫描规则（排除目录/文件类型）或哈希策略变化且已设置模型文件夹时，
+    // 自动重新扫描：使规则/预热策略立即生效（哈希策略依赖本次扫描的模型体积）
+    if (rescanNeeded && state.folder && !state.scanning) {
       await scanModels()
     }
     closeSettings()
@@ -129,6 +143,33 @@ async function onSave() {
           <div class="setting-actions">
             <button class="btn" @click="revealModel(state.folder)" :disabled="!state.folder">打开</button>
             <button class="btn btn-primary" :disabled="state.scanning" @click="onChangeFolder">更改文件夹</button>
+          </div>
+        </div>
+
+        <!-- F2：外部模型导入（原生文件选择 + 目标目录选择） -->
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-title">导入模型文件</span>
+            <span class="setting-desc">
+              从本机任意位置选择模型文件，复制或移动入台；同名 sidecar（说明/预览图/
+              civitai.info）一并搬运，重名自动追加编号，不覆盖库内文件
+            </span>
+          </div>
+          <div class="setting-actions">
+            <button
+              class="btn"
+              :disabled="state.importing || !state.folder"
+              @click="onImportModels('copy')"
+            >
+              {{ state.importing ? '导入中…' : '复制导入' }}
+            </button>
+            <button
+              class="btn"
+              :disabled="state.importing || !state.folder"
+              @click="onImportModels('move')"
+            >
+              移动导入
+            </button>
           </div>
         </div>
 
@@ -199,6 +240,28 @@ async function onSave() {
             placeholder="例如：&#10;thumbnails&#10;temp&#10;backup"
             spellcheck="false"
           ></textarea>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-title">后台哈希预热</span>
+            <span class="setting-desc">
+              重复检测需要文件 SHA256。「仅重复候选」只计算大小相同的模型（内容相同的文件必然同大小），磁盘读取最少；
+              「全库」为所有缺失哈希的模型计算；「关闭」仅在你识别或打开详情页时按需计算。
+            </span>
+          </div>
+          <div class="seg-group">
+            <button
+              v-for="h in HASH_WARMUP_OPTIONS"
+              :key="h.key"
+              type="button"
+              class="seg-btn"
+              :class="{ active: form.hashWarmup === h.key }"
+              @click="form.hashWarmup = h.key"
+            >
+              {{ h.label }}
+            </button>
+          </div>
         </div>
       </div>
 

@@ -22,15 +22,48 @@ export const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif
 /** 禁用后缀（F10）：加在完整文件名之后，WebUI/ComfyUI 生态不再加载该文件 */
 const DISABLED_SUFFIX = '.disabled'
 
-/** 最大递归深度（相对模型根），避免目录环或异常深层结构拖慢扫描 */
-const MAX_DEPTH = 8
+/**
+ * 最大递归深度（相对模型根），避免目录环或异常深层结构拖慢扫描。
+ * OPT-05：watcher 快照遍历共享同一上限，避免监控侧关注扫描侧永远不看的深层目录。
+ */
+export const MAX_SCAN_DEPTH = 8
 
 /** 并行 stat 的分批大小：单批内并发获取 size/mtime，批间串行，避免一次性打开过多文件句柄 */
 const STAT_BATCH_SIZE = 64
 
 /** 跳过的文件/目录名（说明文件、隐藏项、无关目录） */
 const EXCLUDED_ENTRY = /^(put_|\.)/i
-const EXCLUDED_DIRS = new Set(['node_modules', '.git', '$RECYCLE.BIN', 'System Volume Information'])
+
+/**
+ * 内置排除目录（小写，OPT-05 由 scanner 与 watcher 共享）：
+ * Windows 文件系统大小写不敏感，统一按小写比较，避免大小写变体漏排除。
+ * `.git`/`.modelvault` 同时命中隐藏项规则，此处显式登记以防规则演进时失配。
+ */
+export const SCAN_EXCLUDED_DIRS = new Set([
+  'node_modules',
+  '.git',
+  '.modelvault',
+  '$recycle.bin',
+  'system volume information'
+])
+
+/**
+ * 是否属于扫描/监控都应忽略的条目名（隐藏项与 put_ 临时项）。
+ * @param {unknown} name 条目名
+ * @returns {boolean}
+ */
+export function isExcludedScanEntryName(name) {
+  return typeof name === 'string' && EXCLUDED_ENTRY.test(name)
+}
+
+/**
+ * 是否为内置排除目录名（大小写不敏感）。
+ * @param {unknown} name 目录名
+ * @returns {boolean}
+ */
+export function isExcludedScanDirName(name) {
+  return typeof name === 'string' && SCAN_EXCLUDED_DIRS.has(name.toLowerCase())
+}
 
 /**
  * 分类规则：按文件夹段匹配（ComfyUI / WebUI 常见目录布局，全部小写比较）。
@@ -134,14 +167,14 @@ export async function scanModels(root, onProgress, options = {}) {
           }
         })
         // 越界（含 .. 逃逸/绝对路径）与超深子树不入栈
-        .filter((item) => item.depth <= MAX_DEPTH && isInsideRoot(item.dir))
+        .filter((item) => item.depth <= MAX_SCAN_DEPTH && isInsideRoot(item.dir))
     : [{ dir: root, depth: 0, rel: '', descend: true }]
   const stack = initialDirs
 
   while (stack.length > 0) {
     if (signal?.aborted) throw abortError()
     const { dir, depth, rel, descend } = stack.pop()
-    if (depth > MAX_DEPTH) continue
+    if (depth > MAX_SCAN_DEPTH) continue
 
     let entries
     try {
@@ -159,7 +192,7 @@ export async function scanModels(root, onProgress, options = {}) {
     const fileEntries = []
     for (const entry of entries) {
       const name = entry.name
-      if (EXCLUDED_ENTRY.test(name)) continue
+      if (isExcludedScanEntryName(name)) continue
       // 跳过符号链接/junction：避免目录环、越界扫描与重复条目
       if (entry.isSymbolicLink()) continue
 
@@ -169,7 +202,7 @@ export async function scanModels(root, onProgress, options = {}) {
       if (entry.isDirectory()) {
         const lowerName = name.toLowerCase()
         // descend=false 仅用于子树集合中的根节点（''）：不递归后代
-        if (descend && !EXCLUDED_DIRS.has(name) && !userExclude.has(lowerName)) {
+        if (descend && !isExcludedScanDirName(name) && !userExclude.has(lowerName)) {
           stack.push({ dir: fullPath, depth: depth + 1, rel: relChild, descend: true })
         }
         continue

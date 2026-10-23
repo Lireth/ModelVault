@@ -1,6 +1,6 @@
 import { state, replaceModels } from '../state'
 import { toast, confirmDialog } from '../toast'
-import { applyMetaUpdates } from '../meta-apply'
+import { applyMetaUpdates, mapWithConcurrency } from '../meta-apply'
 import { modelById } from '../selectors'
 import { LORA_TAG_KEYS } from '../../../../shared/model-categories'
 
@@ -85,10 +85,10 @@ export async function batchApplyTriggers() {
   }
   state.multiSelect.busy = true
   try {
-    const results = await Promise.allSettled(
-      targets.map(({ id, triggerWords }) =>
-        window.api.models.saveModelData({ id, triggerWords })
-      )
+    const results = await mapWithConcurrency(
+      targets,
+      ({ id, triggerWords }) => window.api.models.saveModelData({ id, triggerWords }),
+      16
     )
     const metaMap = new Map()
     let fail = 0
@@ -165,7 +165,12 @@ export async function batchDeleteModels() {
     ) {
       return
     }
-    const results = await Promise.allSettled(ids.map((id) => window.api.models.deleteModel(id)))
+    // 文件删除（回收站）是较重 IO：并发上限低于元数据批量
+    const results = await mapWithConcurrency(
+      ids,
+      (id) => window.api.models.deleteModel(id),
+      8
+    )
     const deletedIds = new Set()
     results.forEach((r, i) => {
       if (r.status === 'fulfilled' && !r.value?.error) deletedIds.add(ids[i])

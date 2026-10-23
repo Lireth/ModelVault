@@ -1,6 +1,6 @@
 import { state } from '../state'
 import { toast } from '../toast'
-import { applyMetaUpdates } from '../meta-apply'
+import { applyMetaUpdates, mapWithConcurrency } from '../meta-apply'
 
 /**
  * 批量快捷标记（E6，O-4 自 multiselect.js 按域拆出）：
@@ -22,8 +22,10 @@ async function batchApplyFlags(patch, label) {
   if (ids.length === 0 || state.multiSelect.busy) return
   state.multiSelect.busy = true
   try {
-    const results = await Promise.allSettled(
-      ids.map((id) => window.api.models.setMetaFlags({ id, ...patch }))
+    const results = await mapWithConcurrency(
+      ids,
+      (id) => window.api.models.setMetaFlags({ id, ...patch }),
+      16
     )
     const metaMap = new Map()
     let fail = 0

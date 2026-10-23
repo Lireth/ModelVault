@@ -162,7 +162,12 @@ export async function pruneThumbs(keepNames) {
     }
     const stale = entries.filter((n) => !keepNames.has(n))
     if (stale.length === 0) return
-    await Promise.all(stale.map((n) => fs.rm(path.join(dir, n), { force: true })))
+    // OPT-09：失效缩略图可能数千个，统一有界并发，避免瞬时耗尽文件句柄
+    await runWithConcurrency(
+      stale,
+      (n) => fs.rm(path.join(dir, n), { force: true }),
+      16
+    )
     logger.info(`已清理 ${stale.length} 个失效缩略图`)
   } catch (err) {
     if (err.code !== 'ENOENT') logger.warn(`缩略图清理失败: ${err.message}`)

@@ -2,6 +2,12 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { BrowserWindow } from 'electron'
 import logger from '../logger'
+import { runWithConcurrency } from '../utils'
+import {
+  MAX_SCAN_DEPTH,
+  SCAN_EXCLUDED_DIRS,
+  isExcludedScanEntryName
+} from './scanner'
 
 /**
  * 模型目录变更监控（E8；A8 由 fs.watch recursive 重写为「轮询 + 快照比对」）：
@@ -12,16 +18,17 @@ import logger from '../logger'
  *
  * 现实现：按固定间隔递归遍历目录树并比对快照（目录 -> 条目名列表）——
  * - 条目增减/重命名可靠反映在快照差异上，不受平台事件语义影响；
- * - 关联存储目录（.modelvault）与用户排除目录（excludeDirs）被整条剔除出
- *   快照（既不记录也不递归），从机制上根除「监听自身写入」的自激励问题；
+ * - 与 scanner 共享排除策略（隐藏项/put_/node_modules/.git/.modelvault/
+ *   $RECYCLE.BIN/System Volume Information）与最大深度：排除项既不记录也不
+ *   递归，从机制上根除「监听自身写入」的自激励问题，也避免监控侧关注扫描
+ *   侧永远不会扫描的目录；
+ * - 用户排除目录（excludeDirs）与 scanner 同规则，仅按目录名匹配；
  * - 检测到变更后经防抖向渲染进程推送 models:fsChanged（渲染进程据此自动重扫），
  *   防抖静默期内多次变更只触发一次广播；
  * - 快照原语（collectDirSnapshot / snapshotsEqual）同时是后续
  *   「按变更子树局部重扫」的能力基础。
  */
 
-/** 关联存储目录名：遍历时整条剔除（其存在与否/内部写入都不代表模型库变更） */
-const DATA_DIR_NAME = '.modelvault'
 /** 基础轮询间隔（ms）：目录最近有变更时以此间隔巡检 */
 const DEFAULT_POLL_INTERVAL = 2000
 /**
@@ -34,6 +41,16 @@ const DEFAULT_POLL_INTERVAL = 2000
 const DEFAULT_BACKOFF = [2000, 5000, 10000, 30000]
 /** 广播防抖（ms）：批量解压/移动文件时只触发一次重扫 */
 const DEFAULT_BROADCAST_DEBOUNCE = 3000
+/**
+ * 内容校验间隔（ms，O4）：名称快照只能发现条目增删/重命名，同名覆盖写入
+ * （下载器原地替换、工具覆写）不会改变条目名。以低频全树 stat 对比
+ * size/mtime 检出这类变更——默认 60s，避免每轮轮询都对所有文件 stat。
+ */
+const DEFAULT_CONTENT_CHECK_INTERVAL = 60000
+/** 目录遍历的并发上限（O4）：避免无界 Promise.all 在大库上耗尽句柄 */
+const DEFAULT_TRAVERSAL_CONCURRENCY = 8
+/** 内容快照中单目录内文件 stat 的并发上限（与目录池相乘仍有界） */
+const STAT_CONCURRENCY = 8
 
 /** 当前监控状态（root/excludeNames/snapshot/定时器链） */
 let watcher = null
@@ -64,35 +81,163 @@ function toNameSet(names) {
 }
 
 /**
- * 递归收集目录快照：目录绝对路径 -> 排序后的条目名列表。
- * skipNames 中的目录名（含关联存储 .modelvault）被整条剔除——既不进快照
- * 也不递归，其出现/消失/内部变化都不构成模型库变更。子目录读取失败
- * （遍历中被删除/锁定）时跳过该子树——其变化会反映在父层条目名差异上；
- * 根目录不可读时抛出，由调用方决定（监控场景下降级为停止监控）。
- * @param {string} root 遍历根目录
- * @param {Set<string>} [skipNames] 需剔除的目录名小写集合
- * @returns {Promise<Map<string, string[]>>} 目录快照
+ * 快照条目（内容快照使用；目录条目只有 name/isDir，符号链接与扫描策略一致地跳过）：
+ * @typedef {object} SnapshotEntry
+ * @property {string} name 条目名
+ * @property {boolean} [isDir] 是否为目录
+ * @property {number|null} [size] 文件字节数（stat 失败为 null）
+ * @property {number|null} [mtimeMs] 文件修改时间（stat 失败为 null）
  */
-export async function collectDirSnapshot(root, skipNames = new Set()) {
+
+/** 把并发配置收口到 [1, 64] 的安全区间 */
+function normalizeConcurrency(value) {
+  if (!Number.isFinite(value)) return DEFAULT_TRAVERSAL_CONCURRENCY
+  return Math.min(64, Math.max(1, Math.floor(value)))
+}
+
+/**
+ * 按名称排序的快照条目比较器（名称唯一，不会相等）。
+ * @param {SnapshotEntry} a
+ * @param {SnapshotEntry} b
+ * @returns {number}
+ */
+function compareEntryName(a, b) {
+  return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+}
+
+/**
+ * 递归收集目录快照（O4：有界并发遍历）。
+ * 默认返回「目录绝对路径 -> 排序后的条目名列表」；withStats=true 时返回
+ * 「目录绝对路径 -> 排序后的 SnapshotEntry[]（含 size/mtimeMs）」，用于
+ * 低频内容校验（同名覆盖写入无法从条目名差异中检出）。
+ *
+ * skipNames 中的目录名（用户排除目录）与 scanner 内置排除策略命中的条目
+ * 被整条剔除——既不进快照也不递归，其出现/消失/内部变化都不构成模型库
+ * 变更。遍历深度与 scanner 的 MAX_SCAN_DEPTH 一致；符号链接与扫描侧一致
+ * 地跳过（不跟随、不记录），避免监控侧对扫描侧忽略的条目产生误报。
+ * 子目录读取失败（遍历中被删除/锁定）时跳过该子树——其变化会反映在父层
+ * 条目名差异上；根目录不可读时抛出，由调用方决定（监控场景下降级为停止监控）。
+ *
+ * @param {string} root 遍历根目录
+ * @param {Set<string>} [skipNames] 用户排除目录名小写集合（与 scanner 同规则）
+ * @param {{withStats?: boolean, concurrency?: number}} [options]
+ *   withStats: 是否采集文件 size/mtime（内容变更检测）；concurrency: 目录并发上限
+ * @returns {Promise<Map<string, string[]|SnapshotEntry[]>>} 目录快照
+ */
+export async function collectDirSnapshot(root, skipNames = new Set(), options = {}) {
   const snapshot = new Map()
   const skip = new Set(skipNames)
-  skip.add(DATA_DIR_NAME)
-  const walk = async (dir, isRoot) => {
-    let entries
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true })
-    } catch (err) {
-      if (isRoot) throw err
-      return
+  const withStats = options.withStats === true
+  const concurrency = normalizeConcurrency(options.concurrency)
+
+  /** 动态目录队列 + 固定 worker 数：不一次性为整棵树创建 Promise */
+  const queue = [{ dir: root, isRoot: true, depth: 0 }]
+  let active = 0
+  let settled = false
+
+  await new Promise((resolve, reject) => {
+    const finish = (err) => {
+      if (settled) return
+      settled = true
+      if (err) reject(err)
+      else resolve()
     }
-    const visible = entries.filter((e) => !skip.has(e.name.toLowerCase()))
-    snapshot.set(dir, visible.map((e) => e.name).sort())
-    await Promise.all(
-      visible.filter((e) => e.isDirectory()).map((e) => walk(path.join(dir, e.name), false))
-    )
-  }
-  await walk(root, true)
+
+    /** 处理单个目录：读取条目、写入快照、把子目录追加到队列 */
+    const readOne = async ({ dir, isRoot, depth }) => {
+      let entries
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true })
+      } catch (err) {
+        if (isRoot) throw err
+        return
+      }
+      // 与 scanner 完全一致的条目过滤：隐藏项/put_、符号链接、内置排除目录、
+      // 用户排除目录（仅目录名匹配）
+      const visible = []
+      for (const entry of entries) {
+        if (isExcludedScanEntryName(entry.name)) continue
+        if (entry.isSymbolicLink()) continue
+        if (entry.isDirectory()) {
+          const lowerName = entry.name.toLowerCase()
+          if (SCAN_EXCLUDED_DIRS.has(lowerName) || skip.has(lowerName)) continue
+        }
+        visible.push(entry)
+      }
+      const canDescend = depth < MAX_SCAN_DEPTH
+      if (!withStats) {
+        snapshot.set(dir, visible.map((e) => e.name).sort())
+        for (const entry of visible) {
+          if (canDescend && entry.isDirectory()) {
+            queue.push({ dir: path.join(dir, entry.name), isRoot: false, depth: depth + 1 })
+          }
+        }
+        return
+      }
+
+      // 内容快照：目录条目只记名称/类型；文件逐项 stat 并记录 size/mtime。
+      // 单目录内 stat 也有界，避免「大目录 × 目录池」放大句柄占用。
+      const list = []
+      const files = []
+      for (const entry of visible) {
+        if (entry.isDirectory()) list.push({ name: entry.name, isDir: true })
+        else files.push(entry)
+      }
+      const stats = new Array(files.length)
+      await runWithConcurrency(
+        files,
+        async (entry, index) => {
+          try {
+            const stat = await fs.stat(path.join(dir, entry.name))
+            stats[index] = { name: entry.name, size: stat.size, mtimeMs: stat.mtimeMs }
+          } catch {
+            // 遍历期间被删除/锁定：记空值，下一轮内容校验会恢复或再次发现
+            stats[index] = { name: entry.name, size: null, mtimeMs: null }
+          }
+        },
+        STAT_CONCURRENCY
+      )
+      list.push(...stats)
+      snapshot.set(dir, list.sort(compareEntryName))
+      for (const entry of visible) {
+        if (canDescend && entry.isDirectory()) {
+          queue.push({ dir: path.join(dir, entry.name), isRoot: false, depth: depth + 1 })
+        }
+      }
+    }
+
+    const pump = () => {
+      if (settled) return
+      if (queue.length === 0 && active === 0) {
+        finish()
+        return
+      }
+      while (active < concurrency && queue.length > 0 && !settled) {
+        const job = queue.shift()
+        active += 1
+        readOne(job)
+          .catch((err) => {
+            // 子目录读取失败已在 readOne 内部吞掉；仅根目录失败终止整次遍历
+            if (job.isRoot) finish(err)
+          })
+          .finally(() => {
+            active -= 1
+            pump()
+          })
+      }
+    }
+    pump()
+  })
   return snapshot
+}
+
+/** 内容快照 → 名称快照（两套快照共用结构差异判定） */
+function namesFromSnapshot(statSnapshot) {
+  const names = new Map()
+  for (const [dir, entries] of statSnapshot) {
+    names.set(dir, entries.map((entry) => entry.name))
+  }
+  return names
 }
 
 /**
@@ -136,6 +281,47 @@ export function computeSnapshotDiff(root, oldSnap, newSnap) {
   }
   for (const [dir, names] of oldSnap) consider(dir, names, newSnap.get(dir))
   for (const [dir, names] of newSnap) consider(dir, oldSnap.get(dir), names)
+  return [...dirs].sort()
+}
+
+/** 内容快照条目是否完全一致（名称/类型/size/mtime 任一不同即视为变更） */
+function statEntriesEqual(a, b) {
+  if (!a || !b || a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const left = a[i]
+    const right = b[i]
+    if (
+      left.name !== right.name ||
+      Boolean(left.isDir) !== Boolean(right.isDir) ||
+      left.size !== right.size ||
+      left.mtimeMs !== right.mtimeMs
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * 计算两份内容快照（withStats=true）间发生变化的目录集合（O4）：
+ * 除条目增删/重命名外，同名文件的 size/mtime 变化也会命中——这是名称快照
+ * 无法发现的内容覆盖写入。返回相对根的 POSIX 路径数组（根目录为 ''）。
+ * @param {string} root 监控根目录（绝对路径）
+ * @param {Map<string, SnapshotEntry[]>} oldSnap 旧内容快照
+ * @param {Map<string, SnapshotEntry[]>} newSnap 新内容快照
+ * @returns {string[]} 变更目录的相对路径（POSIX 分隔，根目录为 ''）
+ */
+export function computeStatSnapshotDiff(root, oldSnap, newSnap) {
+  const dirs = new Set()
+  const consider = (dirAbs, oldEntries, newEntries) => {
+    if (statEntriesEqual(oldEntries, newEntries)) return
+    const rel = path.relative(root, dirAbs)
+    const normalized = rel === '' ? '' : rel.split(path.sep).join('/')
+    if (normalized && (normalized.startsWith('..') || path.isAbsolute(normalized))) return
+    dirs.add(normalized)
+  }
+  for (const [dir, entries] of oldSnap) consider(dir, entries, newSnap.get(dir))
+  for (const [dir, entries] of newSnap) consider(dir, entries, oldSnap.get(dir))
   return [...dirs].sort()
 }
 
@@ -215,17 +401,57 @@ function runWalk(w, silent) {
       // 隐藏期间不增减空闲计数；恢复后暂停期间积累的变更由首次比对自然发现。
       if (!silent && typeof w.isVisible === 'function' && !w.isVisible()) return
 
-      const snapshot = await collectDirSnapshot(w.root, w.excludeNames)
+      // O4：内容校验轮采集 size/mtime；其余轮次只做低成本名称比对。
+      // 基准轮（silent）必须建立内容基线，否则首个间隔内的同名覆盖无法发现。
+      const contentEnabled = Number.isFinite(w.contentCheckInterval) && w.contentCheckInterval > 0
+      const wantStats =
+        contentEnabled &&
+        (silent || Date.now() - w.lastContentCheckAt >= w.contentCheckInterval)
+      const snapshot = await collectDirSnapshot(w.root, w.excludeNames, {
+        withStats: wantStats,
+        concurrency: w.traversalConcurrency
+      })
+
       if (silent) {
-        w.snapshot = snapshot
+        if (wantStats) {
+          w.statSnapshot = snapshot
+          w.snapshot = namesFromSnapshot(snapshot)
+          w.lastContentCheckAt = Date.now()
+        } else {
+          w.snapshot = snapshot
+          w.statSnapshot = null
+          w.lastContentCheckAt = 0
+        }
         return
       }
+
+      if (wantStats) {
+        w.lastContentCheckAt = Date.now()
+        const names = namesFromSnapshot(snapshot)
+        // 名称变化轮已触发重扫时内容基线会被置空：本轮只重建基线，不重复广播
+        const changedDirs = w.statSnapshot
+          ? computeStatSnapshotDiff(w.root, w.statSnapshot, snapshot)
+          : []
+        w.statSnapshot = snapshot
+        w.snapshot = names
+        if (changedDirs.length === 0) {
+          w.idleRounds += 1
+          return
+        }
+        w.idleRounds = 0
+        scheduleBroadcast(w, changedDirs)
+        return
+      }
+
       const changedDirs = computeSnapshotDiff(w.root, w.snapshot, snapshot)
       if (changedDirs.length === 0) {
         w.idleRounds += 1
         return
       }
       w.snapshot = snapshot
+      // 名称变化已触发重扫（扫描会读到当前内容）；内容基线失效，下个内容
+      // 校验轮静默重建，避免对同一批变更重复广播
+      w.statSnapshot = null
       w.idleRounds = 0 // 有变更：退避重置，下一轮回到基础间隔
       scheduleBroadcast(w, changedDirs)
     })
@@ -250,8 +476,10 @@ function runWalk(w, silent) {
  * @param {boolean} enabled 是否启用自动重扫（settings.autoRescan）
  * @param {string[]} [excludeDirs] 排除目录名（与 scanner 同规则，遍历时剔除，
  *   避免被排除目录内的文件变化触发无意义重扫）
- * @param {{pollInterval?: number, broadcastDebounce?: number}} [timing]
- *   轮询间隔/广播防抖（毫秒；生产走默认值，测试注入小值）
+ * @param {{pollInterval?: number, broadcastDebounce?: number,
+ *   contentCheckInterval?: number, traversalConcurrency?: number}} [timing]
+ *   轮询间隔/广播防抖/内容校验间隔（毫秒）与目录遍历并发；
+ *   生产走默认值，测试注入小值（contentCheckInterval≤0 关闭内容校验）
  */
 export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
   const wantEnabled = enabled === true
@@ -270,6 +498,14 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
     enabled: true,
     excludeNames: toNameSet(excludeDirs),
     snapshot: new Map(),
+    // O4：内容快照（withStats=true）与最近一次内容校验时刻；null 表示需重建基线
+    statSnapshot: null,
+    lastContentCheckAt: 0,
+    contentCheckInterval:
+      timing.contentCheckInterval ?? DEFAULT_CONTENT_CHECK_INTERVAL,
+    traversalConcurrency: normalizeConcurrency(
+      timing.traversalConcurrency ?? DEFAULT_TRAVERSAL_CONCURRENCY
+    ),
     debounceTimer: null,
     timer: null,
     polling: false,
@@ -287,6 +523,9 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
   logger.info(
     `目录监控已启动（autoRescan，基础轮询 ${pollMs}ms` +
       (w.backoff ? `，空闲退避至 ${w.backoff[w.backoff.length - 1]}ms` : '') +
+      (w.contentCheckInterval > 0
+        ? `，内容校验 ${w.contentCheckInterval}ms`
+        : '，内容校验已关闭') +
       `）: ${root}`
   )
   // 立即建立基准快照（不等首个间隔；只记录不比对）：

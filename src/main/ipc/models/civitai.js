@@ -2,10 +2,11 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { BrowserWindow } from 'electron'
 import logger from '../../logger'
-import { getModelMeta, setModelMeta, toRelKey } from '../../services/store'
+import { getModelMeta, getSettings, setModelMeta, toRelKey } from '../../services/store'
 import { classifyModel } from '../../services/scanner'
 import { saveCoverBuffer } from '../../services/covers'
 import {
+  CIVITAI_DISABLED_ERROR,
   civitaiCompletePatch,
   downloadCivitaiImage,
   fetchCivitaiModelType,
@@ -38,6 +39,16 @@ import { wrapHandler, checkModelIdInRoot } from '../handler'
 const MAX_IMPORT_IMAGES = 20
 
 /**
+ * Civitai 网络入口统一隐私门禁（OPT-03）：设置页的 civitaiEnabled 此前
+ * 只控制渲染层入口显隐，主进程 handler 仍可被调用并发起网络请求。
+ * 每个会触网的 handler 在业务逻辑之前同步读取当前库设置并 fail-closed。
+ * @returns {{error: string}|null} 关闭时返回统一错误；开启时返回 null
+ */
+function rejectIfCivitaiDisabled() {
+  return getSettings().civitaiEnabled === false ? { error: CIVITAI_DISABLED_ERROR } : null
+}
+
+/**
  * 确保拿到模型文件当前有效的 SHA256（命中 hashMtime 缓存时零读取），
  * 未命中时经预热服务统一入口计算（与后台预热共享进行中任务，同一模型
  * 同 mtime 只读盘计算一次，结果回写元数据缓存）。
@@ -50,7 +61,14 @@ async function ensureHash(id, meta, mtimeMs) {
   if (meta.hash && meta.hashMtime === mtimeMs) {
     return { hash: meta.hash, meta }
   }
-  const hash = await computeAndCacheHash(id, mtimeMs)
+  let hash
+  try {
+    hash = await computeAndCacheHash(id, mtimeMs, { priority: true })
+  } catch (err) {
+    // 共享的后台任务可能被另一个前台任务抢占：本次识别重试一次（前台通道）
+    if (err?.name !== 'PreemptedError') throw err
+    hash = await computeAndCacheHash(id, mtimeMs, { priority: true })
+  }
   // 重读最新元数据：哈希计算期间用户可能已并发保存其他字段
   return { hash, meta: getModelMeta(id) || meta }
 }
@@ -59,6 +77,8 @@ async function ensureHash(id, meta, mtimeMs) {
 export function registerCivitaiHandlers() {
   // 在线识别：哈希反查 Civitai，成功时保存模型页 URL
   wrapHandler('models:civitaiIdentify', async (event, { id } = {}) => {
+    const disabled = rejectIfCivitaiDisabled()
+    if (disabled) return disabled
     const invalid = checkModelIdInRoot(id)
     if (invalid) return { error: invalid }
     const stat = await fs.stat(id)
@@ -95,6 +115,8 @@ export function registerCivitaiHandlers() {
 
   // 一键补全：反查后仅填充空缺字段（触发词/备注），不覆盖任何用户标注
   wrapHandler('models:civitaiComplete', async (event, { id } = {}) => {
+    const disabled = rejectIfCivitaiDisabled()
+    if (disabled) return disabled
     const invalid = checkModelIdInRoot(id)
     if (invalid) return { error: invalid }
     const stat = await fs.stat(id)
@@ -129,6 +151,8 @@ export function registerCivitaiHandlers() {
   // 故先查 type 再回退 tags。无链接/非 LoRA/未映射/失败的模型不做改动
   // （渲染层汇总提示）；映射成功时覆盖已有标签（分配语义）。
   wrapHandler('models:civitaiCategory', async (event, { id } = {}) => {
+    const disabled = rejectIfCivitaiDisabled()
+    if (disabled) return disabled
     const invalid = checkModelIdInRoot(id)
     if (invalid) return { error: invalid }
     // 模型类型限制：按相对路径复算扫描分类，非 LoRA 直接跳过
@@ -163,6 +187,8 @@ export function registerCivitaiHandlers() {
   // 示例图导入：下载勾选的图片（仅 Civitai CDN 白名单域名）并追加到封面列表。
   // 逐张串行下载/落盘/关联；单张失败不中断整批，结果按图反馈
   wrapHandler('models:civitaiImportImages', async (event, { id, images } = {}) => {
+    const disabled = rejectIfCivitaiDisabled()
+    if (disabled) return disabled
     const invalid = checkModelIdInRoot(id)
     if (invalid) return { error: invalid }
     if (!Array.isArray(images) || images.length === 0) {
@@ -218,17 +244,89 @@ export function registerCivitaiHandlers() {
 }
 
 /**
+ * 哈希完成事件合批（O2）：
+ * 预热服务对每个模型完成都会推送一条 active=false + id/hash 的事件。
+ * 万级模型首轮预热时逐条 IPC 会让渲染层反复执行 O(n) 回填；
+ * 这里在时间窗内累积为 { completions: [{id, hash}] } 一次送达。
+ * 进行中进度（active=true）与队列状态事件仍即时转发——收到非完成事件前
+ * 先刷新批次，保证「批次完成 → 后续 active 进度」的顺序不会倒置。
+ */
+const HASH_COMPLETION_FLUSH_MS = 150
+const HASH_COMPLETION_MAX_BATCH = 200
+
+/** 待发送完成项与最近一次进度计数（用于批次事件的 done/remaining） */
+let pendingHashCompletions = []
+let pendingHashMeta = null
+let hashCompletionTimer = null
+
+/** 向全部存活窗口广播预热事件 */
+function broadcastWarmupProgress(progress) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send('models:warmupProgress', progress)
+    }
+  }
+}
+
+/** 立即送达已累积的哈希完成批次 */
+export function flushWarmupCompletionBatch() {
+  if (pendingHashCompletions.length === 0) {
+    if (hashCompletionTimer) {
+      clearTimeout(hashCompletionTimer)
+      hashCompletionTimer = null
+    }
+    return
+  }
+  const completions = pendingHashCompletions
+  const meta = pendingHashMeta || {}
+  pendingHashCompletions = []
+  pendingHashMeta = null
+  if (hashCompletionTimer) {
+    clearTimeout(hashCompletionTimer)
+    hashCompletionTimer = null
+  }
+  broadcastWarmupProgress({
+    active: false,
+    id: '',
+    percent: 0,
+    hashedBytes: 0,
+    totalBytes: 0,
+    done: Number.isFinite(meta.done) ? meta.done : 0,
+    remaining: Number.isFinite(meta.remaining) ? meta.remaining : 0,
+    hash: '',
+    completions
+  })
+}
+
+/** 累积一个完成项；达到阈值立即发送，否则在时间窗后合并发送 */
+function queueHashCompletion(progress) {
+  pendingHashCompletions.push({ id: progress.id, hash: progress.hash })
+  pendingHashMeta = progress
+  if (pendingHashCompletions.length >= HASH_COMPLETION_MAX_BATCH) {
+    flushWarmupCompletionBatch()
+    return
+  }
+  if (hashCompletionTimer) return
+  hashCompletionTimer = setTimeout(flushWarmupCompletionBatch, HASH_COMPLETION_FLUSH_MS)
+  hashCompletionTimer.unref?.()
+}
+
+/**
  * 注册预热进度的跨窗口广播（与 setupStoreErrorForwarding 同一副作用注册模式）：
  * 预热在主进程后台进行，进度快照经 models:warmupProgress 事件推送渲染进程，
  * 渲染层据此在详情页展示当前模型的哈希进度标识。
+ * 完成事件（active=false 且携带 hash）合批发送；其余事件即时转发。
  * 副作用注册：仅可由 registerModelIpcHandlers 调用时触发，严禁漂移到模块 import 时。
  */
 export function setupWarmupProgressForwarding() {
   setWarmupProgressListener((progress) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) {
-        win.webContents.send('models:warmupProgress', progress)
-      }
+    if (progress?.active === false && progress.id && progress.hash) {
+      queueHashCompletion(progress)
+      return
     }
+    // 非完成事件：先刷新既有完成批次，避免旧的 active=false 覆盖随后到达的
+    // active=true 进度（详情页进度标识会误清空）
+    flushWarmupCompletionBatch()
+    broadcastWarmupProgress(progress)
   })
 }

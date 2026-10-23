@@ -1,10 +1,18 @@
 import fs from 'node:fs/promises'
+import { constants as fsConstants } from 'node:fs'
 import path from 'node:path'
 import { BrowserWindow, dialog } from 'electron'
 import logger from '../../logger'
 import { getCurrentRoot, renameModelMeta, toRelKey } from '../../services/store'
 import { sidecarFilesFor } from './misc'
 import { LORA_TAG_DEFS, LORA_TAG_KEYS } from '../../../shared/model-categories'
+import { MODEL_EXTENSION_NAMES, MODEL_EXTENSION_SET } from '../../../shared/model-extensions'
+import { SIDECAR_PREVIEW_EXTS } from '../../services/scanner'
+import {
+  maintenanceBusyMessage,
+  releaseMaintenance,
+  tryAcquireMaintenance
+} from '../../services/maintenance-lock'
 import { wrapHandler, checkModelIdInRoot } from '../handler'
 
 /**
@@ -65,6 +73,236 @@ export function planOrganizeMoves(moves, root) {
     planned.push({ id: item.id, newPath })
   }
   return { planned, skipped }
+}
+
+/* ---------------- F2：外部模型导入 ---------------- */
+
+/** 导入时随模型一并搬运的 sidecar 后缀（说明/元数据/预览图） */
+const IMPORT_SIDECAR_SUFFIXES = ['.txt', '.civitai.info', ...SIDECAR_PREVIEW_EXTS]
+
+/**
+ * 拆分模型文件名（兼容 WebUI 的 `.disabled` 双重后缀）。
+ * @param {string} fileName 文件名
+ * @returns {{base: string, ext: string, disabled: boolean}}
+ */
+export function splitModelFileName(fileName) {
+  let name = String(fileName || '')
+  let disabled = false
+  if (name.toLowerCase().endsWith('.disabled')) {
+    disabled = true
+    name = name.slice(0, -'.disabled'.length)
+  }
+  const ext = path.extname(name)
+  return { base: path.basename(name, ext), ext, disabled }
+}
+
+/**
+ * 是否为可导入的模型文件（扩展名白名单，支持 .disabled）。
+ * @param {string} fileName 文件名
+ * @returns {boolean}
+ */
+export function isImportableModelFile(fileName) {
+  const { ext } = splitModelFileName(fileName)
+  return MODEL_EXTENSION_SET.has(ext.toLowerCase())
+}
+
+/** 目录是否位于 root 内（含 root 自身；Windows 大小写不敏感） */
+function isInsideDir(root, target) {
+  const rel = path.relative(root, target)
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+}
+
+/** 目标候选名是否与已有模型/同名 sidecar 冲突 */
+async function isImportTargetFree(targetDir, fileName) {
+  const modelPath = path.join(targetDir, fileName)
+  const candidates = [modelPath]
+  const { base } = splitModelFileName(fileName)
+  for (const suffix of IMPORT_SIDECAR_SUFFIXES) {
+    candidates.push(path.join(targetDir, `${base}${suffix}`))
+  }
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate)
+      return false
+    } catch {
+      /* 不存在 */
+    }
+  }
+  return true
+}
+
+/**
+ * 为导入模型选择目标文件名：同名冲突时自动追加 ` (n)`（同时保证
+ * 同名 sidecar 不覆盖），返回可用的文件名与拆分信息。
+ * @param {string} targetDir 目标目录
+ * @param {string} sourceName 源文件名
+ * @returns {Promise<{fileName: string, base: string, ext: string, disabled: boolean}>}
+ */
+export async function planImportTarget(targetDir, sourceName) {
+  const { base, ext, disabled } = splitModelFileName(sourceName)
+  for (let n = 0; n < 1000; n++) {
+    const candidateBase = n === 0 ? base : `${base} (${n})`
+    const fileName = `${candidateBase}${ext}${disabled ? '.disabled' : ''}`
+    if (await isImportTargetFree(targetDir, fileName)) {
+      return { fileName, base: candidateBase, ext, disabled }
+    }
+  }
+  throw new Error(`目标名称冲突过多，无法导入: ${sourceName}`)
+}
+
+/** 复制/移动单个文件；跨卷移动退化为复制后删除源 */
+async function transferFile(src, dst, mode) {
+  if (mode === 'move') {
+    try {
+      await fs.rename(src, dst)
+      return
+    } catch (err) {
+      if (err.code !== 'EXDEV') throw err
+    }
+  }
+  // COPYFILE_EXCL：规划与落盘之间若目标被外部创建，拒绝覆盖而不是静默替换
+  await fs.copyFile(src, dst, fsConstants.COPYFILE_EXCL)
+  if (mode === 'move') await fs.unlink(src).catch(() => {})
+}
+
+/**
+ * 导入外部模型文件（复制/移动入台，F2）：
+ * - 原生文件选择（多选）+ 目标目录选择（必须位于当前模型库内）；
+ * - 逐文件复制/移动，自动搬运同名 `.txt` / `.civitai.info` / 预览图 sidecar；
+ * - 目标同名冲突自动追加 ` (n)`，不覆盖库内已有文件；
+ * - 源文件已在库内时拒绝（避免绕过库内移动的元数据键迁移）；
+ * - 成功后渲染层对目标子树执行局部扫描，新模型即时入列。
+ * @returns {Promise<object>}
+ */
+async function importModels({ mode, win } = {}) {
+  if (mode !== 'copy' && mode !== 'move') return { error: '无效的导入方式' }
+  const root = getCurrentRoot()
+  if (!root) return { error: '尚未选择模型库' }
+  const picked = await dialog.showOpenDialog(win, {
+    title: mode === 'move' ? '选择要移动入台的模型文件' : '选择要复制入台的模型文件',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      {
+        name: '模型文件',
+        // .disabled 是 WebUI 的禁用后缀，需单独加入过滤器才可被选中
+        extensions: [...MODEL_EXTENSION_NAMES.map((e) => e.slice(1)), 'disabled']
+      }
+    ]
+  })
+  if (picked.canceled || picked.filePaths.length === 0) return { canceled: true }
+
+  const targetPick = await dialog.showOpenDialog(win, {
+    title: '选择导入目标文件夹（须在当前模型库内）',
+    defaultPath: root,
+    properties: ['openDirectory', 'createDirectory']
+  })
+  if (targetPick.canceled || !targetPick.filePaths[0]) return { canceled: true }
+  const targetDir = path.resolve(targetPick.filePaths[0])
+  if (!isInsideDir(root, targetDir)) {
+    return { error: '目标文件夹不在当前模型库内' }
+  }
+  const targetRelRaw = path.relative(root, targetDir)
+  const targetRelDir = targetRelRaw === '' ? '' : targetRelRaw.split(path.sep).join('/')
+  if (targetRelDir === '.modelvault' || targetRelDir.startsWith('.modelvault/')) {
+    return { error: '不能导入到关联存储目录' }
+  }
+  // 真实路径校验：拦截库内 junction/符号链接指向库外
+  try {
+    const realRoot = await fs.realpath(root)
+    const realTarget = await fs.realpath(targetDir)
+    if (!isInsideDir(realRoot, realTarget)) {
+      return { error: '目标文件夹真实路径不在当前模型库内' }
+    }
+  } catch (err) {
+    return { error: `目标文件夹不可访问: ${err.message}` }
+  }
+
+  const token = tryAcquireMaintenance('import', root)
+  if (!token) return { error: maintenanceBusyMessage() }
+  const failed = []
+  const warnings = []
+  let imported = 0
+  let renamed = 0
+  const seen = new Set()
+  try {
+    await fs.mkdir(targetDir, { recursive: true })
+    for (const sourceRaw of picked.filePaths) {
+      const source = path.resolve(sourceRaw)
+      if (seen.has(source)) continue
+      seen.add(source)
+      const sourceName = path.basename(source)
+      if (!isImportableModelFile(sourceName)) {
+        failed.push({ source, error: '不支持的模型文件类型' })
+        continue
+      }
+      if (isInsideDir(root, source)) {
+        failed.push({ source, error: '源文件已在当前模型库内，请使用库内移动' })
+        continue
+      }
+      try {
+        const stat = await fs.lstat(source)
+        if (!stat.isFile() || stat.isSymbolicLink()) {
+          failed.push({ source, error: '仅支持导入普通文件' })
+          continue
+        }
+      } catch (err) {
+        failed.push({ source, error: `无法读取源文件: ${err.message}` })
+        continue
+      }
+
+      let plan
+      try {
+        plan = await planImportTarget(targetDir, sourceName)
+      } catch (err) {
+        failed.push({ source, error: err.message })
+        continue
+      }
+      const targetModel = path.join(targetDir, plan.fileName)
+      try {
+        await transferFile(source, targetModel, mode)
+      } catch (err) {
+        failed.push({ source, error: `导入失败: ${err.message}` })
+        continue
+      }
+      imported += 1
+      if (plan.fileName !== sourceName) renamed += 1
+
+      // sidecar 同批搬运（失败只告警，不撤销已成功导入的模型）
+      const sourceBase = splitModelFileName(sourceName).base
+      for (const suffix of IMPORT_SIDECAR_SUFFIXES) {
+        const sidecarSource = path.join(path.dirname(source), `${sourceBase}${suffix}`)
+        try {
+          const sidecarStat = await fs.lstat(sidecarSource)
+          if (!sidecarStat.isFile()) continue
+        } catch {
+          continue
+        }
+        const sidecarTarget = path.join(targetDir, `${plan.base}${suffix}`)
+        try {
+          await transferFile(sidecarSource, sidecarTarget, mode)
+        } catch (err) {
+          warnings.push(`${path.basename(sidecarSource)}: ${err.message}`)
+        }
+      }
+    }
+    logger.info(
+      `模型导入完成（${mode}）：成功 ${imported}，重命名 ${renamed}，失败 ${failed.length} → ${targetDir}`
+    )
+    return {
+      root,
+      targetDir,
+      targetRelDir,
+      imported,
+      renamed,
+      failed,
+      warnings
+    }
+  } catch (err) {
+    logger.warn(`模型导入失败: ${err.message}`)
+    return { error: `模型导入失败: ${err.message}` }
+  } finally {
+    releaseMaintenance(token)
+  }
 }
 
 /** 注册文件操作链路的 IPC 处理器 */
@@ -200,4 +438,12 @@ export function registerFilesHandlers() {
     logger.info(`一键移动文件完成: 移动 ${moved}，失败 ${failed.length}，跳过 ${skipped.length}`)
     return { moved, failed, skipped }
   }, { errorPrefix: '一键移动文件失败' })
+
+  // F2：外部模型导入（复制/移动入台）
+  wrapHandler(
+    'models:importModels',
+    (event, { mode } = {}) =>
+      importModels({ mode, win: BrowserWindow.fromWebContents(event.sender) }),
+    { errorPrefix: '模型导入失败' }
+  )
 }

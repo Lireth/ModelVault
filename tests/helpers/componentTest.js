@@ -18,6 +18,7 @@ function makeComponentApiMock() {
     getPathForFile: vi.fn((file) => (file && typeof file.path === 'string' ? file.path : '')),
     models: {
       loadStore: vi.fn(),
+      openLibrary: vi.fn(),
       scan: vi.fn(),
       cancelScan: vi.fn(() => Promise.resolve({ ok: false })),
       chooseFolder: vi.fn(),
@@ -36,6 +37,8 @@ function makeComponentApiMock() {
       importCover: vi.fn(),
       partialScan: vi.fn(() => Promise.resolve({ models: [], dirs: [], relinked: 0 })),
       warmupHash: vi.fn(() => Promise.resolve({ ok: true })),
+      checkHealth: vi.fn(() => Promise.resolve({ report: null })),
+      repairHealth: vi.fn(() => Promise.resolve({ repaired: {} })),
       onScanProgress: vi.fn(() => () => {}),
       onWarmupProgress: vi.fn(() => () => {}),
       onMenuAction: vi.fn(() => () => {}),
@@ -64,6 +67,8 @@ function resetStoreState() {
   state.folder = ''
   state.booting = false
   state.scanning = false
+  state.backgroundScanning = false
+  state.importing = false
   state.scanError = ''
   state.progress = { dirs: 0, found: 0, current: '' }
   replaceModels([])

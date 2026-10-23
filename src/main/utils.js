@@ -76,3 +76,113 @@ export async function runWithConcurrency(tasks, worker, concurrency) {
   const count = Math.max(0, Math.min(concurrency, tasks.length))
   await Promise.all(Array.from({ length: count }, () => runner()))
 }
+
+/** 字节上限的人类可读文案（错误提示用） */
+function formatByteLimit(bytes) {
+  return bytes >= 1024 * 1024
+    ? `${Math.floor(bytes / 1024 / 1024)}MB`
+    : `${Math.floor(bytes / 1024)}KB`
+}
+
+/**
+ * 读取响应体并强制字节上限（V-06 网络边界）：
+ * 先看 Content-Length 提前拒绝，再流式累计实际字节——上游缺失/伪造
+ * Content-Length 时仍会在超限处取消读取，避免整包进入主进程堆。
+ * @param {Response} response fetch 响应
+ * @param {number} maxBytes 允许的最大字节数
+ * @param {string} [label] 错误文案中的资源名
+ * @returns {Promise<Buffer>} 不超过上限的响应内容
+ */
+export async function readResponseBytesLimited(response, maxBytes, label = '响应') {
+  const declared = Number(response.headers?.get?.('content-length'))
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new Error(`${label}过大（上限 ${formatByteLimit(maxBytes)}）`)
+  }
+  if (!response.body) {
+    const buf = Buffer.from(await response.arrayBuffer())
+    if (buf.length > maxBytes) {
+      throw new Error(`${label}过大（上限 ${formatByteLimit(maxBytes)}）`)
+    }
+    return buf
+  }
+  const reader = response.body.getReader()
+  const chunks = []
+  let total = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {})
+        throw new Error(`${label}过大（上限 ${formatByteLimit(maxBytes)}）`)
+      }
+      chunks.push(Buffer.from(value))
+    }
+  } finally {
+    try {
+      reader.releaseLock()
+    } catch {
+      /* 读取已结束时释放锁可能抛错，忽略 */
+    }
+  }
+  return Buffer.concat(chunks, total)
+}
+
+/**
+ * 读取文本响应并强制字节上限（语义同 readResponseBytesLimited）。
+ * @param {Response} response fetch 响应
+ * @param {number} maxBytes 允许的最大字节数
+ * @param {string} [label] 错误文案中的资源名
+ * @returns {Promise<string>} UTF-8 文本
+ */
+export async function readResponseTextLimited(response, maxBytes, label = '响应') {
+  return (await readResponseBytesLimited(response, maxBytes, label)).toString('utf8')
+}
+
+/**
+ * 从启动参数解析 `--wait-for-pid=<pid>`（V-06 更新安装自等待）。
+ * 新版本实例拉起时先等待旧实例退出并释放单实例锁，避免更新后闪退。
+ * @param {string[]} argv 进程参数
+ * @returns {number} 合法 pid；不存在或非法返回 0
+ */
+export function parseWaitForPid(argv) {
+  if (!Array.isArray(argv)) return 0
+  for (const arg of argv) {
+    const m = /^--wait-for-pid=(\d{1,10})$/.exec(String(arg))
+    if (m) {
+      const pid = Number(m[1])
+      return Number.isSafeInteger(pid) && pid > 0 && pid !== process.pid ? pid : 0
+    }
+  }
+  return 0
+}
+
+/** 进程是否仍存活（EPERM 视为存活：存在但无权限） */
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return err?.code === 'EPERM'
+  }
+}
+
+/**
+ * 等待指定进程退出（V-06 更新安装）。
+ * @param {number} pid 目标进程 id
+ * @param {{timeoutMs?: number, intervalMs?: number, isAlive?: (pid: number) => boolean}} [options]
+ *   isAlive 仅供测试注入；默认使用 process.kill(pid, 0)
+ * @returns {Promise<boolean>} 已退出返回 true；超时仍存活返回 false
+ */
+export async function waitForProcessExit(pid, options = {}) {
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 15000
+  const intervalMs = Number.isFinite(options.intervalMs) ? options.intervalMs : 200
+  const alive = typeof options.isAlive === 'function' ? options.isAlive : isProcessAlive
+  const deadline = Date.now() + Math.max(0, timeoutMs)
+  for (;;) {
+    if (!alive(pid)) return true
+    if (Date.now() >= deadline) return false
+    await new Promise((resolve) => setTimeout(resolve, Math.max(10, intervalMs)))
+  }
+}

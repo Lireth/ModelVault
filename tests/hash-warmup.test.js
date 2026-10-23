@@ -113,6 +113,18 @@ describe('computeAndCacheHash', () => {
     await expect(computeAndCacheHash(id, 1000)).rejects.toThrow('磁盘错误')
     expect(getModelMeta(id)?.hash).toBeUndefined()
   })
+
+  it('priority 透传到线程池前台通道', async () => {
+    const id = await makeModel('priority.safetensors')
+    computeFileHash.mockResolvedValue(fakeHash(30))
+    await computeAndCacheHash(id, 1000, { priority: true })
+    expect(computeFileHash).toHaveBeenCalledWith(
+      id,
+      undefined,
+      expect.any(Function),
+      { priority: true }
+    )
+  })
 })
 
 describe('requestHashWarmup（队列消费）', () => {
@@ -179,6 +191,195 @@ describe('requestHashWarmup（队列消费）', () => {
     await whenWarmupIdle()
     expect(computeFileHash).toHaveBeenCalledTimes(1)
     expect(getModelMeta(a).hash).toBe(fakeHash(6))
+  })
+})
+
+describe('哈希预热策略（O1：体积预筛 + 按需计算）', () => {
+  it('candidates：只计算同尺寸模型，体积唯一的模型不读盘哈希', async () => {
+    const a = await makeModel('c1.safetensors', 'a'.repeat(1024))
+    const b = await makeModel('c2.safetensors', 'b'.repeat(1024))
+    const unique = await makeModel('c3.safetensors', 'u'.repeat(2048))
+    computeFileHash.mockResolvedValue(fakeHash(11))
+    const stats = await Promise.all([a, b, unique].map((id) => fs.stat(id)))
+
+    requestHashWarmup(
+      [
+        { id: a, size: stats[0].size, mtimeMs: stats[0].mtimeMs },
+        { id: b, size: stats[1].size, mtimeMs: stats[1].mtimeMs },
+        { id: unique, size: stats[2].size, mtimeMs: stats[2].mtimeMs }
+      ],
+      { mode: 'candidates', full: true, delayMs: 0 }
+    )
+    await whenWarmupIdle()
+
+    expect(computeFileHash).toHaveBeenCalledTimes(2)
+    expect(computeFileHash.mock.calls.map((call) => call[0]).sort()).toEqual([a, b].sort())
+    expect(getModelMeta(unique)).toBeNull()
+  })
+
+  it('candidates：后续请求发现同尺寸文件时，补算先前因体积唯一而跳过的模型', async () => {
+    const a = await makeModel('c4.safetensors', 'a'.repeat(1024))
+    const b = await makeModel('c5.safetensors', 'b'.repeat(1024))
+    computeFileHash.mockResolvedValue(fakeHash(12))
+    const [sa, sb] = await Promise.all([fs.stat(a), fs.stat(b)])
+
+    // 第一次请求：体积唯一，不产生哈希任务
+    requestHashWarmup([{ id: a, size: sa.size, mtimeMs: sa.mtimeMs }], {
+      mode: 'candidates',
+      full: true,
+      delayMs: 0
+    })
+    await whenWarmupIdle()
+    expect(computeFileHash).not.toHaveBeenCalled()
+
+    // 第二次请求：同尺寸文件出现，两份都应补算
+    requestHashWarmup([{ id: b, size: sb.size, mtimeMs: sb.mtimeMs }], {
+      mode: 'candidates',
+      full: false,
+      delayMs: 0
+    })
+    await whenWarmupIdle()
+
+    expect(computeFileHash).toHaveBeenCalledTimes(2)
+    expect(getModelMeta(a).hash).toBe(fakeHash(12))
+    expect(getModelMeta(b).hash).toBe(fakeHash(12))
+  })
+
+  it('off：后台不入队，但详情页优先任务仍按需计算', async () => {
+    const a = await makeModel('c6.safetensors', 'a'.repeat(1024))
+    const b = await makeModel('c7.safetensors', 'b'.repeat(1024))
+    computeFileHash.mockResolvedValue(fakeHash(13))
+
+    requestHashWarmup([a, b], { mode: 'off', full: true, delayMs: 0 })
+    await whenWarmupIdle()
+    expect(computeFileHash).not.toHaveBeenCalled()
+
+    requestHashWarmup([a], { priority: true })
+    await whenWarmupIdle()
+    expect(computeFileHash).toHaveBeenCalledTimes(1)
+    expect(computeFileHash.mock.calls[0][0]).toBe(a)
+  })
+
+  it('candidates：体积未知时先 stat 再判定（同尺寸计算、唯一跳过）', async () => {
+    const a = await makeModel('c12.safetensors', 'a'.repeat(1024))
+    const b = await makeModel('c13.safetensors', 'b'.repeat(1024))
+    const unique = await makeModel('c14.safetensors', 'u'.repeat(2048))
+    computeFileHash.mockResolvedValue(fakeHash(16))
+
+    requestHashWarmup([a, b, unique], { mode: 'candidates', full: true, delayMs: 0 })
+    await whenWarmupIdle()
+
+    expect(computeFileHash).toHaveBeenCalledTimes(2)
+    expect(computeFileHash.mock.calls.map((call) => call[0]).sort()).toEqual([a, b].sort())
+    expect(getModelMeta(unique)).toBeNull()
+  })
+
+  it('candidates：缓存有效的同尺寸伙伴不再重复计算', async () => {
+    const a = await makeModel('c15.safetensors', 'a'.repeat(1024))
+    const b = await makeModel('c16.safetensors', 'b'.repeat(1024))
+    const [sa, sb] = await Promise.all([fs.stat(a), fs.stat(b)])
+    setModelMeta(a, { hash: fakeHash(17), hashMtime: sa.mtimeMs })
+    computeFileHash.mockResolvedValue(fakeHash(18))
+
+    requestHashWarmup(
+      [
+        { id: a, size: sa.size, mtimeMs: sa.mtimeMs },
+        { id: b, size: sb.size, mtimeMs: sb.mtimeMs }
+      ],
+      { mode: 'candidates', full: true, delayMs: 0 }
+    )
+    await whenWarmupIdle()
+
+    expect(computeFileHash).toHaveBeenCalledTimes(1)
+    expect(computeFileHash.mock.calls[0][0]).toBe(b)
+    expect(getModelMeta(a).hash).toBe(fakeHash(17))
+  })
+
+  it('未知策略值回退 full（服务层兼容既有调用方）', async () => {
+    const a = await makeModel('c17.safetensors', 'a'.repeat(1024))
+    computeFileHash.mockResolvedValue(fakeHash(19))
+
+    requestHashWarmup([a], { mode: 'turbo', full: true, delayMs: 0 })
+    await whenWarmupIdle()
+
+    expect(computeFileHash).toHaveBeenCalledTimes(1)
+  })
+
+  it('全量快照作废后台任务时保留详情页优先任务', async () => {
+    const hot = await makeModel('c18.safetensors', 'h'.repeat(1024))
+    computeFileHash.mockResolvedValue(fakeHash(20))
+
+    pauseHashWarmup()
+    requestHashWarmup([hot], { priority: true })
+    // 新的全量快照（空列表 + 关闭策略）只应清掉普通后台任务
+    requestHashWarmup([], { mode: 'off', full: true })
+    resumeHashWarmup(0)
+    await whenWarmupIdle()
+
+    expect(computeFileHash).toHaveBeenCalledTimes(1)
+    expect(computeFileHash.mock.calls[0][0]).toBe(hot)
+  })
+
+  it('后台任务被前台抢占后重新入队，最终仍完成且不记为失败', async () => {
+    const a = await makeModel('p1.safetensors')
+    const b = await makeModel('p2.safetensors')
+    let firstA = true
+    computeFileHash.mockImplementation(async (file) => {
+      if (file === a && firstA) {
+        firstA = false
+        const err = new Error('让路')
+        err.name = 'PreemptedError'
+        throw err
+      }
+      return file === a ? fakeHash(31) : fakeHash(32)
+    })
+
+    requestHashWarmup([a, b], { mode: 'full', full: true, delayMs: 0 })
+    await whenWarmupIdle()
+
+    // a 第一次被抢占 → 重新入队到队尾；b 先完成，随后 a 重算完成
+    expect(computeFileHash).toHaveBeenCalledTimes(3)
+    expect(getModelMeta(a).hash).toBe(fakeHash(31))
+    expect(getModelMeta(b).hash).toBe(fakeHash(32))
+  })
+
+  it('单个模型哈希失败只记录日志，队列继续处理后续模型', async () => {
+    const bad = await makeModel('c19.safetensors', 'a'.repeat(1024))
+    const good = await makeModel('c20.safetensors', 'b'.repeat(1024))
+    computeFileHash
+      .mockRejectedValueOnce(new Error('磁盘读取失败'))
+      .mockResolvedValueOnce(fakeHash(21))
+
+    requestHashWarmup([bad, good], { mode: 'full', full: true, delayMs: 0 })
+    await whenWarmupIdle()
+
+    expect(computeFileHash).toHaveBeenCalledTimes(2)
+    expect(getModelMeta(good).hash).toBe(fakeHash(21))
+  })
+
+  it('切换到 off 的全量请求会作废旧策略尚未开始的排队任务', async () => {
+    const a = await makeModel('c10.safetensors', 'a'.repeat(1024))
+    const b = await makeModel('c11.safetensors', 'b'.repeat(1024))
+    computeFileHash.mockResolvedValue(fakeHash(15))
+
+    pauseHashWarmup()
+    requestHashWarmup([a, b], { mode: 'full', full: true, delayMs: 0 })
+    // 用户切换为关闭：新的全量请求应丢弃上一策略的后台排队项
+    requestHashWarmup([a, b], { mode: 'off', full: true, delayMs: 0 })
+    resumeHashWarmup(0)
+    await whenWarmupIdle()
+
+    expect(computeFileHash).not.toHaveBeenCalled()
+  })
+
+  it('full：体积唯一也全部计算（显式选择旧行为）', async () => {
+    const a = await makeModel('c8.safetensors', 'a'.repeat(1024))
+    const b = await makeModel('c9.safetensors', 'b'.repeat(2048))
+    computeFileHash.mockResolvedValue(fakeHash(14))
+
+    requestHashWarmup([a, b], { mode: 'full', full: true, delayMs: 0 })
+    await whenWarmupIdle()
+    expect(computeFileHash).toHaveBeenCalledTimes(2)
   })
 })
 

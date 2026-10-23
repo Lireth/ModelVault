@@ -144,11 +144,22 @@ export async function clearAllCovers() {
     toast('error', res.error)
     return false
   }
-  for (const m of state.models) {
-    m.cover = ''
-    m.coverUrl = ''
-    m.covers = []
-    m.hasManualCover = false
+  // state.models 为 shallowReactive 数组、元素是原始对象：必须整体替换元素
+  // 才会触发依赖索引的派生状态；就地改字段在浅响应下不会更新任何界面。
+  // 无封面字段的模型保持原引用，避免无谓的列表失效与重算。
+  for (let i = 0; i < state.models.length; i++) {
+    const m = state.models[i]
+    const hasCoverState =
+      Boolean(m.cover || m.coverUrl || m.hasManualCover) ||
+      (Array.isArray(m.covers) && m.covers.length > 0)
+    if (!hasCoverState) continue
+    state.models[i] = {
+      ...m,
+      cover: '',
+      coverUrl: '',
+      covers: [],
+      hasManualCover: false
+    }
   }
   toast('success', `已清空 ${res.cleared} 个模型共 ${res.images} 张示例图`)
   return true

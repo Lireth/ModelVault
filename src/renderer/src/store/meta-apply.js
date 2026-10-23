@@ -42,3 +42,34 @@ export function applyMetaUpdates(metaMap, pick) {
   }
   return updated
 }
+
+/**
+ * 有界并发映射（OPT-09）：按固定数量 worker 流式消费任务，
+ * 返回值形状与 Promise.allSettled 一致并保持输入顺序，便于批量操作
+ * 复用同一套成功/失败汇总逻辑，同时避免万级选中瞬间发起万级 IPC/文件句柄。
+ * @template T
+ * @param {T[]} items 待处理项
+ * @param {(item: T, index: number) => Promise<any>} worker 单项处理器
+ * @param {number} [limit] 最大并发数（默认 16）
+ * @returns {Promise<Array<{status: 'fulfilled', value: any} | {status: 'rejected', reason: any}>>}
+ */
+export async function mapWithConcurrency(items, worker, limit = 16) {
+  const list = Array.isArray(items) ? items : []
+  if (list.length === 0) return []
+  const concurrency = Math.max(1, Math.min(limit, list.length))
+  const results = new Array(list.length)
+  let next = 0
+  async function runner() {
+    for (;;) {
+      const index = next++
+      if (index >= list.length) return
+      try {
+        results[index] = { status: 'fulfilled', value: await worker(list[index], index) }
+      } catch (reason) {
+        results[index] = { status: 'rejected', reason }
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, () => runner()))
+  return results
+}

@@ -19,6 +19,7 @@ import {
   renameModelMeta,
   resolveCover,
   saveStoreNow,
+  saveStoreDeltaNow,
   setDataRoot,
   setModelMeta,
   setStoreSaveErrorListener,
@@ -344,6 +345,176 @@ describe('退出落盘 flushStoreSave', () => {
   })
 })
 
+describe('O5 增量落盘与快照合并', () => {
+  const journalDir = () => path.join(root, '.modelvault', 'journal')
+  const storeFile = () => path.join(root, '.modelvault', 'store.json')
+
+  it('背景保存只写变化键日志；重新加载回放日志；flush 合并为紧凑快照', async () => {
+    const abs = await touchModel('delta.safetensors')
+    const key = path.relative(root, abs).split(path.sep).join('/')
+    setModelMeta(abs, { alias: 'v1' })
+    await saveStoreNow()
+
+    // 快照为紧凑 JSON（不再 pretty 缩进）
+    const snapshotText = await fs.readFile(storeFile(), 'utf-8')
+    expect(snapshotText).not.toContain('\n  ')
+
+    setModelMeta(abs, { alias: 'v2', note: '增量备注' })
+    await saveStoreDeltaNow()
+    const batches = await fs.readdir(journalDir())
+    expect(batches).toHaveLength(1)
+    const batch = JSON.parse(await fs.readFile(path.join(journalDir(), batches[0]), 'utf-8'))
+    expect(batch.entries).toEqual([
+      expect.objectContaining({ op: 'set', key })
+    ])
+    // 未合并前 store.json 仍是旧值
+    const diskBefore = JSON.parse(await fs.readFile(storeFile(), 'utf-8'))
+    expect(diskBefore.models[key].alias).toBe('v1')
+
+    // 模拟重启：快照 + 增量日志回放
+    await loadData()
+    expect(getModelMeta(abs).alias).toBe('v2')
+    expect(getModelMeta(abs).note).toBe('增量备注')
+
+    // flush（退出/备份/切库路径）强制合并
+    await flushStoreSave()
+    const diskAfter = JSON.parse(await fs.readFile(storeFile(), 'utf-8'))
+    expect(diskAfter.models[key].alias).toBe('v2')
+    await expect(fs.access(journalDir())).rejects.toThrow()
+  })
+
+  it('增量条目达到阈值时自动写全量快照并清空日志', async () => {
+    await saveStoreNow() // 建立基线快照
+    for (let i = 0; i < 200; i++) {
+      setModelMeta(path.join(root, `bulk-${i}.safetensors`), { alias: `m${i}` })
+    }
+    await saveStoreDeltaNow()
+
+    const disk = JSON.parse(await fs.readFile(storeFile(), 'utf-8'))
+    expect(Object.keys(disk.models)).toHaveLength(200)
+    await expect(fs.access(journalDir())).rejects.toThrow()
+  })
+
+  it('增量日志记录删除操作并在回放中生效；无脏键时不写空批次', async () => {
+    const abs = await touchModel('delete-delta.safetensors')
+    setModelMeta(abs, { alias: '待删' })
+    await saveStoreNow()
+    await saveStoreDeltaNow() // 无脏键：不产生日志
+    await expect(fs.access(journalDir())).rejects.toThrow()
+
+    removeModelMeta(abs)
+    await saveStoreDeltaNow()
+    const batches = await fs.readdir(journalDir())
+    const batch = JSON.parse(await fs.readFile(path.join(journalDir(), batches[0]), 'utf-8'))
+    expect(batch.entries).toEqual([
+      { op: 'del', key: path.relative(root, abs).split(path.sep).join('/') }
+    ])
+
+    await loadData()
+    expect(getModelMeta(abs)).toBeNull()
+  })
+
+  it('损坏的日志批次被隔离，后续批次仍正常回放', async () => {
+    await saveStoreNow()
+    await fs.mkdir(journalDir(), { recursive: true })
+    await fs.writeFile(path.join(journalDir(), 'delta-000000000001.json'), '{broken!!')
+    await fs.writeFile(
+      path.join(journalDir(), 'delta-000000000002.json'),
+      JSON.stringify({
+        seq: 2,
+        entries: [{ op: 'set', key: 'b.safetensors', meta: { alias: '后续批次' } }]
+      })
+    )
+    // 合法 JSON 但缺少 entries：同样隔离并继续后续批次
+    await fs.writeFile(
+      path.join(journalDir(), 'delta-000000000003.json'),
+      JSON.stringify({ seq: 3 })
+    )
+    await fs.writeFile(
+      path.join(journalDir(), 'delta-000000000004.json'),
+      JSON.stringify({
+        seq: 4,
+        entries: [{ op: 'set', key: 'c.safetensors', meta: { alias: '再后续' } }]
+      })
+    )
+
+    await loadData()
+
+    expect(getModelMeta(path.join(root, 'b.safetensors')).alias).toBe('后续批次')
+    expect(getModelMeta(path.join(root, 'c.safetensors')).alias).toBe('再后续')
+    await expect(
+      fs.access(path.join(journalDir(), 'delta-000000000001.json'))
+    ).rejects.toThrow()
+    await expect(
+      fs.access(path.join(journalDir(), 'delta-000000000003.json'))
+    ).rejects.toThrow()
+  })
+
+  it('增量写盘期间的再次修改保留为脏，并由下一次增量补写最新值', async () => {
+    const abs = await touchModel('race-delta.safetensors')
+    setModelMeta(abs, { alias: 'base' })
+    await saveStoreNow()
+
+    setModelMeta(abs, { alias: 'v1' })
+    const realRename = fs.rename.bind(fs)
+    let releaseRename = () => {}
+    const gate = new Promise((resolve) => {
+      releaseRename = resolve
+    })
+    let gated = false
+    vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
+      if (!gated && src.includes('journal')) {
+        gated = true
+        await gate
+      }
+      return realRename(src, dst)
+    })
+
+    try {
+      const first = saveStoreDeltaNow()
+      await vi.waitFor(() => expect(gated).toBe(true))
+      // 日志已按 v1 序列化但尚未改名完成：此刻的新修改不得被清出脏集合
+      setModelMeta(abs, { alias: 'v2' })
+      releaseRename()
+      await first
+      await saveStoreDeltaNow()
+    } finally {
+      vi.restoreAllMocks()
+    }
+
+    await loadData()
+    expect(getModelMeta(abs).alias).toBe('v2')
+  })
+
+  it('快照代际之前的旧日志批次被跳过，不覆盖新快照', async () => {
+    await fs.mkdir(path.join(root, '.modelvault'), { recursive: true })
+    await fs.writeFile(
+      storeFile(),
+      JSON.stringify({
+        version: 1,
+        journalSeq: 2,
+        models: { 'a.safetensors': { alias: 'snapshot' } }
+      })
+    )
+    await fs.mkdir(journalDir(), { recursive: true })
+    const writeBatch = (seq, alias) =>
+      fs.writeFile(
+        path.join(journalDir(), `delta-${String(seq).padStart(12, '0')}.json`),
+        JSON.stringify({
+          seq,
+          entries: [{ op: 'set', key: 'a.safetensors', meta: { alias } }]
+        })
+      )
+    await writeBatch(1, 'stale-1')
+    await writeBatch(2, 'stale-2')
+    await writeBatch(3, 'fresh')
+
+    await loadData()
+
+    expect(getModelMeta(path.join(root, 'a.safetensors')).alias).toBe('fresh')
+  })
+})
+
 describe('reloadCurrentRootData（备份恢复到当前根后的内存重载，B1）', () => {
   /** 直接整文件替换磁盘 store.json（备份恢复目录交换的等价形态） */
   async function replaceStoreOnDisk(models) {
@@ -508,6 +679,17 @@ describe('应用设置规范化', () => {
     expect(s.theme).toBe('dark')
   })
 
+  it('hashWarmup 接受 candidates/full/off，未知值回退 candidates', async () => {
+    for (const mode of ['full', 'off', 'candidates']) {
+      await updateSettings({ hashWarmup: mode })
+      const s = await loadSettings()
+      expect(s.hashWarmup).toBe(mode)
+    }
+    await updateSettings({ hashWarmup: 'turbo' })
+    const s = await loadSettings()
+    expect(s.hashWarmup).toBe('candidates')
+  })
+
   it('viewMode 接受 grid/list，未知值回退 grid', async () => {
     await updateSettings({ viewMode: 'list' })
     let s = await loadSettings()
@@ -629,6 +811,25 @@ describe('应用设置文件损坏恢复（B2）', () => {
     expect(s.theme).toBe('dark')
     expect(await fs.readFile(backupFile, 'utf-8')).toBe('123')
     await expect(fs.access(settingsFile)).rejects.toThrow()
+  })
+
+  it('引导层设置落盘失败同样上报，且写盘链保持可等待（C7）', async () => {
+    // 占位引导层设置文件为目录：原子写 rename 到目录必然失败
+    await fs.mkdir(fakeUserData, { recursive: true })
+    await fs.rm(settingsFile, { force: true })
+    await fs.mkdir(settingsFile, { recursive: true })
+    const errors = []
+    setStoreSaveErrorListener((err) => errors.push(err))
+    try {
+      await updateSettings({ modelsFolder: root })
+      expect(errors).toHaveLength(1)
+      expect(errors[0].message).toContain('设置保存失败')
+      // 失败的写盘已由链内 catch 消化：flush 不会 reject
+      await expect(flushSettingsSave()).resolves.toBeUndefined()
+    } finally {
+      setStoreSaveErrorListener(null)
+      await fs.rm(settingsFile, { recursive: true, force: true })
+    }
   })
 
   it('设置落盘失败经监听器通知（C7），内存值运行时仍生效', async () => {

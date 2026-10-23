@@ -81,14 +81,29 @@ const api = {
 
   /** 模型管理 */
   models: {
-    /** 加载持久化数据（设置 + 模型元数据） */
+    /** 加载持久化数据（设置 + 模型元数据 + 本地索引缓存） */
     loadStore: () => invokeValidated('models:loadStore'),
+    /**
+     * 打开已保存模型库（F1：优先返回本地索引，实现秒切库）
+     * @param {string} folder 模型库根目录
+     * @returns {Promise<{root:string, settings:object, cached:boolean,
+     *   models?:object[], savedAt?:number, durationMs?:number} | {error:string}>}
+     */
+    openLibrary: (folder) => invokeValidated('models:openLibrary', { folder }),
     /** 弹出目录选择框，返回所选目录或 null */
     chooseFolder: () => invokeValidated('models:chooseFolder'),
     /** 扫描模型目录，返回 { models, byType, errors } 或 { canceled } / { error } */
     scan: (folder) => invokeValidated('models:scan', { folder }),
     /** 取消进行中的扫描，返回 { ok } */
     cancelScan: () => invokeValidated('models:cancelScan'),
+    /**
+     * F2：导入外部模型文件（复制/移动入台）
+     * @param {'copy'|'move'} mode 复制或移动
+     * @returns {Promise<{root:string,targetDir:string,targetRelDir:string,
+     *   imported:number,renamed:number,failed:object[],warnings:string[]} |
+     *   {canceled:true} | {error:string}>}
+     */
+    importModels: (mode) => invokeValidated('models:importModels', { mode }),
     /**
      * 局部增量扫描（A-03）：只扫描指定变更子树，返回这些子树的模型现状。
      * payload 为 { folder, dirs }（dirs 为 POSIX 相对目录数组，'' 为根直属）
@@ -108,6 +123,17 @@ const api = {
     clearCovers: (id) => invokeValidated('models:clearCovers', { id }),
     /** 一键清空当前库全部模型的示例图（设置页数据清理），返回 { cleared, images } 或 { error } */
     clearAllCovers: () => invokeValidated('models:clearAllCovers'),
+    /**
+     * 模型库体检（V-07）：检查缺失模型文件/失效封面引用/孤儿封面/重复哈希，
+     * 返回 { report } 或 { error }；只读，不修改任何数据
+     */
+    checkHealth: () => invokeValidated('models:checkHealth'),
+    /**
+     * 一键修复（V-07）：移除缺失文件的元数据、清理失效封面引用、
+     * 孤儿封面移入 .modelvault/trash；修复前备份 store.json。
+     * 返回 { report, repaired, backupPath, dataResetSkipped? } 或 { error }
+     */
+    repairHealth: () => invokeValidated('models:repairHealth'),
     /** 导出备份（FEAT-3）：设置 + 当前库标注/封面 → zip，返回 { path, sizeBytes, library, models, covers } / { canceled } / { error } */
     exportBackup: () => invokeValidated('models:exportBackup'),
     /** 从备份恢复（FEAT-3）：zip → 设置 + 指定库，返回 { settingsRestored, libraryRestored? } / { canceled } / { error } */

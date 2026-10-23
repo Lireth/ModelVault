@@ -2,6 +2,7 @@ import { clipboard, dialog } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
+import { runWithConcurrency } from '../utils'
 import { IMAGE_EXTENSIONS } from './scanner'
 // 直接依赖存储子模块而非聚合门面（services/store.js）：门面的重导出链在
 // 模块初始化顺序变化时可能拿到尚未就绪的绑定（A-02 引入 meta-relink 后
@@ -268,7 +269,12 @@ export async function pruneOrphanCovers() {
     const prefix = `${DATA_DIR}/${COVERS_DIR}/`
     const stale = entries.filter((n) => !referenced.has(`${prefix}${n}`))
     if (stale.length === 0) return
-    await Promise.all(stale.map((n) => fs.rm(path.join(dir, n), { force: true })))
+    // OPT-09：孤儿封面批量删除统一有界并发，避免瞬时耗尽文件句柄
+    await runWithConcurrency(
+      stale,
+      (n) => fs.rm(path.join(dir, n), { force: true }),
+      16
+    )
     logger.info(`已清理 ${stale.length} 个孤儿封面文件`)
   } catch (err) {
     if (err.code !== 'ENOENT') logger.warn(`孤儿封面清理失败: ${err.message}`)

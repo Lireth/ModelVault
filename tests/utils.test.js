@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { isAllowedExternalUrl, runWithConcurrency } from '../src/main/utils'
+import {
+  isAllowedExternalUrl,
+  parseWaitForPid,
+  readResponseBytesLimited,
+  runWithConcurrency,
+  waitForProcessExit
+} from '../src/main/utils'
 
 /**
  * utils.isAllowedExternalUrl 单元测试（B3）：
@@ -123,5 +129,64 @@ describe('runWithConcurrency（O-6 固定并发任务池）', () => {
         throw new Error('boom')
       }, 2)
     ).rejects.toThrow('boom')
+  })
+})
+
+describe('网络响应体积上限（V-06）', () => {
+  it('Content-Length 超限时立即拒绝，不读取响应体', async () => {
+    const response = new Response('{}', {
+      status: 200,
+      headers: { 'Content-Length': String(2048) }
+    })
+    await expect(readResponseBytesLimited(response, 1024, '测试响应')).rejects.toThrow(
+      '测试响应过大'
+    )
+  })
+
+  it('无 Content-Length 时按实际读取字节中止', async () => {
+    const response = new Response('x'.repeat(2048), { status: 200 })
+    await expect(readResponseBytesLimited(response, 1024, '测试响应')).rejects.toThrow(
+      '测试响应过大'
+    )
+  })
+
+  it('未超限时返回完整内容', async () => {
+    const response = new Response('hello', { status: 200 })
+    await expect(readResponseBytesLimited(response, 1024, '测试响应')).resolves.toEqual(
+      Buffer.from('hello')
+    )
+  })
+})
+
+describe('更新启动等待（V-06）', () => {
+  it('解析 --wait-for-pid，忽略非法值/自身 pid', () => {
+    expect(parseWaitForPid(['electron', '.', '--wait-for-pid=12345'])).toBe(12345)
+    expect(parseWaitForPid(['--wait-for-pid=abc'])).toBe(0)
+    expect(parseWaitForPid(['--wait-for-pid=-1'])).toBe(0)
+    expect(parseWaitForPid([`--wait-for-pid=${process.pid}`])).toBe(0)
+    expect(parseWaitForPid([])).toBe(0)
+  })
+
+  it('目标进程退出后返回 true', async () => {
+    let checks = 0
+    const exited = await waitForProcessExit(123, {
+      timeoutMs: 500,
+      intervalMs: 10,
+      isAlive: () => {
+        checks += 1
+        return checks < 2
+      }
+    })
+    expect(exited).toBe(true)
+    expect(checks).toBeGreaterThanOrEqual(2)
+  })
+
+  it('超时仍存活返回 false', async () => {
+    const exited = await waitForProcessExit(123, {
+      timeoutMs: 30,
+      intervalMs: 10,
+      isAlive: () => true
+    })
+    expect(exited).toBe(false)
   })
 })

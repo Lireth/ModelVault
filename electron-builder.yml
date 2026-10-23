@@ -35,3 +35,12 @@ win:
   icon: build/icon.ico
   # 产物名随 package.json 的 version 自动变化，避免发版漏改
   artifactName: ${productName}-${version}.exe
+  # E1：代码签名。CI 配置 CSC_LINK（base64 PFX）与 CSC_KEY_PASSWORD 后，
+  # electron-builder 在打包阶段对 EXE 做 SHA256 Authenticode 签名；
+  # 未配置证书时跳过签名，仍可构建（应用内更新退化为 SHA256 校验）。
+  signAndEditExecutable: true
+  # v26 起签名参数统一收归 signtoolOptions（win 根层不再接受 signingHashAlgorithms，
+  # 未知键会使整个 win 配置校验失败）
+  signtoolOptions:
+    signingHashAlgorithms:
+      - sha256

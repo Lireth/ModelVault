@@ -30,6 +30,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // 模糊展示（红色 NSFW 标记不受影响）；详情页图片始终不模糊
   nsfwBlur: true,
   autoRescan: false,
+  // 后台哈希预热策略（O1）：candidates 仅对同尺寸模型计算（默认，最省磁盘）；
+  // full 全库预热；off 关闭后台预热（详情页/识别仍可按需计算）
+  hashWarmup: 'candidates',
   // 智能视图（组合筛选收藏）：{id, name, search, typeFilter, subFilter,
   //   showFavoritesOnly, sortBy, sortAsc} 快照数组，侧栏一键切换
   savedViews: []
