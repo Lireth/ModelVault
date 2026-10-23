@@ -39,5 +39,8 @@ win:
   # electron-builder 在打包阶段对 EXE 做 SHA256 Authenticode 签名；
   # 未配置证书时跳过签名，仍可构建（应用内更新退化为 SHA256 校验）。
   signAndEditExecutable: true
-  signingHashAlgorithms:
-    - sha256
+  # v26 起签名参数统一收归 signtoolOptions（win 根层不再接受 signingHashAlgorithms，
+  # 未知键会使整个 win 配置校验失败）
+  signtoolOptions:
+    signingHashAlgorithms:
+      - sha256
