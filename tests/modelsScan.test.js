@@ -578,11 +578,40 @@ describe('settings:update', () => {
     expect(modelsFolder).toBe('')
   })
 
-  it('变更 modelsFolder 为真实存在的目录时接受', async () => {
+  it('已登记模型库可被设置为激活根', async () => {
+    const rootB = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-b-'))
+    roots.push(rootB)
+    await updateSettings({ modelsFolder: root, modelsFolders: [root, rootB] })
     const update = getRegisteredHandler('settings:update')
-    const res = await update(makeEvent(), { modelsFolder: root })
+    const res = await update(makeEvent(), { modelsFolder: rootB })
     expect(res.error).toBeUndefined()
-    expect(res.settings.modelsFolder).toBe(root)
+    expect(res.settings.modelsFolder).toBe(rootB)
+  })
+
+  it('变更 modelsFolder 为真实存在但未登记的目录时拒绝且不落盘（新增库只能走对话框）', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-outside-'))
+    roots.push(outside)
+    const update = getRegisteredHandler('settings:update')
+    const res = await update(makeEvent(), { modelsFolder: outside })
+    expect(res.error).toContain('不在模型库列表')
+    const settings = await loadSettings()
+    expect(settings.modelsFolder).toBe('')
+    expect(settings.modelsFolders).toEqual([])
+  })
+
+  it('modelsFolders 新增未登记目录时拒绝，移除现有库仍允许', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-outside-'))
+    roots.push(outside)
+    const update = getRegisteredHandler('settings:update')
+    const rejected = await update(makeEvent(), { modelsFolders: [root, outside] })
+    expect(rejected.error).toContain('不在模型库列表')
+
+    await updateSettings({ modelsFolder: root, modelsFolders: [root] })
+    const removed = await update(makeEvent(), { modelsFolders: [] })
+    expect(removed.error).toBeUndefined()
+    const settings = await loadSettings()
+    // 激活库恒保留在列表中，移除仅作用于其余条目
+    expect(settings.modelsFolders).toEqual([root])
   })
 
   it('modelsFolder 与当前值相同时跳过存在性校验（目录暂时离线仍可保存其他设置）', async () => {

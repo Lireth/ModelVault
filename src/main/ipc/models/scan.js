@@ -38,9 +38,10 @@ function isSameRoot(a, b) {
 
 /**
  * 目录是否属于模型库白名单（B1）：settings.modelsFolders（上限 20）。
- * 列表条目只能经 models:chooseFolder（对话框确认）或 settings:update
- * （存在性校验）写入，是「.modelvault 写入点可以指向哪里」的唯一可信
- * 来源；渲染进程直接传入的任意路径不得成为关联存储根。
+ * 列表条目只能经 models:chooseFolder（用户对话框确认）写入；主进程扫描成功
+ * 链路只更新已登记库的激活根，不新增条目；settings:update 仅允许激活/移除/
+ * 重排已登记库，不能再新增根目录。该列表是「.modelvault 写入点可以指向
+ * 哪里」的唯一可信来源；渲染进程直接传入的任意路径不得成为关联存储根。
  * Windows 大小写不敏感比较。
  */
 function isKnownLibrary(dir) {
@@ -85,7 +86,7 @@ export function registerScanHandlers() {
       // 白名单校验（B1）：扫描目录必须已在模型库列表中。存在性校验只保证
       // 「路径可用」，不保证「用户想把这里当库」——无白名单时任意可写目录
       // 都能经 ensureRootStore 落 .modelvault，构成渲染可控的任意目录写入
-      // 原语。新增库只能走 models:chooseFolder / settings:update
+      // 原语。新增库只能走 models:chooseFolder（用户对话框确认）
       if (!isKnownLibrary(root)) {
         logger.warn(`拒绝扫描模型库列表之外的目录: ${root}`)
         return { error: '该目录不在模型库列表中' }

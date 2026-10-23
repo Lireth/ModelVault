@@ -29,8 +29,10 @@ import { readLibraryIndex } from '../../services/library-index'
  * 存储与设置链路：持久化数据加载、模型根目录选择、应用设置更新。
  * ensureRootStore 是全域切换关联存储的唯一入口（扫描与 loadStore 共用）。
  * 目录存在性校验收敛于 ipc/handler.js 的 checkExistingDirectory（O2）：
- * 拦截渲染进程经 settings:update 写入的任意字符串路径——若不做校验，
- * 后续任意一次元数据写入即在该目录创建 .modelvault/（任意目录写入原语）。
+ * settings:update 只允许激活/移除/重排已登记库列表中的根目录，未登记路径
+ * 一律拒绝（新增只能经 models:chooseFolder 对话框）——否则任意已存在目录
+ * 都可被提升为库根，后续元数据写入即在该目录创建 .modelvault/
+ * （任意目录写入原语）。
  */
 
 /**
@@ -268,12 +270,16 @@ export function registerStoreHandlers() {
 
   // 更新应用设置（通用/扫描/外观），返回规范化后的完整设置
   wrapHandler('settings:update', async (event, patch = {}) => {
-    // modelsFolder / modelsFolders（E7 多根目录）的变更项必须是真实存在的目录：
-    // 防止渲染进程写入任意路径后，经元数据写入在该目录创建 .modelvault
-    // （任意目录写入原语）。与当前值相同的路径不重复校验：
-    // 模型目录所在磁盘暂时离线时仍可保存其他设置
+    // 模型库根目录写入收敛（OPT-04）：settings:update 不得新增库根目录。
+    // modelsFolder / modelsFolders 中所有未出现在当前列表内的路径一律拒绝——
+    // 新增库只能经 models:chooseFolder 的原生对话框（用户确认）写入；主进程
+    // 扫描成功链路只更新已登记库的激活根，不新增条目。否则渲染进程可把任意
+    // 已存在目录提升为库根，随后经 ensureRootStore 在该目录创建 .modelvault
+    //（任意目录写入原语）。已在当前列表/当前激活根中的路径跳过校验：
+    // 目录暂时离线时仍可保存设置。
+    const current = getSettings()
     const currentKeys = new Set(
-      [getSettings().modelsFolder, ...(getSettings().modelsFolders || [])]
+      [current.modelsFolder, ...(current.modelsFolders || [])]
         .filter((f) => typeof f === 'string' && f)
         .map((f) => f.toLowerCase())
     )
@@ -288,6 +294,8 @@ export function registerStoreHandlers() {
     }
     for (const folder of candidates) {
       if (currentKeys.has(folder.toLowerCase())) continue
+      // 先做存在性校验，保留原有「目录不存在/不是目录」的明确提示；
+      // 已存在的目录仍必须命中当前库列表，否则拒绝新增。
       const dirInvalid = await checkExistingDirectory(
         folder,
         `模型文件夹不存在或不是目录: ${folder}`
@@ -296,6 +304,8 @@ export function registerStoreHandlers() {
         logger.warn(`拒绝设置不存在的模型目录: ${folder}`)
         return { error: dirInvalid }
       }
+      logger.warn(`拒绝经 settings:update 新增模型库根目录: ${folder}`)
+      return { error: '该目录不在模型库列表中，新增模型库请通过「更改文件夹」选择' }
     }
     await updateSettings(patch)
     const settings = getSettings()
