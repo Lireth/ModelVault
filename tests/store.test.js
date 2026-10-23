@@ -690,6 +690,18 @@ describe('应用设置规范化', () => {
     expect(s.hashWarmup).toBe('candidates')
   })
 
+  it('autoCheckUpdate 缺省视为开启，显式关闭后持久生效（O-3）', async () => {
+    let s = await loadSettings()
+    expect(s.autoCheckUpdate).toBe(true)
+    await updateSettings({ autoCheckUpdate: false })
+    s = await loadSettings()
+    expect(s.autoCheckUpdate).toBe(false)
+    // 与 civitaiEnabled 同款宽松语义：仅显式 false 关闭，缺省/其余值回退开启
+    await updateSettings({ autoCheckUpdate: undefined })
+    s = await loadSettings()
+    expect(s.autoCheckUpdate).toBe(true)
+  })
+
   it('viewMode 接受 grid/list，未知值回退 grid', async () => {
     await updateSettings({ viewMode: 'list' })
     let s = await loadSettings()

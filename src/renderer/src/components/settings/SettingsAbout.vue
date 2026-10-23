@@ -1,11 +1,12 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { toast } from '../../store/appStore'
+import { saveSettings, state, toast, updateAvailable } from '../../store/appStore'
 
 /**
  * 设置页「关于」板块（O-4 自 SettingsPage.vue 按域拆出）：
- * 应用信息展示、应用内检查更新（E1/A-15）+ 更新包下载与安装（F-6）、
- * 日志与诊断入口（B-04）。自包含板块：仅依赖 window.api 与全局 toast。
+ * 应用信息展示、应用内检查更新（E1/A-15）+ 更新包下载与安装（F-6）+
+ * 启动自动检查开关（O-3）、日志与诊断入口（B-04）。
+ * 自包含板块：仅依赖 window.api、appStore 的设置保存与全局 toast。
  */
 
 /** 应用信息（关于板块） */
@@ -78,6 +79,14 @@ async function onCopyDiagnostics() {
 
 const updateInfo = ref(null)
 const checkingUpdate = ref(false)
+
+// 启动自动检查已发现新版本（O-3）：直接采纳为检查结果，
+// 用户打开设置页无需再点一次「检查更新」
+onMounted(() => {
+  if (updateAvailable.value) {
+    updateInfo.value = { ...updateAvailable.value }
+  }
+})
 
 async function onCheckUpdate() {
   checkingUpdate.value = true
@@ -153,6 +162,27 @@ async function onDownloadUpdate() {
 /** 取消下载 */
 function onCancelDownload() {
   window.api.app.cancelUpdateDownload?.()
+}
+
+/* ---------------- 启动自动检查更新开关（O-3） ---------------- */
+
+/** 开关本地态：初始取全局设置（缺省视为开启）；变更即保存（saveSettings 失败会 toast） */
+const autoCheckUpdate = ref(state.settings.autoCheckUpdate !== false)
+const savingAutoCheck = ref(false)
+
+async function onToggleAutoCheck() {
+  if (savingAutoCheck.value) return
+  const next = !autoCheckUpdate.value
+  // 先行切换保证开关即时响应；保存失败时回滚
+  autoCheckUpdate.value = next
+  savingAutoCheck.value = true
+  const ok = await saveSettings({ autoCheckUpdate: next })
+  savingAutoCheck.value = false
+  if (!ok) {
+    autoCheckUpdate.value = !next
+    return
+  }
+  toast('success', next ? '已开启启动自动检查更新' : '已关闭启动自动检查更新')
 }
 
 /** 运行更新程序：主进程延迟拉起新版本并退出当前应用 */
@@ -233,6 +263,21 @@ async function onInstallUpdate() {
     <!-- 更新说明（A-15）：来自 GitHub Release body，主进程已截断 500 字符；
          文本插值渲染，远程内容中的 HTML 原样显示不被解析 -->
     <p v-if="updateInfo?.hasUpdate && updateInfo.releaseNotes" class="update-notes">{{ updateInfo.releaseNotes }}</p>
+
+    <!-- 启动自动检查更新（O-3）：延迟静默查询，仅在有更新时提示；变更即保存 -->
+    <div class="update-row">
+      <label class="autocheck">
+        <input
+          type="checkbox"
+          class="switch"
+          :checked="autoCheckUpdate"
+          :disabled="savingAutoCheck"
+          @change="onToggleAutoCheck"
+        />
+        <span>启动时自动检查更新</span>
+      </label>
+      <span class="update-msg">启动完成后静默查询一次新版本，仅在有更新时提示</span>
+    </div>
 
     <!-- 日志与诊断（B-04）：反馈问题时可直接打开日志目录或复制版本环境信息 -->
     <div class="update-row">
@@ -328,5 +373,15 @@ async function onInstallUpdate() {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+}
+
+/* 启动自动检查开关（O-3）：switch 样式复用全局 main.css */
+.autocheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-xs);
+  cursor: pointer;
+  user-select: none;
 }
 </style>

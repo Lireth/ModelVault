@@ -4,6 +4,7 @@ import { registerWindowShortcuts } from './menu'
 import { registerIpcHandlers } from './ipc'
 import { registerImageScheme, registerImageProtocolHandler } from './protocol'
 import { loadSettings } from './services/store'
+import { scheduleStartupUpdateCheck } from './services/updater'
 import { quitAfterFlush } from './quit'
 import { handleUncaughtException } from './fatal-error'
 import { runStartupSmoke } from './smoke'
@@ -101,6 +102,10 @@ async function startApp() {
     })
 
     logger.info(`应用启动完成 (Electron ${process.versions.electron} / Node ${process.versions.node})`)
+
+    // 启动自动检查更新（O-3）：延迟静默执行，仅在发现新版本时推送渲染层提示；
+    // 开发环境/冒烟模式内部跳过，是否检查由触发时刻的设置值决定
+    scheduleStartupUpdateCheck()
 
     // 冒烟模式：完成启动链路检查后自行退出（仅 CI/手工 smoke 设置该环境变量）
     if (process.env.MODELVAULT_SMOKE === '1') {

@@ -2,6 +2,7 @@ import { watch } from 'vue'
 import {
   applyHashUpdate,
   applyThumbUpdates,
+  applyUpdateAvailable,
   handleMenuAction,
   partialScanModels,
   state,
@@ -22,6 +23,7 @@ export function useMainProcessEvents() {
   let unsubscribeStoreError = null
   let unsubscribeFsChanged = null
   let unsubscribeWarmup = null
+  let unsubscribeUpdateAvailable = null
 
   /** 目录变更自动重扫的二级防抖（主进程 3s 静默期后此处再缓冲 1s，E8） */
   let fsChangedTimer = null
@@ -122,6 +124,11 @@ export function useMainProcessEvents() {
       state.warmup = progress
       applyHashUpdate(progress)
     })
+    // 订阅启动自动检查更新结果（O-3）：仅在有新版本时推送一次，
+    // 记录到 update store 并 toast 提示，设置页「关于」直接展示
+    unsubscribeUpdateAvailable = window.api.app.onUpdateAvailable?.((payload) => {
+      applyUpdateAvailable(payload)
+    })
   }
 
   function unsubscribeAll() {
@@ -132,6 +139,7 @@ export function useMainProcessEvents() {
     unsubscribeStoreError?.()
     unsubscribeFsChanged?.()
     unsubscribeWarmup?.()
+    unsubscribeUpdateAvailable?.()
   }
   return { subscribe, unsubscribeAll }
 }

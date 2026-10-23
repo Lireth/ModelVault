@@ -1,6 +1,7 @@
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import logger from '../logger'
 import { isAllowedExternalUrl, readResponseTextLimited } from '../utils'
+import { getSettings } from './store-settings'
 import {
   fetchAllowedUpdateUrl,
   findUpdateAssets,
@@ -25,6 +26,8 @@ const UPDATE_REPO = 'Lireth/ModelVault'
 const REQUEST_TIMEOUT_MS = 10000
 /** GitHub Release JSON 上限（V-06）：正常响应远小于此值 */
 const MAX_UPDATE_JSON_BYTES = 2 * 1024 * 1024
+/** 启动自动检查延迟（ms，O-3）：避开启动初期的库加载/扫描/索引预热竞争 */
+const STARTUP_CHECK_DELAY_MS = 15000
 
 /**
  * 比较两个 semver 风格版本号（仅数字段，如 0.1.2）。
@@ -122,4 +125,63 @@ export async function checkForUpdate() {
     }
     return { error: `更新检查失败: ${err.message}`, current }
   }
+}
+
+/* ---------------- 启动自动检查更新（O-3） ---------------- */
+
+/**
+ * 执行一次启动静默检查（决策逻辑独立导出，便于单测）：
+ * - 设置关闭：直接跳过，不发任何网络请求；
+ * - 检查失败/无更新：静默结束（仅由 check 内部记日志），不打扰用户；
+ * - 仅「有更新」时经 notify 推送渲染层（载荷为检查结果的渲染层所需子集）。
+ * @param {{autoCheckUpdate: boolean}} settings 应用设置（getSettings 合并视图）
+ * @param {() => Promise<{error?: string, hasUpdate?: boolean, current?: string,
+ *   latest?: string, releaseUrl?: string, releaseNotes?: string,
+ *   canDownload?: boolean, downloadSize?: number}>} check 检查函数（生产为 checkForUpdate）
+ * @param {(payload: object) => void} notify 有更新时的推送回调
+ * @returns {Promise<boolean>} 是否执行了推送
+ */
+export async function runStartupUpdateCheck(settings, check, notify) {
+  if (settings?.autoCheckUpdate !== true) return false
+  const result = await check()
+  if (!result || result.error || result.hasUpdate !== true) return false
+  notify({
+    current: result.current,
+    latest: result.latest,
+    releaseUrl: result.releaseUrl || '',
+    releaseNotes: result.releaseNotes || '',
+    canDownload: result.canDownload === true,
+    downloadSize: result.downloadSize || 0
+  })
+  return true
+}
+
+/** 向所有窗口广播「发现新版本」（app:updateAvailable 事件） */
+function broadcastUpdateAvailable(payload) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send('app:updateAvailable', payload)
+    }
+  }
+}
+
+/** 已安排的启动检查定时器（幂等：重复调用覆盖未触发的前次） */
+let startupCheckTimer = null
+
+/**
+ * 安排启动自动检查更新（应用启动完成后调用一次，O-3）：
+ * - 延迟执行，避免与初始扫描/索引读取竞争网络与 CPU；
+ * - 开发环境与冒烟模式跳过：dev 每次启动都请求 GitHub 既无意义也干扰测试确定性；
+ * - 是否真正发起请求由触发时刻的设置值决定（用户在延迟窗口内关闭开关即时生效）。
+ * @param {number} [delayMs] 延迟毫秒数（测试可注入小值）
+ */
+export function scheduleStartupUpdateCheck(delayMs = STARTUP_CHECK_DELAY_MS) {
+  if (!app.isPackaged || process.env.MODELVAULT_SMOKE === '1') return
+  if (startupCheckTimer) clearTimeout(startupCheckTimer)
+  startupCheckTimer = setTimeout(() => {
+    startupCheckTimer = null
+    runStartupUpdateCheck(getSettings(), checkForUpdate, broadcastUpdateAvailable).catch(
+      (err) => logger.warn(`启动自动检查更新失败: ${err.message}`)
+    )
+  }, delayMs)
 }

@@ -118,6 +118,9 @@ export { COMPARE_MAX_MODELS, compareState, openCompare, closeCompare } from './c
 // 内置动态智能视图（FN-07）
 export { dynamicViews, activeDynamicViewKey, applyDynamicView } from './dynamic-views'
 
+// 启动自动检查更新（O-3）
+export { updateAvailable, applyUpdateAvailable } from './update'
+
 // 查找派生
 export { modelById } from './selectors'
 

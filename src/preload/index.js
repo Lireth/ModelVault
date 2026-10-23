@@ -11,6 +11,7 @@ const VALID_INVOKE_CHANNELS = Object.freeze(Object.keys(IPC_PAYLOAD_SCHEMAS))
 
 const VALID_RECEIVE_CHANNELS = [
   'app:updateProgress',
+  'app:updateAvailable',
   'models:scanProgress',
   'models:menuAction',
   'models:thumbsReady',
@@ -63,6 +64,12 @@ const api = {
     installUpdate: () => invokeValidated('app:installUpdate'),
     /** 订阅更新包下载进度（{ received, total }），返回取消监听函数 */
     onUpdateProgress: (listener) => subscribe('app:updateProgress', listener),
+    /**
+     * 订阅启动自动检查更新结果（O-3）：仅在有新版本时推送一次，
+     * 载荷 { current, latest, releaseUrl, releaseNotes, canDownload, downloadSize }，
+     * 返回取消监听函数
+     */
+    onUpdateAvailable: (listener) => subscribe('app:updateAvailable', listener),
     /** 在系统资源管理器中打开日志目录（B-04），返回 { ok } 或 { error } */
     openLogs: () => invokeValidated('app:openLogs'),
     /**

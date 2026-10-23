@@ -30,6 +30,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // 模糊展示（红色 NSFW 标记不受影响）；详情页图片始终不模糊
   nsfwBlur: true,
   autoRescan: false,
+  // 启动自动检查更新（O-3）：应用启动完成后延迟静默查询 GitHub Releases，
+  // 仅在有新版本时经 app:updateAvailable 事件提示（无更新/失败均不打扰）
+  autoCheckUpdate: true,
   // 后台哈希预热策略（O1）：candidates 仅对同尺寸模型计算（默认，最省磁盘）；
   // full 全库预热；off 关闭后台预热（详情页/识别仍可按需计算）
   hashWarmup: 'candidates',

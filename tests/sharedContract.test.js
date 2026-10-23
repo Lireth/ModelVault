@@ -159,7 +159,7 @@ describe('shared/defaults', () => {
       'modelsFolder', 'modelsFolders', 'autoScan', 'excludeDirs', 'theme', 'accentColor',
       'cardSize', 'viewMode', 'sortBy', 'sortAsc', 'scanExtensions',
       'showSize', 'showMtime', 'showParams', 'civitaiEnabled', 'nsfwBlur', 'autoRescan',
-      'hashWarmup', 'savedViews'
+      'autoCheckUpdate', 'hashWarmup', 'savedViews'
     ].sort()
     expect(Object.keys(DEFAULT_SETTINGS).sort()).toEqual(expectedKeys)
   })

@@ -101,6 +101,9 @@ const EXPECTED_EXPORTS = [
   'dynamicViews',
   'activeDynamicViewKey',
   'applyDynamicView',
+  // 启动自动检查更新（O-3）
+  'updateAvailable',
+  'applyUpdateAvailable',
   // 查找派生
   'modelById',
   // 详情

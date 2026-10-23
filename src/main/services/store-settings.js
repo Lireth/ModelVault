@@ -97,6 +97,7 @@ function defaultLibrarySettings() {
     civitaiEnabled: base.civitaiEnabled,
     nsfwBlur: base.nsfwBlur,
     autoRescan: base.autoRescan,
+    autoCheckUpdate: base.autoCheckUpdate,
     hashWarmup: base.hashWarmup,
     savedViews: [...base.savedViews]
   }
@@ -189,6 +190,8 @@ export function normalizeLibrarySettings(raw) {
     civitaiEnabled: raw.civitaiEnabled !== false,
     nsfwBlur: raw.nsfwBlur !== false,
     autoRescan: raw.autoRescan === true,
+    // 启动自动检查更新（O-3）：缺省视为开启（与 civitaiEnabled 同款默认真语义）
+    autoCheckUpdate: raw.autoCheckUpdate !== false,
     hashWarmup: HASH_WARMUP_KEYS.has(raw.hashWarmup) ? raw.hashWarmup : base.hashWarmup,
     savedViews: normalizeSavedViews(raw.savedViews)
   }
