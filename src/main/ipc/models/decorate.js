@@ -265,13 +265,21 @@ export function resolveCoverSafe(cover) {
   }
 }
 
-/** 单模型的元数据装饰（封面列表校验、默认封面回退 sidecar 预览图） */
-async function decorateOne(model, usedThumbs) {
+/**
+ * 单模型的元数据装饰（封面列表校验、默认封面回退 sidecar 预览图）。
+ * @param {object} model 扫描出的模型
+ * @param {Set<string>} usedThumbs 缩略图保留名单
+ * @param {boolean} [forceRefresh] 跳过装饰缓存（局部扫描变更子树使用：
+ *   sidecar/封面文件变化不会改变模型 mtime，不能靠 mtime + 元数据签名识别）
+ */
+async function decorateOne(model, usedThumbs, forceRefresh = false) {
   const meta0 = getModelMeta(model.id) || {}
   const cached = decorateCache.get(model.id)
   // 增量扫描缓存命中：mtime 与元数据签名均未变化时复用上次结果
-  //（命中路径不做任何文件 IO，sidecar 导入仅发生在缓存未命中时）
-  if (cached && cached.mtimeMs === model.mtimeMs && cached.signature === metaSignature(meta0)) {
+  //（命中路径不做任何文件 IO，sidecar 导入仅发生在缓存未命中时）。
+  // forceRefresh 由局部扫描在变更子树上置位：即使模型文件 mtime 未变，
+  // 也必须重新检查 sidecar/封面文件，避免新增/修改的 sidecar 被缓存遮蔽。
+  if (!forceRefresh && cached && cached.mtimeMs === model.mtimeMs && cached.signature === metaSignature(meta0)) {
     // 刷新插入顺序实现简易 LRU
     decorateCache.delete(model.id)
     decorateCache.set(model.id, cached)
@@ -407,19 +415,25 @@ async function decorateOne(model, usedThumbs) {
  * 末尾按已使用的缩略图清单清理失效缩略图文件。
  * @param {Array<object>} models 扫描出的模型列表
  * @param {AbortSignal} [signal] 取消信号（批间检查）
- * @param {{pruneThumbs?: boolean}} [opts] pruneThumbs=false 跳过末尾的失效
- *   缩略图清理（局部增量扫描必传）：局部装饰仅覆盖变更子树，usedThumbs 不含
- *   子树外模型的缩略图，此时按名单清理会把子树外有效缩略图全部误删——且
- *   装饰缓存命中路径不会重新生成，坏图将持续到元数据变化。失效缩略图与孤儿
- *   封面同一约定（scan.js：「不做孤儿清理，全量扫描兜底」）。
+ * @param {{pruneThumbs?: boolean, forceRefresh?: boolean}} [opts]
+ *   pruneThumbs=false 跳过末尾的失效缩略图清理（局部增量扫描必传）：
+ *   局部装饰仅覆盖变更子树，usedThumbs 不含子树外模型的缩略图，此时按名单
+ *   清理会把子树外有效缩略图全部误删——且装饰缓存命中路径不会重新生成，
+ *   坏图将持续到元数据变化。失效缩略图与孤儿封面同一约定（scan.js：
+ *   「不做孤儿清理，全量扫描兜底」）。
+ *   forceRefresh=true 跳过缓存重新装饰（局部扫描必传）：变更子树内的
+ *   sidecar/封面文件可能变化而未改动模型 mtime，缓存命中会遮蔽这些变化。
  */
 export async function decorateModels(models, signal, opts = {}) {
   const usedThumbs = new Set()
   const result = []
+  const forceRefresh = opts.forceRefresh === true
   for (let i = 0; i < models.length; i += DECORATE_BATCH_SIZE) {
     if (signal?.aborted) throw abortError()
     const batch = models.slice(i, i + DECORATE_BATCH_SIZE)
-    const decoratedBatch = await Promise.all(batch.map((m) => decorateOne(m, usedThumbs)))
+    const decoratedBatch = await Promise.all(
+      batch.map((m) => decorateOne(m, usedThumbs, forceRefresh))
+    )
     result.push(...decoratedBatch)
   }
   if (opts.pruneThumbs !== false) await pruneThumbs(usedThumbs)

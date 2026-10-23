@@ -296,8 +296,14 @@ export function registerScanHandlers() {
       // pruneThumbs=false（OPT-1 修复）：局部装饰仅覆盖变更子树，若按局部
       // usedThumbs 清理会把子树外模型的全部缩略图误删（缓存命中路径不会重新
       // 生成，坏图将持续到元数据变化）。失效缩略图与孤儿封面同一约定：
-      // 由下一次全量扫描兜底清理
-      const decorated = await decorateModels(models, signal, { pruneThumbs: false })
+      // 由下一次全量扫描兜底清理。
+      // forceRefresh（OPT-07）：变更子树内的 sidecar/封面文件变化不会改动
+      // 模型 mtime，必须跳过装饰缓存重新检查，否则新增/修改的 sidecar 与
+      // 预览图会被旧缓存遮蔽。
+      const decorated = await decorateModels(models, signal, {
+        pruneThumbs: false,
+        forceRefresh: true
+      })
       models.length = 0 // 同全量扫描：装饰后立即释放原始数组（O8）
 
       const win = BrowserWindow.fromWebContents(event.sender)

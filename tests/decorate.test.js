@@ -189,6 +189,50 @@ describe('decorateModels 元数据装饰', () => {
   })
 })
 
+describe('OPT-07 局部扫描缓存感知 sidecar/封面变化', () => {
+  it('forceRefresh 重新读取新增 civitai.info sidecar（模型 mtime 未变）', async () => {
+    const abs = path.join(root, 'late-info-lora.safetensors')
+    await fs.writeFile(abs, 'x')
+    const model = makeModel(abs, { type: 'lora' })
+    const [first] = await decorateModels([model])
+    expect(first.triggerWords).toBe('')
+
+    // sidecar 新增不改变模型文件 mtime，默认缓存命中仍返回旧结果
+    await fs.writeFile(
+      path.join(root, 'late-info-lora.civitai.info'),
+      JSON.stringify({ trainedWords: ['late-trigger'] })
+    )
+    const [cached] = await decorateModels([{ ...model }])
+    expect(cached.triggerWords).toBe('')
+
+    // 局部扫描携带 forceRefresh：重新读取 sidecar 并导入触发词
+    const [refreshed] = await decorateModels([{ ...model }], undefined, {
+      forceRefresh: true
+    })
+    expect(refreshed.triggerWords).toBe('late-trigger')
+    expect(refreshed.triggerWordsSource).toBe('civitai')
+  })
+
+  it('forceRefresh 重新识别新增同名预览图（默认封面变化）', async () => {
+    const abs = path.join(root, 'late-preview.safetensors')
+    await fs.writeFile(abs, 'x')
+    const model = makeModel(abs)
+    const [first] = await decorateModels([model])
+    expect(first.cover).toBe('')
+
+    const preview = path.join(root, 'late-preview.png')
+    await fs.writeFile(preview, PNG_MAGIC)
+    const [cached] = await decorateModels([{ ...model }])
+    expect(cached.cover).toBe('')
+
+    const [refreshed] = await decorateModels([{ ...model }], undefined, {
+      forceRefresh: true
+    })
+    expect(refreshed.cover).toBe(preview)
+    expect(refreshed.coverUrl).toContain('mvimg://local/')
+  })
+})
+
 describe('sidecar 导入与用户并发保存的竞态（E3 回归）', () => {
   afterEach(() => {
     vi.mocked(findSidecarText).mockReset()

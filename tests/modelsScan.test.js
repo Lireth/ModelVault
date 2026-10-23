@@ -50,13 +50,20 @@ vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([])
 import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
 import { scanModels } from '../src/main/services/scanner'
 import { syncWatcher } from '../src/main/services/watcher'
-import { getCurrentRoot, loadSettings, setDataRoot, updateSettings } from '../src/main/services/store'
+import {
+  getCurrentRoot,
+  loadData,
+  loadSettings,
+  setDataRoot,
+  updateSettings
+} from '../src/main/services/store'
 import {
   MAX_PARTIAL_SCAN_DIRS,
   collapseDirsToTopLevel,
   normalizePartialScanDirs
 } from '../src/shared/scan-dirs'
 import { drainDeferredThumbs, getThumbPathDeferred } from '../src/main/services/thumbs'
+import { decorateModels } from '../src/main/ipc/models/decorate'
 
 const settingsFile = path.join(fakeUserData, 'settings.json')
 const roots = []
@@ -157,6 +164,40 @@ describe('models:partialScan（A-03）', () => {
     expect(res.dirs).toEqual(['lora'])
     // subDirs 透传给扫描器
     expect(vi.mocked(scanModels).mock.calls.at(-1)[2].subDirs).toEqual(['lora'])
+  })
+
+  it('OPT-07：局部扫描跳过装饰缓存，新增 sidecar 即时导入', async () => {
+    await registerLibrary(root)
+    const abs = path.join(root, 'late-sidecar.safetensors')
+    await fs.writeFile(abs, 'x')
+    const model = {
+      id: abs,
+      name: 'late-sidecar',
+      ext: '.safetensors',
+      relDir: '',
+      folder: root,
+      type: 'lora',
+      size: 1,
+      mtimeMs: 1
+    }
+    // 该测试文件不经过 loadStore 链路；显式加载当前根元数据，使 sidecar
+    // 导入的 setModelMeta 能落到内存存储（与生产启动时序一致）
+    await loadData()
+    // 首次装饰建立缓存（此时无 sidecar）
+    await decorateModels([model])
+    await fs.writeFile(
+      path.join(root, 'late-sidecar.civitai.info'),
+      JSON.stringify({ trainedWords: ['late-tag'] })
+    )
+    vi.mocked(scanModels).mockResolvedValue({ models: [model], errors: [], dirCount: 1 })
+
+    const res = await getRegisteredHandler('models:partialScan')(makeEvent(), {
+      folder: root,
+      dirs: ['']
+    })
+
+    // 模型 mtime 未变，仍必须重新检查 sidecar（forceRefresh 由局部扫描传入）
+    expect(res.models[0].triggerWords).toBe('late-tag')
   })
 
   it('局部扫描应用用户配置的扫描扩展名（B3：与全量结果一致）', async () => {
