@@ -189,6 +189,8 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'app:cancelUpdateDownload': vVoid(),
   'app:installUpdate': vVoid(),
   'app:openLogs': vVoid(),
+  // FN-05：诊断包导出（报告 + 最近日志 → zip），范围与内容固定，无渲染层入参
+  'app:exportDiagnostics': vVoid(),
   'window:setTheme': vObj({
     fields: { theme: vStr({ required: true, max: 32 }) }
   }),
@@ -200,6 +202,8 @@ export const IPC_PAYLOAD_SCHEMAS = {
     fields: { folder: vStr({ required: true, max: 1000 }) }
   }),
   'models:chooseFolder': vVoid(),
+  // FN-01：跨库存储总览（只读聚合，无渲染层入参）
+  'models:crossLibraryOverview': vVoid(),
 
   // ---------- 设置域 ----------
   // settings:update 全宽松（字段级规范化在 normalizeSettings + 目录存在性

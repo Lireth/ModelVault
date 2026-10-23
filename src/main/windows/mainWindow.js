@@ -22,7 +22,7 @@ let pendingStateSave = null
  * 加载上次保存的窗口状态（尺寸/位置/是否最大化）。
  * 数据无效或位置落在所有显示器之外（如外接显示器被拔掉）时返回 null，回退默认值。
  */
-async function loadWindowState() {
+export async function loadWindowState() {
   try {
     const file = path.join(app.getPath('userData'), WINDOW_STATE_FILE)
     const raw = JSON.parse(await fs.readFile(file, 'utf-8'))
@@ -55,10 +55,13 @@ async function saveWindowState(win) {
  * - 开发环境：加载 electron-vite 开发服务器（支持 HMR 热重载）
  * - 生产环境：加载打包后的本地文件
  */
-export async function createMainWindow() {
+export async function createMainWindow(windowStateOverride = undefined) {
   // 窗口底色与标题栏叠加层颜色跟随已保存的主题设置
   const colors = themeColors(getSettings().theme)
-  const state = await loadWindowState()
+  // 启动链路并行化（OP-01）：窗口状态由调用方与 loadSettings 并行预读，
+  // 此处仅在该参数缺省时自行读取（测试/独立调用路径保持原行为）
+  const state =
+    windowStateOverride === undefined ? await loadWindowState() : windowStateOverride
 
   const options = {
     width: state?.width ?? DEFAULT_WIDTH,

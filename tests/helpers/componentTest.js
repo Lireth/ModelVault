@@ -1,5 +1,11 @@
 import { beforeEach, vi } from 'vitest'
-import { defaultSettings, exitMultiSelect, replaceModels, state } from '../../src/renderer/src/store/appStore'
+import {
+  defaultSettings,
+  exitMultiSelect,
+  replaceModels,
+  resetLibraryOverview,
+  state
+} from '../../src/renderer/src/store/appStore'
 
 /**
  * 渲染层组件测试通用装配（OPT-16 测试基建）：
@@ -39,6 +45,26 @@ function makeComponentApiMock() {
       warmupHash: vi.fn(() => Promise.resolve({ ok: true })),
       checkHealth: vi.fn(() => Promise.resolve({ report: null })),
       repairHealth: vi.fn(() => Promise.resolve({ repaired: {} })),
+      crossLibraryOverview: vi.fn(() =>
+        Promise.resolve({
+          overview: {
+            totals: {
+              libraries: 0,
+              availableLibraries: 0,
+              models: 0,
+              knownBytes: 0,
+              hashedModels: 0,
+              crossGroups: 0,
+              redundantCopies: 0,
+              wastedBytes: 0,
+              unknownSizeGroups: 0
+            },
+            libraries: [],
+            crossLibraryGroups: []
+          },
+          warnings: []
+        })
+      ),
       onScanProgress: vi.fn(() => () => {}),
       onWarmupProgress: vi.fn(() => () => {}),
       onMenuAction: vi.fn(() => () => {}),
@@ -55,7 +81,8 @@ function makeComponentApiMock() {
       cancelUpdateDownload: vi.fn(() => Promise.resolve({ ok: true })),
       installUpdate: vi.fn(() => Promise.resolve({ error: '尚未下载更新包' })),
       onUpdateProgress: vi.fn(() => () => {}),
-      openLogs: vi.fn(() => Promise.resolve({ ok: true }))
+      openLogs: vi.fn(() => Promise.resolve({ ok: true })),
+      exportDiagnostics: vi.fn(() => Promise.resolve({ ok: true, path: 'diag.zip', logs: 0 }))
     }
   }
 }
@@ -105,6 +132,7 @@ export function setupComponentTest() {
       removeListener: vi.fn()
     })
     resetStoreState()
+    resetLibraryOverview()
     document.body.innerHTML = ''
   })
 }

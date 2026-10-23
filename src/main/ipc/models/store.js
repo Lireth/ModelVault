@@ -24,6 +24,7 @@ import {
 import { awaitThumbDrain } from './model-state'
 import { wrapHandler, checkExistingDirectory } from '../handler'
 import { readLibraryIndex } from '../../services/library-index'
+import { collectLibraryOverview } from '../../services/library-overview'
 
 /**
  * 存储与设置链路：持久化数据加载、模型根目录选择、应用设置更新。
@@ -319,4 +320,10 @@ export function registerStoreHandlers() {
     logger.info(`应用设置已更新: ${JSON.stringify(patch).slice(0, 200)}`)
     return { settings }
   }, { errorPrefix: '设置保存失败' })
+
+  // 跨库存储总览（FN-01）：只读汇总各库索引/元数据，输出跨库重复组与
+  // 可释放空间。不获取维护锁、不切换当前根——可在扫描/备份期间安全调用
+  wrapHandler('models:crossLibraryOverview', () => collectLibraryOverview(), {
+    errorPrefix: '跨库存储分析失败'
+  })
 }

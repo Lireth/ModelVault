@@ -64,7 +64,12 @@ const api = {
     /** 订阅更新包下载进度（{ received, total }），返回取消监听函数 */
     onUpdateProgress: (listener) => subscribe('app:updateProgress', listener),
     /** 在系统资源管理器中打开日志目录（B-04），返回 { ok } 或 { error } */
-    openLogs: () => invokeValidated('app:openLogs')
+    openLogs: () => invokeValidated('app:openLogs'),
+    /**
+     * 导出诊断包（FN-05）：版本环境 + 设置 + 库状态 + 缓存体积 + 最近日志 → zip。
+     * 返回 { ok, path, sizeBytes, logs } / { canceled: true } / { error }
+     */
+    exportDiagnostics: () => invokeValidated('app:exportDiagnostics')
   },
 
   /** 窗口相关（最小化/最大化/关闭由原生标题栏叠加层控件处理） */
@@ -92,6 +97,11 @@ const api = {
     openLibrary: (folder) => invokeValidated('models:openLibrary', { folder }),
     /** 弹出目录选择框，返回所选目录或 null */
     chooseFolder: () => invokeValidated('models:chooseFolder'),
+    /**
+     * 跨库存储总览（FN-01）：只读汇总各库索引/元数据，
+     * 返回 { overview, warnings } 或 { error }
+     */
+    crossLibraryOverview: () => invokeValidated('models:crossLibraryOverview'),
     /** 扫描模型目录，返回 { models, byType, errors } 或 { canceled } / { error } */
     scan: (folder) => invokeValidated('models:scan', { folder }),
     /** 取消进行中的扫描，返回 { ok } */

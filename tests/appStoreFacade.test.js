@@ -76,6 +76,10 @@ const EXPECTED_EXPORTS = [
   'saveCurrentAsView',
   'applySavedView',
   'deleteSavedView',
+  // 跨库存储总览（FN-01）
+  'libraryOverview',
+  'loadLibraryOverview',
+  'resetLibraryOverview',
   // 查找派生
   'modelById',
   // 详情

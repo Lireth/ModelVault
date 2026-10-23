@@ -1,5 +1,5 @@
 import { app, Menu, dialog, shell } from 'electron'
-import { createMainWindow, getMainWindow } from './windows/mainWindow'
+import { createMainWindow, getMainWindow, loadWindowState } from './windows/mainWindow'
 import { registerWindowShortcuts } from './menu'
 import { registerIpcHandlers } from './ipc'
 import { registerImageScheme, registerImageProtocolHandler } from './protocol'
@@ -78,10 +78,11 @@ async function startApp() {
     registerImageProtocolHandler()
     registerIpcHandlers()
 
-    // 先加载应用设置，确保窗口主题（背景色/标题栏颜色）与已保存设置一致
-    await loadSettings()
+    // 启动链路并行化（OP-01）：设置与窗口状态互不依赖，并行读取后再一次性
+    // 创建窗口，缩短首屏前的串行 IO 等待。
+    const [, windowState] = await Promise.all([loadSettings(), loadWindowState()])
 
-    const win = await createMainWindow()
+    const win = await createMainWindow(windowState)
     registerWindowShortcuts(win)
 
     // 阻止在应用内打开新窗口：http(s) 外链交给系统默认浏览器；

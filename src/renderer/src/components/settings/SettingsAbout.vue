@@ -35,6 +35,26 @@ async function onOpenLogs() {
   }
 }
 
+/** 导出诊断包（FN-05）：版本环境/设置/库状态/缓存体积 + 最近日志打包为 zip */
+const exportingDiagnostics = ref(false)
+async function onExportDiagnostics() {
+  if (exportingDiagnostics.value) return
+  exportingDiagnostics.value = true
+  try {
+    const res = await window.api.app.exportDiagnostics()
+    if (res?.canceled) return
+    if (res?.error) {
+      toast('error', res.error)
+      return
+    }
+    toast('success', `诊断包已导出（含 ${res.logs} 个日志）：${res.path}`)
+  } catch (err) {
+    toast('error', `导出诊断包失败: ${err.message}`)
+  } finally {
+    exportingDiagnostics.value = false
+  }
+}
+
 /** 复制诊断信息（应用/运行时版本与平台），反馈问题时随日志一并提供 */
 async function onCopyDiagnostics() {
   if (!appInfo.value) return
@@ -219,6 +239,9 @@ async function onInstallUpdate() {
       <span class="update-msg">日志按天保留 14 天（位于 %APPDATA%\modelvault\logs），反馈问题时可附上。</span>
       <button class="btn" @click="onOpenLogs">打开日志目录</button>
       <button class="btn" :disabled="!appInfo" @click="onCopyDiagnostics">复制诊断信息</button>
+      <button class="btn" :disabled="exportingDiagnostics" @click="onExportDiagnostics">
+        {{ exportingDiagnostics ? '导出中…' : '导出诊断包' }}
+      </button>
     </div>
   </div>
 </template>

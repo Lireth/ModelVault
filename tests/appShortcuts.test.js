@@ -179,7 +179,13 @@ describe('App 全局快捷键（B-03）', () => {
     await setupGrid(wrapper)
     state.search = 'lora'
     state.settingsOpen = true
-    await nextTick()
+    await flushPromises()
+    // 设置页经 defineAsyncComponent 按需加载（OP-01）：等待其挂载完成，
+    // 确保 ESC 监听器已注册后再派发按键
+    for (let i = 0; i < 100 && !wrapper.find('.settings-page').exists(); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    expect(wrapper.find('.settings-page').exists()).toBe(true)
 
     press('Escape')
     await flushPromises()

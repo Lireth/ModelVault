@@ -1,9 +1,10 @@
 # ModelVault 持续集成工作流（CI）
 #
 # 触发条件：推送到 main 分支、针对 main 的 PR、手动触发
-# 职责：依赖安装 → ESLint → 类型检查（shared 契约层 + preload）→ 单元测试
-#   → 三端编译 → 编译产物完整性校验 → 启动冒烟（out/ 与 win-unpacked）
-#   → 覆盖率报告归档
+# 职责：依赖安装 → 运行时依赖漏洞审计 → ESLint → 类型检查（shared 契约层 +
+#   preload）→ 单元测试 → 三端编译 → 编译产物完整性校验 → 启动冒烟
+#   （out/ 与 win-unpacked）→ 覆盖率报告归档；PR 另做依赖差分审查
+#   （dependency-review）。CodeQL 静态扫描见独立的 codeql.yml。
 # 与 release.yml 的分工：本工作流只做质量门禁与目录产物（--dir）启动冒烟，
 #   不生成便携版/安装包、不发布；正式产物由推送 v* 标签触发的 release.yml 负责。
 
@@ -26,6 +27,24 @@ concurrency:
   cancel-in-progress: true # 同分支新推送自动取消旧任务，节省构建资源
 
 jobs:
+  # OP-08：PR 依赖差分审查（新增/升级依赖引入的高危漏洞阻断合并）。
+  # 仅 PR 触发；依赖 Dependabot 已有的版本更新流程。
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+      - name: 依赖差分审查
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
   test-and-build:
     name: Test & Build (Node ${{ matrix.node }})
     runs-on: windows-latest
@@ -63,6 +82,18 @@ jobs:
 
       - name: 安装依赖
         run: npm ci
+
+      # OP-08 供应链门禁：只审计运行时依赖（vue / fflate），避免 devDependencies
+      # 的噪音；.npmrc 指向的镜像不提供 audit 端点，显式使用官方 registry。
+      # high 及以上漏洞阻断构建，其余等级输出告警供人工评估。
+      - name: 运行时依赖漏洞审计
+        shell: pwsh
+        run: |
+          npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::运行时依赖存在 high 及以上漏洞，请升级或替换后重试"
+            exit 1
+          }
 
       # ---------- 测试与构建 ----------
 

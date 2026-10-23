@@ -39,6 +39,17 @@ export default defineConfig({
     server: {
       port: 5173,
       strictPort: true
+    },
+    // OP-01：框架运行时单独成 chunk，与业务代码分离，利于浏览器缓存与
+    // 首屏并行解析；设置页/统计页经 defineAsyncComponent 自动形成按需 chunk。
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            vue: ['vue']
+          }
+        }
+      }
     }
   }
 })

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue'
 import TopBar from './components/TopBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import BatchBar from './components/BatchBar.vue'
@@ -8,14 +8,18 @@ import LibraryStates from './components/LibraryStates.vue'
 import LibraryToolbar from './components/LibraryToolbar.vue'
 import ModelDetail from './components/ModelDetail.vue'
 import ResultBar from './components/ResultBar.vue'
-import SettingsPage from './components/SettingsPage.vue'
-import StatsPage from './components/StatsPage.vue'
 import ToastHost from './components/ToastHost.vue'
 import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import VirtualModelList from './components/VirtualModelList.vue'
 import { useGlobalShortcuts } from './composables/useGlobalShortcuts'
 import { useMainProcessEvents } from './composables/useMainProcessEvents'
 import { filteredModels, initApp, scanModels, state } from './store/appStore'
+
+// 次要页面异步加载（OP-01）：设置页/统计页仅在打开时渲染，按需加载可显著
+// 缩减启动期首包解析与执行量。详情页保持同步引用——其 Teleport 骨架常驻，
+// 延迟加载不会节省启动成本，且同步挂载保证关闭时的焦点归还时序不变。
+const SettingsPage = defineAsyncComponent(() => import('./components/SettingsPage.vue'))
+const StatsPage = defineAsyncComponent(() => import('./components/StatsPage.vue'))
 
 /**
  * 应用根布局（O-4/O-5 拆分）：

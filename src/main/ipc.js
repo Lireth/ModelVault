@@ -4,6 +4,7 @@ import { registerModelIpcHandlers } from './ipc/models/index.js'
 import { wrapHandler } from './ipc/handler'
 import { themeColors } from './theme'
 import { checkForUpdate } from './services/updater'
+import { exportDiagnostics } from './services/diagnostics'
 import {
   cancelUpdateDownload,
   downloadUpdatePackage,
@@ -65,6 +66,14 @@ export function registerIpcHandlers() {
     }
     return { ok: true }
   })
+
+  // 导出诊断包（FN-05）：版本环境 + 设置 + 库状态 + 缓存体积 + 最近日志。
+  // 只读聚合，不改动任何用户数据；保存对话框在主进程完成
+  wrapHandler(
+    'app:exportDiagnostics',
+    (event) => exportDiagnostics(BrowserWindow.fromWebContents(event.sender)),
+    { errorPrefix: '导出诊断包失败' }
+  )
 
   // 主题切换时同步原生窗口颜色（标题栏叠加层 + 窗口背景）。
   // theme 类型/长度由 schema 前置校验；themeColors 对未知值回退默认主题

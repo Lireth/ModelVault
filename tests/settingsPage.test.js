@@ -113,6 +113,24 @@ describe('SettingsPage 日志与诊断入口（B-04）', () => {
     expect(state.toasts.some((t) => t.type === 'error' && t.text.includes('目录不存在'))).toBe(true)
   })
 
+  it('「导出诊断包」调用 app.exportDiagnostics 并提示成功（FN-05）', async () => {
+    const exportDiagnostics = vi.fn().mockResolvedValue({
+      ok: true,
+      path: 'C:\\diag.zip',
+      logs: 2
+    })
+    window.api.app.exportDiagnostics = exportDiagnostics
+    const wrapper = await mountSettings()
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('导出诊断包'))
+    expect(btn).toBeTruthy()
+    await btn.trigger('click')
+    await flushPromises()
+    expect(exportDiagnostics).toHaveBeenCalledTimes(1)
+    expect(
+      state.toasts.some((t) => t.type === 'success' && t.text.includes('诊断包已导出'))
+    ).toBe(true)
+  })
+
   it('复制诊断信息时剪贴板内容包含版本与平台信息', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.assign(navigator, { clipboard: { writeText } })
@@ -332,6 +350,15 @@ describe('库统计页（F7，自设置页独立为 StatsPage）', () => {
     const tops = wrapper.findAll('.top-list li')
     expect(tops).toHaveLength(2)
     expect(tops[0].text()).toContain('大模型')
+    wrapper.unmount()
+    state.statsOpen = false
+  })
+
+  it('展示跨库存储总览区块（FN-01）', async () => {
+    const wrapper = await mountStats()
+    const cross = wrapper.find('.cross-overview')
+    expect(cross.exists()).toBe(true)
+    expect(cross.text()).toContain('跨库存储总览')
     wrapper.unmount()
     state.statsOpen = false
   })

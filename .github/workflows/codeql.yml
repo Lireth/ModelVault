@@ -1,0 +1,51 @@
+# ModelVault CodeQL 静态安全扫描（OP-08）
+#
+# 触发条件：推送到 main、每周一定时扫描、手动触发。
+# 不在 pull_request 上运行：fork PR 的 token 无 security-events 写权限，
+# 上传 SARIF 会失败；PR 侧由 ci.yml 的 dependency-review 负责依赖审查。
+#
+# 纯 JavaScript 项目无需编译，使用 javascript-typescript 自动分析。
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    # 每周一 03:00 UTC（北京时间 11:00）扫描一次，覆盖未发版期间的增量风险
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      security-events: write # 上传 SARIF 结果到 GitHub Code Scanning
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 初始化 CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # security-extended：在默认查询集之外补充安全模式查询，
+          # 适合本项目的 IPC/协议/文件路径边界场景
+          queries: security-extended
+
+      - name: 执行分析并上传结果
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:javascript-typescript

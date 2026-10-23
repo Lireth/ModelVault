@@ -1,5 +1,6 @@
 <script setup>
 import { onMounted, onUnmounted } from 'vue'
+import CrossLibraryOverview from './CrossLibraryOverview.vue'
 import StatsSection from './StatsSection.vue'
 import { closeStats, state } from '../store/appStore'
 
@@ -30,6 +31,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     </header>
 
     <div class="stats-body">
+      <!-- 跨库存储总览（FN-01）：只读汇总所有已登记模型库 -->
+      <CrossLibraryOverview />
       <StatsSection />
     </div>
   </div>

@@ -91,6 +91,9 @@ export {
   deleteSavedView
 } from './saved-views'
 
+// 跨库存储总览（FN-01，按需拉取，不参与当前库派生链）
+export { libraryOverview, loadLibraryOverview, resetLibraryOverview } from './library-overview'
+
 // 查找派生
 export { modelById } from './selectors'
 
