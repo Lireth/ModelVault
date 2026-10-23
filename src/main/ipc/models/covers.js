@@ -27,7 +27,7 @@ function coverListFromMeta(meta) {
 /**
  * 构造封面操作的标准响应（upload/paste/import/setDefault/delete 共用）。
  * @param {string} absCover 操作后的默认封面绝对路径（可为空串）
- * @param {object} meta 操作后的完整元数据
+ * @param {Record<string, any>} meta 操作后的完整元数据
  */
 export function buildCoverResponse(absCover, meta) {
   const coverUrl = absCover ? toImageUrl(absCover) : ''
@@ -42,6 +42,10 @@ export function buildCoverResponse(absCover, meta) {
 /**
  * 将新封面文件追加到模型的封面列表（去重）。
  * 若尚无默认封面，则将新图设为默认（首页第一张默认显示）。
+ * @param {string} id 模型绝对路径
+ * @param {string} absCover 封面绝对路径
+ * @returns {{error?: string, coverRel?: string, meta?: Record<string, any>}}
+ *   失败 {error}；成功 {coverRel, meta}
  */
 export function appendCoverMeta(id, absCover) {
   const coverRel = relativizeCover(absCover)
@@ -65,7 +69,7 @@ export function appendCoverMeta(id, absCover) {
  * 用户上传/粘贴/拖入/切换默认封面后，卡片在下次扫描前一直加载原图；
  * 此处立即登记归属并查询缩略图——已缓存则直接推送 thumbsReady 切换卡片图，
  * 未缓存则经后台 drain 生成后由既有链路推送。
- * @param {object} win 来源窗口
+ * @param {any} win 来源窗口
  * @param {string} modelId 模型绝对路径
  * @param {string} absCover 默认封面绝对路径（空串时跳过）
  */

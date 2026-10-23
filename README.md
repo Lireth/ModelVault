@@ -204,7 +204,7 @@ wrapHandler('my:channel', async (event, payload) => {
 
 ### 类型检查
 
-项目为纯 JavaScript，以 TypeScript 编译器 `checkJs` 模式做**纯类型检查**（`npm run typecheck`，无构建产物）：`tsconfig.json` 当前覆盖 `src/shared/`（IPC 通道单一来源注册表、默认设置等跨进程契约）、`src/preload/` 与 `src/main/services/` 全部主进程服务层（含其主进程内依赖模块），`strict` 关闭以聚焦真实类型错误。覆盖范围与严格度按棘轮渐进扩展至渲染层；为跨模块共享的数据结构补写 JSDoc 类型标注（如 `SchemaRule`/`WatcherState`/`BackupManifest` typedef）即可让检查器捕获字段改名/漏改类回归。
+项目为纯 JavaScript，以 TypeScript 编译器 `checkJs` 模式做**纯类型检查**（`npm run typecheck`，无构建产物）：`tsconfig.json` 当前覆盖 `src/shared/`（IPC 通道单一来源注册表、默认设置等跨进程契约）、`src/preload/`、`src/main/` 全层（services、ipc handlers、协议/窗口/入口）以及 `src/renderer/src/` 全部 `.js`（store/composables/components 纯逻辑/常量；`.vue` 模板不在 checkJs 范围，由组件测试覆盖）。`src/renderer/src/store/global.d.ts` 声明 `window.api` 与 `*.vue`/`*.css` 模块；`strict` 关闭以聚焦真实类型错误。覆盖范围与严格度按棘轮渐进扩展；为跨模块共享的数据结构补写 JSDoc 类型标注（如 `SchemaRule`/`WatcherState`/`BackupManifest` typedef）即可让检查器捕获字段改名/漏改类回归。
 
 ### 快捷键与窗口
 

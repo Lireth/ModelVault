@@ -110,8 +110,8 @@ export function isRelKeyInScope(key, dirs) {
  * 绝不对输入做静默截断。
  * @param {unknown} dirs 渲染进程传入的变更子树
  * @param {number} [max] 子树数量上限（默认 MAX_PARTIAL_SCAN_DIRS）
- * @returns {{subDirs: string[], collapsed?: boolean} |
- *   {fullScanRequired: true} | {error: string}}
+ * @returns {{subDirs?: string[], collapsed?: boolean,
+ *   fullScanRequired?: boolean, error?: string}}
  */
 export function normalizePartialScanDirs(dirs, max = MAX_PARTIAL_SCAN_DIRS) {
   if (!Array.isArray(dirs)) return { error: '缺少变更子树' }

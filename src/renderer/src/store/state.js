@@ -110,6 +110,7 @@ export function subCategoryInfo(key) {
 /**
  * 默认应用设置（A-12 单一来源 shared/defaults.js，与主进程同一定义；
  * 返回可变副本，scanExtensions 复制避免污染冻结常量）
+ * @returns {Record<string, any>} 可变的默认设置对象
  */
 export function defaultSettings() {
   return {
@@ -216,7 +217,7 @@ export function setHashOverride(id, hash) {
 /**
  * 清理哈希覆盖：不传 ids 清空全部（全量扫描/切库后扫描结果已携带权威哈希），
  * 传数组时仅清理指定模型（局部扫描返回的新对象自带最新哈希）。
- * @param {string[]|null} [ids]
+ * @param {Iterable<string>|null} [ids]
  */
 export function clearHashOverrides(ids = null) {
   if (!ids) {
@@ -284,7 +285,7 @@ export function replaceModels(list) {
  * `state.settings = X` 整体替换绕开（替换后为 raw 对象，深层字段
  * 赋值将失去响应）；统一经 Object.assign 就地合并，保持包装与
  * 响应式依赖不变。
- * @param {object} raw 新设置（通常为主进程规范化返回的完整设置）
+ * @param {Record<string, any>} raw 新设置（通常为主进程规范化返回的完整设置）
  */
 export function replaceSettings(raw) {
   Object.assign(state.settings, raw)

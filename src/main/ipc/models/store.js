@@ -51,8 +51,8 @@ function isKnownLibrary(dir) {
  * F1：用当前内存元数据覆盖索引中的用户标注字段。
  * 索引是上一次全量扫描的快照；收藏/评分/备注等可能在扫描后修改。
  * 覆盖标量标注保证秒开列表即刻准确；封面/缩略图仍由后台校验刷新。
- * @param {object[]} models 索引中的装饰模型
- * @returns {object[]} 合并后的模型列表
+ * @param {any[]} models 索引中的装饰模型
+ * @returns {any[]} 合并后的模型列表
  */
 function overlayCurrentMeta(models) {
   if (!Array.isArray(models)) return models
@@ -91,7 +91,7 @@ function overlayCurrentMeta(models) {
  * 互斥（V-02）：调用方若已持有全局维护锁（扫描/恢复），必须传入
  * maintenanceToken，避免同一操作内二次加锁；未持有则本函数自行加锁。
  * @param {string} root 目标模型根目录
- * @param {{maintenanceToken?: object|null}} [options] 已持有的维护锁令牌
+ * @param {{maintenanceToken?: {id: number}|null}} [options] 已持有的维护锁令牌
  */
 export async function ensureRootStore(root, { maintenanceToken = null } = {}) {
   if (getCurrentRoot() === root) return

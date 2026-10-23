@@ -33,7 +33,11 @@ function withTimeout(promise, ms, label) {
   })
 }
 
-/** 等待渲染页面加载完成（已加载时立即返回） */
+/**
+ * 等待渲染页面加载完成（已加载时立即返回）。
+ * @param {import('electron').BrowserWindow} win 主窗口
+ * @returns {Promise<void>}
+ */
 function waitForRendererLoad(win) {
   const wc = win.webContents
   if (!wc.isLoadingMainFrame() && wc.getURL()) return Promise.resolve()

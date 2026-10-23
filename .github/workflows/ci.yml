@@ -101,10 +101,10 @@ jobs:
       - name: ESLint 代码检查
         run: npm run lint
 
-      # O6 渐进式类型门禁：TypeScript checkJs 校验跨进程契约层
-      # （shared 单一来源注册表 + preload 白名单派生），捕获字段漂移类回归；
-      # strict 渐进收紧，覆盖范围随棘轮扩展至 main / renderer
-      - name: 类型检查（shared 契约层 + preload）
+      # O10 渐进式类型门禁：TypeScript checkJs 覆盖 shared 契约层、preload、
+      # main 全层与 renderer 全部 JS（.vue 模板由组件测试覆盖），捕获字段漂移类回归；
+      # strict 渐进收紧，新增文件默认纳入检查范围
+      - name: 类型检查（shared / preload / main / renderer JS）
         run: npm run typecheck
 
       # 覆盖率统计的 instrumentation 有明显开销：仅在 Node 22 基准腿生成

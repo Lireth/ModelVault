@@ -215,9 +215,9 @@ export async function computeFileHash(filePath, signal, onProgress, options = {}
 /**
  * 按文件 SHA256 查询 Civitai 模型版本信息。
  * @param {string} hash 64 位十六进制 SHA256
- * @returns {Promise<{found: boolean, info?: object, error?: string}>}
- *   found=false 且无 error 表示哈希未被收录（不是失败）；
- *   info 为规范化后的 { url, modelName, versionName, baseModel, trainedWords, description }
+ * @returns {Promise<any>} found=false 且无 error 表示哈希未被收录（不是失败）；
+ *   info 为规范化后的 { url, modelName, versionName, baseModel, trainedWords,
+ *   description, images, videos }
  */
 export async function fetchCivitaiVersionByHash(hash) {
   const { response, networkError } = await fetchCivitaiApi(
@@ -493,7 +493,7 @@ export function readCivitaiImageBody(response) {
  * 下载 Civitai 示例图并做内容校验（仅下载白名单 CDN 的图片）。
  * 返回图片字节与按 Content-Type 推断的扩展名，落盘由封面保存层负责。
  * @param {string} url 图片 URL（必须命中 isAllowedCivitaiImageUrl）
- * @returns {Promise<{buf: Buffer, ext: string} | {error: string}>}
+ * @returns {Promise<any>} 成功 {buf, ext}；失败 {error}
  */
 export async function downloadCivitaiImage(url) {
   if (!isAllowedCivitaiImageUrl(url)) {

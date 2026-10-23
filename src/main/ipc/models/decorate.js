@@ -42,7 +42,7 @@ const deferredOwners = new Map()
  * 故以对象引用为键用 WeakMap 缓存签名——命中时零序列化成本，对象被替换后
  * 自然未命中重建，WeakMap 不阻止垃圾回收。按值语义不变：内容相同的不同
  * 对象仍得到相同签名（仅各自首次计算一次）。
- * @param {object} meta 模型元数据
+ * @param {Record<string, any>} meta 模型元数据
  * @returns {string} 签名字符串
  */
 const signatureCache = new WeakMap()
@@ -223,9 +223,9 @@ export function startThumbDrain(win) {
  * 仅当对应字段为空时导入（备注空读 txt 全文；LoRA 触发词空读 txt 首行；
  * 任意类型触发词空读 civitai trainedWords；NSFW 未标记读 civitai 分级），
  * 导入结果经 setModelMeta 落盘并标记来源，不覆盖任何用户已有标注。
- * @param {{id: string, type: string}} model 模型对象
- * @param {object} meta 当前元数据
- * @returns {Promise<object>} 导入后的最新元数据（未导入时原样返回）
+ * @param {Record<string, any>} model 模型对象
+ * @param {Record<string, any>} meta 当前元数据
+ * @returns {Promise<Record<string, any>>} 导入后的最新元数据（未导入时原样返回）
  */
 async function importSidecarMeta(model, meta) {
   const needNote = !meta.note
@@ -267,7 +267,7 @@ export function resolveCoverSafe(cover) {
 
 /**
  * 单模型的元数据装饰（封面列表校验、默认封面回退 sidecar 预览图）。
- * @param {object} model 扫描出的模型
+ * @param {Record<string, any>} model 扫描出的模型
  * @param {Set<string>} usedThumbs 缩略图保留名单
  * @param {boolean} [forceRefresh] 跳过装饰缓存（局部扫描变更子树使用：
  *   sidecar/封面文件变化不会改变模型 mtime，不能靠 mtime + 元数据签名识别）

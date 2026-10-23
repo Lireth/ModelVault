@@ -15,7 +15,8 @@ export const updateAvailable = ref(null)
 /**
  * 应用启动自动检查结果（app:updateAvailable 事件回调）：
  * 仅接受有效载荷（hasUpdate 且携带版本号），记录并提示。
- * @param {{current?: string, latest?: string, releaseUrl?: string}} payload
+ * @param {{hasUpdate?: boolean, current?: string, latest?: string,
+ *   releaseUrl?: string}} payload
  */
 export function applyUpdateAvailable(payload) {
   if (!payload || payload.hasUpdate !== true || !payload.latest) return

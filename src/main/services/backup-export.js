@@ -56,8 +56,8 @@ async function mapLimit(items, limit, task) {
  * @param {{mode?: 'full'|'selected'|'metadata', ids?: string[]}} [options]
  *   full（默认）：完整库备份；selected：仅当前筛选的模型标注与封面；
  *   metadata：全库标注但不含封面（体积小，用于快速迁移/审阅）
- * @returns {Promise<{path: string, sizeBytes: number, library: boolean, models: number,
- *   covers: number, mode: string, partial: boolean} | {canceled: true} | {error: string}>}
+ * @returns {Promise<any>} 成功 {path,sizeBytes,library,models,covers,mode,partial}；
+ *   取消 {canceled:true}；失败 {error}（handler 逐字段消费）
  */
 export async function exportBackup(win, options = {}) {
   // B-02：先静止两路写盘链再读磁盘——标注为 500ms 防抖落盘，

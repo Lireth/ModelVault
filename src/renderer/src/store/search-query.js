@@ -193,8 +193,8 @@ export function parseSearchQuery(raw) {
 
 /**
  * 判定模型是否满足全部结构化条件（空列表恒命中）。
- * @param {object} m 模型对象
- * @param {object[]} filters parseSearchQuery 产出的条件列表
+ * @param {any} m 模型对象
+ * @param {any[]} filters parseSearchQuery 产出的条件列表
  * @param {(model: any) => string} [resolveHash] 有效哈希解析器
  *   （默认读取模型自带 hash；渲染层传入覆盖映射解析器，O7）
  * @returns {boolean}

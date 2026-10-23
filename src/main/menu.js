@@ -9,7 +9,7 @@ import logger from './logger'
 
 /**
  * 为窗口注册快捷键（替代原生菜单的 accelerator）。
- * @param {BrowserWindow} win 目标窗口
+ * @param {import('electron').BrowserWindow} win 目标窗口
  */
 export function registerWindowShortcuts(win) {
   if (!win) return

@@ -90,7 +90,7 @@ const MAX_COVER_BYTES = 50 * 1024 * 1024
 /**
  * 校验并将外部图片文件复制到关联存储的封面目录（对话框选择与拖拽导入共用）。
  * @param {string} source 源图片绝对路径
- * @returns {Promise<{cover: string} | {error: string}>} cover 为复制后的绝对路径
+ * @returns {Promise<any>} 成功 {cover}（绝对路径）；失败 {error}
  */
 export async function importCoverFromPath(source) {
   if (typeof source !== 'string' || !source) {
@@ -131,7 +131,7 @@ export async function importCoverFromPath(source) {
  * 扩展名 + 魔数 + 大小三重校验，与 importCoverFromPath 同一安全标准。
  * @param {Buffer} buf 图片字节
  * @param {string} ext 文件扩展名（含点，如 '.jpg'，须在 IMAGE_EXTENSIONS 内）
- * @returns {Promise<{cover: string} | {error: string}>} cover 为保存后的绝对路径
+ * @returns {Promise<any>} 成功 {cover}（绝对路径）；失败 {error}
  */
 export async function saveCoverBuffer(buf, ext) {
   const normalizedExt = typeof ext === 'string' ? ext.toLowerCase() : ''
@@ -164,8 +164,7 @@ export async function saveCoverBuffer(buf, ext) {
 /**
  * 弹出图片选择对话框，并将选中的图片复制到关联存储的封面目录。
  * @param {BrowserWindow} parentWin 父窗口
- * @returns {Promise<{cover: string} | {canceled: true} | {error: string}>}
- *   cover 为复制后的绝对路径
+ * @returns {Promise<any>} 成功 {cover}；取消 {canceled:true}；失败 {error}
  */
 export async function pickAndSaveCover(parentWin) {
   const result = await dialog.showOpenDialog(parentWin, {
@@ -208,7 +207,7 @@ export async function isValidImageFile(p) {
  * 读取系统剪贴板中的图片并保存到关联存储的封面目录。
  * Electron 44 起 clipboard 对齐 W3C Clipboard API：readImage 已移除，
  * 改用 clipboard.read() 返回 ClipboardItem[]，按 MIME 类型取图片 Blob。
- * @returns {Promise<{cover: string} | {error: string}>} cover 为保存后的绝对路径
+ * @returns {Promise<any>} 成功 {cover}（绝对路径）；失败 {error}
  */
 export async function saveClipboardImage() {
   try {

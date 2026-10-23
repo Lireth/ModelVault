@@ -53,7 +53,7 @@ function rejectIfCivitaiDisabled() {
  * 未命中时经预热服务统一入口计算（与后台预热共享进行中任务，同一模型
  * 同 mtime 只读盘计算一次，结果回写元数据缓存）。
  * @param {string} id 模型绝对路径
- * @param {object} meta 当前元数据（可为空对象）
+ * @param {Record<string, any>} meta 当前元数据（可为空对象）
  * @param {number} mtimeMs 文件当前 mtime
  * @returns {Promise<{hash: string, meta: object}>} 哈希与（可能已更新缓存字段的）最新元数据
  */

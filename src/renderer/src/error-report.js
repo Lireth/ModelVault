@@ -58,7 +58,12 @@ export function createErrorReporter(api) {
   }
 
   return {
-    /** Vue errorHandler：附加上下文 info（组件名/生命周期阶段）提升定位价值 */
+    /**
+     * Vue errorHandler：附加上下文 info（组件名/生命周期阶段）提升定位价值。
+     * @param {any} err 错误对象
+     * @param {any} _instance 组件实例
+     * @param {string} info 生命周期上下文
+     */
     vueError(err, _instance, info) {
       console.error(err)
       const base = String(err?.message || err)
@@ -69,6 +74,7 @@ export function createErrorReporter(api) {
      * 窗口 error 事件（须以捕获阶段监听：资源加载错误不冒泡）。
      * target 带 tagName 的是资源加载失败（img/script/link），
      * 否则为未捕获的脚本/运行时错误。
+     * @param {any} event window error 事件
      */
     windowError(event) {
       const node = event?.target
@@ -84,7 +90,10 @@ export function createErrorReporter(api) {
       report('window', event?.message || String(err?.message || '未知的窗口错误'), stack)
     },
 
-    /** 未处理的 Promise 拒绝：兼容 Error 与非 Error 原因 */
+    /**
+     * 未处理的 Promise 拒绝：兼容 Error 与非 Error 原因。
+     * @param {any} reason 拒绝原因
+     */
     rejection(reason) {
       console.error('未处理的 Promise 拒绝:', reason)
       const isError = reason instanceof Error

@@ -23,9 +23,9 @@ function checkTagName(tag) {
  * 合并详情页保存的元数据字段（纯函数，不修改入参）。
  * 仅覆盖请求中显式传入（!== undefined）的字段，防止局部保存时将已有值静默清空。
  * note 显式传入时视为用户编辑，清除 sidecar 自动导入来源标记。
- * @param {object} existing 已有元数据
+ * @param {Record<string, any>} existing 已有元数据
  * @param {{alias?: string, params?: object|null, note?: string, subCategory?: string}} patch 本次保存的字段
- * @returns {object} 合并后的新元数据
+ * @returns {Record<string, any>} 合并后的新元数据
  */
 export function mergeSaveModelData(existing, patch) {
   const merged = { ...existing }

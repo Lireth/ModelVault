@@ -13,8 +13,8 @@
   "include": [
     "src/shared/**/*.js",
     "src/preload/**/*.js",
-    "src/main/services/**/*.js",
-    "src/renderer/src/store/search-query.js",
-    "src/renderer/src/store/cover-overrides.js"
+    "src/main/**/*.js",
+    "src/renderer/src/**/*.js",
+    "src/renderer/src/**/*.d.ts"
   ]
 }

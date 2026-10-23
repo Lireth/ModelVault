@@ -30,7 +30,7 @@ function errorDetail(error) {
 /**
  * 处理一个未捕获异常：尽力保存数据后提示用户并重启。
  * 可安全重复调用——首个异常进入处理流程后，后续异常仅记录警告。
- * @param {unknown} error 异常对象
+ * @param {any} error 异常对象
  */
 export async function handleUncaughtException(error) {
   logger.error(`未捕获的异常: ${error?.stack || error?.message || String(error)}`)

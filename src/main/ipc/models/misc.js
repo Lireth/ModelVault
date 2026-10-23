@@ -103,6 +103,7 @@ export function registerMiscHandlers() {
         win.webContents.send('models:menuAction', { id, action })
       }
     }
+    /** @type {any[]} 菜单项（分隔符与普通项混合，交由 Electron 校验） */
     const items = [
       { label: '打开详情', click: () => send('openDetail') },
       { label: '打开所在文件夹', click: () => shell.showItemInFolder(id) },

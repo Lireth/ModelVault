@@ -145,7 +145,7 @@ export function isAllowedExternalUrl(url) {
  * worker 内部须自行捕获业务错误（本函数只保证调度，不吞任务异常）。
  * @template T
  * @param {T[]} tasks 任务列表（按序消费）
- * @param {(task: T, index: number) => Promise<void>} worker 单任务处理器
+ * @param {(task: T, index: number) => Promise<any>} worker 单任务处理器
  * @param {number} concurrency 最大并发数（超出任务数或 ≤0 时自动收敛）
  * @returns {Promise<void>} 全部任务处理完毕后 resolve（worker 抛错则 reject）
  */

@@ -17,7 +17,8 @@ import { confirmDialog, deleteModel, state, toggleFavorite } from '../store/appS
 export function handleModelActionKey(e, ctx) {
   if (e.ctrlKey || e.metaKey || e.altKey) return false
   if (state.confirm.visible || state.selectedId !== null || state.settingsOpen) return false
-  const id = document.activeElement?.closest?.('[data-model-id]')?.dataset.modelId
+  const active = /** @type {any} */ (document.activeElement)
+  const id = active?.closest?.('[data-model-id]')?.dataset.modelId
   if (!id) return false
   if (e.key === 'f' || e.key === 'F') {
     e.preventDefault()

@@ -14,7 +14,7 @@ import { applyMetaUpdates, mapWithConcurrency } from '../meta-apply'
  * 同步本地状态（O2），避免逐个落定造成的多次响应式失效。
  * in-flight 防护（B6）：执行期间置 busy，批量操作栏按钮禁用，防止连点
  * 对同一批模型重复提交数百个 IPC。
- * @param {object} patch { favorite?/nsfw?/rating? }
+ * @param {Record<string, any>} patch { favorite?/nsfw?/rating? }
  * @param {string} label 完成提示文案（如「收藏」）
  */
 async function batchApplyFlags(patch, label) {

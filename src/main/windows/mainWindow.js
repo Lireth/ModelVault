@@ -63,6 +63,7 @@ export async function createMainWindow(windowStateOverride = undefined) {
   const state =
     windowStateOverride === undefined ? await loadWindowState() : windowStateOverride
 
+  /** @type {import('electron').BrowserWindowConstructorOptions} */
   const options = {
     width: state?.width ?? DEFAULT_WIDTH,
     height: state?.height ?? DEFAULT_HEIGHT,

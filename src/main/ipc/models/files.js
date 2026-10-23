@@ -177,6 +177,7 @@ async function transferFile(src, dst, mode) {
  * - 目标同名冲突自动追加 ` (n)`，不覆盖库内已有文件；
  * - 源文件已在库内时拒绝（避免绕过库内移动的元数据键迁移）；
  * - 成功后渲染层对目标子树执行局部扫描，新模型即时入列。
+ * @param {{mode?: string, win?: any}} [options] 导入方式与来源窗口
  * @returns {Promise<object>}
  */
 async function importModels({ mode, win } = {}) {
@@ -320,7 +321,7 @@ const INVALID_FILE_NAME_RE = /[\\/:*?"<>|]/
  * - 禁用中的模型（.disabled）拒绝：sidecar 基名规则不同，先启用再改名。
  * @param {string} id 当前模型绝对路径
  * @param {string} name 新文件名（不含扩展名）
- * @returns {{path: string} | {error: string}}
+ * @returns {{path?: string, error?: string}}
  */
 export function planRenameTarget(id, name) {
   if (typeof id !== 'string' || !id) return { error: '无效的模型标识' }

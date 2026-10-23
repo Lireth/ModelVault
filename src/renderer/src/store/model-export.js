@@ -20,9 +20,34 @@ const MAX_CONTENT_CHARS = 16 * 1024 * 1024
 const CSV_EOL = '\r\n'
 
 /**
+ * 导出行的结构化字段（CSV / Markdown / JSON 共用）。
+ * @typedef {object} ExportRow
+ * @property {string} name
+ * @property {string} alias
+ * @property {string} type
+ * @property {string} typeLabel
+ * @property {string} subCategory
+ * @property {string} subCategoryLabel
+ * @property {string} baseModel
+ * @property {number} sizeBytes
+ * @property {number} mtimeMs
+ * @property {string} mtime
+ * @property {number} rating
+ * @property {boolean} favorite
+ * @property {boolean} nsfw
+ * @property {string[]} tags
+ * @property {string} triggerWords
+ * @property {string} note
+ * @property {string} paramsSummary
+ * @property {Record<string, any>|null} params
+ * @property {string} path
+ * @property {string} civitaiUrl
+ */
+
+/**
  * 构造导出行的结构化数据（纯函数，便于单测）。
- * @param {object[]} models 模型对象列表
- * @returns {object[]}
+ * @param {any[]} models 模型对象列表
+ * @returns {ExportRow[]}
  */
 export function buildExportRows(models) {
   return (Array.isArray(models) ? models : []).map((m) => {
@@ -67,7 +92,7 @@ function mdCell(value) {
 
 /**
  * 生成 CSV（Excel 可直接打开；带 BOM 避免中文乱码）。
- * @param {object[]} rows buildExportRows 的结果
+ * @param {ExportRow[]} rows buildExportRows 的结果
  * @returns {string}
  */
 export function buildCsv(rows) {
@@ -119,7 +144,7 @@ export function buildCsv(rows) {
 
 /**
  * 生成 Markdown 表格。
- * @param {object[]} rows
+ * @param {ExportRow[]} rows
  * @returns {string}
  */
 export function buildMarkdown(rows) {
@@ -164,7 +189,7 @@ export function buildMarkdown(rows) {
 
 /**
  * 生成 JSON（保留结构化字段与推荐参数对象）。
- * @param {object[]} rows
+ * @param {ExportRow[]} rows
  * @returns {string}
  */
 export function buildJson(rows) {

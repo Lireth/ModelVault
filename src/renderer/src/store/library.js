@@ -164,7 +164,7 @@ export function closeStats() {
 /**
  * 保存应用设置（主进程规范化后返回完整设置），并同步主题。
  * IPC 层 reject 时统一 toast 提示（A6），避免静默失败让用户误以为已保存。
- * @param {object} patch 设置增量
+ * @param {Record<string, any>} patch 设置增量
  */
 export async function saveSettings(patch) {
   let res

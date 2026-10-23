@@ -44,7 +44,7 @@ export const LIB_COVERS_PREFIX = 'library/covers/'
  * @typedef {object} BackupRestoreResult
  * @property {boolean} [canceled] 用户取消
  * @property {boolean} [settingsRestored] 是否恢复了设置
- * @property {object} [libraryRestored] 库恢复详情（restoreLibrary/restorePartialLibrary 结果）
+ * @property {Record<string, any>} [libraryRestored] 库恢复详情（restoreLibrary/restorePartialLibrary 结果）
  * @property {number} [skipped] 解压/合并阶段跳过的条目数
  * @property {boolean} [partial] 是否为部分（合并）恢复
  * @property {string} [error] 错误信息（空缺表示无错误）

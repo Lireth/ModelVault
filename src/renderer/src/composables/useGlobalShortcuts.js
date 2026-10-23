@@ -49,7 +49,7 @@ export function useGlobalShortcuts(searchFieldEl, clearSearch) {
     // Ctrl+F：只要网格区可用就聚焦搜索（输入态同样适用，便于随时跳转检索）
     if (ctrl && key === 'f') {
       if (isOverlayPanelOpen() || state.scanning || !state.folder) return
-      const el = searchFieldEl.value
+      const el = /** @type {any} */ (searchFieldEl.value)
       if (el) {
         e.preventDefault()
         el.focus()
