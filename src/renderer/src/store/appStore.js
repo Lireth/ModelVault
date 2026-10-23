@@ -192,6 +192,7 @@ export {
   showContextMenu,
   handleMenuAction,
   toggleDisabledModel,
+  renameModel,
   moveModelTo,
   importModels
 } from './model-actions'

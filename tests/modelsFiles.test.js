@@ -27,6 +27,7 @@ import {
   isImportableModelFile,
   planImportTarget,
   planOrganizeMoves,
+  planRenameTarget,
   registerFilesHandlers,
   splitModelFileName
 } from '../src/main/ipc/models/files'
@@ -316,5 +317,123 @@ describe('F2 模型导入（复制/移动入台）', () => {
     vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({ canceled: true, filePaths: [] })
     expect(await handler(makeEvent(), { mode: 'copy' })).toEqual({ canceled: true })
     expect(await handler(makeEvent(), { mode: 'bad' })).toEqual({ error: '无效的导入方式' })
+  })
+})
+
+describe('planRenameTarget（N1 重命名目标计算）', () => {
+  const dir = path.join('D:', 'models', 'lora')
+
+  it('同目录改名并保留扩展名', () => {
+    expect(planRenameTarget(path.join(dir, 'a.safetensors'), 'b')).toEqual({
+      path: path.join(dir, 'b.safetensors')
+    })
+  })
+
+  it('粘贴完整文件名时剥离原扩展名，避免双重扩展名', () => {
+    expect(planRenameTarget(path.join(dir, 'a.safetensors'), ' b.SAFETENSORS ')).toEqual({
+      path: path.join(dir, 'b.safetensors')
+    })
+  })
+
+  it('名称未变化返回原路径', () => {
+    expect(planRenameTarget(path.join(dir, 'a.safetensors'), 'a')).toEqual({
+      path: path.join(dir, 'a.safetensors')
+    })
+  })
+
+  it('空名/非法字符/超长/禁用模型拒绝', () => {
+    const id = path.join(dir, 'a.safetensors')
+    expect(planRenameTarget(id, '   ').error).toContain('不能为空')
+    expect(planRenameTarget(id, 'bad/name').error).toContain('非法字符')
+    expect(planRenameTarget(id, 'x'.repeat(121)).error).toContain('过长')
+    expect(planRenameTarget(path.join(dir, 'x.safetensors.disabled'), 'y').error).toContain(
+      '先启用'
+    )
+  })
+})
+
+describe('models:renameModel handler（N1）', () => {
+  let root
+  let handler
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-rename-'))
+    roots.push(root)
+    setDataRoot(root)
+    await loadData()
+    registerFilesHandlers()
+    handler = getRegisteredHandler('models:renameModel')
+  })
+
+  afterAll(async () => {
+    for (const dir of roots) {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+
+  async function makeModel(rel = path.join('lora', 'a.safetensors')) {
+    const abs = path.join(root, rel)
+    await fs.mkdir(path.dirname(abs), { recursive: true })
+    await fs.writeFile(abs, 'model-data')
+    await setModelMeta(abs, { note: '标注', rating: 5 })
+    return abs
+  }
+
+  it('成功：主文件与 sidecar 改名，元数据键迁移', async () => {
+    const id = await makeModel()
+    await fs.writeFile(path.join(root, 'lora', 'a.txt'), '说明文本')
+    await fs.writeFile(path.join(root, 'lora', 'a.preview.png'), '预览图')
+
+    const res = await handler(makeEvent(), { id, name: 'b' })
+
+    const newPath = path.join(root, 'lora', 'b.safetensors')
+    expect(res).toMatchObject({ path: newPath, renamedSidecars: 2, sidecarWarnings: [] })
+    await expect(fs.access(id)).rejects.toThrow()
+    await expect(fs.readFile(newPath, 'utf8')).resolves.toBe('model-data')
+    await expect(fs.readFile(path.join(root, 'lora', 'b.txt'), 'utf8')).resolves.toBe('说明文本')
+    await expect(fs.readFile(path.join(root, 'lora', 'b.preview.png'), 'utf8')).resolves.toBe('预览图')
+    // 标注随相对键迁移
+    expect(getModelMeta(newPath)?.note).toBe('标注')
+    expect(getModelMeta(id)).toBeNull()
+  })
+
+  it('目标文件名已存在时拒绝，源文件保持不变', async () => {
+    const id = await makeModel()
+    await fs.writeFile(path.join(root, 'lora', 'b.safetensors'), 'other')
+
+    const res = await handler(makeEvent(), { id, name: 'b' })
+
+    expect(res.error).toBe('目标文件名已存在')
+    await expect(fs.readFile(id, 'utf8')).resolves.toBe('model-data')
+    await expect(fs.readFile(path.join(root, 'lora', 'b.safetensors'), 'utf8')).resolves.toBe('other')
+  })
+
+  it('sidecar 目标已存在时跳过且不覆盖，主文件改名成功并返回警告', async () => {
+    const id = await makeModel()
+    await fs.writeFile(path.join(root, 'lora', 'a.txt'), '旧说明')
+    await fs.writeFile(path.join(root, 'lora', 'b.txt'), '已存在的说明')
+
+    const res = await handler(makeEvent(), { id, name: 'b' })
+
+    expect(res.path).toBe(path.join(root, 'lora', 'b.safetensors'))
+    expect(res.sidecarWarnings.length).toBeGreaterThan(0)
+    // 已有目标 sidecar 内容不被覆盖，源 sidecar 保留
+    await expect(fs.readFile(path.join(root, 'lora', 'b.txt'), 'utf8')).resolves.toBe('已存在的说明')
+    await expect(fs.readFile(path.join(root, 'lora', 'a.txt'), 'utf8')).resolves.toBe('旧说明')
+  })
+
+  it('空名/非法字符/禁用模型/库外路径拒绝', async () => {
+    const id = await makeModel()
+    expect((await handler(makeEvent(), { id, name: '   ' })).error).toContain('不能为空')
+    expect((await handler(makeEvent(), { id, name: 'bad/name' })).error).toContain('非法字符')
+
+    const disabled = path.join(root, 'lora', 'd.safetensors.disabled')
+    await fs.writeFile(disabled, 'model-data')
+    expect((await handler(makeEvent(), { id: disabled, name: 'e' })).error).toContain('先启用')
+
+    const outside = path.join(os.tmpdir(), 'modelvault-rename-outside.safetensors')
+    expect((await handler(makeEvent(), { id: outside, name: 'x' })).error).toContain(
+      '不在当前根目录'
+    )
   })
 })

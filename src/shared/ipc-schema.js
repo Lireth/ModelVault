@@ -327,6 +327,10 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'models:toggleDisabled': vObj({
     fields: { id: ID, disabled: vBool() }
   }),
+  // N1：模型文件重命名（name 为不含扩展名的新文件名；扩展名由 handler 保留）
+  'models:renameModel': vObj({
+    fields: { id: ID, name: vStr({ required: true, max: 120 }) }
+  }),
   'models:moveModelTo': vObj({ fields: { id: ID } }),
   'models:organizeByTags': vObj({
     fields: {

@@ -376,3 +376,44 @@ describe('ModelDetail 自由标签编辑器（F-5）', () => {
     wrapper.unmount()
   })
 })
+
+describe('ModelDetail 文件重命名（N1）', () => {
+  it('打开重命名条预填基名，回车提交新文件名并重扫', async () => {
+    selectModel({ name: 'old-name' })
+    state.folder = 'D:\\models'
+    window.api.models.renameModel = vi
+      .fn()
+      .mockResolvedValue({ path: 'D:\\models\\new-name.safetensors', sidecarWarnings: [] })
+    window.api.models.scan = vi
+      .fn()
+      .mockResolvedValue({ models: [], errors: [], byType: {}, durationMs: 1 })
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const btn = wrapper.findAll('button').find((b) => b.text() === '重命名')
+    expect(btn).toBeTruthy()
+    await btn.trigger('click')
+    await flushPromises()
+
+    const input = wrapper.find('.rename-input')
+    expect(input.exists()).toBe(true)
+    expect(input.element.value).toBe('old-name')
+    await input.setValue('new-name')
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(window.api.models.renameModel).toHaveBeenCalledWith('m1', 'new-name')
+    expect(state.selectedId).toBeNull()
+    expect(state.toasts.some((t) => t.text.includes('已重命名为「new-name」'))).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('禁用模型的「重命名」按钮不可用', async () => {
+    selectModel({ disabled: true })
+    const wrapper = mountDetail()
+    await flushPromises()
+    const btn = wrapper.findAll('button').find((b) => b.text() === '重命名')
+    expect(btn.element.disabled).toBe(true)
+    wrapper.unmount()
+  })
+})

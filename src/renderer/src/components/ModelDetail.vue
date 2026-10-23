@@ -4,7 +4,14 @@ import AutoInfoPanel from './detail/AutoInfoPanel.vue'
 import CivitaiPanel from './detail/CivitaiPanel.vue'
 import CoverPanel from './detail/CoverPanel.vue'
 import MetaForm from './detail/MetaForm.vue'
-import { closeDetail, revealModel, selectedModel, showContextMenu, state } from '../store/appStore'
+import {
+  closeDetail,
+  renameModel,
+  revealModel,
+  selectedModel,
+  showContextMenu,
+  state
+} from '../store/appStore'
 
 /**
  * 详情页面板骨架（O-4 拆分）：
@@ -86,6 +93,62 @@ onBeforeUnmount(() => {
 function onPanelContextMenu() {
   if (selectedModel.value) showContextMenu(selectedModel.value.id)
 }
+
+/* ---------------- 文件重命名（N1） ---------------- */
+
+const renameOpen = ref(false)
+const renameValue = ref('')
+const renameBusy = ref(false)
+const renameInput = ref(null)
+
+/** 打开重命名条：预填当前文件基名（不含扩展名）并聚焦全选 */
+function openRename() {
+  if (!selectedModel.value || selectedModel.value.disabled) return
+  renameValue.value = selectedModel.value.name || ''
+  renameOpen.value = true
+  nextTick(() => {
+    renameInput.value?.focus()
+    renameInput.value?.select?.()
+  })
+}
+
+function cancelRename() {
+  if (renameBusy.value) return
+  renameOpen.value = false
+}
+
+/** 输入法组合中的 Enter/Esc 不提交/取消（中文文件名输入不被截断） */
+function onRenameEnter(e) {
+  if (e?.isComposing) return
+  submitRename()
+}
+
+function onRenameEscape(e) {
+  if (e?.isComposing) return
+  cancelRename()
+}
+
+/** 提交重命名：成功后主进程已迁移文件/元数据，重扫后详情关闭 */
+async function submitRename() {
+  if (renameBusy.value || !selectedModel.value) return
+  const name = renameValue.value.trim()
+  if (!name) return
+  renameBusy.value = true
+  try {
+    const ok = await renameModel(selectedModel.value.id, name)
+    if (ok) renameOpen.value = false
+  } finally {
+    renameBusy.value = false
+  }
+}
+
+// 切换模型时收起重命名条，避免把待改名输入带到另一模型
+watch(
+  () => selectedModel.value?.id,
+  () => {
+    renameOpen.value = false
+  }
+)
 </script>
 
 <template>
@@ -104,12 +167,41 @@ function onPanelContextMenu() {
         <header class="detail-header">
           <h2 :title="selectedModel.name">{{ selectedModel.alias || selectedModel.name }}</h2>
           <div class="detail-header-actions">
+            <button
+              class="btn"
+              :disabled="selectedModel.disabled"
+              title="重命名模型文件（扩展名保持不变）"
+              @click="openRename"
+            >重命名</button>
             <button class="btn" @click="revealModel(selectedModel.id)">打开所在文件夹</button>
             <button class="wc-btn" title="关闭" @click="closeDetail">
               <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
             </button>
           </div>
         </header>
+
+        <!-- 文件重命名（N1）：只改基名，扩展名由主进程保留 -->
+        <div v-if="renameOpen" class="rename-bar">
+          <span class="rename-label">新文件名</span>
+          <input
+            ref="renameInput"
+            v-model="renameValue"
+            class="rename-input"
+            type="text"
+            maxlength="120"
+            spellcheck="false"
+            :placeholder="selectedModel.name"
+            @keydown.enter.prevent="onRenameEnter"
+            @keydown.esc.stop.prevent="onRenameEscape"
+          />
+          <span class="rename-ext">{{ selectedModel.ext }}</span>
+          <button
+            class="btn btn-primary"
+            :disabled="renameBusy || !renameValue.trim()"
+            @click="submitRename"
+          >{{ renameBusy ? '重命名中…' : '确认' }}</button>
+          <button class="btn" :disabled="renameBusy" @click="cancelRename">取消</button>
+        </div>
 
         <div class="detail-body">
           <!-- 左侧：封面管理（CoverPanel，C1） -->
@@ -187,6 +279,46 @@ function onPanelContextMenu() {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+/* 重命名条：位于标题与正文之间，编辑态不遮挡三列内容 */
+.rename-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--bg-card) 55%, transparent);
+}
+
+.rename-label {
+  flex-shrink: 0;
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+.rename-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-card) 60%, transparent);
+  color: var(--text);
+  font-size: var(--font-xs);
+  font-family: var(--font-mono);
+  outline: none;
+}
+
+.rename-input:focus {
+  border-color: var(--accent);
+}
+
+.rename-ext {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  color: var(--text-muted);
 }
 
 .detail-body {
