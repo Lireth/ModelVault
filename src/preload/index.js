@@ -178,6 +178,15 @@ const api = {
     popupMenu: (id) => invokeValidated('models:popupMenu', { id }),
     /** 拖拽导入封面（sourcePath 为外部图片绝对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */
     importCover: (id, sourcePath) => invokeValidated('models:importCover', { id, path: sourcePath }),
+    /** 最近删除记录（F-2 回收站桥接），返回 { entries: [{absPath, name, size, deletedAt}] } */
+    listDeleted: () => invokeValidated('models:listDeleted'),
+    /**
+     * 一键恢复删除的模型（F-2）：文件从系统回收站移回原位置并重绑元数据快照，
+     * 仅限当前库内路径；返回 { ok, sidecarsRestored, metaRestored } 或 { error }
+     */
+    restoreDeleted: (absPath) => invokeValidated('models:restoreDeleted', { absPath }),
+    /** 忽略一条删除记录（文件仍在系统回收站），返回 { ok } */
+    forgetDeleted: (absPath) => invokeValidated('models:forgetDeleted', { absPath }),
     /** 在资源管理器中显示文件 */
     reveal: (path) => invokeValidated('models:reveal', { path }),
     /** 订阅扫描进度，返回取消监听函数 */

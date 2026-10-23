@@ -160,7 +160,7 @@ export async function batchDeleteModels() {
   try {
     if (
       !(await confirmDialog(
-        `确定将选中的 ${ids.length} 个模型移入系统回收站吗？可在系统回收站恢复。`
+        `确定将选中的 ${ids.length} 个模型移入系统回收站吗？可稍后在设置-最近删除中恢复。`
       ))
     ) {
       return

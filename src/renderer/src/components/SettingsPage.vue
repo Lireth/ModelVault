@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
 import SettingsAbout from './settings/SettingsAbout.vue'
 import SettingsBackup from './settings/SettingsBackup.vue'
 import SettingsTags from './settings/SettingsTags.vue'
+import SettingsTrash from './settings/SettingsTrash.vue'
 import { useSettingsForm } from '../composables/useSettingsForm'
 import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
 import {
@@ -387,6 +388,9 @@ async function onSave() {
 
       <!-- 数据管理（O-4 拆分：settings/SettingsBackup.vue，含备份恢复与全库示例图清理） -->
       <SettingsBackup @restored="fillForm" />
+
+      <!-- 最近删除（F-2 回收站桥接：删除记录查看/一键恢复/忽略） -->
+      <SettingsTrash />
 
       <!-- 关于（O-4 拆分：settings/SettingsAbout.vue，含检查更新/日志诊断） -->
       <SettingsAbout />

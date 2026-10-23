@@ -199,7 +199,7 @@ export async function handleMenuAction(id, action) {
     case 'deleteModel': {
       const m = state.models.find((x) => x.id === id)
       if (!m) break
-      if (!(await confirmDialog(`确定将「${m.alias || m.name}」移入系统回收站吗？`))) break
+      if (!(await confirmDialog(`确定将「${m.alias || m.name}」移入系统回收站吗？可稍后在设置-最近删除中恢复。`))) break
       await deleteModel(id)
       break
     }

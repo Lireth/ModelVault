@@ -244,6 +244,14 @@ export const IPC_PAYLOAD_SCHEMAS = {
   // 语义字段（favorite/nsfw/rating）的类型与范围校验留在 handler（文案有测试锁定）
   'models:setMetaFlags': vObj({ fields: { id: ID } }),
   'models:popupMenu': vObj({ fields: { id: ID } }),
+  // F-2 回收站桥接：最近删除记录查看与一键恢复（恢复目标限定当前库内路径）
+  'models:listDeleted': vVoid(),
+  'models:restoreDeleted': vObj({
+    fields: { absPath: vStr({ required: true, max: 2000 }) }
+  }),
+  'models:forgetDeleted': vObj({
+    fields: { absPath: vStr({ required: true, max: 2000 }) }
+  }),
   // 自由标签（F-5）：整体覆写语义；逐项去重/截断规范化在 store-meta
   'models:setModelTags': vObj({
     fields: {
