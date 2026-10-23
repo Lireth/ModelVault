@@ -25,7 +25,7 @@ vi.mock('electron', () => ({
 
 import { net, protocol } from 'electron'
 import { registerImageProtocolHandler, toImageUrl } from '../src/main/protocol'
-import { setDataRoot } from '../src/main/services/store'
+import { setDataRoot, updateSettings } from '../src/main/services/store'
 import { getCivImageCachePath } from '../src/main/services/civ-cache'
 
 const roots = []
@@ -198,6 +198,22 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
     const res = await civHandler(makeCivRequest('https://evil.com/a.jpeg'))
     expect(res.status).toBe(403)
     expect(net.fetch).not.toHaveBeenCalled()
+  })
+
+  it('关闭 Civitai 开关后拒绝远程代理，且不发起网络请求', async () => {
+    await updateSettings({ civitaiEnabled: false })
+    try {
+      vi.mocked(net.fetch).mockResolvedValue(
+        new Response('img-bytes', { status: 200, headers: { 'Content-Type': 'image/jpeg' } })
+      )
+      const res = await civHandler(
+        makeCivRequest('https://image.civitai.com/a/1.jpeg')
+      )
+      expect(res.status).toBe(403)
+      expect(net.fetch).not.toHaveBeenCalled()
+    } finally {
+      await updateSettings({ civitaiEnabled: true })
+    }
   })
 
   it('白名单 CDN 图片经 net.fetch 代理放行，附加按天缓存头', async () => {

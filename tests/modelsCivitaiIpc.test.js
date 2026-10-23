@@ -35,6 +35,7 @@ vi.mock('electron', () => ({
 }))
 
 vi.mock('../src/main/services/civitai.js', () => ({
+  CIVITAI_DISABLED_ERROR: 'Civitai 功能已关闭',
   civitaiCompletePatch: vi.fn(),
   downloadCivitaiImage: vi.fn(),
   fetchCivitaiModelType: vi.fn(),
@@ -85,7 +86,7 @@ import {
   buildCoverResponse,
   refreshCoverThumbnail
 } from '../src/main/ipc/models/covers'
-import { getModelMeta, loadData, setDataRoot, setModelMeta } from '../src/main/services/store'
+import { getModelMeta, loadData, setDataRoot, setModelMeta, updateSettings } from '../src/main/services/store'
 
 const roots = []
 let root
@@ -383,6 +384,44 @@ describe('models:warmupHash', () => {
     const res = await getRegisteredHandler('models:warmupHash')(makeEvent(), { id: 'D:\\outside\\x' })
     expect(res).toEqual({ error: '模型不在当前根目录内' })
     expect(requestHashWarmup).not.toHaveBeenCalled()
+  })
+})
+
+describe('Civitai 隐私开关（civitaiEnabled）', () => {
+  it('关闭后四个网络入口均拒绝，本地哈希预热仍可用', async () => {
+    const id = await touchModel('LoRA\\off.safetensors')
+    setModelMeta(id, { civitaiUrl: 'https://civitai.com/models/123' })
+    computeAndCacheHash.mockResolvedValue('h')
+    fetchCivitaiVersionByHash.mockResolvedValue({ found: false })
+    fetchCivitaiModelType.mockResolvedValue({ found: false })
+    downloadCivitaiImage.mockResolvedValue({ error: '不应执行' })
+
+    await updateSettings({ civitaiEnabled: false })
+    try {
+      const disabled = { error: 'Civitai 功能已关闭' }
+      const event = makeEvent()
+      expect(await getRegisteredHandler('models:civitaiIdentify')(event, { id })).toEqual(disabled)
+      expect(await getRegisteredHandler('models:civitaiComplete')(event, { id })).toEqual(disabled)
+      expect(await getRegisteredHandler('models:civitaiCategory')(event, { id })).toEqual(disabled)
+      expect(
+        await getRegisteredHandler('models:civitaiImportImages')(event, {
+          id,
+          images: [{ url: 'https://image.civitai.com/a.jpeg' }]
+        })
+      ).toEqual(disabled)
+
+      // 关闭开关不得触发哈希/API/图片下载（隐私边界）
+      expect(computeAndCacheHash).not.toHaveBeenCalled()
+      expect(fetchCivitaiVersionByHash).not.toHaveBeenCalled()
+      expect(fetchCivitaiModelType).not.toHaveBeenCalled()
+      expect(downloadCivitaiImage).not.toHaveBeenCalled()
+
+      // 纯本地哈希预热不属于 Civitai 网络功能，仍应可用
+      expect(await getRegisteredHandler('models:warmupHash')(event, { id })).toEqual({ ok: true })
+      expect(requestHashWarmup).toHaveBeenCalledWith([id], { priority: true })
+    } finally {
+      await updateSettings({ civitaiEnabled: true })
+    }
   })
 })
 

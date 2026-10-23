@@ -4,8 +4,13 @@ import path from 'node:path'
 import fs from 'node:fs'
 import logger from './logger'
 import { isValidImageFile, isImageBuffer } from './services/covers'
-import { getCurrentRoot } from './services/store'
-import { isAllowedCivitaiImageUrl, fetchCivitaiImage, readCivitaiImageBody } from './services/civitai'
+import { getCurrentRoot, getSettings } from './services/store'
+import {
+  CIVITAI_DISABLED_ERROR,
+  isAllowedCivitaiImageUrl,
+  fetchCivitaiImage,
+  readCivitaiImageBody
+} from './services/civitai'
 import {
   civCacheContentType,
   getCivImageFromCache,
@@ -203,6 +208,11 @@ function registerCivimgHandler() {
       const url = new URL(request.url)
       if (url.host !== 'remote') {
         return new Response('Bad Request', { status: 400 })
+      }
+      // 隐私门禁（OPT-03）：设置关闭时连磁盘缓存也不服务，统一下线 Civitai 内容
+      if (getSettings().civitaiEnabled === false) {
+        logger.warn(`civimg 协议拒绝：${CIVITAI_DISABLED_ERROR}`)
+        return new Response('Forbidden', { status: 403 })
       }
       let target
       try {

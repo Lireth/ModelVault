@@ -13,6 +13,8 @@ import { computeFileHashOffThread } from './hash-worker-pool'
  */
 
 const CIVITAI_API_BASE = 'https://civitai.com/api/v1'
+/** 关闭 Civitai 开关时主进程统一拒绝文案（IPC 与 civimg 代理共用） */
+export const CIVITAI_DISABLED_ERROR = 'Civitai 功能已关闭'
 /** 请求超时（ms），与 updater.js 一致 */
 const REQUEST_TIMEOUT_MS = 15000
 /** 图片下载超时（ms）：示例图普遍数 MB，放宽到 30s */

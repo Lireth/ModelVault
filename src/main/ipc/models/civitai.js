@@ -2,10 +2,11 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { BrowserWindow } from 'electron'
 import logger from '../../logger'
-import { getModelMeta, setModelMeta, toRelKey } from '../../services/store'
+import { getModelMeta, getSettings, setModelMeta, toRelKey } from '../../services/store'
 import { classifyModel } from '../../services/scanner'
 import { saveCoverBuffer } from '../../services/covers'
 import {
+  CIVITAI_DISABLED_ERROR,
   civitaiCompletePatch,
   downloadCivitaiImage,
   fetchCivitaiModelType,
@@ -38,6 +39,16 @@ import { wrapHandler, checkModelIdInRoot } from '../handler'
 const MAX_IMPORT_IMAGES = 20
 
 /**
+ * Civitai 网络入口统一隐私门禁（OPT-03）：设置页的 civitaiEnabled 此前
+ * 只控制渲染层入口显隐，主进程 handler 仍可被调用并发起网络请求。
+ * 每个会触网的 handler 在业务逻辑之前同步读取当前库设置并 fail-closed。
+ * @returns {{error: string}|null} 关闭时返回统一错误；开启时返回 null
+ */
+function rejectIfCivitaiDisabled() {
+  return getSettings().civitaiEnabled === false ? { error: CIVITAI_DISABLED_ERROR } : null
+}
+
+/**
  * 确保拿到模型文件当前有效的 SHA256（命中 hashMtime 缓存时零读取），
  * 未命中时经预热服务统一入口计算（与后台预热共享进行中任务，同一模型
  * 同 mtime 只读盘计算一次，结果回写元数据缓存）。
@@ -59,6 +70,8 @@ async function ensureHash(id, meta, mtimeMs) {
 export function registerCivitaiHandlers() {
   // 在线识别：哈希反查 Civitai，成功时保存模型页 URL
   wrapHandler('models:civitaiIdentify', async (event, { id } = {}) => {
+    const disabled = rejectIfCivitaiDisabled()
+    if (disabled) return disabled
     const invalid = checkModelIdInRoot(id)
     if (invalid) return { error: invalid }
     const stat = await fs.stat(id)
@@ -95,6 +108,8 @@ export function registerCivitaiHandlers() {
 
   // 一键补全：反查后仅填充空缺字段（触发词/备注），不覆盖任何用户标注
   wrapHandler('models:civitaiComplete', async (event, { id } = {}) => {
+    const disabled = rejectIfCivitaiDisabled()
+    if (disabled) return disabled
     const invalid = checkModelIdInRoot(id)
     if (invalid) return { error: invalid }
     const stat = await fs.stat(id)
@@ -129,6 +144,8 @@ export function registerCivitaiHandlers() {
   // 故先查 type 再回退 tags。无链接/非 LoRA/未映射/失败的模型不做改动
   // （渲染层汇总提示）；映射成功时覆盖已有标签（分配语义）。
   wrapHandler('models:civitaiCategory', async (event, { id } = {}) => {
+    const disabled = rejectIfCivitaiDisabled()
+    if (disabled) return disabled
     const invalid = checkModelIdInRoot(id)
     if (invalid) return { error: invalid }
     // 模型类型限制：按相对路径复算扫描分类，非 LoRA 直接跳过
@@ -163,6 +180,8 @@ export function registerCivitaiHandlers() {
   // 示例图导入：下载勾选的图片（仅 Civitai CDN 白名单域名）并追加到封面列表。
   // 逐张串行下载/落盘/关联；单张失败不中断整批，结果按图反馈
   wrapHandler('models:civitaiImportImages', async (event, { id, images } = {}) => {
+    const disabled = rejectIfCivitaiDisabled()
+    if (disabled) return disabled
     const invalid = checkModelIdInRoot(id)
     if (invalid) return { error: invalid }
     if (!Array.isArray(images) || images.length === 0) {
