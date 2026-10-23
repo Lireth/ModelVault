@@ -79,6 +79,32 @@ export function collapseDirsToTopLevel(dirs) {
 }
 
 /**
+ * 相对目录是否落在变更子树集合内（主/渲染共用语义，OP-09）：
+ * - 子树项 '' 表示仅根目录直属（不递归子目录）；
+ * - 非空子树命中自身及其全部后代（POSIX 前缀 + '/' 边界）。
+ * @param {string} relDir 模型所在相对目录（'' 为根直属）
+ * @param {string[]} dirs 变更子树（POSIX 相对路径）
+ * @returns {boolean} dirs 非数组时按「全覆盖」处理（调用方的缺省语义）
+ */
+export function isRelDirInScope(relDir, dirs) {
+  if (!Array.isArray(dirs)) return true
+  return dirs.some((d) =>
+    d === '' ? relDir === '' : relDir === d || relDir.startsWith(`${d}/`)
+  )
+}
+
+/**
+ * 相对路径键（文件）是否落在变更子树集合内。
+ * @param {string} key POSIX 相对路径（如 'LoRA/a.safetensors'）
+ * @param {string[]} dirs 变更子树
+ * @returns {boolean}
+ */
+export function isRelKeyInScope(key, dirs) {
+  const slash = key.lastIndexOf('/')
+  return isRelDirInScope(slash < 0 ? '' : key.slice(0, slash), dirs)
+}
+
+/**
  * 校验并归一化局部扫描子树（主进程 IPC 入口使用）。
  * 超限时优先收敛到一级目录；仍超限则要求调用方降级全量扫描，
  * 绝不对输入做静默截断。

@@ -180,7 +180,8 @@ export function registerStoreHandlers() {
           syncWatcher(
             settings.modelsFolder,
             settings.autoRescan === true,
-            settings.excludeDirs || []
+            settings.excludeDirs || [],
+            { nativeWatch: true }
           )
           // F1：返回上次全量扫描的本地索引，渲染层可先秒开列表再后台校验
           cachedIndex = await readLibraryIndex(settings.modelsFolder)
@@ -229,7 +230,9 @@ export function registerStoreHandlers() {
       // 切库成功后才提交激活库（与扫描链路同一 V-02 状态机）
       await updateSettings({ modelsFolder: root })
       const settings = getSettings()
-      syncWatcher(root, settings.autoRescan === true, settings.excludeDirs || [])
+      syncWatcher(root, settings.autoRescan === true, settings.excludeDirs || [], {
+        nativeWatch: true
+      })
       logger.info(
         `模型库已打开（本地索引 ${cachedIndex.models.length} 个模型）: ${root}`
       )
@@ -315,7 +318,8 @@ export function registerStoreHandlers() {
     syncWatcher(
       settings.modelsFolder,
       settings.autoRescan === true,
-      settings.excludeDirs || []
+      settings.excludeDirs || [],
+      { nativeWatch: true }
     )
     logger.info(`应用设置已更新: ${JSON.stringify(patch).slice(0, 200)}`)
     return { settings }

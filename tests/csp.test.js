@@ -30,6 +30,8 @@ describe('渲染进程 CSP（B4）', () => {
     expect(csp).toContain("default-src 'self'")
     expect(csp).toContain("script-src 'self'")
     expect(csp).toContain("img-src 'self' data: mvimg:")
+    // FN-02：示例视频经 civimg 代理播放
+    expect(csp).toContain("media-src 'self' civimg:")
     // 此前仅靠 default-src 隐式覆盖的指令，显式化固定
     expect(csp).toContain("object-src 'none'")
     expect(csp).toContain("base-uri 'self'")

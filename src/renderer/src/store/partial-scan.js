@@ -5,7 +5,8 @@ import { scanModels } from './library'
 import {
   MAX_PARTIAL_SCAN_DIRS,
   collapseDirsToTopLevel,
-  dedupeAndPruneDescendants
+  dedupeAndPruneDescendants,
+  isRelDirInScope
 } from '../../../shared/scan-dirs'
 
 /**
@@ -90,16 +91,8 @@ function enqueue(root, dirs) {
   for (const dir of dirs) queuedDirs.add(dir)
 }
 
-/**
- * 判断模型的相对目录是否落在变更子树集合内。
- * @param {string} relDir 模型相对目录（'' 为根直属）
- * @param {string[]} dirs 变更子树（POSIX，'' 为根直属）
- */
-function isRelDirAffected(relDir, dirs) {
-  return dirs.some((d) =>
-    d === '' ? relDir === '' : relDir === d || relDir.startsWith(`${d}/`)
-  )
-}
+/** 判断模型的相对目录是否落在变更子树集合内（OP-09 共享实现） */
+const isRelDirAffected = isRelDirInScope
 
 /**
  * 局部增量扫描：只重扫 watcher 检出的变更子树，主进程返回这些子树的模型现状，

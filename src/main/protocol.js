@@ -9,6 +9,7 @@ import {
   CIVITAI_DISABLED_ERROR,
   isAllowedCivitaiImageUrl,
   fetchCivitaiImage,
+  fetchCivitaiVideo,
   readCivitaiImageBody
 } from './services/civitai'
 import {
@@ -259,6 +260,10 @@ function registerCivimgHandler() {
         logger.warn(`civimg 协议拒绝非白名单图片地址: ${target.slice(0, 200)}`)
         return new Response('Forbidden', { status: 403 })
       }
+      // FN-02：示例视频走流式代理（Range 透传），不进入图片磁盘缓存
+      if (isCivitaiVideoUrl(target)) {
+        return proxyCivitaiVideo(target, request)
+      }
       // 缓存命中路径：魔数校验失败（半写/损坏/被篡改）时删除条目自愈并回源
       const cached = await getCivImageFromCache(target)
       if (cached) {
@@ -303,6 +308,48 @@ function registerCivimgHandler() {
       return new Response('Internal Error', { status: 500 })
     }
   })
+}
+
+/** 视频扩展名（Civitai 示例视频，FN-02）：走流式代理而非磁盘图片缓存 */
+const VIDEO_URL_RE = /\.(mp4|webm|mov|m4v)(?:$|[?#])/i
+
+/**
+ * 是否为示例视频地址（纯函数，便于单测）。
+ * @param {unknown} url CDN 地址
+ * @returns {boolean}
+ */
+export function isCivitaiVideoUrl(url) {
+  return typeof url === 'string' && VIDEO_URL_RE.test(url)
+}
+
+/**
+ * 示例视频流式代理（FN-02）：
+ * 透传渲染进程的 Range 请求头（拖动播放/分段加载），响应体直接流回，
+ * 不在主进程聚合（视频可达数百 MB）；不写磁盘缓存，仅下发按天缓存头。
+ * 域名白名单与图片代理一致（调用方已校验，fetchCivitaiVideo 内部再校验）。
+ * @param {string} target 白名单内的视频 URL
+ * @param {Request} request 原始协议请求（读取 Range）
+ * @returns {Promise<Response>}
+ */
+async function proxyCivitaiVideo(target, request) {
+  try {
+    const range = request?.headers?.get?.('range') || ''
+    const upstream = await fetchCivitaiVideo(target, range)
+    if (!upstream.ok && upstream.status !== 206) {
+      logger.warn(`civimg 视频上游响应异常（HTTP ${upstream.status}）: ${target.slice(0, 200)}`)
+      return new Response('Upstream Error', { status: 502 })
+    }
+    const headers = new Headers(upstream.headers)
+    headers.set('Cache-Control', 'public, max-age=86400')
+    return new Response(upstream.body, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers
+    })
+  } catch (err) {
+    logger.warn(`civimg 视频代理失败: ${err.message}`)
+    return new Response('Upstream Error', { status: 502 })
+  }
 }
 
 /** 由本地图片绝对路径构造渲染进程可用的 mvimg URL */

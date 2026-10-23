@@ -16,14 +16,18 @@ import { wrapHandler } from '../handler'
 
 /** 注册备份与恢复链路的 IPC 处理器 */
 export function registerBackupHandlers() {
-  // 导出备份：返回 { path, sizeBytes, library, models, covers } / { canceled } / { error }
-  wrapHandler('models:exportBackup', async (event) => {
+  // 导出备份（FN-08 支持 full/selected/metadata 三种范围）：
+  // 返回 { path, sizeBytes, library, models, covers, mode, partial } /
+  // { canceled } / { error }
+  wrapHandler('models:exportBackup', async (event, payload = {}) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    const res = await exportBackup(win)
+    const res = await exportBackup(win, payload)
     if (res.error) {
       logger.warn(`备份导出失败: ${res.error}`)
     } else if (!res.canceled) {
-      logger.info(`备份已导出: ${res.path}（${res.models} 模型 / ${res.covers} 封面）`)
+      logger.info(
+        `备份已导出（${res.mode || 'full'}）: ${res.path}（${res.models} 模型 / ${res.covers} 封面）`
+      )
     }
     return res
   }, { errorPrefix: '备份导出失败' })

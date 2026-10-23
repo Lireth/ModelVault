@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   civitaiComplete,
   civitaiIdentify,
@@ -51,6 +51,10 @@ const hashProgressText = computed(() => {
 
 /** 识别到的示例图列表（[{url, width, height, nsfw}]，仅识别会话内有效） */
 const images = ref([])
+/** 识别到的示例视频列表（FN-02：[{url, thumbnailUrl, width, height, nsfw}]） */
+const videos = ref([])
+/** 正在播放的视频（null 表示播放器关闭） */
+const activeVideo = ref(null)
 /** 示例图是否已拉取（未识别过或重开详情后需重新获取） */
 const imagesLoaded = ref(false)
 /** 展开示例图区域 */
@@ -69,12 +73,39 @@ function thumbSrc(url) {
   return `civimg://remote/${encodeURIComponent(url)}`
 }
 
+/** 示例视频播放地址（同一受控代理；视频走 Range 流式透传） */
+function videoSrc(url) {
+  return `civimg://remote/${encodeURIComponent(url)}`
+}
+
+function openVideo(video) {
+  activeVideo.value = video
+}
+
+function closeVideo() {
+  activeVideo.value = null
+}
+
+/** ESC 优先关闭播放器（捕获阶段截断，避免同时触发详情页关闭） */
+function onVideoKeydown(e) {
+  if (e.key === 'Escape' && activeVideo.value) {
+    e.stopPropagation()
+    e.preventDefault()
+    closeVideo()
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onVideoKeydown, { capture: true }))
+onBeforeUnmount(() => window.removeEventListener('keydown', onVideoKeydown, { capture: true }))
+
 // 切换模型时清空上次识别结论与示例图状态（URL 本身随模型对象走，无需清理）
 watch(
   () => model.value?.id,
   () => {
     lastResult.value = ''
     images.value = []
+    videos.value = []
+    activeVideo.value = null
     imagesLoaded.value = false
     showImages.value = false
     selectedUrls.clear()
@@ -94,6 +125,7 @@ async function onIdentify() {
       return
     }
     images.value = res.info?.images || []
+    videos.value = res.info?.videos || []
     imagesLoaded.value = true
     selectedUrls.clear()
   } finally {
@@ -185,9 +217,9 @@ async function importSelected() {
 
       <!-- 示例图采集：勾选后一键导入为模型封面 -->
       <template v-if="showImages">
-        <div v-if="identifying && !imagesLoaded" class="civitai-hint">正在获取示例图列表…</div>
-        <template v-else-if="images.length > 0">
-          <div class="civitai-img-grid">
+        <div v-if="identifying && !imagesLoaded" class="civitai-hint">正在获取示例媒体列表…</div>
+        <template v-else-if="images.length > 0 || videos.length > 0">
+          <div v-if="images.length > 0" class="civitai-img-grid">
             <label
               v-for="img in images"
               :key="img.url"
@@ -204,7 +236,31 @@ async function importSelected() {
               <span v-if="img.nsfw" class="civitai-nsfw-badge">NSFW</span>
             </label>
           </div>
-          <div class="civitai-actions">
+          <!-- 示例视频（FN-02）：点击经 civimg 流式代理在线播放，不导入为封面 -->
+          <div v-if="videos.length > 0" class="civitai-video-section">
+            <span class="civitai-hint">示例视频（{{ videos.length }}）</span>
+            <div class="civitai-video-grid">
+              <button
+                v-for="video in videos"
+                :key="video.url"
+                class="civitai-video-item"
+                type="button"
+                :title="`${video.width} × ${video.height}${video.nsfw ? '（NSFW）' : ''}（点击播放）`"
+                @click="openVideo(video)"
+              >
+                <img
+                  v-if="video.thumbnailUrl"
+                  :src="thumbSrc(video.thumbnailUrl)"
+                  loading="lazy"
+                  :class="{ nsfw: video.nsfw }"
+                  alt=""
+                />
+                <span v-else class="civitai-video-play">▶</span>
+                <span class="civitai-video-size">{{ video.width }} × {{ video.height }}</span>
+              </button>
+            </div>
+          </div>
+          <div v-if="images.length > 0" class="civitai-actions">
             <button class="btn" type="button" :disabled="importing" @click="selectAll">全选</button>
             <button class="btn" type="button" :disabled="importing || selectedCount === 0" @click="clearSelection">清空</button>
             <button
@@ -215,9 +271,9 @@ async function importSelected() {
               @click="importSelected"
             >{{ importing ? '导入中…' : `添加所选示例图（${selectedCount}）` }}</button>
           </div>
-          <span class="civitai-hint">导入的图片会追加到模型封面列表（单次最多 20 张）</span>
+          <span v-if="images.length > 0" class="civitai-hint">导入的图片会追加到模型封面列表（单次最多 20 张）</span>
         </template>
-        <div v-else class="civitai-hint">该模型版本暂无示例图</div>
+        <div v-else class="civitai-hint">该模型版本暂无示例图或视频</div>
       </template>
     </template>
 
@@ -247,9 +303,25 @@ async function importSelected() {
         未在 Civitai 找到匹配的模型（自训或其他来源的模型无法识别）
       </span>
       <span v-else class="civitai-hint">
-        识别成功后可展示模型页链接、一键补全空缺信息并采集示例图
+        识别成功后可展示模型页链接、一键补全空缺信息并采集示例图/视频
       </span>
     </template>
+
+    <!-- 示例视频播放器（FN-02）：叠加层 + 原生 video 控件 -->
+    <Teleport to="body">
+      <div v-if="activeVideo" class="civitai-video-mask" @click.self="closeVideo">
+        <div class="civitai-video-box" role="dialog" aria-modal="true" aria-label="示例视频">
+          <button class="civitai-video-close" title="关闭播放器" @click="closeVideo">✕</button>
+          <video
+            class="civitai-video-player"
+            :src="videoSrc(activeVideo.url)"
+            controls
+            autoplay
+            playsinline
+          ></video>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -372,5 +444,105 @@ async function importSelected() {
   border-radius: var(--radius-full, 999px);
   background: color-mix(in srgb, #e5484d 80%, transparent);
   color: #fff;
+}
+
+/* 示例视频（FN-02） */
+.civitai-video-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.civitai-video-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.civitai-video-item {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm, 6px);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg-card) 60%, transparent);
+  cursor: pointer;
+}
+
+.civitai-video-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.civitai-video-item img.nsfw {
+  filter: blur(10px);
+}
+
+.civitai-video-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  color: var(--text-muted);
+}
+
+.civitai-video-size {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: var(--radius-full, 999px);
+  background: color-mix(in srgb, #000 55%, transparent);
+  color: #fff;
+}
+
+.civitai-video-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+}
+
+.civitai-video-box {
+  position: relative;
+  max-width: min(1080px, 92vw);
+  max-height: 88vh;
+  padding: 10px;
+  border-radius: var(--radius-lg, 12px);
+  background: #000;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+}
+
+.civitai-video-player {
+  display: block;
+  max-width: 100%;
+  max-height: calc(88vh - 20px);
+  border-radius: calc(var(--radius-lg, 12px) - 4px);
+  background: #000;
+}
+
+.civitai-video-close {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--glass-border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
 }
 </style>

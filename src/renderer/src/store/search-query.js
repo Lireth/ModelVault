@@ -144,7 +144,7 @@ function matchFilter(m, f) {
     case 'mtime': {
       // mtime 为文件修改时间；年龄 = 当前时间 - mtime（缺失值不命中）
       const t = Number(m.mtimeMs)
-      if (!Number.isFinite(t)) return false
+      if (!Number.isFinite(t) || t <= 0) return false
       return compareOp(Date.now() - t, f.op, f.ms)
     }
     case 'author':

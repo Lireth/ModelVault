@@ -256,10 +256,12 @@ export async function fetchCivitaiVersionByHash(hash) {
 /**
  * 由 by-hash 端点响应构造规范化信息与页面 URL（纯函数，便于单测）。
  * 页面链接格式与 Civitai 官方一致：/models/{modelId}?modelVersionId={versionId}。
- * 示例图仅保留静态图片（视频/混合媒体剔除），按 API 默认顺序（热度）截断。
+ * 示例媒体按 API 默认顺序（热度）截断；图片与视频分别输出
+ * （FN-02：视频用于详情页预览播放，不参与封面导入）。
  * @param {object} raw API 响应 JSON
  * @returns {object|null} { url, modelName, versionName, baseModel, trainedWords,
- *   description, images: [{url, width, height, nsfw}] }
+ *   description, images: [{url, width, height, nsfw}],
+ *   videos: [{url, thumbnailUrl, width, height, nsfw}] }
  */
 export function normalizeVersionInfo(raw) {
   if (!raw || typeof raw !== 'object') return null
@@ -269,18 +271,39 @@ export function normalizeVersionInfo(raw) {
   const trainedWords = Array.isArray(raw.trainedWords)
     ? raw.trainedWords.filter((w) => typeof w === 'string' && w.trim()).map((w) => w.trim())
     : []
-  const images = Array.isArray(raw.images)
+  const media = Array.isArray(raw.images)
     ? raw.images
-        .filter((img) => img && typeof img === 'object' && img.type === 'image' &&
-          typeof img.url === 'string' && img.url.startsWith('https://'))
+        .filter(
+          (item) =>
+            item &&
+            typeof item === 'object' &&
+            (item.type === 'image' || item.type === 'video') &&
+            typeof item.url === 'string' &&
+            item.url.startsWith('https://')
+        )
         .slice(0, MAX_IMAGES)
-        .map((img) => ({
-          url: img.url,
-          width: Number.isFinite(img.width) ? img.width : 0,
-          height: Number.isFinite(img.height) ? img.height : 0,
-          nsfw: img.nsfw === true || (Array.isArray(img.nsfwLevel) && img.nsfwLevel.length > 0)
-        }))
     : []
+  const images = media
+    .filter((item) => item.type === 'image')
+    .map((img) => ({
+      url: img.url,
+      width: Number.isFinite(img.width) ? img.width : 0,
+      height: Number.isFinite(img.height) ? img.height : 0,
+      nsfw: img.nsfw === true || (Array.isArray(img.nsfwLevel) && img.nsfwLevel.length > 0)
+    }))
+  const videos = media
+    .filter((item) => item.type === 'video')
+    .map((video) => ({
+      url: video.url,
+      width: Number.isFinite(video.width) ? video.width : 0,
+      height: Number.isFinite(video.height) ? video.height : 0,
+      nsfw: video.nsfw === true || (Array.isArray(video.nsfwLevel) && video.nsfwLevel.length > 0),
+      // Civitai 部分视频条目提供缩略图；不可信 URL 仅接受 https 字符串
+      thumbnailUrl:
+        typeof video.thumbnailUrl === 'string' && video.thumbnailUrl.startsWith('https://')
+          ? video.thumbnailUrl
+          : ''
+    }))
   return {
     url: `https://civitai.com/models/${modelId}?modelVersionId=${versionId}`,
     modelName: typeof raw.model?.name === 'string' ? raw.model.name : '',
@@ -288,7 +311,8 @@ export function normalizeVersionInfo(raw) {
     baseModel: typeof raw.baseModel === 'string' ? raw.baseModel : '',
     trainedWords,
     description: typeof raw.description === 'string' ? raw.description : '',
-    images
+    images,
+    videos
   }
 }
 
@@ -419,6 +443,27 @@ export async function fetchCivitaiImage(url) {
     },
     isAllowedCivitaiImageUrl,
     'Civitai 图片请求'
+  )
+}
+
+/**
+ * 发起 Civitai 示例视频请求（FN-02）：透传 Range 以支持拖动播放，
+ * 不设置整体超时（视频可能较大且持续播放），域名白名单与图片一致。
+ * @param {string} url 已通过 isAllowedCivitaiImageUrl 校验的视频地址
+ * @param {string} [range] 原始 Range 请求头
+ * @returns {Promise<Response>}
+ */
+export async function fetchCivitaiVideo(url, range = '') {
+  const headers = {
+    Accept: 'video/mp4,video/webm,video/*;q=0.9,*/*;q=0.5',
+    Referer: 'https://civitai.com/'
+  }
+  if (typeof range === 'string' && range.trim()) headers.Range = range.trim()
+  return fetchWithAllowedRedirects(
+    url,
+    { headers },
+    isAllowedCivitaiImageUrl,
+    'Civitai 视频请求'
   )
 }
 

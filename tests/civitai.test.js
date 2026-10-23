@@ -292,24 +292,47 @@ describe('normalizeVersionInfo', () => {
     expect(info.trainedWords).toEqual([])
   })
 
-  it('示例图仅保留静态图片，携带尺寸与 NSFW 标记；非白名单域名留待下载时拦截', () => {
+  it('图片与视频分流输出，携带尺寸/NSFW/视频封面；坏数据剔除', () => {
     const info = normalizeVersionInfo({
       id: 1,
       modelId: 2,
       images: [
         { type: 'image', url: 'https://image.civitai.com/a.jpeg', width: 512, height: 768, nsfw: false },
-        { type: 'video', url: 'https://image.civitai.com/b.mp4', width: 512, height: 768 },
+        {
+          type: 'video',
+          url: 'https://image.civitai.com/b.mp4',
+          width: 512,
+          height: 768,
+          thumbnailUrl: 'https://image.civitai.com/b.jpeg'
+        },
+        { type: 'video', url: 'https://image.civitai.com/c.webm' },
         { type: 'image', url: 'http://image.civitai.com/c.jpeg', width: 1, height: 1 },
         { type: 'image', url: 'https://evil.com/d.jpeg', width: 1, height: 1, nsfw: true },
         null,
         { type: 'image', width: 1, height: 1 }
       ]
     })
-    // https 前缀的静态图均保留（域名白名单在 downloadCivitaiImage 强制），
-    // http/视频/坏数据剔除
+    // https 前缀的静态图与视频分别保留（域名白名单在下载/代理时强制），
+    // http/坏数据剔除
     expect(info.images).toEqual([
       { url: 'https://image.civitai.com/a.jpeg', width: 512, height: 768, nsfw: false },
       { url: 'https://evil.com/d.jpeg', width: 1, height: 1, nsfw: true }
+    ])
+    expect(info.videos).toEqual([
+      {
+        url: 'https://image.civitai.com/b.mp4',
+        width: 512,
+        height: 768,
+        nsfw: false,
+        thumbnailUrl: 'https://image.civitai.com/b.jpeg'
+      },
+      {
+        url: 'https://image.civitai.com/c.webm',
+        width: 0,
+        height: 0,
+        nsfw: false,
+        thumbnailUrl: ''
+      }
     ])
   })
 

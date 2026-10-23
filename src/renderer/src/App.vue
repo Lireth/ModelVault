@@ -6,6 +6,7 @@ import BatchBar from './components/BatchBar.vue'
 import ConfirmOverlay from './components/ConfirmOverlay.vue'
 import LibraryStates from './components/LibraryStates.vue'
 import LibraryToolbar from './components/LibraryToolbar.vue'
+import ModelCompare from './components/ModelCompare.vue'
 import ModelDetail from './components/ModelDetail.vue'
 import ResultBar from './components/ResultBar.vue'
 import ToastHost from './components/ToastHost.vue'
@@ -135,6 +136,7 @@ onUnmounted(() => {
     </footer>
 
     <ModelDetail />
+    <ModelCompare />
     <ToastHost />
 
     <!-- 自定义确认层（U4，O9 拆分为 ConfirmOverlay 组件）：

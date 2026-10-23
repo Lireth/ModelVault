@@ -112,6 +112,12 @@ export {
   exportModelList
 } from './model-export'
 
+// 模型对比（FN-03）
+export { COMPARE_MAX_MODELS, compareState, openCompare, closeCompare } from './compare'
+
+// 内置动态智能视图（FN-07）
+export { dynamicViews, activeDynamicViewKey, applyDynamicView } from './dynamic-views'
+
 // 查找派生
 export { modelById } from './selectors'
 

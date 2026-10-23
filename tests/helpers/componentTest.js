@@ -1,6 +1,7 @@
 import { beforeEach, vi } from 'vitest'
 import {
   clearCoverOverrides,
+  closeCompare,
   defaultSettings,
   exitMultiSelect,
   replaceModels,
@@ -136,6 +137,7 @@ export function setupComponentTest() {
     resetStoreState()
     resetLibraryOverview()
     clearCoverOverrides()
+    closeCompare()
     document.body.innerHTML = ''
   })
 }

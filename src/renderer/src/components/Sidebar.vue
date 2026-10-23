@@ -12,6 +12,9 @@ import {
   switchRoot,
   savedViews,
   activeSavedViewId,
+  dynamicViews,
+  activeDynamicViewKey,
+  applyDynamicView,
   viewSummary,
   saveCurrentAsView,
   applySavedView,
@@ -173,6 +176,24 @@ function onScanClick() {
       >
         保存当前筛选为视图
       </button>
+    </div>
+
+    <!-- 动态视图（FN-07）：内置规则随模型实时求值（未评分/近 30 天/长期未更新） -->
+    <div class="side-section views-section">
+      <h3>动态视图</h3>
+      <ul class="view-list dynamic-view-list">
+        <li v-for="v in dynamicViews" :key="v.key">
+          <button
+            class="view-item"
+            :class="{ active: v.key === activeDynamicViewKey }"
+            :title="`${v.title}（${v.count} 个，点击应用）`"
+            @click="applyDynamicView(v.key)"
+          >
+            <span class="view-name">{{ v.label }}</span>
+            <span class="view-count">{{ v.count }}</span>
+          </button>
+        </li>
+      </ul>
     </div>
 
     <div class="side-section">
@@ -398,6 +419,18 @@ function onScanClick() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 动态视图实时计数 */
+.view-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.dynamic-view-list {
+  margin-bottom: 4px;
 }
 
 /* 删除按钮：键盘可达（OPT-2），装配语义与 .root-remove 一致 */

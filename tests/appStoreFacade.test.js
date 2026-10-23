@@ -92,6 +92,15 @@ const EXPECTED_EXPORTS = [
   'buildMarkdown',
   'buildJson',
   'exportModelList',
+  // 模型对比（FN-03）
+  'COMPARE_MAX_MODELS',
+  'compareState',
+  'openCompare',
+  'closeCompare',
+  // 内置动态智能视图（FN-07）
+  'dynamicViews',
+  'activeDynamicViewKey',
+  'applyDynamicView',
   // 查找派生
   'modelById',
   // 详情

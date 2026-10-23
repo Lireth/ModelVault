@@ -551,13 +551,13 @@ describe('扫描完成以最新设置同步目录监控（E8 竞态回归）', (
     const pending = scan(makeEvent(), { folder: root })
     await waitForScanStarted()
     await update(makeEvent(), { excludeDirs: ['temp-out'] })
-    expect(syncWatcher).toHaveBeenCalledWith(root, false, ['temp-out'])
+    expect(syncWatcher).toHaveBeenCalledWith(root, false, ['temp-out'], { nativeWatch: true })
 
     // 扫描完成后的同步调用必须携带最新名单（旧实现回退为扫描前的 []）
     releaseScan()
     await pending
     const calls = vi.mocked(syncWatcher).mock.calls
-    expect(calls.at(-1)).toEqual([root, false, ['temp-out']])
+    expect(calls.at(-1)).toEqual([root, false, ['temp-out'], { nativeWatch: true }])
   })
 })
 

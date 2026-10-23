@@ -29,6 +29,7 @@ import {
   VIEW_MODE_KEYS
 } from '../src/shared/app-enums'
 import { DEFAULT_SETTINGS } from '../src/shared/defaults'
+import { isRelDirInScope, isRelKeyInScope } from '../src/shared/scan-dirs'
 // scanner 不依赖 electron（仅 node 内置 + shared），可直接在 node 环境导入
 import { MODEL_EXTENSIONS as SCANNER_EXTS } from '../src/main/services/scanner'
 
@@ -127,6 +128,27 @@ describe('shared/app-enums', () => {
   it('视图模式 key 集合与展示定义一致（grid/list）', () => {
     expect([...VIEW_MODE_KEYS].sort()).toEqual(VIEW_MODE_DEFS.map((d) => d.key).sort())
     expect([...VIEW_MODE_KEYS].sort()).toEqual(['grid', 'list'])
+  })
+})
+
+describe('shared/scan-dirs 子树归属（OP-09）', () => {
+  it('空串仅命中根直属，不递归子目录', () => {
+    expect(isRelDirInScope('', [''])).toBe(true)
+    expect(isRelDirInScope('LoRA', [''])).toBe(false)
+  })
+
+  it('非空子树命中自身与后代，边界不误伤同名前缀', () => {
+    expect(isRelDirInScope('LoRA', ['LoRA'])).toBe(true)
+    expect(isRelDirInScope('LoRA/角色', ['LoRA'])).toBe(true)
+    expect(isRelDirInScope('LoRA2', ['LoRA'])).toBe(false)
+    expect(isRelDirInScope('', ['LoRA'])).toBe(false)
+  })
+
+  it('相对路径键按所在目录判定；dirs 非数组按全覆盖（全量语义）', () => {
+    expect(isRelKeyInScope('LoRA/a.safetensors', ['LoRA'])).toBe(true)
+    expect(isRelKeyInScope('Other/a.safetensors', ['LoRA'])).toBe(false)
+    expect(isRelKeyInScope('a.safetensors', [''])).toBe(true)
+    expect(isRelKeyInScope('LoRA/a.safetensors', null)).toBe(true)
   })
 })
 

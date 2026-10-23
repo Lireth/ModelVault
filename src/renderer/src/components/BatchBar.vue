@@ -16,6 +16,7 @@ import {
   filteredModels,
   invertSelectionFiltered,
   multiSelectedModels,
+  openCompare,
   state,
   toggleSelectAllFiltered
 } from '../store/appStore'
@@ -120,6 +121,13 @@ onUnmounted(() => {
         :title="`批量评 ${i} 星`"
         @click="batchRating(i)"
       ><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z" /></svg></button>
+      <!-- 模型对比（FN-03）：2~6 个模型并排比较参数/触发词/标签 -->
+      <button
+        class="btn"
+        :disabled="state.multiSelect.ids.length < 2 || state.multiSelect.busy"
+        title="并排对比最多 6 个模型的推荐参数、触发词、标签等"
+        @click="openCompare(state.multiSelect.ids)"
+      >对比</button>
     </div>
 
     <span class="batch-sep"></span>

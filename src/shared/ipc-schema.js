@@ -281,7 +281,13 @@ export const IPC_PAYLOAD_SCHEMAS = {
   }),
 
   // ---------- 备份域 ----------
-  'models:exportBackup': vVoid(),
+  // FN-08：备份模式 full/selected/metadata；selected 携带当前筛选的模型 id
+  'models:exportBackup': vObj({
+    fields: {
+      mode: vStr({ max: 16 }),
+      ids: vArr({ max: 20000, items: vStr({ max: 2000 }) })
+    }
+  }),
   'models:importBackup': vVoid(),
 
   // ---------- 导出域 ----------

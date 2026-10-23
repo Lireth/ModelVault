@@ -162,6 +162,76 @@ describe('downloadUpdatePackage（下载 + SHA256 校验闭环）', () => {
     expect(res2.path).toBe(res.path)
   })
 
+  it('中断后保留 .part，再次下载以 Range 续传并完成校验（OP-06）', async () => {
+    const partPath = path.join(updateDir(), 'ModelVault-0.2.0.exe.download.part')
+    await fs.mkdir(updateDir(), { recursive: true })
+    // 预置前 5 字节（模拟上次中断）
+    await fs.writeFile(partPath, EXE_BYTES.subarray(0, 5))
+
+    vi.mocked(net.fetch).mockImplementation((url, options) => {
+      if (String(url).endsWith('.sha256')) {
+        return Promise.resolve(new Response(CHECKSUM_BODY, { status: 200 }))
+      }
+      expect(options.headers.Range).toBe('bytes=5-')
+      const rest = EXE_BYTES.subarray(5)
+      return Promise.resolve(
+        new Response(rest, {
+          status: 206,
+          headers: { 'content-length': String(rest.length) }
+        })
+      )
+    })
+    setPendingUpdate(ASSETS, '0.2.0')
+
+    const res = await downloadUpdatePackage()
+    expect(res.error).toBeUndefined()
+    expect(await fs.readFile(res.path)).toEqual(EXE_BYTES)
+    const names = await fs.readdir(updateDir())
+    expect(names.every((n) => !n.endsWith('.part'))).toBe(true)
+  })
+
+  it('服务端忽略 Range（200 全量）时丢弃旧分片从头覆盖', async () => {
+    const partPath = path.join(updateDir(), 'ModelVault-0.2.0.exe.download.part')
+    await fs.mkdir(updateDir(), { recursive: true })
+    await fs.writeFile(partPath, Buffer.from('garbage'))
+
+    vi.mocked(net.fetch).mockImplementation((url, options) => {
+      if (String(url).endsWith('.sha256')) {
+        return Promise.resolve(new Response(CHECKSUM_BODY, { status: 200 }))
+      }
+      expect(options.headers.Range).toBe('bytes=7-')
+      return Promise.resolve(
+        new Response(EXE_BYTES, {
+          status: 200,
+          headers: { 'content-length': String(EXE_BYTES.length) }
+        })
+      )
+    })
+    setPendingUpdate(ASSETS, '0.2.0')
+
+    const res = await downloadUpdatePackage()
+    expect(res.error).toBeUndefined()
+    expect(await fs.readFile(res.path)).toEqual(EXE_BYTES)
+  })
+
+  it('网络失败保留已下载分片供下次续传', async () => {
+    const partPath = path.join(updateDir(), 'ModelVault-0.2.0.exe.download.part')
+    await fs.mkdir(updateDir(), { recursive: true })
+    await fs.writeFile(partPath, EXE_BYTES.subarray(0, 5))
+
+    vi.mocked(net.fetch).mockImplementation((url) => {
+      if (String(url).endsWith('.sha256')) {
+        return Promise.resolve(new Response(CHECKSUM_BODY, { status: 200 }))
+      }
+      return Promise.reject(new Error('network down'))
+    })
+    setPendingUpdate(ASSETS, '0.2.0')
+
+    const res = await downloadUpdatePackage()
+    expect(res.error).toContain('network down')
+    await expect(fs.stat(partPath)).resolves.toBeTruthy()
+  })
+
   it('校验和不匹配时拒绝落盘并清理临时文件', async () => {
     // 内容与校验和不符（'world...' 的 SHA256 ≠ HASH）
     mockFetchFlow(Buffer.from('world-exe'))

@@ -23,9 +23,12 @@ import {
   flushStoreSave,
   getCurrentRoot,
   getLibrarySettings,
+  getModelMeta,
   normalizeLibrarySettings,
   normalizeStoreData,
-  saveLibrarySettings
+  saveLibrarySettings,
+  setModelMeta,
+  toRelKey
 } from './store'
 
 /**
@@ -47,6 +50,12 @@ import {
 export const BACKUP_FORMAT = 'modelvault-backup'
 /** 备份格式版本（大于当前版本的备份拒绝恢复，提示升级应用） */
 export const BACKUP_VERSION = 1
+/**
+ * 选择性/元数据备份的格式版本（FN-08）：旧版本应用不认识 partial 语义，
+ * 若按全量恢复会只保留子集标注。提升版本号让旧应用以「版本过新」拒绝，
+ * 新应用同时兼容读取 v1（全量/手工）与 v2（选择性）。
+ */
+export const PARTIAL_BACKUP_VERSION = 2
 
 /** 封面总字节上限：fflate 为内存打包，超大封面集会挤占主进程堆，超限引导手动复制 */
 const MAX_COVERS_BYTES = 1024 * 1024 * 1024
@@ -239,7 +248,7 @@ export function parseBackupManifest(bytes) {
   if (manifest?.app !== BACKUP_FORMAT) {
     return { ok: false, error: '不是有效的 ModelVault 备份文件' }
   }
-  if (!Number.isFinite(manifest.version) || manifest.version > BACKUP_VERSION) {
+  if (!Number.isFinite(manifest.version) || manifest.version > PARTIAL_BACKUP_VERSION) {
     return { ok: false, error: '备份文件版本过新，请升级应用后重试' }
   }
   return { ok: true, manifest }
@@ -471,10 +480,13 @@ async function pathExists(p) {
 /**
  * 导出备份：弹保存对话框，将设置与当前库关联存储打包为 zip。
  * @param {import('electron').BrowserWindow} win 父窗口
- * @returns {Promise<{path: string, sizeBytes: number, library: boolean, models: number, covers: number}
- *   | {canceled: true} | {error: string}>}
+ * @param {{mode?: 'full'|'selected'|'metadata', ids?: string[]}} [options]
+ *   full（默认）：完整库备份；selected：仅当前筛选的模型标注与封面；
+ *   metadata：全库标注但不含封面（体积小，用于快速迁移/审阅）
+ * @returns {Promise<{path: string, sizeBytes: number, library: boolean, models: number,
+ *   covers: number, mode: string, partial: boolean} | {canceled: true} | {error: string}>}
  */
-export async function exportBackup(win) {
+export async function exportBackup(win, options = {}) {
   // B-02：先静止两路写盘链再读磁盘——标注为 500ms 防抖落盘，
   // 刚修改的备注/标签若不 flush 不会进入备份（用户以为已备份）。
   await Promise.all([flushStoreSave(), flushSettingsSave()])
@@ -482,13 +494,19 @@ export async function exportBackup(win) {
   // 模型文件夹时配置随包生效，且不会劫持本机的激活库/库列表
   const librarySettings = getLibrarySettings()
   const root = getCurrentRoot()
+  const mode =
+    options.mode === 'selected' || options.mode === 'metadata' ? options.mode : 'full'
+  const partial = mode !== 'full'
   const settingsText = JSON.stringify(librarySettings, null, 2)
   const manifest = {
     app: BACKUP_FORMAT,
-    version: BACKUP_VERSION,
+    // 部分备份使用更高版本号：旧应用不认识 partial，需显式拒绝而非按全量恢复
+    version: partial ? PARTIAL_BACKUP_VERSION : BACKUP_VERSION,
     createdAt: new Date().toISOString(),
     appVersion: app.getVersion(),
-    settings: true
+    settings: true,
+    mode,
+    partial
   }
 
   let models = 0
@@ -498,20 +516,67 @@ export async function exportBackup(win) {
   if (root) {
     const storeFile = path.join(root, DATA_DIR, DATA_FILE)
     const coversDir = path.join(root, DATA_DIR, COVERS_DIR)
+    let parsedStore = null
     try {
       storeText = await fs.readFile(storeFile, 'utf-8')
-      models = Object.keys(JSON.parse(storeText)?.models || {}).length
+      parsedStore = JSON.parse(storeText)
+      models = Object.keys(parsedStore?.models || {}).length
     } catch (err) {
       if (err.code !== 'ENOENT') {
         return { error: `读取关联存储失败: ${err.message}` }
       }
       // 该库尚未生成过关联数据：仅备份应用设置
     }
+
+    // FN-08：选择性/元数据模式没有标注可导出时明确失败，避免产出空备份
+    if (mode !== 'full' && !storeText) {
+      return { error: '当前模型库没有可备份的模型标注' }
+    }
+
+    // FN-08：选择性/元数据模式在内存中裁剪 store.json（不修改磁盘数据）
+    let keepModels = null
+    if (storeText && mode !== 'full') {
+      const modelMap = parsedStore?.models && typeof parsedStore.models === 'object'
+        ? parsedStore.models
+        : {}
+      if (mode === 'selected') {
+        const wanted = new Set(
+          (Array.isArray(options.ids) ? options.ids : [])
+            .map((id) => toRelKey(id))
+            .filter(Boolean)
+        )
+        keepModels = Object.keys(modelMap).filter((key) => wanted.has(key))
+        if (keepModels.length === 0) {
+          return { error: '当前筛选结果没有可备份的模型标注' }
+        }
+      } else {
+        keepModels = Object.keys(modelMap)
+      }
+      const filtered = {}
+      for (const key of keepModels) filtered[key] = modelMap[key]
+      // metadata 模式同样不携带封面
+      storeText = JSON.stringify({ ...parsedStore, models: filtered }, null, 2)
+      models = keepModels.length
+    }
+
     if (storeText) {
       // 封面写入前先统计总字节，超限拒绝。
       // O5：统计并发化（复用下方读取的同一并发度）——数百封面下逐个串行
       // await stat 的统计阶段比 8 路并发的读取阶段还慢，成为备份瓶颈
-      const coverNames = await fs.readdir(coversDir).catch(() => [])
+      let coverNames = await fs.readdir(coversDir).catch(() => [])
+      if (mode === 'selected' && parsedStore?.models) {
+        // 只保留选中模型引用的封面文件（文件名即 covers 内的 basename）
+        const referenced = new Set()
+        for (const key of keepModels || []) {
+          const meta = parsedStore.models[key] || {}
+          for (const rel of [...(meta.covers || []), meta.cover]) {
+            if (typeof rel === 'string' && rel) referenced.add(path.basename(rel))
+          }
+        }
+        coverNames = coverNames.filter((name) => referenced.has(name))
+      } else if (mode === 'metadata') {
+        coverNames = []
+      }
       const stats = await mapLimit(coverNames, COVER_IO_CONCURRENCY, (name) =>
         fs.stat(path.join(coversDir, name)).catch(() => null)
       )
@@ -556,7 +621,9 @@ export async function exportBackup(win) {
       sizeBytes: outStat.size,
       library: Boolean(manifest.library),
       models,
-      covers
+      covers,
+      mode,
+      partial
     }
   } catch (err) {
     // 失败时清理半成品，避免用户误以为备份可用
@@ -709,6 +776,112 @@ async function restoreLibraryLocked(root, filePath, skippedCovers = 0, restoreSe
   }
 }
 
+/** 选择性恢复前的 store.json 快照（最多保留 10 份，失败不阻断恢复） */
+async function snapshotSelectiveStore(root, stamp) {
+  const source = path.join(root, DATA_DIR, DATA_FILE)
+  if (!(await pathExists(source))) return ''
+  const dir = path.join(root, DATA_DIR, 'backups')
+  try {
+    await fs.mkdir(dir, { recursive: true })
+    const dest = path.join(dir, `store-selective-${stamp}.json`)
+    await fs.copyFile(source, dest)
+    const names = (await fs.readdir(dir))
+      .filter((name) => name.startsWith('store-selective-'))
+      .sort()
+    for (const old of names.slice(0, Math.max(0, names.length - 10))) {
+      await fs.rm(path.join(dir, old), { force: true }).catch(() => {})
+    }
+    return dest
+  } catch (err) {
+    logger.warn(`选择性恢复前快照失败（继续合并）: ${err.message}`)
+    return ''
+  }
+}
+
+/**
+ * 选择性/元数据备份的合并恢复（FN-08）：
+ * 与全量恢复的目录交换不同，这里只把备份中的模型标注合并进当前库，
+ * 保留现有封面与其他模型；同名相对路径以备份内容覆盖。
+ * 仅支持当前激活库（setModelMeta 以当前根目录为基准）。
+ * @param {string} root 当前激活模型根目录
+ * @param {string} filePath 备份 zip
+ * @param {object} manifest 已校验的清单
+ * @returns {Promise<object>}
+ */
+async function restorePartialLibrary(root, filePath, manifest) {
+  return runMaintenance('restore', root, async () => {
+    await Promise.all([flushStoreSave(), flushSettingsSave()])
+    const dataDir = path.join(root, DATA_DIR)
+    const coversDir = path.join(dataDir, COVERS_DIR)
+    await fs.mkdir(coversDir, { recursive: true })
+
+    // 封面同名不覆盖（既有文件优先）；新文件直接写入当前库封面目录。
+    // 若后续校验/合并失败，删除本次新写入的封面，避免在库内留下半成品。
+    let covers = 0
+    const writtenCovers = []
+    try {
+      const unzipped = await streamBackupZip(filePath, {
+        coverWriter: async (name, data) => {
+          const dest = path.join(coversDir, name)
+          const exists = await fs.access(dest).then(
+            () => true,
+            () => false
+          )
+          if (exists) return
+          await fs.writeFile(dest, data)
+          writtenCovers.push(dest)
+          covers += 1
+        }
+      })
+      const storeBytes = unzipped[`${LIB_PREFIX}${DATA_FILE}`]
+      if (!storeBytes) throw new Error('备份缺少库元数据')
+      const parsed = JSON.parse(new TextDecoder().decode(storeBytes))
+      const sanitized = normalizeStoreData(parsed)
+      const stamp = Date.now()
+      const backupPath = await snapshotSelectiveStore(root, stamp)
+
+      let added = 0
+      let updated = 0
+      let skipped = 0
+      const metadataOnly = manifest.mode === 'metadata'
+      for (const [relKey, meta] of Object.entries(sanitized.models)) {
+        const abs = path.join(root, relKey)
+        const existed = Boolean(getModelMeta(abs))
+        // metadata-only 备份不含封面：清空封面引用，避免恢复后指向不存在的文件
+        const incoming = metadataOnly ? { ...meta, covers: [], cover: '' } : meta
+        const saved = setModelMeta(abs, incoming)
+        if (!saved) {
+          skipped += 1
+          continue
+        }
+        if (existed) updated += 1
+        else added += 1
+      }
+      await flushStoreSave()
+      logger.info(
+        `选择性备份已合并: ${filePath} → ${root}（新增 ${added} / 更新 ${updated} / 跳过 ${skipped}）`
+      )
+      return {
+        root,
+        models: added + updated,
+        covers,
+        skipped,
+        settingsRestored: false,
+        partial: true,
+        mode: manifest.mode || 'selected',
+        added,
+        updated,
+        backupPath
+      }
+    } catch (err) {
+      for (const file of writtenCovers) {
+        await fs.rm(file, { force: true }).catch(() => {})
+      }
+      throw err
+    }
+  })
+}
+
 /**
  * 从备份恢复：依次经原生对话框完成「选备份文件 →（含库数据时）选目标文件夹
  * → 覆盖确认」，全流程在主进程完成，渲染进程一次调用即可。
@@ -743,6 +916,56 @@ export async function importBackup(win) {
   const parsedManifest = parseBackupManifest(manifestBytes)
   if (!parsedManifest.ok) return { error: parsedManifest.error }
   const manifest = parsedManifest.manifest
+
+  // FN-08：选择性/元数据备份走合并恢复（不替换目录、不恢复设置）。
+  // 仅支持当前激活库——合并基于当前根的相对路径关联。
+  if (manifest.partial === true) {
+    const root = getCurrentRoot()
+    if (!root) {
+      return {
+        error: '选择性备份只能合并到当前激活的模型库，请先打开目标模型库',
+        settingsRestored: false,
+        partial: true
+      }
+    }
+    const count =
+      manifest.library && Number.isFinite(manifest.library.models)
+        ? manifest.library.models
+        : 0
+    const choice = await dialog.showMessageBox(win, {
+      type: 'warning',
+      title: '合并恢复确认',
+      message: `将把备份中的 ${count} 个模型标注合并到当前模型库`,
+      detail:
+        `目标：${root}\n` +
+        '同名模型的标注会被备份内容覆盖；现有封面与其他模型保持不变。' +
+        '恢复前会自动快照 store.json（.modelvault/backups/）。',
+      buttons: ['取消', '合并恢复'],
+      defaultId: 0,
+      cancelId: 0
+    })
+    if (choice.response !== 1) {
+      return { error: '已取消合并恢复', settingsRestored: false, partial: true }
+    }
+    try {
+      const libraryRestored = await restorePartialLibrary(root, filePath, manifest)
+      return {
+        settingsRestored: false,
+        libraryRestored,
+        skipped: libraryRestored.skipped
+      }
+    } catch (err) {
+      if (err?.code === 'EBUSY') {
+        return { error: err.message, settingsRestored: false, partial: true }
+      }
+      logger.warn(`选择性备份合并失败: ${err.message}`)
+      return {
+        error: `选择性备份合并失败: ${err.message}`,
+        settingsRestored: false,
+        partial: true
+      }
+    }
+  }
 
   // 第二遍在确定恢复路径后再执行：
   // - 含库数据：先选目标目录，再在维护锁内流式解压，封面逐张落盘；

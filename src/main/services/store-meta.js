@@ -7,6 +7,7 @@ import { atomicWriteFile } from './atomic-write'
 import { notifyStoreSaveError } from './store-events'
 import { isEmptyModelMeta, planMetaRelinks, splitRelKey } from './meta-relink'
 import { ALL_CATEGORY_KEYS } from '../../shared/model-categories'
+import { isRelKeyInScope } from '../../shared/scan-dirs'
 import {
   COVERS_DIR,
   DATA_DIR,
@@ -729,15 +730,8 @@ export function relinkScannedMeta(scanned, options = {}) {
   if (!data || !getCurrentRoot() || !Array.isArray(scanned)) return zero
 
   const affectedDirs = Array.isArray(options.affectedDirs) ? options.affectedDirs : null
-  /** 键的相对目录是否落在受影响集合内（d 与其后代；'' 仅根直属文件） */
-  const keyInScope = (key) => {
-    if (!affectedDirs) return true
-    const slash = key.lastIndexOf('/')
-    const dir = slash < 0 ? '' : key.slice(0, slash)
-    return affectedDirs.some((d) =>
-      d === '' ? dir === '' : dir === d || dir.startsWith(`${d}/`)
-    )
-  }
+  /** 键的相对目录是否落在受影响集合内（OP-09 共享实现；null = 全量语义） */
+  const keyInScope = (key) => isRelKeyInScope(key, affectedDirs)
 
   const currentKeys = new Set()
   const newcomers = []

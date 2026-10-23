@@ -109,13 +109,13 @@ describe('models:loadStore 目录监控启动路径（OPT-19）', () => {
     const root = writeSettings({ autoScan: false, autoRescan: true, excludeDirs: ['temp'] })
     const handler = getRegisteredHandler('models:loadStore')
     await handler(makeEvent())
-    expect(syncWatcher).toHaveBeenCalledWith(root, true, ['temp'])
+    expect(syncWatcher).toHaveBeenCalledWith(root, true, ['temp'], { nativeWatch: true })
   })
 
   it('autoRescan 关闭时按禁用状态同步（不启动监控）', async () => {
     const root = writeSettings({ autoScan: false, autoRescan: false })
     await getRegisteredHandler('models:loadStore')(makeEvent())
-    expect(syncWatcher).toHaveBeenCalledWith(root, false, [])
+    expect(syncWatcher).toHaveBeenCalledWith(root, false, [], { nativeWatch: true })
   })
 })
 
@@ -187,7 +187,7 @@ describe('models:openLibrary 秒切库（F1）', () => {
     expect(res.durationMs).toBe(42)
     expect(res.settings.modelsFolder).toBe(root)
     expect(getCurrentRoot()).toBe(root)
-    expect(syncWatcher).toHaveBeenCalledWith(root, false, [])
+    expect(syncWatcher).toHaveBeenCalledWith(root, false, [], { nativeWatch: true })
   })
 
   it('无索引时不切换根目录，返回 cached=false 交由扫描链路', async () => {

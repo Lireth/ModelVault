@@ -127,7 +127,8 @@ describe('IPC payload 通道校验（validateIpcPayload）', () => {
     expect(validateIpcPayload('models:loadStore', null)).toBe('')
     expect(validateIpcPayload('models:chooseFolder', {})).toBe('该通道不接受参数')
     expect(validateIpcPayload('models:cancelScan', 'x')).toBe('该通道不接受参数')
-    expect(validateIpcPayload('models:exportBackup', [1])).toBe('该通道不接受参数')
+    // FN-08 起 exportBackup 接受可选 { mode, ids }，非对象 payload 被拒绝
+    expect(validateIpcPayload('models:exportBackup', [1])).toBe('参数无效: payload 须为对象')
   })
 
   it('app:reportError：宽松结构门禁（字段可选，提供时校验类型与长度）', () => {

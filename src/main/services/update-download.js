@@ -18,7 +18,9 @@ import { isAllowedExternalUrl, readResponseTextLimited } from '../utils'
  *   不可注入 URL），且必须 https + github.com 白名单——被篡改的 API 响应
  *   无法把用户引向他站；
  * - 边下载边计算 SHA256，完成后与校验和文件比对，不匹配即删除重来；
- * - 写入临时 .part 文件，校验通过后原子改名，断电/崩溃不产生半成品误装；
+ * - 写入稳定的 .download.part 文件，校验通过后原子改名；网络中断/取消时保留
+ *   已下载部分，再次下载以 HTTP Range 续传（OP-06），最终仍以完整 SHA256
+ *   与 Authenticode 校验为准，断电/崩溃不产生半成品误装；
  * - E1：发布包使用 Windows 代码签名；配置发布者证书指纹后，下载复用与
  *   安装前均强制 Authenticode 状态 Valid 且指纹一致（fail-closed）；
  * - 安装 = 拉起新 EXE（携带 --wait-for-pid 等待旧实例释放单实例锁）并退出：
@@ -200,9 +202,14 @@ function getUpdateDir() {
 /** 流式计算文件 SHA256（小写 hex） */
 async function hashFile(filePath) {
   const hash = createHash('sha256')
+  await updateHashFromFile(hash, filePath)
+  return hash.digest('hex').toLowerCase()
+}
+
+/** 把文件内容流式喂入既有 hash（续传时先补齐已下载部分的哈希状态） */
+async function updateHashFromFile(hash, filePath) {
   const stream = fs.createReadStream(filePath)
   for await (const chunk of stream) hash.update(chunk)
-  return hash.digest('hex').toLowerCase()
 }
 
 /** 证书指纹规范化：去分隔符并统一大写（Get-AuthenticodeSignature 输出带空格） */
@@ -409,7 +416,9 @@ export async function downloadUpdatePackage(onProgress) {
   }
   const dir = getUpdateDir()
   const target = path.join(dir, `ModelVault-${latest}.exe`)
-  const tmp = `${target}.${process.pid}.part`
+  // OP-06：稳定的 .part 名称（跨进程保留），用于中断后续传；
+  // 版本号已通过白名单校验，不同版本互不冲突
+  const partPath = `${target}.download.part`
   // 并发闸同步置位（见函数注释）
   downloadAbort = new AbortController()
   try {
@@ -454,27 +463,77 @@ export async function downloadUpdatePackage(onProgress) {
       /* 不存在，走下载 */
     }
 
-    // 流式下载：边写临时文件边计算哈希（免二次读盘），进度节流推送
-    const hash = createHash('sha256')
+    // OP-06：探测可续传的已下载部分。只有体积小于目标（已知时）才续传；
+    // 否则视为陈旧/越界残留，清理后从头下载。
+    let resumeFrom = 0
+    const partStat = await fsp.stat(partPath).catch(() => null)
+    if (
+      partStat?.isFile() &&
+      partStat.size > 0 &&
+      (!Number.isFinite(size) || !size || partStat.size < size)
+    ) {
+      resumeFrom = partStat.size
+    } else if (partStat) {
+      await fsp.rm(partPath, { force: true }).catch(() => {})
+    }
+
+    // 流式下载：边写临时文件边计算哈希（免二次读盘），进度节流推送。
+    // 续传时先把已下载部分流式喂入哈希，保证最终校验覆盖完整包。
+    let hash = createHash('sha256')
     let received = 0
     let lastSent = 0
-    const response = await fetchAllowedUpdateUrl(downloadUrl, { signal: downloadAbort.signal })
+    if (resumeFrom > 0) {
+      try {
+        await updateHashFromFile(hash, partPath)
+        received = resumeFrom
+      } catch {
+        // 已下载部分不可读：丢弃后从头开始
+        resumeFrom = 0
+        await fsp.rm(partPath, { force: true }).catch(() => {})
+      }
+    }
+    let writeFlag = resumeFrom > 0 ? 'a' : 'w'
+    const response = await fetchAllowedUpdateUrl(downloadUrl, {
+      signal: downloadAbort.signal,
+      ...(resumeFrom > 0 ? { headers: { Range: `bytes=${resumeFrom}-` } } : {})
+    })
+    if (resumeFrom > 0 && response.status === 416) {
+      await fsp.rm(partPath, { force: true }).catch(() => {})
+      return { error: '断点续传位置无效，临时文件已清理，请重试下载' }
+    }
+    if (resumeFrom > 0 && response.status !== 206) {
+      // 服务端忽略 Range（返回 200 全量）：丢弃旧分片，从头覆盖
+      logger.info('更新服务端不支持断点续传，改为从头下载')
+      resumeFrom = 0
+      received = 0
+      writeFlag = 'w'
+      hash = createHash('sha256')
+    }
     if (!response.ok || !response.body) {
       return { error: `更新包下载失败（HTTP ${response.status}）` }
     }
-    const total = Number(response.headers.get('content-length')) || size
-    // Content-Length 预检（V-06）：异常大响应在写入磁盘前即拒绝
-    if (Number.isFinite(total) && total > MAX_UPDATE_BYTES) {
+    // 206 的 content-length 为剩余字节；200 为完整包大小。
+    // 总大小优先取 Release 声明值，但响应头本身超限也必须拒绝（V-06）。
+    const declared = Number(response.headers.get('content-length')) || 0
+    const total =
+      response.status === 206
+        ? size && size > 0
+          ? size
+          : resumeFrom + declared
+        : declared || size
+    if (declared > MAX_UPDATE_BYTES || (Number.isFinite(total) && total > MAX_UPDATE_BYTES)) {
+      await fsp.rm(partPath, { force: true }).catch(() => {})
       return { error: '更新包体积异常（超过 600MB），已中止下载' }
     }
     const reader = response.body.getReader()
-    const fh = await fsp.open(tmp, 'w')
+    const fh = await fsp.open(partPath, writeFlag)
     try {
       for (;;) {
         const { done, value } = await reader.read()
         if (done) break
         received += value.byteLength
         if (received > MAX_UPDATE_BYTES) {
+          await fsp.rm(partPath, { force: true }).catch(() => {})
           throw new Error('更新包体积异常，已中止下载')
         }
         hash.update(value)
@@ -493,14 +552,14 @@ export async function downloadUpdatePackage(onProgress) {
     // 校验和比对：不匹配视为损坏/被篡改，删除临时文件
     const actual = hash.digest('hex').toLowerCase()
     if (actual !== expected) {
-      await fsp.rm(tmp, { force: true }).catch(() => {})
+      await fsp.rm(partPath, { force: true }).catch(() => {})
       logger.warn(`更新包校验和不匹配: 期望 ${expected} 实际 ${actual}`)
       return { error: '校验和不匹配，下载可能损坏或被篡改，已放弃本次下载' }
     }
     // E1：哈希通过后再验 Authenticode（配置了发布者指纹时强制有效且指纹一致）
-    const signature = await verifyUpdateSignature(tmp)
+    const signature = await verifyUpdateSignature(partPath)
     if (!signature.ok) {
-      await fsp.rm(tmp, { force: true }).catch(() => {})
+      await fsp.rm(partPath, { force: true }).catch(() => {})
       logger.warn(`更新包验签失败: ${signature.error}`)
       return { error: signature.error }
     }
@@ -509,14 +568,15 @@ export async function downloadUpdatePackage(onProgress) {
     }
     // 原子落盘：先移除旧包再改名（Windows rename 对已存在目标不可靠）
     await fsp.rm(target, { force: true }).catch(() => {})
-    await fsp.rename(tmp, target)
+    await fsp.rename(partPath, target)
     downloadedFile = target
     logger.info(`更新包下载完成并通过校验: ${target}（${received} 字节）`)
     return { path: target, size: received }
   } catch (err) {
-    await fsp.rm(tmp, { force: true }).catch(() => {})
+    // OP-06：网络中断/用户取消时保留 .part 供下次续传；校验失败/体积异常
+    // 已在对应分支显式删除，不会留下不可信分片。
     if (err instanceof Error && err.name === 'AbortError') {
-      logger.info('更新包下载已取消')
+      logger.info('更新包下载已取消（已下载部分保留，可续传）')
       return { canceled: true }
     }
     logger.warn(`更新包下载失败: ${err?.message || err}`)

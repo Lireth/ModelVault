@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs/promises'
+import fsSync from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { EventEmitter } from 'node:events'
 import { fakeUserData } from './setup'
 
 /**
@@ -85,6 +87,89 @@ afterEach(async () => {
   }
   roots.length = 0
   bundles.length = 0
+})
+
+describe('OP-05 原生事件监听（加速触发，轮询兜底）', () => {
+  it('文件变更经原生事件提前广播；.modelvault 内写入被忽略', async () => {
+    await fs.mkdir(path.join(root, '.modelvault'), { recursive: true })
+    syncWatcher(root, true, [], {
+      nativeWatch: true,
+      // 轮询拉到很长，确保本用例的广播只能来自原生事件
+      pollInterval: 100000,
+      broadcastDebounce: 30,
+      contentCheckInterval: 0,
+      isVisible: () => true,
+      onPollScheduled: () => {}
+    })
+    await sleep(50)
+
+    await fs.writeFile(path.join(root, 'native.safetensors'), 'x')
+    await waitFor(() => sentEvents.length > 0, '原生事件广播', 3000)
+    expect(sentEvents[0].channel).toBe('models:fsChanged')
+    expect(sentEvents[0].payload.root).toBe(root)
+    // 根直属文件：子树为空串
+    expect(sentEvents[0].payload.dirs).toContain('')
+
+    const before = sentEvents.length
+    await fs.mkdir(path.join(root, '.modelvault', 'thumbs'), { recursive: true })
+    await fs.writeFile(path.join(root, '.modelvault', 'thumbs', 'noise.jpg'), 'x')
+    await sleep(300)
+    // 关联存储目录的写入不触发广播（与轮询排除策略一致）
+    expect(sentEvents.length).toBe(before)
+  })
+})
+
+describe('OP-05 原生监听降级与重建', () => {
+  const originalWatch = fsSync.watch
+
+  afterEach(() => {
+    fsSync.watch = originalWatch
+  })
+
+  it('监听运行期异常时关闭并回落 2s 轮询；同根同步可重建监听', async () => {
+    const fake = new EventEmitter()
+    fake.close = vi.fn()
+    let watchCalls = 0
+    fsSync.watch = () => {
+      watchCalls += 1
+      return fake
+    }
+    const delays = []
+    const timing = {
+      nativeWatch: true,
+      pollInterval: 100000,
+      broadcastDebounce: 20,
+      contentCheckInterval: 0,
+      isVisible: () => true,
+      onPollScheduled: (d) => delays.push(d)
+    }
+    syncWatcher(root, true, [], timing)
+    expect(watchCalls).toBe(1)
+
+    fake.emit('error', new Error('watch failed'))
+    await waitFor(() => delays.includes(2000), '异常后回落 2s 轮询', 2000)
+    expect(fake.close).toHaveBeenCalled()
+
+    // 同根同开关再次同步：nativeWatcher 已为空，应尝试重建
+    syncWatcher(root, true, [], timing)
+    expect(watchCalls).toBe(2)
+  })
+
+  it('fs.watch 初始化抛错时继续用轮询且不崩溃', async () => {
+    fsSync.watch = () => {
+      throw new Error('unsupported platform')
+    }
+    const delays = []
+    syncWatcher(root, true, [], {
+      nativeWatch: true,
+      pollInterval: 100000,
+      broadcastDebounce: 20,
+      contentCheckInterval: 0,
+      isVisible: () => true,
+      onPollScheduled: (d) => delays.push(d)
+    })
+    await waitFor(() => delays.includes(2000), '初始化失败回落 2s 轮询', 2000)
+  })
 })
 
 describe('collectDirSnapshot / snapshotsEqual', () => {

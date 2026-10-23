@@ -24,7 +24,11 @@ vi.mock('electron', () => ({
 }))
 
 import { net, protocol } from 'electron'
-import { registerImageProtocolHandler, toImageUrl } from '../src/main/protocol'
+import {
+  isCivitaiVideoUrl,
+  registerImageProtocolHandler,
+  toImageUrl
+} from '../src/main/protocol'
 import { setDataRoot, updateSettings } from '../src/main/services/store'
 import { getCivImageCachePath } from '../src/main/services/civ-cache'
 
@@ -234,6 +238,40 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
     vi.mocked(net.fetch).mockResolvedValue(new Response('', { status: 403 }))
     const res = await civHandler(makeCivRequest('https://image.civitai.com/a.jpeg'))
     expect(res.status).toBe(502)
+  })
+
+  it('示例视频流式代理：透传 Range 并返回 206（FN-02）', async () => {
+    const target = 'https://image.civitai.com/x/video.mp4'
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response('vid', {
+        status: 206,
+        headers: {
+          'Content-Range': 'bytes 10-12/100',
+          'Accept-Ranges': 'bytes',
+          'Content-Length': '3'
+        }
+      })
+    )
+    const request = makeCivRequest(target)
+    request.headers = new Headers({ range: 'bytes=10-' })
+    const res = await civHandler(request)
+    expect(res.status).toBe(206)
+    expect(vi.mocked(net.fetch)).toHaveBeenCalledWith(
+      target,
+      expect.objectContaining({
+        headers: expect.objectContaining({ Range: 'bytes=10-' })
+      })
+    )
+    expect(res.headers.get('content-range')).toBe('bytes 10-12/100')
+    // 视频不进入图片缓存路径（仅一次网络请求）
+    expect(net.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('isCivitaiVideoUrl：识别常见视频扩展名', () => {
+    expect(isCivitaiVideoUrl('https://image.civitai.com/a/b.mp4')).toBe(true)
+    expect(isCivitaiVideoUrl('https://image.civitai.com/a/b.webm?x=1')).toBe(true)
+    expect(isCivitaiVideoUrl('https://image.civitai.com/a/b.jpeg')).toBe(false)
+    expect(isCivitaiVideoUrl(null)).toBe(false)
   })
 
   /** 最小 PNG 文件头（通过魔数校验，可入缓存） */

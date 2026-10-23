@@ -5,6 +5,7 @@ import {
   clearAllCovers,
   confirmDialog,
   defaultSettings,
+  filteredModels,
   replaceSettings,
   scanModels,
   state,
@@ -173,24 +174,39 @@ async function onClearAllCovers() {
 }
 
 /** 导出备份：应用设置 + 当前库标注/封面 → zip（对话框与打包均在主进程） */
-async function onExportBackup() {
+async function onExportBackup(options = { mode: 'full' }) {
   backupBusy.value = true
   try {
-    const res = await window.api.models.exportBackup()
+    const res = await window.api.models.exportBackup(options)
     if (res.canceled) return
     if (res.error) {
       toast('error', res.error)
       return
     }
+    const modeLabel =
+      res.mode === 'selected' ? '当前筛选' : res.mode === 'metadata' ? '仅标注' : '完整'
     const scope = res.library
-      ? `${res.models} 个模型标注 / ${res.covers} 张封面`
+      ? `${res.models} 个模型标注${res.covers ? ` / ${res.covers} 张封面` : ''}`
       : '应用设置（当前库暂无标注数据）'
-    toast('success', `备份已导出（${scope}）→ ${res.path}`)
+    toast('success', `${modeLabel}备份已导出（${scope}）→ ${res.path}`)
   } catch (err) {
     toast('error', `备份导出失败: ${err.message}`)
   } finally {
     backupBusy.value = false
   }
+}
+
+/** 导出当前筛选结果的标注与封面（FN-08） */
+function onExportSelectedBackup() {
+  onExportBackup({
+    mode: 'selected',
+    ids: filteredModels.value.map((m) => m.id)
+  })
+}
+
+/** 导出全库标注但不含封面（FN-08） */
+function onExportMetadataBackup() {
+  onExportBackup({ mode: 'metadata' })
 }
 
 /** 从备份恢复：刷新本地状态；当前库被恢复时自动重扫使标注/封面立即生效 */
@@ -219,7 +235,12 @@ async function onImportBackup() {
     }
     const parts = []
     if (res.settingsRestored) parts.push('应用设置')
-    if (res.libraryRestored) {
+    if (res.libraryRestored?.partial) {
+      parts.push(
+        `合并 ${res.libraryRestored.models} 个模型标注（新增 ${res.libraryRestored.added || 0} / 更新 ${res.libraryRestored.updated || 0}` +
+          `${res.libraryRestored.covers ? ` / ${res.libraryRestored.covers} 张封面` : ''}）`
+      )
+    } else if (res.libraryRestored) {
       parts.push(`模型库数据（${res.libraryRestored.models} 个模型 / ${res.libraryRestored.covers} 张封面）`)
     }
     if (parts.length === 0) {
@@ -244,12 +265,20 @@ async function onImportBackup() {
         <span class="setting-title">备份与恢复</span>
         <span class="setting-desc">
           导出：应用设置 + 当前模型库的标注（备注 / 参数 / 收藏 / 评分）与封面，打包为 zip 文件。
-          缩略图为可再生缓存，不纳入备份。恢复时选择备份文件与目标模型文件夹，
-          目标目录已有数据时会先留 .bak 再覆盖。
+          缩略图为可再生缓存，不纳入备份。可导出完整备份、当前筛选结果（含封面）
+          或仅标注（不含封面）。恢复完整备份时选择目标文件夹，已有数据先留 .bak；
+          选择性/仅标注备份会合并到当前激活库（同名标注覆盖，恢复前自动快照 store.json）。
         </span>
       </div>
       <div class="setting-actions">
-        <button class="btn" :disabled="backupBusy" @click="onExportBackup">导出备份…</button>
+        <button class="btn" :disabled="backupBusy" @click="onExportBackup()">导出完整备份…</button>
+        <button
+          class="btn"
+          :disabled="backupBusy || filteredModels.length === 0"
+          :title="filteredModels.length === 0 ? '当前筛选结果为空' : '仅备份当前筛选结果的标注与封面'"
+          @click="onExportSelectedBackup"
+        >导出当前筛选…</button>
+        <button class="btn" :disabled="backupBusy" @click="onExportMetadataBackup">仅导出标注…</button>
         <button class="btn" :disabled="backupBusy" @click="onImportBackup">从备份恢复…</button>
       </div>
     </div>

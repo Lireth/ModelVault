@@ -149,8 +149,12 @@ const api = {
      * 主进程弹保存对话框并原子写入；返回 { ok, path, sizeBytes } / { canceled } / { error }
      */
     exportModelList: (payload) => invokeValidated('models:exportModelList', payload),
-    /** 导出备份（FEAT-3）：设置 + 当前库标注/封面 → zip，返回 { path, sizeBytes, library, models, covers } / { canceled } / { error } */
-    exportBackup: () => invokeValidated('models:exportBackup'),
+    /**
+     * 导出备份（FEAT-3/FN-08）：设置 + 当前库标注/封面 → zip。
+     * options: { mode: 'full'|'selected'|'metadata', ids?: string[] }；
+     * 返回 { path, sizeBytes, library, models, covers, mode, partial } / { canceled } / { error }
+     */
+    exportBackup: (options) => invokeValidated('models:exportBackup', options),
     /** 从备份恢复（FEAT-3）：zip → 设置 + 指定库，返回 { settingsRestored, libraryRestored? } / { canceled } / { error } */
     importBackup: () => invokeValidated('models:importBackup'),
     /** 删除模型文件（移入回收站并清理元数据），返回 { ok } 或 { error } */

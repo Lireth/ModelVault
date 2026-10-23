@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import fsSync from 'node:fs'
 import path from 'node:path'
 import { BrowserWindow } from 'electron'
 import logger from '../logger'
@@ -10,13 +11,17 @@ import {
 } from './scanner'
 
 /**
- * 模型目录变更监控（E8；A8 由 fs.watch recursive 重写为「轮询 + 快照比对」）：
+ * 模型目录变更监控（E8；A8 轮询快照 + OP-05 原生事件加速）：
  *
- * 原实现的问题：Node 的 fs.watch recursive 在 Windows 后端到端不可靠
- * （漏事件、filename 偶发为 null 导致 .modelvault 过滤被绕过、
- * 缓冲区溢出丢细节），autoRescan 在目标平台时灵时不灵。
+ * 历史：纯 fs.watch recursive 在 Windows 上端到端不可靠（漏事件、filename
+ * 偶发为 null、缓冲区溢出丢细节）；因此 A8 改为轮询快照作为**正确性来源**。
+ * OP-05 在此基础上增加可选的原生事件监听作为**加速触发**：
+ * - 事件只用于提前触发防抖广播，快照差异仍是最终判据（漏事件由轮询兜底）；
+ * - 原生监听可用时轮询间隔延长到 15s 起（仍受内容校验与空闲退避约束），
+ *   降低持续 readdir 开销；监听初始化失败则立即回落到原 2s 阶梯；
+ * - 事件路径中的 .modelvault/隐藏项/用户排除目录一律忽略，避免自激励。
  *
- * 现实现：按固定间隔递归遍历目录树并比对快照（目录 -> 条目名列表）——
+ * 轮询实现：按固定间隔递归遍历目录树并比对快照（目录 -> 条目名列表）——
  * - 条目增减/重命名可靠反映在快照差异上，不受平台事件语义影响；
  * - 与 scanner 共享排除策略（隐藏项/put_/node_modules/.git/.modelvault/
  *   $RECYCLE.BIN/System Volume Information）与最大深度：排除项既不记录也不
@@ -31,6 +36,13 @@ import {
 
 /** 基础轮询间隔（ms）：目录最近有变更时以此间隔巡检 */
 const DEFAULT_POLL_INTERVAL = 2000
+/**
+ * 原生事件监听可用时的基础轮询间隔（OP-05）：事件负责低延迟触发，
+ * 轮询只承担漏事件兜底，因此从 2s 放宽到 15s，空闲退避仍封顶 30s。
+ */
+const NATIVE_WATCH_POLL_INTERVAL = 15000
+/** 原生监听失败后的兜底退回间隔（保持原行为） */
+const NATIVE_WATCH_FALLBACK_BACKOFF = [2000, 5000, 10000, 30000]
 /**
  * 空闲退避阶梯（ms，A-07b；O8 延长封顶）：连续巡检无变更时逐级拉长间隔，
  * 避免空闲库（尤其移动硬盘/网络盘）被高频全树 readdir 持续唤醒；
@@ -62,6 +74,14 @@ function stop() {
   watcher = null
   if (w.debounceTimer) clearTimeout(w.debounceTimer)
   if (w.timer) clearInterval(w.timer)
+  if (w.nativeWatcher) {
+    try {
+      w.nativeWatcher.close()
+    } catch {
+      /* 关闭失败不影响停止监控 */
+    }
+    w.nativeWatcher = null
+  }
 }
 
 /** 向所有窗口广播目录变更 */
@@ -78,6 +98,62 @@ function toNameSet(names) {
   return new Set(
     (names || []).filter((n) => typeof n === 'string' && n).map((n) => n.toLowerCase())
   )
+}
+
+/**
+ * 原生事件文件名 → 待广播子树（OP-05）。
+ * @param {object} w 监控状态（读取 excludeNames）
+ * @param {string|null} filename fs.watch 回调的文件名（recursive 下为相对路径）
+ * @returns {string[]|null} 子树数组；null 表示忽略该事件；空数组表示无法定位（全量兜底）
+ */
+function nativeEventDirs(w, filename) {
+  // 文件名缺失（缓冲区溢出/平台差异）时无法定位子树：走全量扫描兜底
+  if (typeof filename !== 'string' || !filename) return []
+  const rel = filename.split(path.sep).join('/').replace(/^\/+/, '')
+  if (!rel) return []
+  const segments = rel.split('/').filter(Boolean)
+  for (const seg of segments) {
+    // 关联存储/隐藏项/put_ 临时项/用户排除目录：与快照遍历同一排除策略，
+    // 从机制上避免监听自身缩略图与元数据写入造成自激励
+    if (isExcludedScanEntryName(seg) || w.excludeNames.has(seg.toLowerCase())) return null
+  }
+  const slash = rel.lastIndexOf('/')
+  return [slash < 0 ? '' : rel.slice(0, slash)]
+}
+
+/**
+ * 启动原生递归监听（OP-05，仅作加速触发；失败时静默回落到轮询）。
+ * @param {object} w 监控状态
+ */
+function startNativeWatch(w) {
+  try {
+    const native = fsSync.watch(w.root, { recursive: true }, (_eventType, filename) => {
+      if (w !== watcher) return // 旧根在途事件：丢弃（B2 代际防护）
+      const dirs = nativeEventDirs(w, filename)
+      if (dirs === null) return
+      scheduleBroadcast(w, dirs)
+    })
+    native.on('error', (err) => {
+      logger.warn(`原生目录监听异常，回落到轮询: ${err.message}`)
+      try {
+        native.close()
+      } catch {
+        /* 已关闭 */
+      }
+      if (w === watcher) {
+        w.nativeWatcher = null
+        // 监听已不可用：恢复原轮询节奏，保证变更仍能被发现
+        w.pollInterval = DEFAULT_POLL_INTERVAL
+        w.backoff = NATIVE_WATCH_FALLBACK_BACKOFF
+      }
+    })
+    w.nativeWatcher = native
+    return true
+  } catch (err) {
+    logger.warn(`原生目录监听不可用，继续使用轮询: ${err.message}`)
+    w.nativeWatcher = null
+    return false
+  }
 }
 
 /**
@@ -487,12 +563,19 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
     // 同根同状态（如每次扫描完成后的重复同步）：仅刷新排除名单即返回，
     // 不重启遍历（skipNames 每轮遍历时读取，热生效）
     watcher.excludeNames = toNameSet(excludeDirs)
+    // OP-05：原生监听曾因异常退出（或首次不可用）时，借同步时机尝试重建
+    if (watcher.nativeWatch && !watcher.nativeWatcher) {
+      startNativeWatch(watcher)
+    }
     return
   }
   stop()
   if (!root || !wantEnabled) return
 
-  const pollMs = timing.pollInterval ?? DEFAULT_POLL_INTERVAL
+  // OP-05：原生事件监听默认关闭（由调用方显式开启）；开启时轮询降频为兜底
+  const nativeWatch = timing.nativeWatch === true
+  const pollMs =
+    timing.pollInterval ?? (nativeWatch ? NATIVE_WATCH_POLL_INTERVAL : DEFAULT_POLL_INTERVAL)
   const w = {
     root,
     enabled: true,
@@ -512,16 +595,31 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
     idleRounds: 0,
     pendingDirs: new Set(),
     pollInterval: pollMs,
+    // OP-05 原生监听状态（未开启/启动失败为 null）
+    nativeWatch,
+    nativeWatcher: null,
     // 退避阶梯：测试 timing 未传 backoff 时为 undefined（恒定间隔，旧行为）；
-    // 生产默认 2s→5s→10s→30s（A-07b；O8 延长封顶，见 DEFAULT_BACKOFF 注释）
-    backoff: timing.backoff ?? (timing.pollInterval ? undefined : DEFAULT_BACKOFF),
+    // 原生监听开启时以 15s 起步、30s 封顶；否则默认 2s→5s→10s→30s
+    backoff:
+      timing.backoff ??
+      (timing.pollInterval
+        ? undefined
+        : nativeWatch
+          ? [NATIVE_WATCH_POLL_INTERVAL, 30000]
+          : DEFAULT_BACKOFF),
     debounceMs: timing.broadcastDebounce ?? DEFAULT_BROADCAST_DEBOUNCE,
     isVisible: typeof timing.isVisible === 'function' ? timing.isVisible : windowsVisible,
     onPollScheduled: typeof timing.onPollScheduled === 'function' ? timing.onPollScheduled : null
   }
   watcher = w
+  if (nativeWatch && !startNativeWatch(w)) {
+    // 原生监听不可用：退回原轮询节奏（避免 15s 起步导致变更发现过慢）
+    w.pollInterval = DEFAULT_POLL_INTERVAL
+    w.backoff = NATIVE_WATCH_FALLBACK_BACKOFF
+  }
   logger.info(
-    `目录监控已启动（autoRescan，基础轮询 ${pollMs}ms` +
+    `目录监控已启动（autoRescan，基础轮询 ${w.pollInterval}ms` +
+      (w.nativeWatcher ? '，原生事件监听已启用' : '') +
       (w.backoff ? `，空闲退避至 ${w.backoff[w.backoff.length - 1]}ms` : '') +
       (w.contentCheckInterval > 0
         ? `，内容校验 ${w.contentCheckInterval}ms`
