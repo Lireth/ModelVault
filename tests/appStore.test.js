@@ -12,6 +12,7 @@ import {
   batchToggleDisabled,
   batchAssignCivitaiTags,
   batchOrganizeByTags,
+  clearAllCovers,
   confirmDialog,
   deleteModel,
   dismissToast,
@@ -69,6 +70,7 @@ function makeApiMock() {
       pasteCover: vi.fn(),
       setDefaultCover: vi.fn(),
       deleteCover: vi.fn(),
+      clearAllCovers: vi.fn(),
       importCover: vi.fn(),
       civitaiIdentify: vi.fn(),
       civitaiCategory: vi.fn(),
@@ -1577,6 +1579,43 @@ describe('重复模型检测与筛选（FEAT-1）', () => {
     expect(filteredModels.value).toHaveLength(4)
     state.showDuplicatesOnly = false
     expect(filteredModels.value).toHaveLength(5)
+  })
+})
+
+describe('清空全部示例图（OPT-01）', () => {
+  it('成功后以元素级替换同步列表，派生查找立即回退且不重扫', async () => {
+    replaceModels([
+      makeModel('m1', {
+        cover: 'covers/a.png',
+        coverUrl: 'mvimg://local/covers/a.png',
+        covers: [{ rel: 'covers/a.png', path: 'D:\\models\\.modelvault\\covers\\a.png', url: 'mvimg://local/covers/a.png' }],
+        hasManualCover: true
+      }),
+      makeModel('m2', {
+        cover: 'covers/b.png',
+        coverUrl: 'mvimg://local/covers/b.png',
+        covers: [{ rel: 'covers/b.png', path: 'D:\\models\\.modelvault\\covers\\b.png', url: 'mvimg://local/covers/b.png' }],
+        hasManualCover: true
+      })
+    ])
+    state.selectedId = 'm1'
+    const before = state.models[0]
+    api.models.clearAllCovers.mockResolvedValue({ cleared: 2, images: 2 })
+
+    const ok = await clearAllCovers()
+
+    expect(ok).toBe(true)
+    // 浅响应数组的元素必须被替换，才能触发依赖其索引的派生状态
+    expect(state.models[0]).not.toBe(before)
+    for (const m of state.models) {
+      expect(m.cover).toBe('')
+      expect(m.coverUrl).toBe('')
+      expect(m.covers).toEqual([])
+      expect(m.hasManualCover).toBe(false)
+    }
+    // selectedModel 经 modelById 读取到新引用，详情页立即回退占位图
+    expect(selectedModel.value?.coverUrl).toBe('')
+    expect(state.toasts.at(-1)).toMatchObject({ type: 'success' })
   })
 })
 
