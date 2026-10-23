@@ -168,8 +168,16 @@ const EXT_PALETTE = [
 const extRows = computed(() => {
   const byExt = new Map()
   for (const m of state.models) {
-    const dot = m.id.lastIndexOf('.')
-    const ext = dot >= 0 ? m.id.slice(dot + 1).toLowerCase() : '其他'
+    // 优先使用扫描结果携带的真实扩展名（OPT-06）：.disabled 只是禁用后缀，
+    // 直接截取路径末段会把 a.safetensors.disabled 误统计为 disabled 格式。
+    let ext = typeof m.ext === 'string' && m.ext ? m.ext.replace(/^\./, '').toLowerCase() : ''
+    if (!ext) {
+      // 兼容无 ext 的旧索引：剔除 .disabled 后再取最后一段扩展名
+      let id = typeof m.id === 'string' ? m.id : ''
+      if (id.toLowerCase().endsWith('.disabled')) id = id.slice(0, -'.disabled'.length)
+      const dot = id.lastIndexOf('.')
+      ext = dot >= 0 ? id.slice(dot + 1).toLowerCase() : '其他'
+    }
     const row = byExt.get(ext) || { count: 0, bytes: 0 }
     row.count += 1
     row.bytes += Number.isFinite(m.size) ? m.size : 0

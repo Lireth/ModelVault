@@ -96,6 +96,23 @@ describe('StatsSection 格式分布', () => {
     expect(block.findAll('.stack-seg').length).toBe(2)
     wrapper.unmount()
   })
+
+  it('按扫描 ext 字段聚合，.disabled 文件仍计入真实格式', () => {
+    replaceModels([
+      makeModel('a.safetensors.disabled', { ext: '.safetensors', disabled: true, size: 3000 }),
+      makeModel('b.safetensors', { ext: '.safetensors', size: 1000 }),
+      makeModel('c.ckpt', { ext: '.ckpt', size: 2000 })
+    ])
+    const wrapper = mountStats()
+    const block = wrapper.findAll('.stats-block').find((b) => b.text().includes('格式分布'))
+    const rows = block.findAll('.type-stats li')
+    // 两个 .safetensors（含禁用文件）与一个 .ckpt，不应出现 disabled 格式
+    expect(rows.length).toBe(2)
+    expect(rows[0].text()).toContain('.safetensors')
+    expect(rows[0].text()).toContain('2 个')
+    expect(block.text()).not.toContain('disabled')
+    wrapper.unmount()
+  })
 })
 
 describe('StatsSection 评分分布', () => {
