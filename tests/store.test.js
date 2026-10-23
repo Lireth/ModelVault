@@ -813,6 +813,25 @@ describe('应用设置文件损坏恢复（B2）', () => {
     await expect(fs.access(settingsFile)).rejects.toThrow()
   })
 
+  it('引导层设置落盘失败同样上报，且写盘链保持可等待（C7）', async () => {
+    // 占位引导层设置文件为目录：原子写 rename 到目录必然失败
+    await fs.mkdir(fakeUserData, { recursive: true })
+    await fs.rm(settingsFile, { force: true })
+    await fs.mkdir(settingsFile, { recursive: true })
+    const errors = []
+    setStoreSaveErrorListener((err) => errors.push(err))
+    try {
+      await updateSettings({ modelsFolder: root })
+      expect(errors).toHaveLength(1)
+      expect(errors[0].message).toContain('设置保存失败')
+      // 失败的写盘已由链内 catch 消化：flush 不会 reject
+      await expect(flushSettingsSave()).resolves.toBeUndefined()
+    } finally {
+      setStoreSaveErrorListener(null)
+      await fs.rm(settingsFile, { recursive: true, force: true })
+    }
+  })
+
   it('设置落盘失败经监听器通知（C7），内存值运行时仍生效', async () => {
     // 占位库设置文件为目录：库层原子写 rename 到目录必然失败（设置随模型库走）
     const libSettingsFile = path.join(root, '.modelvault', 'settings.json')

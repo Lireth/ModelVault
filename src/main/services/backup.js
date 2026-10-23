@@ -640,12 +640,8 @@ async function restoreLibraryLocked(root, filePath, skippedCovers = 0, restoreSe
     // 封面解压完成即落盘：临时目录仅承载文件，内存中只保留当前封面字节
     const unzipped = await streamBackupZip(filePath, {
       stats,
+      // name 由 safeCoverName 校验过（不安全条目在解压阶段已跳过），此处可直接落盘
       coverWriter: async (name, data) => {
-        if (!name) {
-          stats.skippedCovers += 1
-          logger.warn('恢复时跳过不安全的备份封面条目')
-          return
-        }
         await fs.writeFile(path.join(coversDir, name), data)
         covers += 1
       }

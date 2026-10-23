@@ -376,7 +376,8 @@ export async function flushSettingsSave() {
   for (;;) {
     const bootstrapTask = bootstrapWriteChain
     const libraryTask = libraryWriteChain
-    await Promise.all([bootstrapTask.catch(() => {}), libraryTask.catch(() => {})])
+    // 两条链在入队时已 catch（失败经监听器上报），此处等待不会 reject
+    await Promise.all([bootstrapTask, libraryTask])
     if (bootstrapTask === bootstrapWriteChain && libraryTask === libraryWriteChain) return
   }
 }
