@@ -562,24 +562,26 @@ describe('扫描完成以最新设置同步目录监控（E8 竞态回归）', (
 })
 
 describe('models:loadStore', () => {
-  it('返回设置与元数据映射；连续调用结果一致（ensureRootStore 不重复加载）', async () => {
+  it('仅返回设置与本地索引；连续调用结果一致（ensureRootStore 不重复加载）', async () => {
     await updateSettings({ modelsFolder: root })
     const loadStore = getRegisteredHandler('models:loadStore')
     const first = await loadStore(makeEvent())
     expect(first.settings.modelsFolder).toBe(root)
-    expect(first.models).toEqual({})
+    // O1：元数据映射不再随响应回传，避免启动时无消费方的全量 IPC 克隆
+    expect(first).not.toHaveProperty('models')
     const second = await loadStore(makeEvent())
-    expect(second.models).toEqual(first.models)
-    expect(second.settings.modelsFolder).toBe(root)
+    expect(second.settings.modelsFolder).toBe(first.settings.modelsFolder)
+    expect(second).not.toHaveProperty('models')
   })
 
-  it('已设置的目录不存在时跳过关联存储加载，返回空元数据映射（C6 任意目录写入防护）', async () => {
+  it('已设置的目录不存在时跳过关联存储加载，响应不含元数据映射（C6 任意目录写入防护）', async () => {
     await updateSettings({ modelsFolder: root })
     await fs.rm(root, { recursive: true, force: true })
     const loadStore = getRegisteredHandler('models:loadStore')
     const res = await loadStore(makeEvent())
     expect(res.settings.modelsFolder).toBe(root)
-    expect(res.models).toEqual({})
+    expect(res).not.toHaveProperty('models')
+    expect(res.cachedIndex).toBeNull()
   })
 })
 

@@ -7,6 +7,7 @@ import {
   flushSettingsSave,
   flushStoreSave,
   getModelMeta,
+  getModelIdsByAbsPath,
   getSettings,
   getCurrentRoot,
   isInRoot,
@@ -185,6 +186,14 @@ describe('路径关联', () => {
     expect(removeModelMeta(abs)).toBe(true)
     expect(getModelMeta(abs)).toBeNull()
     expect(removeModelMeta(abs)).toBe(false)
+  })
+
+  it('模型 id 列表按绝对路径返回（启动预热用，O1）', async () => {
+    const a = await touchModel('id-a.safetensors')
+    const b = await touchModel('nested/id-b.safetensors')
+    setModelMeta(a, { alias: 'a' })
+    setModelMeta(b, { alias: 'b' })
+    expect(getModelIdsByAbsPath().sort()).toEqual([a, b].sort())
   })
 
   it('改名/移动后元数据键整体迁移：标注与哈希履历无缝跟随（F10/F11）', async () => {

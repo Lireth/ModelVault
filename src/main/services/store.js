@@ -72,6 +72,7 @@ export {
   normalizeStoreData,
   getModelMeta,
   getMetaMapByAbsPath,
+  getModelIdsByAbsPath,
   setModelMeta,
   removeModelMeta,
   renameModelMeta,

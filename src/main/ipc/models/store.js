@@ -1,7 +1,7 @@
 import { BrowserWindow, dialog } from 'electron'
 import logger from '../../logger'
 import {
-  getMetaMapByAbsPath,
+  getModelIdsByAbsPath,
   getModelMeta,
   getCurrentRoot,
   getSettings,
@@ -141,18 +141,17 @@ export function setupStoreErrorForwarding() {
 
 /** 注册存储与设置链路的 IPC 处理器 */
 export function registerStoreHandlers() {
-  // 加载持久化数据（设置 + 当前模型根目录的元数据，键为绝对路径）
+  // 加载持久化数据（设置 + 本地索引缓存；元数据仅在主进程内部消费）
   wrapHandler('models:loadStore', async () => {
     // V-02：加载/切库与扫描、备份恢复互斥。维护操作进行中时返回当前内存快照，
     // 避免窗口重载/并发调用把根目录切到正在扫描的库之外
     const token = tryAcquireMaintenance('load', null)
     if (!token) {
       logger.warn(`维护操作进行中，loadStore 返回当前内存快照: ${maintenanceBusyMessage()}`)
-      return { settings: getSettings(), models: getMetaMapByAbsPath() }
+      return { settings: getSettings(), cachedIndex: null }
     }
     try {
       const settings = await loadSettings()
-      let metaMap = {}
       let cachedIndex = null
       if (settings.modelsFolder) {
         // 已设置目录不存在（如磁盘离线/被移动）时不切换关联存储，
@@ -165,12 +164,12 @@ export function registerStoreHandlers() {
           await ensureRootStore(settings.modelsFolder, { maintenanceToken: token })
           // 清理不再被元数据引用的孤儿封面文件
           await pruneOrphanCovers()
-          metaMap = getMetaMapByAbsPath()
           // 启动后后台预热缺失的模型哈希（Civitai 识别加速）：仅入队，
           // 由预热服务延迟逐个处理，已缓存/文件缺失的条目消费时秒级跳过。
           // O1：启动时只有元数据键、没有体积——full=true 重置体积索引，
-          // candidates 策略下由 drain 逐个 stat 后按真实体积决定是否计算
-          requestHashWarmup(Object.keys(metaMap), {
+          // candidates 策略下由 drain 逐个 stat 后按真实体积决定是否计算。
+          // 仅取 id 列表，不构造随响应回传的完整元数据映射（启动 IPC 瘦身）
+          requestHashWarmup(getModelIdsByAbsPath(), {
             mode: settings.hashWarmup,
             full: true
           })
@@ -195,7 +194,6 @@ export function registerStoreHandlers() {
       }
       return {
         settings,
-        models: metaMap,
         cachedIndex
       }
     } finally {

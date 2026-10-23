@@ -504,7 +504,7 @@ export function getModelMeta(modelId) {
   return relKey ? data.models[relKey] || null : null
 }
 
-/** 以绝对路径返回模型元数据表（供渲染进程使用） */
+/** 以绝对路径返回模型元数据表（供主进程内部消费，如库体检） */
 export function getMetaMapByAbsPath() {
   const result = {}
   if (!data || !getCurrentRoot()) return result
@@ -512,6 +512,17 @@ export function getMetaMapByAbsPath() {
     result[path.join(getCurrentRoot(), relKey)] = meta
   }
   return result
+}
+
+/**
+ * 当前根目录下全部模型的绝对路径（O1）：
+ * 启动预热等仅需 id 列表的场景使用，避免构造并丢弃整张元数据映射表。
+ * @returns {string[]} 模型绝对路径列表
+ */
+export function getModelIdsByAbsPath() {
+  const root = getCurrentRoot()
+  if (!data || !root) return []
+  return Object.keys(data.models).map((relKey) => path.join(root, relKey))
 }
 
 /** 写入单条模型元数据（合并保存，键为模型绝对路径） */
