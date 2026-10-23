@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { relativeWithin } from '../utils'
 
 /**
  * 存储位置约定与路径换算（C2 自 store.js 拆出）：
@@ -29,13 +30,10 @@ export const COVERS_DIR = 'covers'
 
 /** 当前生效的模型根目录 */
 let currentRoot = null
-/** 根目录的小写形式（Windows 大小写不敏感路径匹配兜底用） */
-let currentRootLower = null
 
 /** 切换当前关联存储的模型根目录（重置内存状态） */
 export function setDataRoot(root) {
   currentRoot = root
-  currentRootLower = root ? root.toLowerCase() : null
 }
 
 /** 当前生效的模型根目录 */
@@ -76,24 +74,14 @@ export function getCoversDir() {
 
 /**
  * 绝对模型路径 -> 相对键（'/' 分隔）；不在根目录内时返回 null。
- * Windows 文件系统大小写不敏感：路径仅大小写不同时 path.relative
- * 会返回 '..\..' 导致关联失联，改用大小写不敏感的前缀匹配兜底。
+ * 归属判定与大小写兜底统一收敛在 utils.relativeWithin（O-1 单一实现），
+ * 此处只负责「空相对路径（即根目录自身）视为无效键」与 POSIX 分隔转换。
  * @param {string} absPath 绝对路径
  */
 export function toRelKey(absPath) {
   if (!currentRoot || typeof absPath !== 'string') return null
-  const rel = path.relative(currentRoot, absPath)
-  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
-    if (process.platform !== 'win32' || !currentRootLower) return null
-    const absLower = absPath.toLowerCase()
-    const rootLower = currentRootLower.endsWith(path.sep)
-      ? currentRootLower
-      : currentRootLower + path.sep
-    if (!absLower.startsWith(rootLower)) return null
-    const rest = absPath.slice(rootLower.length)
-    if (!rest) return null
-    return rest.split(path.sep).join('/')
-  }
+  const rel = relativeWithin(absPath, currentRoot)
+  if (!rel) return null
   return rel.split(path.sep).join('/')
 }
 
@@ -112,7 +100,8 @@ export function resolveCover(coverRel) {
 /** 绝对封面路径 -> 相对封面路径（仅限封面目录内的文件） */
 export function relativizeCover(absCover) {
   if (!currentRoot || typeof absCover !== 'string') return ''
-  const rel = path.relative(getCoversDir(), absCover)
-  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return ''
+  // 封面目录自身（相对路径为空）不构成有效封面，与越界同等处理
+  const rel = relativeWithin(absCover, getCoversDir())
+  if (!rel) return ''
   return `${DATA_DIR}/${COVERS_DIR}/${rel.split(path.sep).join('/')}`
 }

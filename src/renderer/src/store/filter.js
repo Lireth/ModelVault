@@ -185,11 +185,14 @@ export const tagCounts = computed(() => {
 /**
  * 全库自由标签池（F-5）：按使用次数降序（同频按中文名稳定排序），上限 50——
  * 筛选下拉的数据源；标签由详情页编辑器维护，随元数据即时落盘。
+ * O-4：先物化 [标签, 计数] 数组再排序——原实现在比较器内两次 tagCounts.get()
+ * 查表，全库标签量级下把 Map 查找乘进比较次数。
  */
 export const allTags = computed(() =>
-  [...tagCounts.value.keys()]
-    .sort((a, b) => (tagCounts.value.get(b) || 0) - (tagCounts.value.get(a) || 0) || zhCollator.compare(a, b))
+  [...tagCounts.value.entries()]
+    .sort((a, b) => b[1] - a[1] || zhCollator.compare(a[0], b[0]))
     .slice(0, 50)
+    .map(([tag]) => tag)
 )
 
 /**

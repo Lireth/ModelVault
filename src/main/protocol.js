@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
 import logger from './logger'
+import { relativeWithin } from './utils'
 import { isValidImageFile, isImageBuffer } from './services/covers'
 import { getCurrentRoot, getSettings } from './services/store'
 import {
@@ -92,8 +93,7 @@ async function realpathCached(dir) {
  * 校验请求的真实路径是否允许访问：仅限当前模型根目录（含关联存储）与旧版封面目录。
  * 入参必须是已 fs.realpath 解析后的路径：根目录内的符号链接/junction
  * 若指向根目录外，字面前缀校验可被绕过，必须以解析后的真实路径判断（B8）。
- * 放行目录本身也做 realpath 归一（root 可能位于 junction 之下），
- * Windows 上按大小写不敏感比较（与路径关联存储的兜底策略一致）。
+ * 归属判定（含 Windows 大小写不敏感兜底）统一收敛在 utils.relativeWithin（O-1）。
  */
 async function isAllowedPath(realPath) {
   const root = getCurrentRoot()
@@ -108,16 +108,10 @@ async function isAllowedPath(realPath) {
   if (root) allowed.push(path.normalize(root))
   // 旧版全局封面目录（迁移前的历史数据兼容）
   allowed.push(path.join(app.getPath('userData'), 'covers'))
-  const lower = process.platform === 'win32'
-  const target = lower ? realPath.toLowerCase() : realPath
   for (const dir of allowed) {
     const resolved = await realpathCached(dir)
     if (!resolved) continue
-    const base = lower ? resolved.toLowerCase() : resolved
-    const rel = path.relative(base, target)
-    if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) {
-      return true
-    }
+    if (relativeWithin(realPath, resolved) !== null) return true
   }
   return false
 }

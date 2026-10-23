@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 /**
  * 虚拟滚动内核（O4，自 VirtualModelGrid / VirtualModelList 合并）：
@@ -174,6 +174,18 @@ export function useVirtualScroll(opts) {
     }
   )
 
+  /**
+   * 聚焦指定模型卡片/行（O-3 单一实现）：网格与列表此前各有一份逐字相同的
+   * 实现（querySelector + CSS.escape + nextTick），修复需打双补丁。目标项
+   * 可能尚未渲染（键盘导航会先 scrollToRow 再聚焦），故等下一帧再查找。
+   * @param {string} id 模型 id（即 data-model-id 属性值）
+   */
+  function focusModel(id) {
+    nextTick(() => {
+      rootEl.value?.querySelector(`[data-model-id="${CSS.escape(id)}"]`)?.focus()
+    })
+  }
+
   onMounted(() => {
     scroller = findScrollParent(rootEl.value)
     // 重新挂载（空态/视图切换回来）时旧滚动位置已无意义，复位到顶部（B16）
@@ -195,5 +207,5 @@ export function useVirtualScroll(opts) {
     resizeObserver?.disconnect()
   })
 
-  return { rootEl, scrollTop, viewportHeight, startIndex, endIndex, indexById, scrollToRow }
+  return { rootEl, scrollTop, viewportHeight, startIndex, endIndex, indexById, scrollToRow, focusModel }
 }

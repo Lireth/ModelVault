@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick } from 'vue'
+import { computed } from 'vue'
 import { handleModelActionKey } from './modelRowActions'
 import {
   formatDate,
@@ -37,7 +37,7 @@ const props = defineProps({
 const ROW_HEIGHT = 36
 const OVERSCAN_ROWS = 8
 
-const { rootEl, startIndex, endIndex, indexById, scrollToRow } = useVirtualScroll({
+const { rootEl, startIndex, endIndex, indexById, scrollToRow, focusModel } = useVirtualScroll({
   rowHeight: ROW_HEIGHT,
   rowCount: () => props.models.length,
   models: () => props.models,
@@ -132,13 +132,6 @@ function onContextMenu(m) {
 }
 
 /* ---------------- 键盘导航与快捷动作 ---------------- */
-
-/** 聚焦指定模型行（等待渲染后聚焦） */
-function focusModel(id) {
-  nextTick(() => {
-    rootEl.value?.querySelector(`[data-model-id="${CSS.escape(id)}"]`)?.focus()
-  })
-}
 
 /**
  * 方向键在行间移动焦点并联动滚动（↑/← 上一行，↓/→ 下一行，

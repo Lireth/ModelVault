@@ -3,7 +3,7 @@ import fsSync from 'node:fs'
 import path from 'node:path'
 import { BrowserWindow } from 'electron'
 import logger from '../logger'
-import { runWithConcurrency } from '../utils'
+import { relativeWithin, runWithConcurrency } from '../utils'
 import {
   MAX_SCAN_DEPTH,
   SCAN_EXCLUDED_DIRS,
@@ -349,11 +349,10 @@ export function computeSnapshotDiff(root, oldSnap, newSnap) {
     const a = oldNames || []
     const b = newNames || []
     if (a.length === b.length && a.every((n, i) => n === b[i])) return
-    const rel = path.relative(root, dirAbs)
-    const normalized = rel === '' ? '' : rel.split(path.sep).join('/')
+    const rel = relativeWithin(dirAbs, root)
     // 理论上快照键都在根内；防御性忽略越界项
-    if (normalized && (normalized.startsWith('..') || path.isAbsolute(normalized))) return
-    dirs.add(normalized)
+    if (rel === null) return
+    dirs.add(rel === '' ? '' : rel.split(path.sep).join('/'))
   }
   for (const [dir, names] of oldSnap) consider(dir, names, newSnap.get(dir))
   for (const [dir, names] of newSnap) consider(dir, oldSnap.get(dir), names)
@@ -391,10 +390,10 @@ export function computeStatSnapshotDiff(root, oldSnap, newSnap) {
   const dirs = new Set()
   const consider = (dirAbs, oldEntries, newEntries) => {
     if (statEntriesEqual(oldEntries, newEntries)) return
-    const rel = path.relative(root, dirAbs)
-    const normalized = rel === '' ? '' : rel.split(path.sep).join('/')
-    if (normalized && (normalized.startsWith('..') || path.isAbsolute(normalized))) return
-    dirs.add(normalized)
+    const rel = relativeWithin(dirAbs, root)
+    // 理论上快照键都在根内；防御性忽略越界项
+    if (rel === null) return
+    dirs.add(rel === '' ? '' : rel.split(path.sep).join('/'))
   }
   for (const [dir, entries] of oldSnap) consider(dir, entries, newSnap.get(dir))
   for (const [dir, entries] of newSnap) consider(dir, entries, oldSnap.get(dir))

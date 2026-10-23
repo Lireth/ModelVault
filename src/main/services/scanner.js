@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { abortError } from '../utils'
+import { abortError, relativeWithin, runWithConcurrency } from '../utils'
 import { MODEL_EXTENSION_SET } from '../../shared/model-extensions'
 import { folderNameToTag } from '../../shared/model-categories'
 
@@ -28,8 +28,8 @@ const DISABLED_SUFFIX = '.disabled'
  */
 export const MAX_SCAN_DEPTH = 8
 
-/** 并行 stat 的分批大小：单批内并发获取 size/mtime，批间串行，避免一次性打开过多文件句柄 */
-const STAT_BATCH_SIZE = 64
+/** 并行 stat 的并发上限：与 watcher 等共用 utils.runWithConcurrency（流式取任务，无批间屏障） */
+const STAT_CONCURRENCY = 64
 
 /** 跳过的文件/目录名（说明文件、隐藏项、无关目录） */
 const EXCLUDED_ENTRY = /^(put_|\.)/i
@@ -149,10 +149,7 @@ export async function scanModels(root, onProgress, options = {}) {
   // 根层新增/删除的目录必以其自身路径另行出现在子树集合中，'' 只需采集直属文件
   const scoped = Array.isArray(options.subDirs) && options.subDirs.length > 0
   const rootResolved = path.resolve(root)
-  const isInsideRoot = (abs) => {
-    const rel = path.relative(rootResolved, path.resolve(abs))
-    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
-  }
+  const isInsideRoot = (abs) => relativeWithin(path.resolve(abs), rootResolved) !== null
   const initialDirs = scoped
     ? options.subDirs
         .map((item) => {
@@ -222,38 +219,48 @@ export async function scanModels(root, onProgress, options = {}) {
       fileEntries.push({ fullPath, name, relChild })
     }
 
-    // 分批并行 stat（仅取 size/mtime），批间串行控制并发句柄数
-    for (let i = 0; i < fileEntries.length; i += STAT_BATCH_SIZE) {
-      if (signal?.aborted) throw abortError()
-      const batch = fileEntries.slice(i, i + STAT_BATCH_SIZE)
-      const stats = await Promise.allSettled(batch.map((f) => fs.stat(f.fullPath)))
-      batch.forEach((f, j) => {
-        const s = stats[j]
-        if (s.status === 'rejected') {
-          errors.push({ dir: f.fullPath, message: s.reason?.message || String(s.reason) })
-          return
+    // 并行 stat（仅取 size/mtime）：流式固定并发池（与 watcher 共用
+    // utils.runWithConcurrency，O-5）——完成一个补位一个，无「批内并发、
+    // 批间串行」的整批等待尾延迟，并发峰值恒定。结果按索引回填后在下方
+    // 顺序提交，保持 models/errors 的顺序确定性与取消语义（每文件前检查）。
+    const stats = new Array(fileEntries.length)
+    await runWithConcurrency(
+      fileEntries,
+      async (f, index) => {
+        if (signal?.aborted) throw abortError()
+        try {
+          stats[index] = { stat: await fs.stat(f.fullPath) }
+        } catch (err) {
+          stats[index] = { err: err?.message || String(err) }
         }
-        const stat = s.value
-        if (seenIds.has(f.fullPath)) return
-        seenIds.add(f.fullPath)
-        const ext = f.ext || path.extname(f.name).toLowerCase()
-        models.push({
-          id: f.fullPath,
-          // disabled 文件名含双重后缀（x.safetensors.disabled），一并剥离
-          name: path.basename(f.name, ext + (f.disabled ? DISABLED_SUFFIX : '')),
-          ext,
-          disabled: f.disabled === true,
-          type: classifyModel(rel ? rel.split('/') : [], f.name),
-          // 自动分类标签：按文件夹名匹配（装饰层与 meta.subCategory 合成生效）
-          folderSubCategory: classifySubCategory(rel ? rel.split('/') : []),
-          folder: dir,
-          relDir: rel,
-          size: stat.size,
-          mtimeMs: stat.mtimeMs
-        })
-        onProgress?.({ dirs: dirCount, found: models.length, current: f.relChild })
+      },
+      STAT_CONCURRENCY
+    )
+    fileEntries.forEach((f, index) => {
+      const { stat, err } = stats[index]
+      if (err) {
+        errors.push({ dir: f.fullPath, message: err })
+        return
+      }
+      if (seenIds.has(f.fullPath)) return
+      seenIds.add(f.fullPath)
+      const ext = f.ext || path.extname(f.name).toLowerCase()
+      models.push({
+        id: f.fullPath,
+        // disabled 文件名含双重后缀（x.safetensors.disabled），一并剥离
+        name: path.basename(f.name, ext + (f.disabled ? DISABLED_SUFFIX : '')),
+        ext,
+        disabled: f.disabled === true,
+        type: classifyModel(rel ? rel.split('/') : [], f.name),
+        // 自动分类标签：按文件夹名匹配（装饰层与 meta.subCategory 合成生效）
+        folderSubCategory: classifySubCategory(rel ? rel.split('/') : []),
+        folder: dir,
+        relDir: rel,
+        size: stat.size,
+        mtimeMs: stat.mtimeMs
       })
-    }
+      onProgress?.({ dirs: dirCount, found: models.length, current: f.relChild })
+    })
   }
 
   return { models, errors, dirCount }

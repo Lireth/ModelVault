@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest'
+import path from 'node:path'
 import {
   isAllowedExternalUrl,
   parseWaitForPid,
   readResponseBytesLimited,
+  relativeWithin,
   runWithConcurrency,
   waitForProcessExit
 } from '../src/main/utils'
@@ -188,5 +190,45 @@ describe('更新启动等待（V-06）', () => {
       isAlive: () => true
     })
     expect(exited).toBe(false)
+  })
+})
+
+/**
+ * relativeWithin 单元测试（O-1 路径归属判定单一实现）：
+ * 该函数是扫描子树校验、关联存储相对键换算、mvimg 协议放行、导入目标校验、
+ * 快照越界防御共用的唯一归属判定——大小写策略不一致曾是安全边界与数据关联
+ * 边界漂移的根源，此处锁定各分支语义。
+ */
+describe('relativeWithin（O-1 路径归属判定）', () => {
+  const root = path.join(path.sep, 'vault', 'library')
+
+  it('根目录内返回相对路径，相等返回空串，越界返回 null', () => {
+    expect(relativeWithin(path.join(root, 'lora', 'a.safetensors'), root)).toBe(
+      path.join('lora', 'a.safetensors')
+    )
+    expect(relativeWithin(root, root)).toBe('')
+    expect(relativeWithin(path.join(path.sep, 'vault', 'other'), root)).toBe(null)
+    expect(relativeWithin(root, path.join(root, 'lora'))).toBe(null)
+  })
+
+  it('同前缀的兄弟目录不算包含（拒绝 ..evil 式前缀伪装）', () => {
+    expect(relativeWithin(path.join(path.sep, 'vault', 'library-old', 'x'), root)).toBe(null)
+  })
+
+  it('名为 ..foo 的合法子目录不被误判为越界', () => {
+    expect(relativeWithin(path.join(root, '..foo', 'x'), root)).toBe(path.join('..foo', 'x'))
+  })
+
+  it('大小写不敏感：仅大小写不同仍判定为包含，且返回值保留原始大小写', () => {
+    const upper = path.join(path.sep, 'Vault', 'Library', 'LoRA', 'A.safetensors')
+    expect(relativeWithin(upper, root)).toBe(path.join('LoRA', 'A.safetensors'))
+  })
+
+  it('非字符串/空输入一律越界（防御渲染层传入的异常值）', () => {
+    expect(relativeWithin('', root)).toBe(null)
+    expect(relativeWithin(root, '')).toBe(null)
+    expect(relativeWithin(undefined, root)).toBe(null)
+    expect(relativeWithin(root, null)).toBe(null)
+    expect(relativeWithin(42, root)).toBe(null)
   })
 })

@@ -63,7 +63,7 @@ const scroll = useVirtualScroll({
     containerWidth.value = scroll.rootEl.value?.clientWidth || 0
   }
 })
-const { rootEl, startIndex: startRow, endIndex: endRow, indexById, scrollToRow } = scroll
+const { rootEl, startIndex: startRow, endIndex: endRow, indexById, scrollToRow, focusModel } = scroll
 
 const visibleRows = computed(() => {
   const rows = []
@@ -75,13 +75,6 @@ const visibleRows = computed(() => {
 })
 
 /* ---------------- 键盘网格导航（E10） ---------------- */
-
-/** 聚焦指定模型卡片（等待渲染后聚焦） */
-function focusModel(id) {
-  nextTick(() => {
-    rootEl.value?.querySelector(`[data-model-id="${CSS.escape(id)}"]`)?.focus()
-  })
-}
 
 /**
  * 方向键在卡片间移动焦点并联动滚动。

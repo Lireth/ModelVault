@@ -3,6 +3,7 @@ import { constants as fsConstants } from 'node:fs'
 import path from 'node:path'
 import { BrowserWindow, dialog } from 'electron'
 import logger from '../../logger'
+import { relativeWithin } from '../../utils'
 import { getCurrentRoot, renameModelMeta, toRelKey } from '../../services/store'
 import { sidecarFilesFor } from './misc'
 import { LORA_TAG_DEFS, LORA_TAG_KEYS } from '../../../shared/model-categories'
@@ -106,10 +107,9 @@ export function isImportableModelFile(fileName) {
   return MODEL_EXTENSION_SET.has(ext.toLowerCase())
 }
 
-/** 目录是否位于 root 内（含 root 自身；Windows 大小写不敏感） */
+/** 目录是否位于 root 内（含 root 自身；Windows 大小写不敏感，O-1 单一实现） */
 function isInsideDir(root, target) {
-  const rel = path.relative(root, target)
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+  return relativeWithin(target, root) !== null
 }
 
 /** 目标候选名是否与已有模型/同名 sidecar 冲突 */

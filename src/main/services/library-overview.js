@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
+import { relativeWithin } from '../utils'
 import { readLibraryIndex } from './library-index'
 import { getCurrentRoot, getDataFilePath } from './store-paths'
 import { getSettings } from './store-settings'
@@ -60,10 +61,8 @@ export function normalizeLibraryRoots(roots) {
 
 /** 绝对模型路径 → 库内相对路径（POSIX；不在库内时回退文件名） */
 function relativePathOf(root, absPath, fallbackName) {
-  const rel = path.relative(root, absPath)
-  if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
-    return rel.split(path.sep).join('/')
-  }
+  const rel = relativeWithin(absPath, root)
+  if (rel) return rel.split(path.sep).join('/')
   return fallbackName || path.basename(absPath)
 }
 
