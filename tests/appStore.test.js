@@ -932,6 +932,27 @@ describe('批量操作单次状态合并（O2）', () => {
     expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已为 3 个模型收藏'))).toBe(true)
   })
 
+  it('批量收藏按统一限流执行：同时在途 IPC 不超过上限', async () => {
+    const ids = Array.from({ length: 40 }, (_, i) => `m${i}`)
+    state.models = ids.map((id) => makeModel(id))
+    state.multiSelect.ids = ids
+    let inFlight = 0
+    let maxInFlight = 0
+    api.models.setMetaFlags.mockImplementation(async () => {
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      inFlight -= 1
+      return { meta: { favorite: true, nsfw: false, rating: 0 } }
+    })
+
+    await batchFavorite(true)
+
+    expect(api.models.setMetaFlags).toHaveBeenCalledTimes(40)
+    expect(maxInFlight).toBeGreaterThan(0)
+    expect(maxInFlight).toBeLessThanOrEqual(16)
+  })
+
   it('批量收藏：部分失败时成功者已同步、汇总提示统计', async () => {
     state.models = [makeModel('a'), makeModel('b'), makeModel('c')]
     state.multiSelect.ids = ['a', 'b', 'c']
@@ -1040,6 +1061,29 @@ describe('批量操作单次状态合并（O2）', () => {
     expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已将 2 个模型移入回收站'))).toBe(true)
   })
 
+  it('批量删除按文件操作并发上限执行：同时在途 IPC 不超过上限', async () => {
+    const ids = Array.from({ length: 40 }, (_, i) => `d${i}`)
+    state.models = ids.map((id) => makeModel(id))
+    state.multiSelect.ids = ids
+    let inFlight = 0
+    let maxInFlight = 0
+    api.models.deleteModel.mockImplementation(async () => {
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      inFlight -= 1
+      return { ok: true }
+    })
+
+    const pending = batchDeleteModels()
+    acceptConfirm()
+    await pending
+
+    expect(api.models.deleteModel).toHaveBeenCalledTimes(40)
+    expect(maxInFlight).toBeGreaterThan(0)
+    expect(maxInFlight).toBeLessThanOrEqual(8)
+  })
+
   it('批量删除：部分失败时失败者保留在列表', async () => {
     state.models = [makeModel('a'), makeModel('b')]
     state.multiSelect.ids = ['a', 'b']
@@ -1142,6 +1186,32 @@ describe('批量操作单次状态合并（O2）', () => {
     expect(state.models[1].triggerWords).toBe('已有词')
     expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已为 1 个模型填入触发词'))).toBe(true)
     expect(state.toasts.some((t) => t.text.includes('2 个已有触发词或无候选'))).toBe(true)
+  })
+
+  it('批量填入触发词按统一限流执行：同时在途 IPC 不超过上限', async () => {
+    const ids = Array.from({ length: 40 }, (_, i) => `t${i}`)
+    state.models = ids.map((id) =>
+      makeModel(id, {
+        autoInfo: { triggerCandidates: ['tag'] },
+        triggerWords: ''
+      })
+    )
+    state.multiSelect.ids = ids
+    let inFlight = 0
+    let maxInFlight = 0
+    api.models.saveModelData.mockImplementation(async () => {
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      inFlight -= 1
+      return { meta: { triggerWords: 'tag', triggerWordsSource: 'civitai' } }
+    })
+
+    await batchApplyTriggers()
+
+    expect(api.models.saveModelData).toHaveBeenCalledTimes(40)
+    expect(maxInFlight).toBeGreaterThan(0)
+    expect(maxInFlight).toBeLessThanOrEqual(16)
   })
 
   it('批量填入触发词：选中模型全部无可填时提示且零 IPC', async () => {

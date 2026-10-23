@@ -1,5 +1,6 @@
 import { BrowserWindow } from 'electron'
 import logger from '../../logger'
+import { runWithConcurrency } from '../../utils'
 import { getMetaMapByAbsPath, getModelMeta, relativizeCover, setModelMeta } from '../../services/store'
 import { deleteCoverFile, importCoverFromPath, pickAndSaveCover, saveClipboardImage } from '../../services/covers'
 import { getThumbPathDeferred } from '../../services/thumbs'
@@ -179,8 +180,12 @@ export function registerCoverHandlers() {
       return { error: '封面移除失败' }
     }
     // 物理文件删除放在元数据更新之后：单张失败不阻塞整体（失败残留的
-    // 孤儿文件由 pruneOrphanCovers 周期清理兜底）
-    await Promise.all(covers.map((rel) => deleteCoverFile(resolveCoverSafe(rel))))
+    // 孤儿文件由 pruneOrphanCovers 周期清理兜底）。OPT-09：有界并发删除
+    await runWithConcurrency(
+      covers,
+      (rel) => deleteCoverFile(resolveCoverSafe(rel)),
+      8
+    )
     logger.info(`已移除全部示例图: ${id}（${covers.length} 张）`)
     return buildCoverResponse('', meta)
   }, { errorPrefix: '封面移除失败' })
@@ -199,12 +204,13 @@ export function registerCoverHandlers() {
       clearedModels += 1
       clearedImages += covers.length
       for (const rel of covers) {
-        deletions.push(() => deleteCoverFile(resolveCoverSafe(rel)))
+        deletions.push(resolveCoverSafe(rel))
       }
     }
     // 引用清理已全部完成后统一删文件：单张失败不阻塞（孤儿文件由
-    // pruneOrphanCovers 周期清理兜底）
-    await Promise.all(deletions.map((del) => del()))
+    // pruneOrphanCovers 周期清理兜底）。OPT-09：全库封面可能数千张，
+    // 统一有界并发，避免瞬时耗尽文件句柄
+    await runWithConcurrency(deletions, (abs) => deleteCoverFile(abs), 8)
     logger.info(`已清空全部示例图: ${clearedModels} 个模型共 ${clearedImages} 张`)
     return { cleared: clearedModels, images: clearedImages }
   }, { errorPrefix: '示例图清空失败' })
