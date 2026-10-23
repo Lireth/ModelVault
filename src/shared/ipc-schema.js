@@ -36,6 +36,22 @@
 import { MAX_PARTIAL_SCAN_DIRS_INPUT } from './scan-dirs'
 
 /**
+ * 主进程 → 渲染进程事件通道（O9 单一来源）：
+ * preload 的订阅白名单与主进程发送点共用此清单；新增事件通道只改这里，
+ * 由 tests/ipcSchema.test.js 对账 preload 的 subscribe 调用点防止漂移。
+ */
+export const IPC_EVENT_CHANNELS = Object.freeze([
+  'app:updateProgress',
+  'app:updateAvailable',
+  'models:scanProgress',
+  'models:menuAction',
+  'models:thumbsReady',
+  'models:storeError',
+  'models:fsChanged',
+  'models:warmupProgress'
+])
+
+/**
  * 通道 schema 规则对象（构造器产物，kind 标识类型，其余为约束项）。
  * @typedef {object} SchemaRule
  * @property {string} kind 规则类型：void/string/boolean/int/array/object
@@ -149,7 +165,7 @@ export function validateValue(value, rule, label) {
         if (!rule.loose) {
           const unknown = keys.filter((k) => !(k in rule.fields))
           if (unknown.length > 0) {
-            return `${label} 包含未知字段: ${unknown.slice(0, 5).join(', ')}`
+            return `${label || '参数'} 包含未知字段: ${unknown.slice(0, 5).join(', ')}`
           }
         }
       }
@@ -206,9 +222,55 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'models:crossLibraryOverview': vVoid(),
 
   // ---------- 设置域 ----------
-  // settings:update 全宽松（字段级规范化在 normalizeSettings + 目录存在性
-  // 校验在 handler）；仅限制对象规模防巨型 payload
-  'settings:update': vObj({ max: 40 }),
+  // O9：字段白名单 + 严格未知字段拒绝（loose:false）。类型/长度在此 fail-fast，
+  // 枚举与取值范围仍由 normalizeSettings/handler 负责（文案与既有测试锁定）。
+  'settings:update': vObj({
+    max: 40,
+    loose: false,
+    fields: {
+      modelsFolder: vStr({ max: 1000 }),
+      modelsFolders: vArr({ max: 20, items: vStr({ max: 1000 }) }),
+      autoScan: vBool(),
+      excludeDirs: vArr({ max: 100, items: vStr({ max: 100 }) }),
+      theme: vStr({ max: 16 }),
+      accentColor: vStr({ max: 32 }),
+      cardSize: vStr({ max: 16 }),
+      viewMode: vStr({ max: 16 }),
+      sortBy: vStr({ max: 16 }),
+      sortAsc: vBool(),
+      scanExtensions: vArr({ max: 20, items: vStr({ max: 16 }) }),
+      showSize: vBool(),
+      showMtime: vBool(),
+      showParams: vBool(),
+      civitaiEnabled: vBool(),
+      nsfwBlur: vBool(),
+      autoRescan: vBool(),
+      autoCheckUpdate: vBool(),
+      hashWarmup: vStr({ max: 16 }),
+      // 智能视图：字段与 store-settings.normalizeSavedViews 对齐；
+      // 文案/枚举回退仍在 normalize（这里只挡类型与未知字段）
+      savedViews: vArr({
+        max: 20,
+        items: vObj({
+          max: 16,
+          loose: false,
+          fields: {
+            id: vStr({ max: 40 }),
+            name: vStr({ max: 30 }),
+            search: vStr({ max: 1000 }),
+            typeFilter: vStr({ max: 64 }),
+            subFilter: vStr({ max: 128 }),
+            baseFilter: vStr({ max: 64 }),
+            tagFilter: vStr({ max: 128 }),
+            showFavoritesOnly: vBool(),
+            showDuplicatesOnly: vBool(),
+            sortBy: vStr({ max: 16 }),
+            sortAsc: vBool()
+          }
+        })
+      })
+    }
+  }),
 
   // ---------- 扫描域 ----------
   'models:scan': vObj({
@@ -241,8 +303,16 @@ export const IPC_PAYLOAD_SCHEMAS = {
       params: vObj({ max: 30, nullable: true })
     }
   }),
-  // 语义字段（favorite/nsfw/rating）的类型与范围校验留在 handler（文案有测试锁定）
-  'models:setMetaFlags': vObj({ fields: { id: ID } }),
+  // O9：类型在 schema fail-fast；取值范围（rating 0-5）与空更新语义仍由
+  // handler 产出专属文案（既有测试锁定）
+  'models:setMetaFlags': vObj({
+    fields: {
+      id: ID,
+      favorite: vBool(),
+      nsfw: vBool(),
+      rating: vInt()
+    }
+  }),
   'models:popupMenu': vObj({ fields: { id: ID } }),
   // F-2 回收站桥接：最近删除记录查看与一键恢复（恢复目标限定当前库内路径）
   'models:listDeleted': vVoid(),

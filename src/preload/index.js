@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_PAYLOAD_SCHEMAS } from '../shared/ipc-schema'
+import { IPC_PAYLOAD_SCHEMAS, IPC_EVENT_CHANNELS } from '../shared/ipc-schema'
 
 /**
  * IPC 通道白名单：渲染进程只能通过以下通道通信，防止任意通道调用。
@@ -9,16 +9,12 @@ import { IPC_PAYLOAD_SCHEMAS } from '../shared/ipc-schema'
  */
 const VALID_INVOKE_CHANNELS = Object.freeze(Object.keys(IPC_PAYLOAD_SCHEMAS))
 
-const VALID_RECEIVE_CHANNELS = [
-  'app:updateProgress',
-  'app:updateAvailable',
-  'models:scanProgress',
-  'models:menuAction',
-  'models:thumbsReady',
-  'models:storeError',
-  'models:fsChanged',
-  'models:warmupProgress'
-]
+/**
+ * 事件通道白名单（O9 单一来源）：由 shared/ipc-schema.js 的
+ * IPC_EVENT_CHANNELS 派生，不再独立维护；preload 的 subscribe 调用点
+ * 与该清单的一致性由 tests/ipcSchema.test.js 对账锁定。
+ */
+const VALID_RECEIVE_CHANNELS = IPC_EVENT_CHANNELS
 
 /** 带白名单校验的 invoke（所有便捷方法的统一入口） */
 function invokeValidated(channel, payload) {

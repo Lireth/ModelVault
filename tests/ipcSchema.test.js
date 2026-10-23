@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
+  IPC_EVENT_CHANNELS,
   IPC_PAYLOAD_SCHEMAS,
   validateIpcPayload,
   validateValue,
@@ -30,6 +31,15 @@ function extractPreloadInvokeChannels() {
     'utf-8'
   )
   return [...source.matchAll(/invokeValidated\(\s*'([^']+)'/g)].map((m) => m[1])
+}
+
+/** 从 preload 源码提取 subscribe 事件订阅点通道 */
+function extractPreloadSubscribeChannels() {
+  const source = fs.readFileSync(
+    path.resolve(__dirname, '../src/preload/index.js'),
+    'utf-8'
+  )
+  return [...source.matchAll(/subscribe\(\s*'([^']+)'/g)].map((m) => m[1])
 }
 
 /** 从主进程源码提取 wrapHandler 注册点通道（ipc.js + ipc/models/*.js） */
@@ -189,11 +199,59 @@ describe('IPC payload 通道校验（validateIpcPayload）', () => {
     expect(validateIpcPayload('models:saveModelData', { id: 99 })).toBe('id 须为字符串')
   })
 
-  it('models:setMetaFlags：语义字段（favorite 等）保持宽松，类型校验留在 handler', () => {
-    // favorite: 'yes' 由 handler 产出「无效的收藏状态」（有测试锁定该文案）
-    expect(validateIpcPayload('models:setMetaFlags', { id: 'x', favorite: 'yes' })).toBe('')
+  it('models:setMetaFlags：类型在 schema fail-fast，范围语义留在 handler', () => {
+    expect(validateIpcPayload('models:setMetaFlags', { id: 'x', favorite: true })).toBe('')
+    // favorite 非布尔值在结构门禁拒绝（O9）
+    expect(validateIpcPayload('models:setMetaFlags', { id: 'x', favorite: 'yes' })).toBe(
+      'favorite 须为布尔值'
+    )
+    expect(validateIpcPayload('models:setMetaFlags', { id: 'x', nsfw: 1 })).toBe(
+      'nsfw 须为布尔值'
+    )
+    // 整数通过 schema；0-5 范围与文案由 handler 校验（既有测试锁定）
     expect(validateIpcPayload('models:setMetaFlags', { id: 'x', rating: 6 })).toBe('')
+    expect(validateIpcPayload('models:setMetaFlags', { id: 'x', rating: 4.5 })).toBe(
+      'rating 须为整数'
+    )
     expect(validateIpcPayload('models:setMetaFlags', { id: 42 })).toBe('id 须为字符串')
+  })
+
+  it('settings:update：字段白名单与未知字段拒绝（O9）', () => {
+    const view = {
+      id: 'v1',
+      name: '视图',
+      search: '',
+      typeFilter: 'all',
+      subFilter: '',
+      baseFilter: '',
+      tagFilter: '',
+      showFavoritesOnly: false,
+      showDuplicatesOnly: false,
+      sortBy: 'name',
+      sortAsc: true
+    }
+    const valid = {
+      autoScan: false,
+      theme: 'dark',
+      excludeDirs: ['temp'],
+      scanExtensions: ['.safetensors'],
+      sortBy: 'mtime',
+      sortAsc: false,
+      savedViews: [view]
+    }
+    expect(validateIpcPayload('settings:update', valid)).toBe('')
+    expect(validateIpcPayload('settings:update', { bogusField: 1 })).toBe(
+      '参数 包含未知字段: bogusField'
+    )
+    expect(validateIpcPayload('settings:update', { autoScan: 'yes' })).toBe(
+      'autoScan 须为布尔值'
+    )
+    expect(
+      validateIpcPayload('settings:update', { savedViews: [{ ...view, extra: 1 }] })
+    ).toBe('savedViews[0] 包含未知字段: extra')
+    expect(
+      validateIpcPayload('settings:update', { savedViews: [{ ...view, name: 'x'.repeat(31) }] })
+    ).toBe('savedViews[0].name 长度超限（≤30）')
   })
 
   it('models:toggleDisabled：disabled 须为布尔值', () => {
@@ -272,5 +330,21 @@ describe('IPC 通道单一来源对账（O2）', () => {
     for (const rule of Object.values(IPC_PAYLOAD_SCHEMAS)) {
       expect(['object', 'void']).toContain(rule.kind)
     }
+  })
+
+  it('事件通道单一来源（O9）：preload subscribe 调用点与注册表一致', () => {
+    const declared = new Set(IPC_EVENT_CHANNELS)
+    const subscribed = new Set(extractPreloadSubscribeChannels())
+    expect(subscribed.size).toBeGreaterThan(0)
+    // 订阅了未登记事件：preload 白名单会直接 throw
+    expect([...subscribed].filter((c) => !declared.has(c))).toEqual([])
+    // 登记了但无订阅点：死通道
+    expect([...declared].filter((c) => !subscribed.has(c))).toEqual([])
+  })
+
+  it('事件通道唯一且不与 invoke 通道冲突', () => {
+    expect(new Set(IPC_EVENT_CHANNELS).size).toBe(IPC_EVENT_CHANNELS.length)
+    const invokes = new Set(Object.keys(IPC_PAYLOAD_SCHEMAS))
+    expect(IPC_EVENT_CHANNELS.filter((c) => invokes.has(c))).toEqual([])
   })
 })

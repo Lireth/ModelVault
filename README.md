@@ -190,7 +190,7 @@ ModelVault/
 'my:channel': vObj({ fields: { id: vStr({ required: true, max: 2000 }) } })
 ```
 
-2. 在 `src/main/ipc.js` 或 `src/main/ipc/models/` 对应域模块中注册处理器（统一经 `wrapHandler`，自动执行 schema 前置校验与异常兜底；事件推送类通道加入 preload 的 `VALID_RECEIVE_CHANNELS`）：
+2. 在 `src/main/ipc.js` 或 `src/main/ipc/models/` 对应域模块中注册处理器（统一经 `wrapHandler`，自动执行 schema 前置校验与异常兜底；事件推送类通道在 `IPC_EVENT_CHANNELS` 登记，preload 的订阅白名单由此派生）：
 
 ```js
 wrapHandler('my:channel', async (event, payload) => {
@@ -200,7 +200,7 @@ wrapHandler('my:channel', async (event, payload) => {
 
 3. 在 `src/preload/index.js` 的 `api` 对象中添加语义化方法（内部统一走 `invokeValidated` / `subscribe`），渲染进程通过 `window.api.myDomain.doThing(payload)` 调用。
 
-> 通道登记与两侧调用/注册点的一致性由 `tests/ipcSchema.test.js` 双向对账锁定，任一侧漏改即测试失败。
+> invoke 通道与两侧调用/注册点、事件通道与 preload 订阅点的一致性均由 `tests/ipcSchema.test.js` 双向对账锁定，任一侧漏改即测试失败。
 
 ### 类型检查
 

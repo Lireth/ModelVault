@@ -268,7 +268,10 @@ describe('models:saveModelData / models:setMetaFlags 集成（D1）', () => {
   it('setMetaFlags 非法值与空更新拒绝', async () => {
     const abs = await setupModel()
     const handler = getRegisteredHandler('models:setMetaFlags')
-    expect(await handler(makeEvent(), { id: abs, favorite: 'yes' })).toEqual({ error: '无效的收藏状态' })
+    // O9：类型错误在 schema 前置门禁拒绝（handler 保留同名校验作纵深防御）
+    expect(await handler(makeEvent(), { id: abs, favorite: 'yes' })).toEqual({
+      error: 'favorite 须为布尔值'
+    })
     expect(await handler(makeEvent(), { id: abs, rating: 6 })).toEqual({ error: '评分需为 0-5 的整数' })
     expect(await handler(makeEvent(), { id: abs })).toEqual({ error: '无有效的更新字段' })
   })
