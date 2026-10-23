@@ -11,6 +11,8 @@ import path from 'node:path'
  * 并对 Windows 上并发替换目标的 rename 竞争退避重试。
  * @param {string} file 目标文件绝对路径
  * @param {string} content 待写入内容
+ * @param {{createDirs?: boolean}} [options] createDirs=false 时要求目标目录已存在
+ *   （O5：离线库落盘不得通过 mkdir 重建模型根目录树）
  */
 let tmpSeq = 0
 
@@ -36,14 +38,16 @@ async function renameReplacing(tmp, file) {
   }
 }
 
-export async function atomicWriteFile(file, content) {
+export async function atomicWriteFile(file, content, { createDirs = true } = {}) {
   // 临时名带进程内单调序号（A1）：同一文件的并发写入（如 settings:update 与
   // 扫描完成回写）各自使用不同临时文件，避免后写方截断前写方内容、
   // 或先行方 rename 移走临时文件致后行方 ENOENT
   const tmp = `${file}.${process.pid}.${++tmpSeq}.tmp`
   let fh = null
   try {
-    await fs.mkdir(path.dirname(file), { recursive: true })
+    // O5：关联存储写入由调用方先确保目录存在并传 createDirs=false，
+    // 避免库目录离线时 recursive mkdir 把根目录树重新建出来
+    if (createDirs) await fs.mkdir(path.dirname(file), { recursive: true })
     fh = await fs.open(tmp, 'w')
     await fh.writeFile(content, { encoding: 'utf-8' })
     // fsync 刷盘数据块（A2）：必须在 rename 之前完成，使更名后的目标

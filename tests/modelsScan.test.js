@@ -582,6 +582,8 @@ describe('models:loadStore', () => {
     expect(res.settings.modelsFolder).toBe(root)
     expect(res).not.toHaveProperty('models')
     expect(res.cachedIndex).toBeNull()
+    // O5：启动加载不得通过库设置初始化把 .modelvault 重建到已失效的旧路径
+    await expect(fs.access(path.join(root, '.modelvault'))).rejects.toThrow()
   })
 })
 

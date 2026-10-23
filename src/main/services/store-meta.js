@@ -46,6 +46,17 @@ const SAVE_DELAY = 500
  */
 const JOURNAL_COMPACT_ENTRIES = 200
 
+/**
+ * 根目录可用性探测缓存（O5）：只缓存「可用」结果，避免正常落盘前每次都 stat；
+ * 离线时不缓存负结果，库恢复后下一次保存立即生效。
+ */
+const ROOT_PROBE_TTL_MS = 1000
+/** 离线跳过后自动重试落盘的间隔（ms）：库恢复可用时无需用户再次编辑即可补写 */
+const OFFLINE_RETRY_MS = 10000
+
+let rootProbe = { root: null, at: 0 }
+let offlineRetryTimer = null
+
 /** 当前根目录的元数据，键为相对路径（'/' 分隔） */
 let data = null
 let saveTimer = null
@@ -351,6 +362,8 @@ async function loadJournal(snapshotSeq) {
  * store.json 不存在时创建空数据，并尝试从旧版全局存储迁移属于该目录的记录。
  */
 export async function loadData() {
+  // 根目录可用性缓存可能来自旧根/重载前的状态，加载时重置一次
+  rootProbe = { root: null, at: 0 }
   dataReset = false
   dirtyKeys = new Set()
   journalSeq = 0
@@ -541,6 +554,56 @@ export function setModelMeta(modelId, meta) {
   return normalized
 }
 
+/** 当前模型根目录是否可用（O5：离线库跳过落盘，不重建目录树） */
+async function isCurrentRootAvailable() {
+  const root = getCurrentRoot()
+  if (!root) return false
+  const now = Date.now()
+  if (rootProbe.root === root && now - rootProbe.at < ROOT_PROBE_TTL_MS) return true
+  try {
+    const stat = await fs.stat(root)
+    if (!stat.isDirectory()) return false
+    rootProbe = { root, at: now }
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 确保 .modelvault 已存在（O5）：使用非递归 mkdir——父目录（模型根）离线时
+ * 返回 ENOENT 而不是被 recursive 重建；调用方随后以 createDirs=false 原子写。
+ * @returns {Promise<boolean>} 目录可用时为 true
+ */
+async function ensureDataDir() {
+  try {
+    await fs.mkdir(getDataDir())
+    return true
+  } catch (err) {
+    if (err.code === 'EEXIST') return true
+    logger.warn(`关联存储目录不可用，已跳过元数据落盘: ${err.message}`)
+    return false
+  }
+}
+
+/** 离线跳过后安排一次自动重试（库恢复可用时自动补写内存中的修改） */
+function scheduleOfflineRetry() {
+  if (offlineRetryTimer || saveSuppressed) return
+  offlineRetryTimer = setTimeout(() => {
+    offlineRetryTimer = null
+    if (getCurrentRoot() && !saveSuppressed) {
+      saveStoreDeltaNow().catch(notifyStoreSaveError)
+    }
+  }, OFFLINE_RETRY_MS)
+  offlineRetryTimer.unref?.()
+}
+
+function clearOfflineRetry() {
+  if (!offlineRetryTimer) return
+  clearTimeout(offlineRetryTimer)
+  offlineRetryTimer = null
+}
+
 /** 防抖保存：短时间内多次修改只落盘一次 */
 function scheduleSave() {
   // 恢复重载窗口内不调度：定时器携带的是恢复前的旧内存
@@ -568,16 +631,19 @@ function scheduleSave() {
  * seq ≤ snapshotSeq 的旧批次，不会用旧 delta 回滚快照内容。
  */
 async function writeSnapshot() {
+  if (!(await ensureDataDir())) return false
   // 版本快照必须在同步序列化之前捕获：JSON.stringify 期间/写盘 await 期间
   // 若有新变更，dirtyKeys 不能整体清空（否则丢失尚未落盘的修改）
   const versionAtWrite = mutationVersion
   const payload = { version: 1, models: data.models, journalSeq }
   const text = JSON.stringify(payload)
-  await atomicWriteFile(getDataFilePath(), text)
+  // createDirs=false（O5）：目录已由 ensureDataDir 确认，写入阶段绝不重建根目录树
+  await atomicWriteFile(getDataFilePath(), text, { createDirs: false })
   hasSnapshot = true
   journalEntryCount = 0
   if (mutationVersion === versionAtWrite) dirtyKeys.clear()
   await removeJournalDir()
+  return true
 }
 
 /**
@@ -587,6 +653,7 @@ async function writeSnapshot() {
  * @param {string[]} keys 脏键列表
  */
 async function writeDeltaJournal(keys) {
+  if (!(await ensureDataDir())) return false
   const seq = journalSeq + 1
   const entries = []
   /** 写入内容对应的元数据引用：写盘期间被再次修改的键必须保留为脏 */
@@ -599,13 +666,19 @@ async function writeDeltaJournal(keys) {
   }
   if (entries.length === 0) {
     dirtyKeys.clear()
-    return
+    return true
   }
-  const file = path.join(
-    getJournalDir(),
-    `delta-${String(seq).padStart(12, '0')}.json`
-  )
-  await atomicWriteFile(file, JSON.stringify({ seq, entries }))
+  const journalDir = getJournalDir()
+  try {
+    await fs.mkdir(journalDir)
+  } catch (err) {
+    if (err.code !== 'EEXIST') {
+      logger.warn(`增量日志目录不可用，已跳过元数据落盘: ${err.message}`)
+      return false
+    }
+  }
+  const file = path.join(journalDir, `delta-${String(seq).padStart(12, '0')}.json`)
+  await atomicWriteFile(file, JSON.stringify({ seq, entries }), { createDirs: false })
   journalSeq = seq
   journalEntryCount += entries.length
   for (const [key, metaAtWrite] of written) {
@@ -614,6 +687,7 @@ async function writeDeltaJournal(keys) {
       dirtyKeys.delete(key)
     }
   }
+  return true
 }
 
 /**
@@ -630,16 +704,25 @@ async function runSave(forceSnapshot) {
   }
   saving = true
   try {
+    // O5：库目录离线（被移动/盘符未挂载）时跳过序列化与写盘，
+    // 脏数据保留在内存，并安排恢复后的自动补写——绝不重建模型根目录树
+    if (!(await isCurrentRootAvailable())) {
+      if (dirtyKeys.size > 0 || journalEntryCount > 0) scheduleOfflineRetry()
+      return
+    }
     const keys = [...dirtyKeys]
+    let wrote = true
     if (
       forceSnapshot ||
       !hasSnapshot ||
       journalEntryCount + keys.length >= JOURNAL_COMPACT_ENTRIES
     ) {
-      await writeSnapshot()
+      wrote = await writeSnapshot()
     } else if (keys.length > 0) {
-      await writeDeltaJournal(keys)
+      wrote = await writeDeltaJournal(keys)
     }
+    if (wrote) clearOfflineRetry()
+    else if (dirtyKeys.size > 0 || journalEntryCount > 0) scheduleOfflineRetry()
   } catch (err) {
     notifyStoreSaveError(err)
   } finally {
@@ -712,6 +795,9 @@ export async function flushStoreSave() {
  */
 export async function switchDataRoot(root) {
   await flushStoreSave()
+  // O5：切根后旧根的可用性缓存与离线重试定时器一并作废
+  clearOfflineRetry()
+  rootProbe = { root: null, at: 0 }
   setDataRoot(root)
 }
 

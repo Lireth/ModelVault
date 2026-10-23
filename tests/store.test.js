@@ -1155,3 +1155,65 @@ describe('旧版存储迁移', () => {
     }
   })
 })
+
+describe('库离线写入防护（O5）', () => {
+  it('根目录离线时跳过元数据落盘且不重建目录，恢复后补写内存修改', async () => {
+    const abs = path.join(root, 'offline.safetensors')
+    setModelMeta(abs, { note: '离线修改' })
+    // 模拟库被移动/盘符卸载：整个根目录消失
+    await fs.rm(root, { recursive: true, force: true })
+
+    await saveStoreNow()
+    // 已安排重试时再次保存直接复用定时器（不重复调度）
+    await saveStoreNow()
+    // 关键：写链不得通过 mkdir 把根目录/.modelvault 重新建出来
+    await expect(fs.access(root)).rejects.toThrow()
+
+    // 库恢复可用：内存中的修改在下一次保存时补写
+    await fs.mkdir(root)
+    await saveStoreNow()
+    const parsed = JSON.parse(
+      await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
+    )
+    expect(parsed.models['offline.safetensors'].note).toBe('离线修改')
+  })
+
+  it('库根路径变成普通文件时同样跳过落盘（目录判定）', async () => {
+    await fs.rm(root, { recursive: true, force: true })
+    await fs.writeFile(root, 'not-a-directory')
+
+    await saveStoreNow()
+
+    // 路径仍是文件，未被写链替换为目录树
+    expect((await fs.stat(root)).isFile()).toBe(true)
+  })
+
+  it('根目录可用时连续保存复用探测缓存', async () => {
+    const abs = path.join(root, 'cached.safetensors')
+    setModelMeta(abs, { note: 'v1' })
+    await saveStoreNow()
+
+    setModelMeta(abs, { note: 'v2' })
+    await saveStoreNow()
+
+    const parsed = JSON.parse(
+      await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
+    )
+    expect(parsed.models['cached.safetensors'].note).toBe('v2')
+  })
+
+  it('atomicWriteFile createDirs:false 不创建缺失目录', async () => {
+    const target = path.join(root, 'missing', 'x.json')
+    await expect(atomicWriteFile(target, 'x', { createDirs: false })).rejects.toThrow()
+    await expect(fs.access(path.join(root, 'missing'))).rejects.toThrow()
+  })
+
+  it('库目录离线时设置更新不重建目录（内存仍生效）', async () => {
+    await fs.rm(root, { recursive: true, force: true })
+
+    await updateSettings({ theme: 'light' })
+
+    expect(getSettings().theme).toBe('light')
+    await expect(fs.access(root)).rejects.toThrow()
+  })
+})

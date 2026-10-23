@@ -229,6 +229,15 @@ function getSettingsFilePath() {
   return path.join(app.getPath('userData'), SETTINGS_FILE)
 }
 
+/** 目标库目录是否可用（O5：离线库跳过库设置写入，避免重建 .modelvault） */
+async function isDirectoryAvailable(dir) {
+  try {
+    return (await fs.stat(dir)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 /** 加载指定根目录的库设置文件（.modelvault/settings.json）。
  * @param {string} root 模型根目录绝对路径
  * @param {object|null} [seedRaw] 首次初始化种子（旧版全局设置的遗留字段；空则用默认值）
@@ -245,8 +254,14 @@ async function loadLibrarySettings(root, seedRaw = null) {
     return normalizeLibrarySettings(parsed)
   } catch (err) {
     if (err.code === 'ENOENT') {
-      // 该库首次打开：以迁移种子（旧版全局设置遗留字段）或默认值初始化并落盘
+      // 该库首次打开：以迁移种子（旧版全局设置遗留字段）或默认值初始化并落盘。
+      // O5：库目录离线（被移动/盘符未挂载）时只驻内存，不写入（否则 mkdir
+      // 会把 .modelvault 重建到已失效的旧路径）
       const seeded = normalizeLibrarySettings(seedRaw)
+      if (!(await isDirectoryAvailable(root))) {
+        logger.warn(`模型库目录不可用，跳过库设置初始化写入: ${root}`)
+        return seeded
+      }
       try {
         await enqueueLibraryWrite(root, JSON.stringify(seeded, null, 2))
         if (seedRaw) logger.info(`应用设置已迁移至模型库: ${file}`)
@@ -392,7 +407,21 @@ export async function flushSettingsSave() {
  * @returns {Promise<void>} 本次写入完成（失败时 reject，链本身继续服务后续写入）
  */
 function enqueueLibraryWrite(root, text) {
-  const task = libraryWriteChain.then(() => atomicWriteFile(getLibSettingsFilePath(root), text))
+  const task = libraryWriteChain.then(async () => {
+    // O5：执行时再次确认库目录可用（排队期间可能被移动/卸载）；
+    // 抛出后由 updateSettings 统一经 notifyStoreSaveError 告知用户
+    if (!(await isDirectoryAvailable(root))) {
+      throw new Error(`模型库目录不可用，已跳过设置落盘: ${root}`)
+    }
+    const file = getLibSettingsFilePath(root)
+    try {
+      // 非递归 mkdir：库根离线时返回 ENOENT，绝不重建根目录树
+      await fs.mkdir(path.dirname(file))
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err
+    }
+    await atomicWriteFile(file, text, { createDirs: false })
+  })
   libraryWriteChain = task.catch(() => {})
   return task
 }
