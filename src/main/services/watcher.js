@@ -4,11 +4,7 @@ import path from 'node:path'
 import { BrowserWindow } from 'electron'
 import logger from '../logger'
 import { relativeWithin, runWithConcurrency } from '../utils'
-import {
-  MAX_SCAN_DEPTH,
-  SCAN_EXCLUDED_DIRS,
-  isExcludedScanEntryName
-} from './scanner'
+import { MAX_SCAN_DEPTH, isExcludedScanName, isVisibleScanEntry } from './scanner'
 
 /**
  * 模型目录变更监控（E8；A8 轮询快照 + OP-05 原生事件加速）：
@@ -139,9 +135,9 @@ function nativeEventDirs(w, filename) {
   if (!rel) return []
   const segments = rel.split('/').filter(Boolean)
   for (const seg of segments) {
-    // 关联存储/隐藏项/put_ 临时项/用户排除目录：与快照遍历同一排除策略，
-    // 从机制上避免监听自身缩略图与元数据写入造成自激励
-    if (isExcludedScanEntryName(seg) || w.excludeNames.has(seg.toLowerCase())) return null
+    // 关联存储/隐藏项/put_ 临时项/内置与用户排除目录：与快照遍历共享
+    // isExcludedScanName（O11），从机制上避免监听自身写入造成自激励
+    if (isExcludedScanName(seg, w.excludeNames)) return null
   }
   const slash = rel.lastIndexOf('/')
   return [slash < 0 ? '' : rel.slice(0, slash)]
@@ -255,18 +251,8 @@ export async function collectDirSnapshot(root, skipNames = new Set(), options = 
         if (isRoot) throw err
         return
       }
-      // 与 scanner 完全一致的条目过滤：隐藏项/put_、符号链接、内置排除目录、
-      // 用户排除目录（仅目录名匹配）
-      const visible = []
-      for (const entry of entries) {
-        if (isExcludedScanEntryName(entry.name)) continue
-        if (entry.isSymbolicLink()) continue
-        if (entry.isDirectory()) {
-          const lowerName = entry.name.toLowerCase()
-          if (SCAN_EXCLUDED_DIRS.has(lowerName) || skip.has(lowerName)) continue
-        }
-        visible.push(entry)
-      }
+      // O11：与 scanner 共享 isVisibleScanEntry，规则不再两侧各写一份
+      const visible = entries.filter((entry) => isVisibleScanEntry(entry, skip))
       const canDescend = depth < MAX_SCAN_DEPTH
       if (!withStats) {
         snapshot.set(dir, visible.map((e) => e.name).sort())

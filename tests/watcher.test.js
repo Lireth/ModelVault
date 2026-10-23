@@ -116,6 +116,12 @@ describe('OP-05 原生事件监听（加速触发，轮询兜底）', () => {
     await sleep(300)
     // 关联存储目录的写入不触发广播（与轮询排除策略一致）
     expect(sentEvents.length).toBe(before)
+
+    // O11：内置排除目录（node_modules）的事件同样忽略，不再各自维护规则
+    await fs.mkdir(path.join(root, 'node_modules', 'pkg'), { recursive: true })
+    await fs.writeFile(path.join(root, 'node_modules', 'pkg', 'noise.js'), 'x')
+    await sleep(300)
+    expect(sentEvents.length).toBe(before)
   })
 })
 

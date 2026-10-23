@@ -9,6 +9,8 @@ import {
   findSidecarCivitaiInfo,
   findSidecarPreview,
   findSidecarText,
+  isExcludedScanName,
+  isVisibleScanEntry,
   scanModels,
   sidecarImportPatch
 } from '../src/main/services/scanner'
@@ -20,6 +22,42 @@ import {
  * - scanModels 递归扫描（扩展名过滤、排除目录、进度回调）
  * - findSidecarPreview 同名预览图查找
  */
+
+describe('扫描/监控共享遍历策略（O11）', () => {
+  /** 构造 readdir(withFileTypes) 最小 Dirent 替身 */
+  function dirent(name, kind) {
+    return {
+      name,
+      isDirectory: () => kind === 'dir',
+      isFile: () => kind === 'file',
+      isSymbolicLink: () => kind === 'sym'
+    }
+  }
+
+  it('目录项可见性：隐藏/put_/符号链接/内置与用户排除目录均不可见', () => {
+    const userExclude = new Set(['temp'])
+    expect(isVisibleScanEntry(dirent('model.safetensors', 'file'), userExclude)).toBe(true)
+    expect(isVisibleScanEntry(dirent('lora', 'dir'), userExclude)).toBe(true)
+    expect(isVisibleScanEntry(dirent('.hidden', 'dir'), userExclude)).toBe(false)
+    expect(isVisibleScanEntry(dirent('put_temp.bin', 'file'), userExclude)).toBe(false)
+    expect(isVisibleScanEntry(dirent('link', 'sym'), userExclude)).toBe(false)
+    expect(isVisibleScanEntry(dirent('node_modules', 'dir'), userExclude)).toBe(false)
+    expect(isVisibleScanEntry(dirent('$RECYCLE.BIN', 'dir'), userExclude)).toBe(false)
+    expect(isVisibleScanEntry(dirent('TEMP', 'dir'), userExclude)).toBe(false)
+    // 用户排除仅作用于目录：同名文件不被误伤
+    expect(isVisibleScanEntry(dirent('temp', 'file'), userExclude)).toBe(true)
+  })
+
+  it('目录名排除：隐藏/put_/内置/用户排除（大小写不敏感），普通名称放行', () => {
+    const userExclude = new Set(['cache'])
+    expect(isExcludedScanName('.modelvault', userExclude)).toBe(true)
+    expect(isExcludedScanName('put_upload.tmp', userExclude)).toBe(true)
+    expect(isExcludedScanName('Node_Modules', userExclude)).toBe(true)
+    expect(isExcludedScanName('System Volume Information', userExclude)).toBe(true)
+    expect(isExcludedScanName('CACHE', userExclude)).toBe(true)
+    expect(isExcludedScanName('lora', userExclude)).toBe(false)
+  })
+})
 
 describe('classifyModel', () => {
   it('按文件夹段分类（不区分大小写）', () => {

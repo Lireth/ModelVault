@@ -66,6 +66,35 @@ export function isExcludedScanDirName(name) {
 }
 
 /**
+ * 扫描/监控共享的目录名排除策略（O11）：隐藏项/put_ 临时项、内置排除目录、
+ * 用户排除目录（大小写不敏感）。原生事件只有路径段、无法判断类型，因此按
+ * 名称统一判定；目录快照与扫描遍历则经 isVisibleScanEntry 使用。
+ * @param {unknown} name 条目名
+ * @param {Set<string>} [userExclude] 用户排除目录名小写集合
+ * @returns {boolean}
+ */
+export function isExcludedScanName(name, userExclude = new Set()) {
+  if (isExcludedScanEntryName(name)) return true
+  if (isExcludedScanDirName(name)) return true
+  return typeof name === 'string' && userExclude.has(name.toLowerCase())
+}
+
+/**
+ * 扫描/监控共享的目录项可见性策略（O11）：隐藏项/put_、符号链接、内置排除
+ * 目录与用户排除目录既不记录也不递归——两侧规则演进必须经由此单一入口，
+ * 避免监控侧关注扫描侧永远不看的目录（自激励/无效唤醒）。
+ * @param {import('node:fs').Dirent} entry readdir(withFileTypes) 条目
+ * @param {Set<string>} [userExclude] 用户排除目录名小写集合
+ * @returns {boolean}
+ */
+export function isVisibleScanEntry(entry, userExclude = new Set()) {
+  if (!entry || isExcludedScanEntryName(entry.name)) return false
+  if (entry.isSymbolicLink()) return false
+  if (entry.isDirectory() && isExcludedScanName(entry.name, userExclude)) return false
+  return true
+}
+
+/**
  * 分类规则：按文件夹段匹配（ComfyUI / WebUI 常见目录布局，全部小写比较）。
  * 顺序即优先级。Embedding、ControlNet、放大模型、HyperNetwork 等不再单独分类，
  * 统一归入 other（其他模型），可在详情页通过二级分类标签标注。
@@ -191,18 +220,16 @@ export async function scanModels(root, onProgress, options = {}) {
     // 先遍历目录项：入队子目录 + 收集待 stat 的模型文件
     const fileEntries = []
     for (const entry of entries) {
+      // O11：与 watcher 共享同一可见性策略（隐藏/put_/符号链接/排除目录）
+      if (!isVisibleScanEntry(entry, userExclude)) continue
       const name = entry.name
-      if (isExcludedScanEntryName(name)) continue
-      // 跳过符号链接/junction：避免目录环、越界扫描与重复条目
-      if (entry.isSymbolicLink()) continue
 
       const fullPath = path.join(dir, name)
       const relChild = rel ? `${rel}/${name}` : name
 
       if (entry.isDirectory()) {
-        const lowerName = name.toLowerCase()
         // descend=false 仅用于子树集合中的根节点（''）：不递归后代
-        if (descend && !isExcludedScanDirName(name) && !userExclude.has(lowerName)) {
+        if (descend) {
           stack.push({ dir: fullPath, depth: depth + 1, rel: relChild, descend: true })
         }
         continue
