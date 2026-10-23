@@ -130,8 +130,11 @@ function isAllowedCivitaiApiUrl(url) {
  * 发起 Civitai API JSON 请求（全局节流 + 429 退避重试）：
  * 429 时按 Retry-After 等待后重试（无头兜底 60s，等待上限 90s），
  * 超出重试次数后把最后一次 429 响应交回调用方按 HTTP 错误处理。
+ * 超时按 attempt 独立计时（Civitai 429 修复）：在全局节流等待之后创建
+ * AbortSignal.timeout，避免等待 Retry-After（最长 90s）后复用第一次请求
+ * 已过期的 signal，使重试必然以 AbortError 失败。
  * @param {string} url API 地址
- * @param {object} [options] net.fetch 选项
+ * @param {object} [options] net.fetch 选项（signal 由本函数按 attempt 注入）
  * @returns {Promise<{response: Response} | {networkError: Error}>}
  */
 async function fetchCivitaiApi(url, options = {}) {
@@ -141,7 +144,7 @@ async function fetchCivitaiApi(url, options = {}) {
     try {
       response = await fetchWithAllowedRedirects(
         url,
-        options,
+        { ...options, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
         isAllowedCivitaiApiUrl,
         'Civitai 请求'
       )
@@ -216,8 +219,7 @@ export async function fetchCivitaiVersionByHash(hash) {
   const { response, networkError } = await fetchCivitaiApi(
     `${CIVITAI_API_BASE}/model-versions/by-hash/${hash}`,
     {
-      headers: { 'User-Agent': 'ModelVault', Accept: 'application/json' },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+      headers: { 'User-Agent': 'ModelVault', Accept: 'application/json' }
     }
   )
   if (networkError) {
@@ -312,8 +314,7 @@ export async function fetchCivitaiModelType(modelId) {
   const { response, networkError } = await fetchCivitaiApi(
     `${CIVITAI_API_BASE}/models/${modelId}`,
     {
-      headers: { 'User-Agent': 'ModelVault', Accept: 'application/json' },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+      headers: { 'User-Agent': 'ModelVault', Accept: 'application/json' }
     }
   )
   if (networkError) {
