@@ -61,7 +61,14 @@ async function ensureHash(id, meta, mtimeMs) {
   if (meta.hash && meta.hashMtime === mtimeMs) {
     return { hash: meta.hash, meta }
   }
-  const hash = await computeAndCacheHash(id, mtimeMs)
+  let hash
+  try {
+    hash = await computeAndCacheHash(id, mtimeMs, { priority: true })
+  } catch (err) {
+    // 共享的后台任务可能被另一个前台任务抢占：本次识别重试一次（前台通道）
+    if (err?.name !== 'PreemptedError') throw err
+    hash = await computeAndCacheHash(id, mtimeMs, { priority: true })
+  }
   // 重读最新元数据：哈希计算期间用户可能已并发保存其他字段
   return { hash, meta: getModelMeta(id) || meta }
 }

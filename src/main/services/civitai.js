@@ -204,10 +204,11 @@ const MIME_EXT = {
  * @param {import('electron').AbortSignal} [signal] 取消信号（可选）
  * @param {(hashedBytes: number, totalBytes: number) => void} [onProgress]
  *   哈希进度回调（可选，每块读取后触发；预热链路据此推送进度标识）
+ * @param {{priority?: boolean}} [options] priority=true 为前台任务（OPT-08）
  * @returns {Promise<string>} 64 位十六进制哈希
  */
-export async function computeFileHash(filePath, signal, onProgress) {
-  return computeFileHashOffThread(filePath, signal, onProgress)
+export async function computeFileHash(filePath, signal, onProgress, options = {}) {
+  return computeFileHashOffThread(filePath, signal, onProgress, options)
 }
 
 /**

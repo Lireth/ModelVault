@@ -139,9 +139,12 @@ let paused = false
  * 回写 hash/hashMtime。
  * @param {string} id 模型绝对路径
  * @param {number} mtimeMs 调用方 stat 到的文件 mtime（保证缓存与文件版本对应）
+ * @param {{priority?: boolean}} [options] priority=true 为前台任务（详情页/识别），
+ *   线程池会优先执行并让在途后台任务让路（OPT-08）
  * @returns {Promise<string>} 64 位十六进制 SHA256
  */
-export function computeAndCacheHash(id, mtimeMs) {
+export function computeAndCacheHash(id, mtimeMs, options = {}) {
+  const priority = options.priority === true
   const current = inflight.get(id)
   if (current && current.mtimeMs === mtimeMs) return current.promise
   const promise = (async () => {
@@ -150,12 +153,17 @@ export function computeAndCacheHash(id, mtimeMs) {
     const snap = { active: true, id, percent: 0, hashedBytes: 0, totalBytes: 0, hash: '' }
     try {
       emitProgress(snap, true)
-      const hash = await computeFileHash(id, undefined, (hashedBytes, totalBytes) => {
-        snap.hashedBytes = hashedBytes
-        snap.totalBytes = totalBytes
-        snap.percent = totalBytes > 0 ? Math.min(100, Math.round((hashedBytes / totalBytes) * 100)) : 0
-        emitProgress(snap)
-      })
+      const hash = await computeFileHash(
+        id,
+        undefined,
+        (hashedBytes, totalBytes) => {
+          snap.hashedBytes = hashedBytes
+          snap.totalBytes = totalBytes
+          snap.percent = totalBytes > 0 ? Math.min(100, Math.round((hashedBytes / totalBytes) * 100)) : 0
+          emitProgress(snap)
+        },
+        { priority }
+      )
       snap.hash = hash
       // 写盘前重读最新元数据：哈希计算期间用户可能已并发保存其他字段
       const latest = getModelMeta(id) || {}
@@ -429,9 +437,23 @@ async function drain() {
       const meta = getModelMeta(id)
       if (meta?.hash && meta.hashMtime === stat.mtimeMs) continue // 缓存有效，免计算
       try {
-        await computeAndCacheHash(id, stat.mtimeMs)
+        // 详情页/识别 priority 任务走线程池前台通道；后台批量保持普通优先级
+        await computeAndCacheHash(id, stat.mtimeMs, { priority: task.force })
         logger.info(`后台哈希预热完成: ${id}`)
       } catch (err) {
+        if (err?.name === 'PreemptedError') {
+          // 前台任务让路：后台任务被线程池在块边界中止，重新入队等待前台完成，
+          // 不视为失败，避免用户打开详情后批量预热静默丢模型。
+          logger.info(`后台哈希任务让路，已重新入队: ${id}`)
+          // 该任务出队时已计入 done/consumed；让路后重新排队，回退计数，
+          // 待重算完成时再次计入，避免进度出现“done + remaining > 总数”。
+          if (consumedIds.delete(id)) doneCount = Math.max(0, doneCount - 1)
+          if (!queued.has(id)) {
+            queued.add(id)
+            queue.push({ id, force: false, mode: task.mode })
+          }
+          continue
+        }
         logger.warn(`后台哈希预热失败: ${id} ${err.message}`)
       }
     }

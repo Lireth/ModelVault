@@ -113,6 +113,18 @@ describe('computeAndCacheHash', () => {
     await expect(computeAndCacheHash(id, 1000)).rejects.toThrow('磁盘错误')
     expect(getModelMeta(id)?.hash).toBeUndefined()
   })
+
+  it('priority 透传到线程池前台通道', async () => {
+    const id = await makeModel('priority.safetensors')
+    computeFileHash.mockResolvedValue(fakeHash(30))
+    await computeAndCacheHash(id, 1000, { priority: true })
+    expect(computeFileHash).toHaveBeenCalledWith(
+      id,
+      undefined,
+      expect.any(Function),
+      { priority: true }
+    )
+  })
 })
 
 describe('requestHashWarmup（队列消费）', () => {
@@ -306,6 +318,29 @@ describe('哈希预热策略（O1：体积预筛 + 按需计算）', () => {
 
     expect(computeFileHash).toHaveBeenCalledTimes(1)
     expect(computeFileHash.mock.calls[0][0]).toBe(hot)
+  })
+
+  it('后台任务被前台抢占后重新入队，最终仍完成且不记为失败', async () => {
+    const a = await makeModel('p1.safetensors')
+    const b = await makeModel('p2.safetensors')
+    let firstA = true
+    computeFileHash.mockImplementation(async (file) => {
+      if (file === a && firstA) {
+        firstA = false
+        const err = new Error('让路')
+        err.name = 'PreemptedError'
+        throw err
+      }
+      return file === a ? fakeHash(31) : fakeHash(32)
+    })
+
+    requestHashWarmup([a, b], { mode: 'full', full: true, delayMs: 0 })
+    await whenWarmupIdle()
+
+    // a 第一次被抢占 → 重新入队到队尾；b 先完成，随后 a 重算完成
+    expect(computeFileHash).toHaveBeenCalledTimes(3)
+    expect(getModelMeta(a).hash).toBe(fakeHash(31))
+    expect(getModelMeta(b).hash).toBe(fakeHash(32))
   })
 
   it('单个模型哈希失败只记录日志，队列继续处理后续模型', async () => {

@@ -72,6 +72,50 @@ it('多任务串行执行：按入队顺序逐个完成（并发 1）', async ()
   expect(order).toEqual(['a', 'b'])
 })
 
+it('前台优先级任务先于已排队的后台任务执行', async () => {
+  const a = await writeFixture('p1.bin', Buffer.from('foreground-a'))
+  const b = await writeFixture('p2.bin', Buffer.from('background-b'))
+  const c = await writeFixture('p3.bin', Buffer.from('foreground-c'))
+
+  const order = []
+  // a 先占用 current（前台）；b 为后台排队；c 为前台插队。
+  // a 完成前 b/c 已同步入队，故 c 必须越过 b 先执行。
+  const pa = computeFileHashOffThread(a.abs, undefined, undefined, { priority: true })
+    .then((h) => { order.push('a'); return h })
+  const pb = computeFileHashOffThread(b.abs)
+    .then((h) => { order.push('b'); return h })
+  const pc = computeFileHashOffThread(c.abs, undefined, undefined, { priority: true })
+    .then((h) => { order.push('c'); return h })
+
+  const [ha, hb, hc] = await Promise.all([pa, pb, pc])
+  expect(ha).toBe(a.expected)
+  expect(hb).toBe(b.expected)
+  expect(hc).toBe(c.expected)
+  expect(order).toEqual(['a', 'c', 'b'])
+})
+
+it('前台任务抢占在途后台任务：后台任务以 PreemptedError 让路', async () => {
+  // 64MB 大文件包含多个 8MB 读块，worker 会在块边界检查 abort：
+  // 前台任务入队后后台任务必须中止并让出唯一执行位。
+  const big = await writeFixture('preempt-big.bin', Buffer.alloc(64 * 1024 * 1024, 1))
+  const small = await writeFixture('preempt-small.bin', Buffer.from('front-task'))
+
+  const background = computeFileHashOffThread(big.abs)
+  const backgroundOutcome = background.then(
+    () => 'resolved',
+    (err) => err
+  )
+  const foreground = computeFileHashOffThread(
+    small.abs,
+    undefined,
+    undefined,
+    { priority: true }
+  )
+
+  await expect(foreground).resolves.toBe(small.expected)
+  expect(await backgroundOutcome).toMatchObject({ name: 'PreemptedError' })
+})
+
 it('在途任务取消：立即 reject AbortError（同步 abort，不依赖读块时序）', async () => {
   const { abs } = await writeFixture('d.bin', Buffer.alloc(1024, 7))
   const controller = new AbortController()

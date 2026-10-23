@@ -88,11 +88,24 @@ let worker = null
 /** 派发序号：任务 id 单调递增，worker 消息按 id 回路由 */
 let nextTaskId = 0
 
-/** FIFO 任务队列（worker 并发 1：同一时刻至多一个在途任务） */
-const taskQueue = []
+/**
+ * 双通道任务队列（worker 并发 1：同一时刻至多一个在途任务）：
+ * - foreground：详情页/识别/预热 priority 任务，优先出队；
+ * - background：批量预热等后台任务，让路于前台。
+ * 两个队列仍严格串行执行，优先级只影响取队顺序。
+ */
+const foregroundQueue = []
+const backgroundQueue = []
 
 /** 当前在途任务（null 表示空闲） */
 let currentTask = null
+
+/** 构造“后台任务已让路”错误（仅线程池内部使用） */
+function preemptedError() {
+  const err = new Error('后台哈希任务已让路')
+  err.name = 'PreemptedError'
+  return err
+}
 
 /**
  * 惰性创建 worker 并绑定消息路由：
@@ -116,8 +129,14 @@ function ensureWorker() {
       return
     }
     if (msg.type === 'done') {
+      // 后台任务被前台抢占：worker 在块边界中止后回传 AbortError。
+      // 这里不自动重排（由哈希预热层按任务语义重新入队），只把错误类型
+      // 改为 PreemptedError，避免上层把让路误报为“计算失败”。
+      const preempted = task.preempting && msg.name === 'AbortError'
       settleCurrent()
-      if (msg.error !== undefined) {
+      if (preempted) {
+        task.reject(preemptedError())
+      } else if (msg.error !== undefined) {
         const err = new Error(msg.error)
         if (msg.name) err.name = msg.name
         task.reject(err)
@@ -144,17 +163,54 @@ function settleCurrent() {
   currentTask = null
 }
 
+/** 从队列取下一个未取消任务（前台优先，后台兜底） */
+function nextTask() {
+  for (const queue of [foregroundQueue, backgroundQueue]) {
+    while (queue.length > 0) {
+      const task = queue.shift()
+      if (!task.settled) return task
+    }
+  }
+  return null
+}
+
 /**
- * 从队列泵出下一任务（串行）：队列头已取消的任务直接跳过结算。
+ * 入队并按需抢占：前台任务入队时，若当前正在执行后台任务，
+ * 通知 worker 在下一读块边界中止；等 worker 回传 done 后再启动前台任务，
+ * 避免新旧任务并发读写同一个 worker 的共享 abort 标志。
+ */
+function enqueueTask(task) {
+  if (task.priority) {
+    foregroundQueue.push(task)
+    if (currentTask && !currentTask.priority && !currentTask.preempting && worker) {
+      currentTask.preempting = true
+      worker.postMessage({ type: 'abort', id: currentTask.id })
+    }
+  } else {
+    backgroundQueue.push(task)
+  }
+  pump()
+}
+
+/** 从两个队列中移除指定任务（取消排队任务用） */
+function dequeueTask(task) {
+  for (const queue of [foregroundQueue, backgroundQueue]) {
+    const idx = queue.indexOf(task)
+    if (idx >= 0) {
+      queue.splice(idx, 1)
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * 从队列泵出下一任务（串行）：前台优先；队列中已取消的任务直接跳过。
  */
 function pump() {
   if (currentTask) return
-  const task = taskQueue.shift()
+  const task = nextTask()
   if (!task) return
-  if (task.settled) {
-    pump()
-    return
-  }
   currentTask = task
   ensureWorker().postMessage({ type: 'hash', id: task.id, filePath: task.filePath })
 }
@@ -166,12 +222,14 @@ function failAll(err) {
     settleCurrent()
     task.reject(err)
   }
-  while (taskQueue.length > 0) {
-    const task = taskQueue.shift()
-    if (!task.settled) {
-      task.settled = true
-      if (task.abortListener) task.signal?.removeEventListener('abort', task.abortListener)
-      task.reject(err)
+  for (const queue of [foregroundQueue, backgroundQueue]) {
+    while (queue.length > 0) {
+      const task = queue.shift()
+      if (!task.settled) {
+        task.settled = true
+        if (task.abortListener) task.signal?.removeEventListener('abort', task.abortListener)
+        task.reject(err)
+      }
     }
   }
   if (worker) {
@@ -192,9 +250,11 @@ function failAll(err) {
  * @param {import('electron').AbortSignal} [signal] 取消信号（可选）
  * @param {(hashedBytes: number, totalBytes: number) => void} [onProgress]
  *   哈希进度回调（可选，每块读取后触发）
+ * @param {{priority?: boolean}} [options] priority=true 为前台任务：
+ *   优先于排队中的后台任务，并可在块边界抢占在途后台任务（OPT-08）
  * @returns {Promise<string>} 64 位十六进制哈希
  */
-export function computeFileHashOffThread(filePath, signal, onProgress) {
+export function computeFileHashOffThread(filePath, signal, onProgress, options = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(abortError())
@@ -205,6 +265,8 @@ export function computeFileHashOffThread(filePath, signal, onProgress) {
       filePath,
       signal,
       onProgress,
+      priority: options.priority === true,
+      preempting: false,
       abortListener: null,
       settled: false,
       resolve: (hash) => {
@@ -225,17 +287,14 @@ export function computeFileHashOffThread(filePath, signal, onProgress) {
         settleCurrent()
         task.reject(abortError())
         pump()
-      } else {
+      } else if (dequeueTask(task)) {
         // 尚在队列：直接出队结算
-        const idx = taskQueue.indexOf(task)
-        if (idx >= 0) taskQueue.splice(idx, 1)
         task.settled = true
         task.reject(abortError())
       }
     }
     signal?.addEventListener('abort', task.abortListener, { once: true })
-    taskQueue.push(task)
-    pump()
+    enqueueTask(task)
   })
 }
 

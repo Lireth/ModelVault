@@ -177,8 +177,27 @@ describe('models:civitaiIdentify', () => {
 
     await getRegisteredHandler('models:civitaiIdentify')(makeEvent(), { id })
 
-    expect(computeAndCacheHash).toHaveBeenCalledWith(id, mtimeMs)
+    expect(computeAndCacheHash).toHaveBeenCalledWith(id, mtimeMs, { priority: true })
     expect(fetchCivitaiVersionByHash).toHaveBeenCalledWith('fresh-hash')
+  })
+
+  it('共享哈希被其他前台任务抢占时自动重试一次', async () => {
+    const id = await touchModel('retry.safetensors')
+    const { mtimeMs } = await fs.stat(id)
+    const preempted = new Error('让路')
+    preempted.name = 'PreemptedError'
+    computeAndCacheHash
+      .mockRejectedValueOnce(preempted)
+      .mockResolvedValueOnce('retry-hash')
+    fetchCivitaiVersionByHash.mockResolvedValue({ found: false })
+
+    const res = await getRegisteredHandler('models:civitaiIdentify')(makeEvent(), { id })
+
+    expect(res).toEqual({ found: false })
+    expect(computeAndCacheHash).toHaveBeenCalledTimes(2)
+    expect(computeAndCacheHash).toHaveBeenNthCalledWith(1, id, mtimeMs, { priority: true })
+    expect(computeAndCacheHash).toHaveBeenNthCalledWith(2, id, mtimeMs, { priority: true })
+    expect(fetchCivitaiVersionByHash).toHaveBeenCalledWith('retry-hash')
   })
 
   it('已有 baseModel 不覆盖（宁留旧不覆盖）；无匹配与 API 错误透传', async () => {
