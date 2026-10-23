@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config'
+﻿import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 
 // 单元测试配置：
@@ -36,6 +36,7 @@ export default defineConfig({
         // 纯 re-export 门面（C2/A-04 拆分保持导入路径的聚合入口，无逻辑）：
         // 计入门面只会以 0% 稀释基线，逻辑在子模块中计量
         'src/main/services/store.js',
+        'src/main/services/backup.js',
         'src/renderer/src/store/appStore.js',
         'src/renderer/src/store/multiselect.js'
       ],
@@ -63,9 +64,12 @@ export default defineConfig({
         '**/src/main/services/watcher.js': {
           statements: 90, branches: 78, functions: 96, lines: 93.5
         },
-        // 备份恢复（zip 打包/恢复/.bak 留存）
-        '**/src/main/services/backup.js': {
-          statements: 87, branches: 80, functions: 76, lines: 90
+        // 备份恢复（zip 流式编解码/导出/恢复/.bak 留存；O2 拆分后逻辑位于
+        // backup-format/backup-zip/backup-export/backup-restore 四个子模块，
+        // 门面 backup.js 已排除；glob 键对匹配文件取聚合值判定，
+        // 地板 = 拆分后实际聚合基线 91.7/86.7/88.3/93.3 下浮 ~4pt）
+        '**/src/main/services/backup-*.js': {
+          statements: 87, branches: 82, functions: 84, lines: 89
         },
         // 元数据重关联（库内移动/重命名后「宁可不绑也绝不绑错」）
         '**/src/main/services/meta-relink.js': {
