@@ -105,6 +105,26 @@ describe('models:deleteModel', () => {
     expect(res.error).toBe('删除失败: 回收站不可用')
     expect(getModelMeta(abs)?.alias).toBe('保留')
   })
+
+  it('库内 junction 指向库外时拒绝删除（O6 realpath 归属）', async (ctx) => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-outside-'))
+    roots.push(outsideDir)
+    const outsideFile = path.join(outsideDir, 'secret.safetensors')
+    await fs.writeFile(outsideFile, 'x')
+    const link = path.join(root, 'link')
+    try {
+      await fs.symlink(outsideDir, link, 'junction')
+    } catch {
+      ctx.skip()
+    }
+
+    const handler = getRegisteredHandler('models:deleteModel')
+    const res = await handler(makeEvent(), { id: path.join(link, 'secret.safetensors') })
+
+    expect(res.error).toBe('模型不在当前根目录内，无法删除')
+    expect(vi.mocked(shell.trashItem)).not.toHaveBeenCalled()
+    await expect(fs.access(outsideFile)).resolves.toBeUndefined()
+  })
 })
 
 describe('models:reveal 越界校验（C6）', () => {
@@ -120,5 +140,29 @@ describe('models:reveal 越界校验（C6）', () => {
     const inside = path.join(root, 'm.safetensors')
     expect(await handler(makeEvent(), { path: inside })).toEqual({ ok: true })
     expect(shell.showItemInFolder).toHaveBeenCalledWith(inside)
+  })
+
+  it('库根目录自身放行（设置页「打开模型文件夹」）', async () => {
+    const handler = getRegisteredHandler('models:reveal')
+    expect(await handler(makeEvent(), { path: root })).toEqual({ ok: true })
+    expect(shell.showItemInFolder).toHaveBeenCalledWith(root)
+  })
+
+  it('库内 junction 指向库外时拒绝定位（O6 realpath 归属）', async (ctx) => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-outside-'))
+    roots.push(outsideDir)
+    const outsideFile = path.join(outsideDir, 'secret.safetensors')
+    await fs.writeFile(outsideFile, 'x')
+    const link = path.join(root, 'link')
+    try {
+      await fs.symlink(outsideDir, link, 'junction')
+    } catch {
+      ctx.skip()
+    }
+    const handler = getRegisteredHandler('models:reveal')
+    expect(await handler(makeEvent(), { path: path.join(link, 'secret.safetensors') })).toEqual({
+      error: '无效的路径'
+    })
+    expect(shell.showItemInFolder).not.toHaveBeenCalled()
   })
 })

@@ -3,6 +3,7 @@ import path from 'node:path'
 import logger from '../logger'
 import { atomicWriteFile } from './atomic-write'
 import { getCurrentRoot, getDataDir, isInRoot } from './store-paths'
+import { isPathRealWithin, resolveRealPath } from '../utils'
 import { flushStoreSave, getModelMeta, setModelMeta } from './store-meta'
 
 /**
@@ -213,8 +214,11 @@ function removeEntry(entries, absPath) {
  */
 export async function restoreDeletedModel(absPath, options = {}) {
   if (typeof absPath !== 'string' || !absPath) return { error: '无效的路径' }
-  // 安全门禁：仅允许恢复当前库内的记录（防止把回收站内容写到任意位置）
-  if (!isInRoot(absPath)) {
+  // 安全门禁：仅允许恢复当前库内的记录（防止把回收站内容写到任意位置）。
+  // O6：除字面归属外再做 realpath 校验——父目录/原路径若为指向库外的
+  // junction，恢复时的 mkdir/rename 不得落到库外
+  const realRoot = await resolveRealPath(getCurrentRoot())
+  if (!isInRoot(absPath) || !realRoot || !(await isPathRealWithin(absPath, realRoot))) {
     return { error: '仅支持恢复当前模型库内的删除记录，请先切换到对应模型库' }
   }
   const entries = await readTrashLog()
@@ -241,6 +245,10 @@ export async function restoreDeletedModel(absPath, options = {}) {
   for (const sidecar of Array.isArray(entry.sidecars) ? entry.sidecars : []) {
     try {
       if (typeof sidecar !== 'string' || !sidecar) continue
+      if (!(await isPathRealWithin(sidecar, realRoot))) {
+        logger.warn(`sidecar 原路径真实位置不在当前库内，已跳过恢复: ${sidecar}`)
+        continue
+      }
       await fs.access(sidecar)
       continue
     } catch {

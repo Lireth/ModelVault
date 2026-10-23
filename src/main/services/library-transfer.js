@@ -4,6 +4,7 @@ import logger from '../logger'
 import { runMaintenance } from './maintenance-lock'
 import { sidecarFilesFor } from './scanner'
 import { getCurrentRoot, isInRoot, toRelKey } from './store-paths'
+import { isPathRealWithin, resolveRealPath } from '../utils'
 import { flushStoreSave, getModelMeta, normalizeStoreData, removeModelMeta } from './store-meta'
 import { getSettings } from './store-settings'
 
@@ -115,6 +116,9 @@ export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
     return { error: '目标文件夹不是已保存的模型库，请先在侧栏添加该库' }
   }
   const transferMode = mode === 'move' ? 'move' : 'copy'
+  // O6：源文件按真实路径校验（库内 junction 指向库外时拒绝传输/删除）
+  const sourceReal = await resolveRealPath(currentRoot)
+  if (!sourceReal) return { error: '当前模型库目录不可访问' }
   try {
     await fs.access(targetRoot)
   } catch {
@@ -129,7 +133,11 @@ export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
     const skipped = []
     const planned = []
     for (const id of ids) {
-      if (typeof id !== 'string' || !isInRoot(id)) {
+      if (
+        typeof id !== 'string' ||
+        !isInRoot(id) ||
+        !(await isPathRealWithin(id, sourceReal))
+      ) {
         failed.push({ id: String(id), error: '模型不在当前库内' })
         continue
       }

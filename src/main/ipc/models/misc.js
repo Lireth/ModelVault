@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import { BrowserWindow, Menu, clipboard, dialog, shell } from 'electron'
 import logger from '../../logger'
 import { atomicWriteFile } from '../../services/atomic-write'
-import { isInRoot, getModelMeta, removeModelMeta } from '../../services/store'
+import { getModelMeta, removeModelMeta } from '../../services/store'
 import { checkLibraryHealth, repairLibraryHealth } from '../../services/library-health'
 import {
   forgetDeletedModel,
@@ -11,7 +11,12 @@ import {
   restoreDeletedModel
 } from '../../services/trash-log'
 import { sidecarFilesFor } from '../../services/scanner'
-import { wrapHandler, checkModelId, checkModelIdInRoot } from '../handler'
+import {
+  wrapHandler,
+  checkModelIdInRootReal,
+  getRealRootPath
+} from '../handler'
+import { isPathRealWithin } from '../../utils'
 
 /**
  * 其他模型操作链路：删除模型（回收站 + sidecar 清理）、
@@ -49,7 +54,10 @@ function isDisabledPath(p) {
 export function registerMiscHandlers() {
   // 删除模型文件（移入回收站）并清理关联元数据与同名 sidecar 文件
   wrapHandler('models:deleteModel', async (event, { id } = {}) => {
-    const invalid = checkModelId(id) || (isInRoot(id) ? '' : '模型不在当前根目录内，无法删除')
+    // O6：破坏性操作按 realpath 校验归属，拦截库内 junction 指向库外的删除
+    const invalid = await checkModelIdInRootReal(id, {
+      message: '模型不在当前根目录内，无法删除'
+    })
     if (invalid) return { error: invalid }
     try {
       const stat = await fs.stat(id)
@@ -81,8 +89,8 @@ export function registerMiscHandlers() {
   }, { errorPrefix: '删除失败' })
 
   // 卡片/详情右键菜单：主进程构建原生菜单，动作经 menuAction 事件回传渲染进程
-  wrapHandler('models:popupMenu', (event, { id } = {}) => {
-    const invalid = checkModelIdInRoot(id)
+  wrapHandler('models:popupMenu', async (event, { id } = {}) => {
+    const invalid = await checkModelIdInRootReal(id)
     if (invalid) return { error: invalid }
     const win = BrowserWindow.fromWebContents(event.sender)
     const meta = getModelMeta(id) || {}
@@ -125,8 +133,15 @@ export function registerMiscHandlers() {
 
   // 在资源管理器中显示模型文件（仅限当前模型根目录内的路径，C6：
   // 与 deleteModel/popupMenu 的越界校验一致，防止任意路径探测）
-  wrapHandler('models:reveal', (event, { path: targetPath } = {}) => {
-    if (typeof targetPath !== 'string' || !targetPath || !isInRoot(targetPath)) {
+  wrapHandler('models:reveal', async (event, { path: targetPath } = {}) => {
+    // O6：真实路径归属校验；根目录自身也允许（设置页「打开模型文件夹」）
+    const rootReal = await getRealRootPath()
+    if (
+      typeof targetPath !== 'string' ||
+      !targetPath ||
+      !rootReal ||
+      !(await isPathRealWithin(targetPath, rootReal))
+    ) {
       return { error: '无效的路径' }
     }
     shell.showItemInFolder(targetPath)

@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises'
 import { ipcMain } from 'electron'
 import logger from '../logger'
-import { isInRoot } from '../services/store'
+import { getCurrentRoot, isInRoot } from '../services/store'
 import { validateIpcPayload } from '../../shared/ipc-schema'
+import { isPathRealWithin, resolveRealPath } from '../utils'
 
 /**
  * IPC handler 统一包装与入参校验助手（O1/O2 样板收敛）：
@@ -59,9 +60,34 @@ export function checkModelId(id) {
   return typeof id === 'string' && id ? '' : '无效的模型标识'
 }
 
-/** 模型 id + 根目录越界的复合校验（deleteModel/popupMenu 等写操作入口） */
+/** 模型 id + 根目录越界的复合校验（元数据/网络等非破坏性操作入口） */
 export function checkModelIdInRoot(id) {
   return checkModelId(id) || (isInRoot(id) ? '' : '模型不在当前根目录内')
+}
+
+/** 当前模型库根目录的真实路径（O6）；未设置/不可访问返回空串 */
+export async function getRealRootPath() {
+  const root = getCurrentRoot()
+  return root ? resolveRealPath(root) : ''
+}
+
+/**
+ * 破坏性操作的模型归属校验（O6）：realpath 归一后必须仍在库根内。
+ * 元数据写入/在线查询等非破坏性操作仍用同步的字面校验；
+ * 删除、移动、重命名、禁用等会改动磁盘文件的操作必须使用本函数。
+ * @param {string} id 模型绝对路径
+ * @param {{realRoot?: string, message?: string}} [options]
+ *   realRoot 为批量场景预先解析的根真实路径；message 为越界错误文案
+ * @returns {Promise<string>} 合法返回空串，否则返回错误文案
+ */
+export async function checkModelIdInRootReal(id, options = {}) {
+  const base = checkModelId(id)
+  if (base) return base
+  const message = options.message || '模型不在当前根目录内'
+  const realRoot = options.realRoot || (await getRealRootPath())
+  if (!realRoot || !isInRoot(id)) return message
+  if (!(await isPathRealWithin(id, realRoot))) return message
+  return ''
 }
 
 /**

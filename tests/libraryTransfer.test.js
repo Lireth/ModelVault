@@ -164,6 +164,24 @@ describe('transferModelsToLibrary（F-3 跨库传输）', () => {
     expect(getModelMeta(abs)?.note).toBe('n')
   })
 
+  it('源路径为库内 junction 指向库外时拒绝传输（O6 realpath 归属）', async (ctx) => {
+    const outside = mkTmp('modelvault-transfer-out-')
+    const outsideFile = await writeModel(outside, 'secret.safetensors', 'outside-data')
+    const link = path.join(sourceRoot, 'link')
+    try {
+      await fsp.symlink(outside, link, 'junction')
+    } catch {
+      ctx.skip()
+    }
+    const id = path.join(link, 'secret.safetensors')
+
+    const res = await transferModelsToLibrary({ ids: [id], targetRoot, mode: 'move' })
+
+    expect(res.transferred).toBe(0)
+    expect(res.failed[0].error).toContain('不在当前库内')
+    await expect(fsp.access(outsideFile)).resolves.toBeUndefined()
+  })
+
   it('目标库 journal 残留（未合并 delta）时拒绝迁移', async () => {
     const journalDir = path.join(targetRoot, '.modelvault', 'journal')
     await fsp.mkdir(journalDir, { recursive: true })

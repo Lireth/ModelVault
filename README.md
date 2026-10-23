@@ -231,6 +231,6 @@ wrapHandler('my:channel', async (event, payload) => {
 - `contextIsolation: true` + `nodeIntegration: false` + `sandbox: true`，渲染进程无 Node 能力；preload 仅暴露白名单通道
 - `mvimg://` 图片协议仅允许访问当前模型根目录内文件（越界返回 403）；`civimg://` 远程图片代理仅放行 Civitai 官方 CDN 域名白名单（https 强制，防 SSRF）
 - 渲染进程导航一律拦截，外部链接经系统浏览器打开；HTML 含 CSP 策略
-- 模型删除移入系统回收站（非永久删除）；扫描根目录白名单校验；封面导入有图片魔数校验与大小预检
+- 模型删除移入系统回收站（非永久删除）；扫描根目录白名单校验；删除/移动/重命名/禁用/跨库传输等破坏性操作统一按 realpath 校验归属，库内 junction 指向库外时拒绝；封面导入有图片魔数校验与大小预检
 - 应用内更新强制 SHA256 校验；配置发布者证书指纹后，下载复用与安装前还会校验 Authenticode（状态 Valid + 指纹一致），失败即拒绝执行
 - 开发类快捷键（DevTools/刷新）在生产环境禁用

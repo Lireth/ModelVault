@@ -5,6 +5,7 @@
  * 两处同构，统一收敛到本模块维护。
  */
 
+import fs from 'node:fs/promises'
 import path from 'node:path'
 
 /**
@@ -47,6 +48,43 @@ export function relativeWithin(absPath, baseDir) {
     return null
   }
   return absPath.slice(base.length + 1)
+}
+
+/**
+ * 解析路径的真实路径（O6）：不存在/不可访问时返回空串。
+ * @param {string} target 绝对路径
+ * @returns {Promise<string>} realpath 或 ''
+ */
+export async function resolveRealPath(target) {
+  if (typeof target !== 'string' || !target) return ''
+  try {
+    return await fs.realpath(target)
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 破坏性操作的 realpath 归属判定（O6）：
+ * - 目标存在：解析符号链接/junction 后必须仍在 realRoot 内；
+ * - 目标不存在：回退到最近存在祖先的真实路径，防止父目录是指向库外的
+ *   junction 时后续 mkdir/rename 把文件写到库外。
+ * @param {string} target 目标绝对路径
+ * @param {string} realRoot 已 realpath 的库根目录
+ * @returns {Promise<boolean>} 真实路径位于库内时为 true
+ */
+export async function isPathRealWithin(target, realRoot) {
+  if (typeof target !== 'string' || !target || !realRoot) return false
+  const direct = await resolveRealPath(target)
+  if (direct) return relativeWithin(direct, realRoot) !== null
+  let dir = path.dirname(target)
+  for (;;) {
+    const real = await resolveRealPath(dir)
+    if (real) return relativeWithin(real, realRoot) !== null
+    const parent = path.dirname(dir)
+    if (parent === dir) return false
+    dir = parent
+  }
 }
 
 /** 构造取消异常（与 AbortController 的 AbortError 同名，便于统一识别） */

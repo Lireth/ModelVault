@@ -437,3 +437,92 @@ describe('models:renameModel handler（N1）', () => {
     )
   })
 })
+
+describe('破坏性文件操作的 realpath 归属（O6）', () => {
+  let root
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-realpath-'))
+    roots.push(root)
+    setDataRoot(root)
+    await loadData()
+    registerFilesHandlers()
+  })
+
+  afterAll(async () => {
+    for (const dir of roots) {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+
+  /** 在库内创建指向库外的 junction，返回 { outsideDir, link, outsideFile } */
+  async function makeOutsideLink(ctx, fileName = 'secret.safetensors') {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-outside-'))
+    roots.push(outsideDir)
+    const outsideFile = path.join(outsideDir, fileName)
+    await fs.writeFile(outsideFile, 'outside-data')
+    const link = path.join(root, 'link')
+    try {
+      await fs.symlink(outsideDir, link, 'junction')
+    } catch {
+      ctx.skip()
+    }
+    return { outsideDir, link, outsideFile }
+  }
+
+  it('禁用改名：库内 junction 指向库外时拒绝且不改动外部文件', async (ctx) => {
+    const { link, outsideFile } = await makeOutsideLink(ctx)
+    const id = path.join(link, 'secret.safetensors')
+
+    const res = await getRegisteredHandler('models:toggleDisabled')(makeEvent(), {
+      id,
+      disabled: true
+    })
+
+    expect(res.error).toBe('模型不在当前根目录内')
+    await expect(fs.readFile(outsideFile, 'utf8')).resolves.toBe('outside-data')
+    await expect(fs.access(`${outsideFile}.disabled`)).rejects.toThrow()
+  })
+
+  it('重命名：库内 junction 指向库外时拒绝且不改动外部文件', async (ctx) => {
+    const { link, outsideFile } = await makeOutsideLink(ctx)
+    const id = path.join(link, 'secret.safetensors')
+
+    const res = await getRegisteredHandler('models:renameModel')(makeEvent(), {
+      id,
+      name: 'renamed'
+    })
+
+    expect(res.error).toBe('模型不在当前根目录内')
+    await expect(fs.readFile(outsideFile, 'utf8')).resolves.toBe('outside-data')
+    await expect(fs.access(path.join(path.dirname(outsideFile), 'renamed.safetensors'))).rejects.toThrow()
+  })
+
+  it('库内移动：目标目录为指向库外的 junction 时拒绝', async (ctx) => {
+    const source = path.join(root, 'm.safetensors')
+    await fs.writeFile(source, 'model-data')
+    const { link } = await makeOutsideLink(ctx)
+    vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+      canceled: false,
+      filePaths: [link]
+    })
+
+    const res = await getRegisteredHandler('models:moveModelTo')(makeEvent(), { id: source })
+
+    expect(res.error).toBe('目标文件夹真实路径不在当前模型库内')
+    await expect(fs.readFile(source, 'utf8')).resolves.toBe('model-data')
+  })
+
+  it('一键整理：源模型通过库内 junction 指向库外时跳过', async (ctx) => {
+    const { link, outsideFile } = await makeOutsideLink(ctx)
+    const id = path.join(link, 'secret.safetensors')
+
+    const res = await getRegisteredHandler('models:organizeByTags')(makeEvent(), {
+      moves: [{ id, subCategory: 'role' }]
+    })
+
+    expect(res.moved).toBe(0)
+    expect(res.skipped).toContainEqual({ id, reason: 'out-of-root' })
+    await expect(fs.readFile(outsideFile, 'utf8')).resolves.toBe('outside-data')
+  })
+})

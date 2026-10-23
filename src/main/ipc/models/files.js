@@ -3,7 +3,7 @@ import { constants as fsConstants } from 'node:fs'
 import path from 'node:path'
 import { BrowserWindow, dialog } from 'electron'
 import logger from '../../logger'
-import { relativeWithin } from '../../utils'
+import { isPathRealWithin, relativeWithin } from '../../utils'
 import { getCurrentRoot, renameModelMeta, toRelKey } from '../../services/store'
 import { sidecarFilesFor } from './misc'
 import { LORA_TAG_DEFS, LORA_TAG_KEYS } from '../../../shared/model-categories'
@@ -15,7 +15,11 @@ import {
   tryAcquireMaintenance
 } from '../../services/maintenance-lock'
 import { transferModelsToLibrary } from '../../services/library-transfer'
-import { wrapHandler, checkModelIdInRoot } from '../handler'
+import {
+  wrapHandler,
+  checkModelIdInRootReal,
+  getRealRootPath
+} from '../handler'
 
 /**
  * 文件级操作链路（批次 4）：
@@ -348,7 +352,7 @@ export function planRenameTarget(id, name) {
 export function registerFilesHandlers() {
   // 加/去 .disabled 后缀（F10）：幂等；目标名已存在时拒绝
   wrapHandler('models:toggleDisabled', async (event, { id, disabled } = {}) => {
-    const invalid = checkModelIdInRoot(id)
+    const invalid = await checkModelIdInRootReal(id)
     if (invalid) return { error: invalid }
     if (typeof disabled !== 'boolean') return { error: '无效的禁用状态' }
     const isCurrently = id.toLowerCase().endsWith('.disabled')
@@ -374,7 +378,7 @@ export function registerFilesHandlers() {
   // 模型文件重命名（N1）：仅改当前目录内的文件名，扩展名保持不变；
   // 同名 sidecar 一并改名（目标已存在则跳过不覆盖），元数据键即时迁移
   wrapHandler('models:renameModel', async (event, { id, name } = {}) => {
-    const invalid = checkModelIdInRoot(id)
+    const invalid = await checkModelIdInRootReal(id)
     if (invalid) return { error: invalid }
     const plan = planRenameTarget(id, name)
     if (plan.error) return { error: plan.error }
@@ -433,7 +437,7 @@ export function registerFilesHandlers() {
 
   // 库内移动/归档（F11）：目录选择对话框 + 同名 sidecar 一并移动
   wrapHandler('models:moveModelTo', async (event, { id } = {}) => {
-    const invalid = checkModelIdInRoot(id)
+    const invalid = await checkModelIdInRootReal(id)
     if (invalid) return { error: invalid }
     const win = BrowserWindow.fromWebContents(event.sender)
     const pick = await dialog.showOpenDialog(win, {
@@ -446,6 +450,11 @@ export function registerFilesHandlers() {
     const newPath = path.join(targetDir, path.basename(id))
     if (!toRelKey(newPath)) {
       return { error: '目标文件夹不在当前模型库内' }
+    }
+    // O6：真实路径校验——拦截目标目录本身是指向库外的 junction/符号链接
+    const rootReal = await getRealRootPath()
+    if (!rootReal || !(await isPathRealWithin(targetDir, rootReal))) {
+      return { error: '目标文件夹真实路径不在当前模型库内' }
     }
     if (newPath === id) return { path: id }
     try {
@@ -497,12 +506,14 @@ export function registerFilesHandlers() {
     }
     const root = getCurrentRoot()
     if (!root) return { error: '未选择模型库根目录' }
-    // 逐项校验归属：非法项跳过而非整体失败（批量场景保持其余项可用）
+    const rootReal = await getRealRootPath()
+    if (!rootReal) return { error: '模型库根目录不可访问' }
+    // 逐项校验归属（O6：realpath 后仍须在库内）：非法项跳过而非整体失败
     const valid = []
     const skipped = []
     for (const item of moves) {
       if (!item || typeof item.id !== 'string') continue
-      if (checkModelIdInRoot(item.id)) {
+      if (await checkModelIdInRootReal(item.id, { realRoot: rootReal })) {
         skipped.push({ id: item.id, reason: 'out-of-root' })
         continue
       }
@@ -513,11 +524,22 @@ export function registerFilesHandlers() {
     if (planned.length === 0) {
       return { moved: 0, failed: [], skipped }
     }
-    // 创建 LoRA 一级目录与 7 个标签子文件夹（recursive：已存在时静默保持原样）
+    // 创建 LoRA 一级目录与 7 个标签子文件夹（recursive：已存在时静默保持原样）。
+    // O6：已存在的 LoRA 目录若是指向库外的 junction，拒绝整理（避免 mkdir 跟随到库外）
+    const loraDir = path.join(root, LORA_DIR)
+    let loraExists = true
     try {
-      await fs.mkdir(path.join(root, LORA_DIR), { recursive: true })
+      await fs.access(loraDir)
+    } catch {
+      loraExists = false
+    }
+    if (loraExists && !(await isPathRealWithin(loraDir, rootReal))) {
+      return { error: 'LoRA 文件夹真实路径不在当前模型库内' }
+    }
+    try {
+      await fs.mkdir(loraDir, { recursive: true })
       for (const folder of TAG_FOLDER_NAMES) {
-        await fs.mkdir(path.join(root, LORA_DIR, folder), { recursive: true })
+        await fs.mkdir(path.join(loraDir, folder), { recursive: true })
       }
     } catch (err) {
       return { error: `创建分类文件夹失败: ${err.message}` }
@@ -525,6 +547,11 @@ export function registerFilesHandlers() {
     let moved = 0
     const failed = []
     for (const { id, newPath } of planned) {
+      // 目标标签子文件夹同样做真实路径校验（已存在指库外的 junction 时拒绝）
+      if (!(await isPathRealWithin(path.dirname(newPath), rootReal))) {
+        failed.push({ id, error: '目标文件夹真实路径不在当前模型库内' })
+        continue
+      }
       try {
         await fs.access(newPath)
         failed.push({ id, error: '目标位置已存在同名文件' })
