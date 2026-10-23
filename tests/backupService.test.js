@@ -239,6 +239,23 @@ describe('exportBackup', () => {
     expect(Object.keys(zip).some((k) => k.includes('thumbs'))).toBe(false)
   })
 
+  it('大封面跨多个读块流式写入后仍可正确解压', async () => {
+    const root = makeLibrary()
+    const big = Buffer.alloc(2 * 1024 * 1024, 0x5a)
+    fs.writeFileSync(path.join(root, '.modelvault', 'covers', 'big.png'), big)
+    setDataRoot(root)
+    await loadData()
+    const outZip = path.join(mkTmp('modelvault-out-'), 'backup.zip')
+    dialogMock.showSaveDialog.mockResolvedValue({ canceled: false, filePath: outZip })
+
+    const res = await exportBackup(null)
+
+    expect(res.error).toBeUndefined()
+    expect(res.covers).toBe(3)
+    const zip = unzipSync(new Uint8Array(fs.readFileSync(outZip)))
+    expect(Buffer.from(zip['library/covers/big.png']).equals(big)).toBe(true)
+  })
+
   it('无关联数据时仅备份应用设置', async () => {
     const root = mkTmp('modelvault-empty-lib-')
     setDataRoot(root)
@@ -311,6 +328,40 @@ describe('importBackup', () => {
     expect(saved.theme).toBe('light')
     expect(saved.sortBy).toBe('size')
     expect(saved.modelsFolder).toBeUndefined()
+  })
+
+  it('大封面跨解压分块仍逐张写入目标目录', async () => {
+    const zipPath = path.join(mkTmp('modelvault-out-'), 'big-cover.zip')
+    const big = Buffer.alloc(2 * 1024 * 1024, 0x3c)
+    fs.writeFileSync(
+      zipPath,
+      zipSync({
+        'manifest.json': strToU8(
+          JSON.stringify({
+            app: BACKUP_FORMAT,
+            version: BACKUP_VERSION,
+            settings: true,
+            library: { root: 'D:\\old-lib', models: 1, covers: 1 }
+          })
+        ),
+        'settings.json': strToU8(JSON.stringify({ theme: 'light' })),
+        'library/store.json': strToU8(
+          JSON.stringify({ version: 1, models: { 'x.safetensors': {} } })
+        ),
+        'library/covers/big.png': new Uint8Array(big)
+      })
+    )
+    const target = mkTmp('modelvault-target-')
+    dialogMock.showOpenDialog
+      .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
+      .mockResolvedValueOnce({ canceled: false, filePaths: [target] })
+
+    const res = await importBackup(null)
+
+    expect(res.error).toBeUndefined()
+    expect(res.libraryRestored.covers).toBe(1)
+    const restored = fs.readFileSync(path.join(target, '.modelvault', 'covers', 'big.png'))
+    expect(restored.equals(big)).toBe(true)
   })
 
   it('目标已有 .modelvault 时确认后覆盖并留存 .bak', async () => {
@@ -461,8 +512,10 @@ describe('importBackup', () => {
       })
     )
     const target = mkTmp('modelvault-target-')
-    // 解压限额在目标文件夹选择之前触发：只需文件选择对话框响应
-    dialogMock.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
+    // 流式恢复先确认目标目录，再在维护锁内解压；超限错误发生在临时目录阶段
+    dialogMock.showOpenDialog
+      .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
+      .mockResolvedValueOnce({ canceled: false, filePaths: [target] })
 
     const res = await importBackup(null)
 
