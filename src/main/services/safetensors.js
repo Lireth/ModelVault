@@ -17,6 +17,12 @@ const MAX_HEADER_BYTES = 16 * 1024 * 1024
 /** 触发词候选默认提取数量（按训练集出现频次降序） */
 const TAG_CANDIDATES_LIMIT = 15
 
+/** 各 dtype 的单元素字节数（safetensors 规范类型；未知类型按 0 计） */
+const DTYPE_BYTES = {
+  F64: 8, I64: 8, U64: 8, F32: 4, I32: 4, F16: 2, BF16: 2,
+  I16: 2, I8: 1, U8: 1, BOOL: 1, F8_E4M3: 1, F8_E5M2: 1
+}
+
 /**
  * 从 8 字节缓冲读取小端 u64 头部长度。
  * @param {Buffer} buf 长度至少 8 字节的缓冲
@@ -88,6 +94,7 @@ export function extractTagCandidates(raw, limit = TAG_CANDIDATES_LIMIT) {
  * @property {number|null} resMin 推荐分辨率下限（较小值）
  * @property {number|null} resMax 推荐分辨率上限（较大值）
  * @property {string[]} triggerCandidates 触发词候选（按频次排序）
+ * @property {TensorStats|null} [tensorStats] 张量索引统计（F-1；旧缓存数据无此字段）
  */
 
 /**
@@ -118,6 +125,154 @@ export function extractSafetensorsInfo(metadata) {
 }
 
 /**
+ * 张量索引统计（F-1）：从头部 JSON 的张量表（键 → {dtype, shape}）推导，
+ * 零额外 IO——parseHeaderBuffer 已读入整个头部，仅追加一次 O(键数) 遍历。
+ * @typedef {object} TensorStats
+ * @property {number} tensorCount 张量总数
+ * @property {number} paramCount 总参数量（各张量 shape 元素数之和）
+ * @property {string} dtypeMain 占参数量最高的 dtype（'' 无法判定）
+ * @property {Array<{dtype: string, tensors: number, params: number}>} dtypes
+ *   dtype 分布（按参数量降序，最多 5 项）
+ * @property {string} architecture 按键名特征推导的架构家族（'' 无法判定）：
+ *   Checkpoint 单文件（SD1.5/SDXL/Flux/SD3.5）与 kohya 命名 LoRA
+ * @property {{textEncoder: number, unet: number, vae: number}} componentRatios
+ *   组件字节占比（0-1，未分类字节不计入分母；无法分类时全 0）
+ */
+
+/**
+ * 按键名特征推导模型架构家族（保守规则：宁可留空也不误判）。
+ * @param {string[]} keys 张量键列表
+ * @returns {string} 架构家族标识；无法判定返回 ''
+ */
+function inferArchitecture(keys) {
+  let hasCheckpoint = false
+  let hasCond2 = false
+  let hasCond1 = false
+  let hasTextEncoders = false
+  let flux = false
+  let sd3 = false
+  let sdxlLora = false
+  let classicLora = false
+  for (const key of keys) {
+    if (key.startsWith('model.diffusion_model.') || key.startsWith('first_stage_model.')) {
+      hasCheckpoint = true
+    }
+    if (key.startsWith('conditioner.embedders.1.')) hasCond2 = true
+    else if (key.startsWith('conditioner.embedders.0.')) hasCond1 = true
+    if (key.startsWith('text_encoders.')) hasTextEncoders = true
+    if (key.includes('double_blocks') || key.includes('single_blocks')) flux = true
+    else if (key.includes('joint_blocks')) sd3 = true
+    if (key.startsWith('lora_te2_')) sdxlLora = true
+    if (
+      key.startsWith('lora_unet_input_blocks') ||
+      key.startsWith('lora_unet_output_blocks') ||
+      key.startsWith('lora_unet_down_blocks') ||
+      key.startsWith('lora_unet_up_blocks')
+    ) {
+      classicLora = true
+    }
+  }
+  // Checkpoint 单文件：双文本编码器（CLIP-G+T5? embedders.1）→ SDXL；
+  // text_encoders + DiT → Flux / SD3.5；其余带 conditioner 的 → SD1.5
+  if (hasCheckpoint) {
+    if (hasCond2) return 'SDXL'
+    if (hasTextEncoders) return flux ? 'Flux' : sd3 ? 'SD3.5' : ''
+    if (hasCond1) return 'SD1.5'
+    return ''
+  }
+  // kohya 命名 LoRA：Flux（double/single blocks）> SD3.5（joint blocks）
+  // > SDXL（双文本编码器 lora_te2_）> SD1.5（经典 UNet blocks 命名）
+  if (flux) return 'Flux'
+  if (sd3) return 'SD3.5'
+  if (sdxlLora) return 'SDXL'
+  if (classicLora) return 'SD1.5'
+  return ''
+}
+
+/** 组件字节分类前缀（顺序敏感：textEncoder 先判，lora_vae 兜底归 vae） */
+function classifyTensorKey(key) {
+  if (
+    key.startsWith('conditioner.') ||
+    key.startsWith('text_encoders.') ||
+    key.startsWith('text_model.') ||
+    key.startsWith('lora_te') ||
+    key.startsWith('lora_te1_') ||
+    key.startsWith('lora_te2_')
+  ) {
+    return 'textEncoder'
+  }
+  if (key.startsWith('first_stage_model.') || key.startsWith('lora_vae')) return 'vae'
+  if (
+    key.startsWith('model.diffusion_model.') ||
+    key.startsWith('diffusion_model.') ||
+    key.startsWith('lora_unet') ||
+    key.startsWith('transformer.')
+  ) {
+    return 'unet'
+  }
+  return ''
+}
+
+/**
+ * 从头部 JSON 的张量表推导统计信息（纯函数，不可信输入容错）。
+ * @param {Record<string, any>} header 已 JSON.parse 的头部对象（含张量键与 __metadata__）
+ * @returns {TensorStats|null} 无有效张量条目时返回 null
+ */
+export function analyzeTensorIndex(header) {
+  if (!header || typeof header !== 'object') return null
+  const dtypeParams = new Map()
+  const dtypeTensors = new Map()
+  const componentBytes = { textEncoder: 0, unet: 0, vae: 0 }
+  let tensorCount = 0
+  let paramCount = 0
+  const keys = []
+  for (const [key, entry] of Object.entries(header)) {
+    if (key === '__metadata__') continue
+    if (!entry || typeof entry !== 'object') continue
+    const shape = entry.shape
+    if (!Array.isArray(shape) || shape.length === 0) continue
+    const dtype = typeof entry.dtype === 'string' ? entry.dtype : ''
+    if (!dtype) continue
+    let n = 1
+    for (const dim of shape) {
+      if (!Number.isFinite(dim) || dim < 0) {
+        n = 0
+        break
+      }
+      n *= dim
+    }
+    tensorCount += 1
+    paramCount += n
+    const bytes = n * (DTYPE_BYTES[dtype] || 0)
+    dtypeParams.set(dtype, (dtypeParams.get(dtype) || 0) + n)
+    dtypeTensors.set(dtype, (dtypeTensors.get(dtype) || 0) + 1)
+    const component = classifyTensorKey(key)
+    if (component) componentBytes[component] += bytes
+    keys.push(key)
+  }
+  if (tensorCount === 0) return null
+  const classified = componentBytes.textEncoder + componentBytes.unet + componentBytes.vae
+  const componentRatios = { textEncoder: 0, unet: 0, vae: 0 }
+  if (classified > 0) {
+    for (const k of Object.keys(componentRatios)) {
+      componentRatios[k] = componentBytes[k] / classified
+    }
+  }
+  const dtypes = [...dtypeParams.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([dtype, params]) => ({ dtype, params, tensors: dtypeTensors.get(dtype) || 0 }))
+  return {
+    tensorCount,
+    paramCount,
+    dtypeMain: dtypes.length > 0 ? dtypes[0].dtype : '',
+    dtypes,
+    architecture: inferArchitecture(keys),
+    componentRatios
+  }
+}
+
+/**
  * 判断解析结果是否包含可用内容（任一展示字段或推荐值非空）。
  * @param {SafetensorsInfo|null} info extractSafetensorsInfo 的结果
  * @returns {boolean}
@@ -135,10 +290,26 @@ export function hasUsefulInfo(info) {
   )
 }
 
+/** 无训练元信息时的空 info 形状（与 extractSafetensorsInfo 返回结构一致） */
+const EMPTY_INFO = Object.freeze({
+  title: '',
+  author: '',
+  baseModel: '',
+  networkModule: '',
+  networkAlpha: null,
+  precision: '',
+  resMin: null,
+  resMax: null,
+  triggerCandidates: []
+})
+
 /**
- * 解析 safetensors 头部 JSON 缓冲（不含前 8 字节长度区）。
+ * 解析 safetensors 头部 JSON 缓冲（不含前 8 字节长度区，F-1 合并张量统计）：
+ * 返回训练元信息（可能全空）+ 张量索引统计；二者皆无（头部无任何可用内容，
+ * 如空张量表）返回 null。张量统计的存在使得「无 __metadata__ 但结构合法」
+ * 的文件也能产出 autoInfo——装饰层据此免做健康补检。
  * @param {Buffer} headerBuf 头部 JSON 字节
- * @returns {object|null} 解析信息；JSON 损坏或无 __metadata__ 返回 null
+ * @returns {object|null} 解析信息；JSON 损坏或无任何可用内容返回 null
  */
 export function parseHeaderBuffer(headerBuf) {
   let header
@@ -147,8 +318,11 @@ export function parseHeaderBuffer(headerBuf) {
   } catch {
     return null
   }
-  const info = extractSafetensorsInfo(header?.__metadata__)
-  return hasUsefulInfo(info) ? info : null
+  if (!header || typeof header !== 'object') return null
+  const info = extractSafetensorsInfo(header?.__metadata__) || { ...EMPTY_INFO, triggerCandidates: [] }
+  const tensorStats = analyzeTensorIndex(header)
+  if (!hasUsefulInfo(info) && !tensorStats) return null
+  return { ...info, tensorStats: tensorStats || null }
 }
 
 /**

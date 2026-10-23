@@ -16,6 +16,32 @@ const autoInfo = computed(() => selectedModel.value?.autoInfo || null)
  *  F3 修正：不限 LoRA——不少 Checkpoint 同样内嵌训练标签，此前被静默丢弃 */
 const autoTriggerCandidates = computed(() => autoInfo.value?.triggerCandidates || [])
 
+/** 张量索引统计（F-1，本地零网络；旧装饰缓存/非 safetensors 无此字段） */
+const tensorStats = computed(() => autoInfo.value?.tensorStats || null)
+
+/** 参数量紧凑展示：B（十亿）/ M（百万）/ K（千），AI 社区通用记法 */
+const paramText = computed(() => {
+  const n = tensorStats.value?.paramCount
+  if (!Number.isFinite(n) || n <= 0) return ''
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`
+  return String(n)
+})
+
+/** 组件字节占比（0-1 → 百分比；无已分类字节时 null 不渲染） */
+const componentPcts = computed(() => {
+  const r = tensorStats.value?.componentRatios
+  if (!r) return null
+  const total = r.textEncoder + r.unet + r.vae
+  if (total <= 0) return null
+  return {
+    textEncoder: Math.round(r.textEncoder * 100),
+    unet: Math.round(r.unet * 100),
+    vae: Math.max(0, 100 - Math.round(r.textEncoder * 100) - Math.round(r.unet * 100))
+  }
+})
+
 function applyResolution() {
   const a = autoInfo.value
   if (!a || !Number.isFinite(a.resMin)) return
@@ -62,7 +88,31 @@ const emit = defineEmits(['apply-resolution', 'apply-triggers'])
         <dt>训练分辨率</dt>
         <dd>{{ autoInfo.resMin }} × {{ autoInfo.resMax }}</dd>
       </template>
+      <!-- 张量索引统计（F-1，本地零网络推导）：架构家族 / 参数量 / 主精度 -->
+      <template v-if="tensorStats?.architecture">
+        <dt>架构（推导）</dt>
+        <dd>{{ tensorStats.architecture }}</dd>
+      </template>
+      <template v-if="paramText">
+        <dt>参数量</dt>
+        <dd>{{ paramText }}</dd>
+      </template>
+      <template v-if="tensorStats?.dtypeMain">
+        <dt>张量 / 精度</dt>
+        <dd>{{ tensorStats.tensorCount.toLocaleString() }} 个张量 · {{ tensorStats.dtypeMain }} 为主</dd>
+      </template>
     </dl>
+    <!-- 组件字节构成（F-1）：文本编码器 / UNet(DiT) / VAE 占比条 -->
+    <div v-if="componentPcts" class="autoinfo-components">
+      <div class="autoinfo-bar" aria-hidden="true">
+        <div class="autoinfo-seg te" :style="{ width: componentPcts.textEncoder + '%' }"></div>
+        <div class="autoinfo-seg unet" :style="{ width: componentPcts.unet + '%' }"></div>
+        <div class="autoinfo-seg vae" :style="{ width: componentPcts.vae + '%' }"></div>
+      </div>
+      <span class="autoinfo-comp-legend">
+        文本编码器 {{ componentPcts.textEncoder }}% · UNet/DiT {{ componentPcts.unet }}% · VAE {{ componentPcts.vae }}%
+      </span>
+    </div>
     <div v-if="autoTriggerCandidates.length" class="autoinfo-words">
       <span v-for="w in autoTriggerCandidates" :key="w" class="autoinfo-word" :title="w">{{ w }}</span>
     </div>
@@ -152,5 +202,37 @@ const emit = defineEmits(['apply-resolution', 'apply-triggers'])
   align-items: center;
   gap: 8px;
   margin-top: 2px;
+}
+
+/* 组件字节构成条（F-1）：三段式占比条 + 图例 */
+.autoinfo-components {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.autoinfo-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--bg-hover);
+}
+
+.autoinfo-seg.te {
+  background: var(--accent);
+}
+
+.autoinfo-seg.unet {
+  background: var(--favorite);
+}
+
+.autoinfo-seg.vae {
+  background: var(--text-muted);
+}
+
+.autoinfo-comp-legend {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 </style>

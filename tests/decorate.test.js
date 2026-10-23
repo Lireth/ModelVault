@@ -451,12 +451,14 @@ describe('健康检查与 civitai 自动导入（F6/F8 集成）', () => {
     expect(d1.suspect).toBe(true)
     expect(d1.autoInfo).toBeNull()
 
-    // 合法但无 __metadata__：readSafetensorsInfo 为 null，健康检查通过 → 不标记
+    // 合法但无 __metadata__：F-1 起返回仅含张量统计的 autoInfo，不标记 suspect
+    // （结构合法；健康补检仅在解析失败时触发，此处装饰结果直接可用）
     const healthy = path.join(root, 'healthy.safetensors')
     await writeSafetensors(healthy, null)
     const [d2] = await decorateModels([makeModel(healthy)])
     expect(d2.suspect).toBe(false)
-    expect(d2.autoInfo).toBeNull()
+    expect(d2.autoInfo).not.toBeNull()
+    expect(d2.autoInfo.tensorStats).toMatchObject({ tensorCount: 1 })
   })
 
   it('civitai.info 的 trainedWords 与 nsfw 空字段自动导入（F8）', async () => {
