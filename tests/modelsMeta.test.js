@@ -42,6 +42,9 @@ const baseMeta = {
 /** 本文件创建的全部临时目录（afterAll 只清理这些，不动系统临时目录） */
 const roots = []
 
+/** 最小 PNG 文件头（魔数校验所需 8 字节 + 补足数据） */
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
+
 describe('mergeSaveModelData', () => {
   it('全字段显式传入时正常覆盖', () => {
     const merged = mergeSaveModelData(baseMeta, {
@@ -102,9 +105,6 @@ describe('importCoverFromPath 封面导入', () => {
     }
   })
 
-  /** 最小 PNG 文件头（魔数校验所需 8 字节 + 补足数据） */
-  const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
-
   it('伪装图片扩展名的文本文件拒绝导入（B7 外泄链）', async () => {
     const fake = path.join(root, 'secret.png')
     await fs.writeFile(fake, '敏感文本内容，非图片')
@@ -158,7 +158,7 @@ describe('mvimg 协议路径白名单', () => {
 
   it('根目录内图片放行', async () => {
     const img = path.join(root, 'cover.png')
-    await fs.writeFile(img, 'x')
+    await fs.writeFile(img, PNG_MAGIC)
     const res = await request(img)
     expect(res.status).toBe(200)
   })

@@ -40,6 +40,19 @@ const IMAGE_MAGIC = [
 ]
 
 /**
+ * 从已打开的文件句柄读取前 12 字节并匹配图片魔数（读路径统一入口）。
+ * @param {import('node:fs/promises').FileHandle} fh 已打开的文件句柄
+ * @returns {Promise<boolean>} 文件头匹配已知图片格式时为 true
+ */
+async function readImageMagic(fh) {
+  const buf = Buffer.alloc(12)
+  const { bytesRead } = await fh.read(buf, 0, 12, 0)
+  if (bytesRead === 0) return false
+  // 未读满 12 字节时剩余字节保持 0，不会误匹配任何魔数
+  return isImageBuffer(buf)
+}
+
+/**
  * 读取文件头校验内容是否为真实图片。
  * 安全作用：importCover 是唯一允许从模型根目录之外复制文件的 IPC 入口，
  * 仅凭扩展名校验可被用于将任意文件复制进封面目录再经 mvimg 协议读出（文件外泄链），
@@ -50,11 +63,7 @@ const IMAGE_MAGIC = [
 export async function hasImageMagic(filePath) {
   const fh = await fs.open(filePath, 'r')
   try {
-    const buf = Buffer.alloc(12)
-    const { bytesRead } = await fh.read(buf, 0, 12, 0)
-    if (bytesRead === 0) return false
-    // 未读满 12 字节时剩余字节保持 0，不会误匹配任何魔数
-    return isImageBuffer(buf)
+    return await readImageMagic(fh)
   } finally {
     await fh.close()
   }
@@ -172,15 +181,26 @@ export async function pickAndSaveCover(parentWin) {
   return importCoverFromPath(result.filePaths[0])
 }
 
-/** 校验路径是否为存在的图片文件 */
+/**
+ * 校验路径是否为真实图片文件（扩展名 + 文件头魔数）。
+ * mvimg 协议与扫描装饰共用此入口：仅凭扩展名会把任意文件当作可展示图片，
+ * 与导入链路的魔数标准不一致（伪装扩展名可在协议层读出非图片内容）。
+ * 同一句柄内完成常规文件判定与文件头读取，避免额外的 path stat。
+ * @param {string} p 待校验文件路径
+ * @returns {Promise<boolean>} 真实图片返回 true
+ */
 export async function isValidImageFile(p) {
   if (typeof p !== 'string' || !p) return false
   if (!IMAGE_EXTENSIONS.has(path.extname(p).toLowerCase())) return false
+  let fh = null
   try {
-    const stat = await fs.stat(p)
-    return stat.isFile()
+    fh = await fs.open(p, 'r')
+    if (!(await fh.stat()).isFile()) return false
+    return await readImageMagic(fh)
   } catch {
     return false
+  } finally {
+    if (fh) await fh.close().catch(() => {})
   }
 }
 

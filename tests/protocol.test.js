@@ -32,6 +32,11 @@ import {
 import { setDataRoot, updateSettings } from '../src/main/services/store'
 import { getCivImageCachePath } from '../src/main/services/civ-cache'
 
+/** 最小 PNG 文件头（mvimg 魔数校验所需字节均在文件头 12 字节内） */
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
+/** 最小 JPEG 文件头（缩略图 .jpg 场景） */
+const JPEG_MAGIC = Buffer.from([0xff, 0xd8, 0xff, 0xe0])
+
 const roots = []
 let root
 /** 注册时捕获的协议处理器 */
@@ -85,7 +90,7 @@ describe('mvimg 协议路径白名单', () => {
 
   it('根目录内的图片文件放行，经 net.fetch 以 file:// 读取', async () => {
     const cover = path.join(root, 'cover.png')
-    await fs.writeFile(cover, 'fake-png-content')
+    await fs.writeFile(cover, PNG_MAGIC)
     vi.mocked(net.fetch).mockResolvedValue({ status: 200, body: 'img' })
     const res = await handler(makeRequest(cover))
     expect(res.status).toBe(200)
@@ -102,11 +107,19 @@ describe('mvimg 协议路径白名单', () => {
     expect(net.fetch).not.toHaveBeenCalled()
   })
 
+  it('伪装成图片扩展名的非图片内容返回 404（文件头魔数校验）', async () => {
+    const fake = path.join(root, 'fake.png')
+    await fs.writeFile(fake, 'this is not an image')
+    const res = await handler(makeRequest(fake))
+    expect(res.status).toBe(404)
+    expect(net.fetch).not.toHaveBeenCalled()
+  })
+
   it('旧版全局封面目录（userData/covers）内的文件放行（历史数据兼容）', async () => {
     const legacyDir = path.join(fakeUserData, 'covers')
     await fs.mkdir(legacyDir, { recursive: true })
     const legacyCover = path.join(legacyDir, 'old-cover.png')
-    await fs.writeFile(legacyCover, 'x')
+    await fs.writeFile(legacyCover, PNG_MAGIC)
     try {
       vi.mocked(net.fetch).mockResolvedValue({ status: 200 })
       const res = await handler(makeRequest(legacyCover))
@@ -127,7 +140,7 @@ describe('mvimg 协议路径白名单', () => {
   it('关联存储封面（.modelvault/covers，内容不可变命名）返回 immutable 长缓存', async () => {
     const cover = path.join(root, '.modelvault', 'covers', '1728-cover.png')
     await fs.mkdir(path.dirname(cover), { recursive: true })
-    await fs.writeFile(cover, 'img')
+    await fs.writeFile(cover, PNG_MAGIC)
     vi.mocked(net.fetch).mockResolvedValue(
       new Response('img', { status: 200, headers: { 'Content-Type': 'image/png' } })
     )
@@ -145,7 +158,7 @@ describe('mvimg 协议路径白名单', () => {
   it('缩略图缓存（.modelvault/thumbs，文件名含源图 mtime）返回 immutable 长缓存', async () => {
     const thumb = path.join(root, '.modelvault', 'thumbs', 'abc123-1700000000000.jpg')
     await fs.mkdir(path.dirname(thumb), { recursive: true })
-    await fs.writeFile(thumb, 'thumb')
+    await fs.writeFile(thumb, JPEG_MAGIC)
     vi.mocked(net.fetch).mockResolvedValue(new Response('thumb', { status: 200 }))
 
     const res = await handler(makeRequest(thumb))
@@ -156,7 +169,7 @@ describe('mvimg 协议路径白名单', () => {
 
   it('模型目录内 sidecar 同名图（路径不变但内容可被替换）返回 no-cache', async () => {
     const sidecar = path.join(root, 'model.preview.png')
-    await fs.writeFile(sidecar, 'img')
+    await fs.writeFile(sidecar, PNG_MAGIC)
     vi.mocked(net.fetch).mockResolvedValue(new Response('img', { status: 200 }))
 
     const res = await handler(makeRequest(sidecar))

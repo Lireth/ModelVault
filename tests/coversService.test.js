@@ -24,6 +24,7 @@ import {
   deleteCoverFile,
   hasImageMagic,
   importCoverFromPath,
+  isValidImageFile,
   pruneOrphanCovers,
   saveClipboardImage
 } from '../src/main/services/covers'
@@ -65,6 +66,30 @@ describe('hasImageMagic（魔数校验）', () => {
     await fs.writeFile(empty, Buffer.alloc(0))
     expect(await hasImageMagic(empty)).toBe(false)
     await expect(hasImageMagic(path.join(root, 'missing.png'))).rejects.toThrow()
+  })
+})
+
+describe('isValidImageFile（扩展名 + 魔数统一校验）', () => {
+  it('真实 PNG 头返回 true', async () => {
+    const p = path.join(root, 'valid.png')
+    await fs.writeFile(p, PNG_MAGIC)
+    expect(await isValidImageFile(p)).toBe(true)
+  })
+
+  it('伪装成图片扩展名的非图片内容返回 false', async () => {
+    const p = path.join(root, 'fake.png')
+    await fs.writeFile(p, 'this is not an image')
+    expect(await isValidImageFile(p)).toBe(false)
+  })
+
+  it('目录、缺失文件与非图片扩展名返回 false', async () => {
+    const dir = path.join(root, 'dir.png')
+    await fs.mkdir(dir)
+    expect(await isValidImageFile(dir)).toBe(false)
+    expect(await isValidImageFile(path.join(root, 'missing.png'))).toBe(false)
+    const txt = path.join(root, 'x.txt')
+    await fs.writeFile(txt, PNG_MAGIC)
+    expect(await isValidImageFile(txt)).toBe(false)
   })
 })
 
