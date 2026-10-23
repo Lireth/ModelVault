@@ -1,5 +1,6 @@
 import { beforeEach, vi } from 'vitest'
 import {
+  clearCoverOverrides,
   defaultSettings,
   exitMultiSelect,
   replaceModels,
@@ -45,6 +46,7 @@ function makeComponentApiMock() {
       warmupHash: vi.fn(() => Promise.resolve({ ok: true })),
       checkHealth: vi.fn(() => Promise.resolve({ report: null })),
       repairHealth: vi.fn(() => Promise.resolve({ repaired: {} })),
+      exportModelList: vi.fn(() => Promise.resolve({ ok: true, path: 'list.csv' })),
       crossLibraryOverview: vi.fn(() =>
         Promise.resolve({
           overview: {
@@ -133,6 +135,7 @@ export function setupComponentTest() {
     })
     resetStoreState()
     resetLibraryOverview()
+    clearCoverOverrides()
     document.body.innerHTML = ''
   })
 }

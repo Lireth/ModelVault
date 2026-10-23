@@ -16,6 +16,11 @@ import { normalizeBaseModel } from '../../../shared/model-categories'
  * - score:>[=|<|<=]<0-5 整数>  评分（裸值为精确匹配）
  * - fav:yes|no                收藏状态（true/false/1/0 等价写法）
  * - nsfw:yes|no               NSFW 标记
+ * - mtime:<|<=|>|>=<数值><单位> 文件年龄（距今时长，单位 m/h/d/w/y，缺省 d）：
+ *                             `mtime:<7d` 近 7 天更新；`mtime:>30d` 超过 30 天未更新
+ * - author:<文本>             safetensors 头部解析/Civitai 回填的作者包含命中
+ * - trigger:<文本>            触发词或训练标签候选包含命中
+ * - hash:<前缀>               SHA256 前缀匹配（4~64 位十六进制，大小写不敏感）
  * - 多个 token 之间 AND；结构化 token 之外的文本合并为自由关键词，
  *   沿用既有「合并搜索域子串包含」语义
  *
@@ -28,6 +33,15 @@ const TOKEN_RE = /([A-Za-z_][\w-]*)\s*:\s*("([^"]*)"|[^\s]+)/g
 
 /** 大小单位 → 字节倍率（二进制口径，与展示层 formatSize 一致） */
 const SIZE_UNITS = { b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3, tb: 1024 ** 4 }
+
+/** 时间单位 → 毫秒倍率（mtime token 使用） */
+const TIME_UNITS = {
+  m: 60 * 1000,
+  h: 60 * 60 * 1000,
+  d: 24 * 60 * 60 * 1000,
+  w: 7 * 24 * 60 * 60 * 1000,
+  y: 365 * 24 * 60 * 60 * 1000
+}
 
 /** 布尔值写法归一（fav/nsfw 共用） */
 const BOOL_VALUES = new Set(['yes', 'no', 'true', 'false', '1', '0'])
@@ -82,6 +96,26 @@ function parseFilter(prefix, value) {
       if (!BOOL_VALUES.has(value.toLowerCase())) return null
       return { kind: 'nsfw', value: /^(yes|true|1)$/i.test(value) }
     }
+    case 'mtime': {
+      const m = /^(>=|<=|>|<)?\s*([\d.]+)\s*(m|h|d|w|y)?$/i.exec(value)
+      if (!m || !Number.isFinite(parseFloat(m[2]))) return null
+      const unit = (m[3] || 'd').toLowerCase()
+      return {
+        kind: 'mtime',
+        op: m[1] || '=',
+        ms: parseFloat(m[2]) * TIME_UNITS[unit]
+      }
+    }
+    case 'author':
+      return { kind: 'author', text: value.toLowerCase() }
+    case 'trigger':
+      return { kind: 'trigger', text: value.toLowerCase() }
+    case 'hash': {
+      const text = value.toLowerCase()
+      // 过短前缀会命中过宽，不作为语法解析（整段回退自由文本）
+      if (!/^[0-9a-f]{4,64}$/.test(text)) return null
+      return { kind: 'hash', text }
+    }
     default:
       return null
   }
@@ -107,6 +141,27 @@ function matchFilter(m, f) {
       return m.favorite === f.value
     case 'nsfw':
       return m.nsfw === f.value
+    case 'mtime': {
+      // mtime 为文件修改时间；年龄 = 当前时间 - mtime（缺失值不命中）
+      const t = Number(m.mtimeMs)
+      if (!Number.isFinite(t)) return false
+      return compareOp(Date.now() - t, f.op, f.ms)
+    }
+    case 'author':
+      return String(m.autoInfo?.author || '').toLowerCase().includes(f.text)
+    case 'trigger': {
+      const parts = [m.triggerWords]
+      if (Array.isArray(m.autoInfo?.triggerCandidates)) {
+        parts.push(...m.autoInfo.triggerCandidates)
+      }
+      return parts
+        .filter((s) => typeof s === 'string' && s)
+        .join('\n')
+        .toLowerCase()
+        .includes(f.text)
+    }
+    case 'hash':
+      return String(m.hash || '').toLowerCase().startsWith(f.text)
     default:
       return true
   }

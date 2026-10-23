@@ -1,4 +1,5 @@
 import { state, replaceModels } from './state'
+import { clearModelCoverOverrides } from './cover-overrides'
 import { toast } from './toast'
 import { scanModels } from './library'
 import {
@@ -227,6 +228,10 @@ export async function partialScanModels(dirs) {
       removedIds.push(m.id)
       return false
     })
+    // OP-02：局部扫描返回的是重新装饰的最新对象（forceRefresh），清除这些
+    // 模型的旧封面覆盖，避免历史缩略图地址遮住新装饰结果；子树外模型的
+    // 覆盖继续保留（它们本轮未被重新装饰）。
+    clearModelCoverOverrides(incomingIds)
     replaceModels(untouched.concat(incoming))
     state.lastScan = {
       count: state.models.length,

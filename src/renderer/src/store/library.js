@@ -1,4 +1,5 @@
 import { state, defaultSettings, modelIndexOf, replaceModels, replaceSettings } from './state'
+import { applyCoverOverrides, clearCoverOverrides } from './cover-overrides'
 import { toast } from './toast'
 import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
 
@@ -59,6 +60,8 @@ export async function initApp() {
     const cached = data.cachedIndex
     if (state.folder && Array.isArray(cached?.models) && cached.models.length > 0) {
       // 秒开上次索引；autoScan 开启时后台校验，关闭时保持缓存展示
+      // OP-02：索引装饰结果自带最新缩略图 URL，展示覆盖从空开始
+      clearCoverOverrides()
       replaceModels(cached.models)
       state.lastScan = {
         count: cached.models.length,
@@ -210,6 +213,8 @@ export async function switchRoot(folder) {
       return
     }
     if (res?.cached && Array.isArray(res.models)) {
+      // OP-02：切库后覆盖映射属于旧库，清空后以索引装饰结果为准
+      clearCoverOverrides()
       replaceModels(res.models)
       state.folder = res.root || folder
       state.lastScan = {
@@ -304,6 +309,9 @@ export async function scanModels(folder = state.folder, options = {}) {
       }
       return false
     }
+    // OP-02：全量扫描装饰结果已携带缓存命中的缩略图 URL，清空旧覆盖后
+    // 以新结果为准（缺失缩略图由后续 thumbsReady 重新写入覆盖）
+    clearCoverOverrides()
     replaceModels(res.models)
     // 扫描成功后才提交激活库（主进程已在同一维护锁内完成切根）
     state.folder = res.root || targetRoot
@@ -350,48 +358,10 @@ export function cancelScan() {
  *   的缩略图更新，按 path 匹配 covers 中的对应项
  */
 export function applyThumbUpdates(updates) {
-  if (!Array.isArray(updates)) return
-  // O2：批次内先按模型合并，再对每个模型做一次元素级替换。
-  // 主进程已把多个缩略图完成事件合批；同一模型的多张轮播封面更新
-  // （coverThumb）合并为一次 covers 数组替换，避免同 tick 内多次
-  // 元素级赋值触发依赖整表的派生计算反复失效。
-  // 索引查找走 state 模块维护的持久 id→下标缓存（O(1)），
-  // 不再为每个事件重建全量 Map。
-  const byModel = new Map()
-  for (const update of updates) {
-    if (!update || typeof update.id !== 'string' || !update.id) continue
-    const { id, coverUrl, coverThumb } = update
-    if (!coverUrl && !coverThumb) continue
-    let entry = byModel.get(id)
-    if (!entry) {
-      entry = { coverUrl: '', thumbs: new Map() }
-      byModel.set(id, entry)
-    }
-    if (coverUrl) entry.coverUrl = coverUrl
-    if (coverThumb && typeof coverThumb.path === 'string' && typeof coverThumb.thumbUrl === 'string') {
-      entry.thumbs.set(coverThumb.path, coverThumb.thumbUrl)
-    }
-  }
-  for (const [id, entry] of byModel) {
-    const idx = modelIndexOf(id)
-    if (idx === undefined) continue
-    // O3 约定：浅响应下 Object.assign 原位变异不触发更新，须元素级替换；
-    // 替换会使 selectedModel 指向新引用，但详情页 watch 有 formDirty 保护
-    // （有编辑时跳过重填），无编辑时重填等值无副作用
-    let next = state.models[idx]
-    if (entry.coverUrl) next = { ...next, coverUrl: entry.coverUrl }
-    if (entry.thumbs.size > 0 && Array.isArray(next.covers)) {
-      let changed = false
-      const covers = next.covers.map((c) => {
-        const thumbUrl = entry.thumbs.get(c.path)
-        if (thumbUrl === undefined || c.thumbUrl === thumbUrl) return c
-        changed = true
-        return { ...c, thumbUrl }
-      })
-      if (changed) next = { ...next, covers }
-    }
-    if (next !== state.models[idx]) state.models[idx] = next
-  }
+  // OP-02：写入独立的展示覆盖映射，不再逐模型替换对象——后者会使
+  // filteredModels/duplicateGroups/typeCounts 等派生在全量缩略图回填期间
+  // 反复失效并重排，且搜索域 WeakMap 缓存随对象换身失效。
+  applyCoverOverrides(updates)
 }
 
 /**

@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { setModelCoverUrl } from '../src/renderer/src/store/cover-overrides'
 import {
   acceptConfirm,
   allFilteredSelected,
   applyHashUpdate,
   applyThumbUpdates,
+  clearCoverOverrides,
+  coverThumbUrl,
+  modelCoverUrl,
   batchApplyTriggers,
   batchCivitaiIdentify,
   batchCivitaiImages,
@@ -94,6 +98,7 @@ let api
 
 beforeEach(() => {
   api = makeApiMock()
+  clearCoverOverrides()
   vi.stubGlobal('window', { api })
   // applyTheme/applyAccent（saveSettings/主题与强调色切换）会触碰 document
   vi.stubGlobal('document', {
@@ -1474,20 +1479,24 @@ describe('saveSettings', () => {
 })
 
 describe('applyThumbUpdates', () => {
-  it('按 id 增量替换 coverUrl；无效输入忽略', () => {
+  it('按 id 写入展示覆盖；模型对象保持引用与字段不变', () => {
     state.models = [makeModel('m1', { coverUrl: 'orig' }), makeModel('m2', { coverUrl: 'orig2' })]
+    const before = state.models[0]
     applyThumbUpdates([
       { id: 'm1', coverUrl: 'thumb1' },
       { id: 'missing', coverUrl: 'x' },
       { id: 'm2', coverUrl: '' }
     ])
-    expect(state.models[0].coverUrl).toBe('thumb1')
+    expect(modelCoverUrl(state.models[0])).toBe('thumb1')
     expect(state.models[1].coverUrl).toBe('orig2')
+    // OP-02：覆盖映射独立，领域对象不被替换
+    expect(state.models[0]).toBe(before)
+    expect(state.models[0].coverUrl).toBe('orig')
     applyThumbUpdates('not-an-array')
     expect(state.models).toHaveLength(2)
   })
 
-  it('coverThumb 按 path 合并进对应 covers 条目（OPT-1）', () => {
+  it('coverThumb 按 path 写入覆盖，不修改 covers 条目（OPT-1）', () => {
     state.models = [
       makeModel('m1', {
         coverUrl: 'orig',
@@ -1497,28 +1506,41 @@ describe('applyThumbUpdates', () => {
         ]
       })
     ]
-    // 仅 coverThumb：默认封面 URL 不变，目标 covers 条目获得 thumbUrl
+    // 仅 coverThumb：默认封面 URL 不变，目标 covers 条目的展示缩略图走覆盖
     applyThumbUpdates([{ id: 'm1', coverThumb: { path: 'p-b', thumbUrl: 't-b' } }])
-    expect(state.models[0].coverUrl).toBe('orig')
-    expect(state.models[0].covers[0].thumbUrl).toBeUndefined()
-    expect(state.models[0].covers[1].thumbUrl).toBe('t-b')
+    expect(modelCoverUrl(state.models[0])).toBe('orig')
+    expect(coverThumbUrl(state.models[0].covers[0])).toBe('')
+    expect(coverThumbUrl(state.models[0].covers[1])).toBe('t-b')
+    expect(state.models[0].covers[1].thumbUrl).toBeUndefined()
     // coverUrl 与 coverThumb 同时携带时一并生效；未知 path 静默忽略
     applyThumbUpdates([
       { id: 'm1', coverUrl: 'thumb1', coverThumb: { path: 'p-a', thumbUrl: 't-a' } },
       { id: 'm1', coverThumb: { path: 'p-missing', thumbUrl: 't-x' } }
     ])
-    expect(state.models[0].coverUrl).toBe('thumb1')
-    expect(state.models[0].covers[0].thumbUrl).toBe('t-a')
-    expect(state.models[0].covers[1].thumbUrl).toBe('t-b')
+    expect(modelCoverUrl(state.models[0])).toBe('thumb1')
+    expect(coverThumbUrl(state.models[0].covers[0])).toBe('t-a')
+    expect(coverThumbUrl(state.models[0].covers[1])).toBe('t-b')
   })
 
   it('coverThumb 与 coverUrl 均缺省的更新被忽略', () => {
     state.models = [makeModel('m1', { coverUrl: 'orig' })]
     applyThumbUpdates([{ id: 'm1' }])
-    expect(state.models[0].coverUrl).toBe('orig')
+    expect(modelCoverUrl(state.models[0])).toBe('orig')
   })
 
-  it('O2 批次：同一模型的多张轮播封面与默认封面合并为一次元素替换', () => {
+  it('封面替换/清空时覆盖同步：空值回退模型自带字段', () => {
+    const m = makeModel('m1', { coverUrl: 'orig' })
+    state.models = [m]
+    setModelCoverUrl('m1', 'thumb')
+    expect(modelCoverUrl(m)).toBe('thumb')
+    // 清空封面：覆盖删除，回退模型对象（coverUrl 置空则展示占位）
+    setModelCoverUrl('m1', '')
+    expect(modelCoverUrl(m)).toBe('orig')
+    setModelCoverUrl('m1', 'new-cover')
+    expect(modelCoverUrl(m)).toBe('new-cover')
+  })
+
+  it('批次更新不触发模型元素替换（避免全量派生重算）', () => {
     replaceModels([
       makeModel('m1', {
         coverUrl: 'orig',
@@ -1535,9 +1557,9 @@ describe('applyThumbUpdates', () => {
       { id: 'm1', coverThumb: { path: 'p-b', thumbUrl: 't-b' } }
     ])
 
-    expect(state.models[0]).not.toBe(before)
-    expect(state.models[0].coverUrl).toBe('t-default')
-    expect(state.models[0].covers.map((c) => c.thumbUrl)).toEqual(['t-a', 't-b'])
+    expect(state.models[0]).toBe(before)
+    expect(modelCoverUrl(state.models[0])).toBe('t-default')
+    expect(state.models[0].covers.map(coverThumbUrl)).toEqual(['t-a', 't-b'])
   })
 })
 

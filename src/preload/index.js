@@ -144,6 +144,11 @@ const api = {
      * 返回 { report, repaired, backupPath, dataResetSkipped? } 或 { error }
      */
     repairHealth: () => invokeValidated('models:repairHealth'),
+    /**
+     * 导出模型清单（FN-04）：渲染层按当前筛选结果生成 csv/markdown/json 文本，
+     * 主进程弹保存对话框并原子写入；返回 { ok, path, sizeBytes } / { canceled } / { error }
+     */
+    exportModelList: (payload) => invokeValidated('models:exportModelList', payload),
     /** 导出备份（FEAT-3）：设置 + 当前库标注/封面 → zip，返回 { path, sizeBytes, library, models, covers } / { canceled } / { error } */
     exportBackup: () => invokeValidated('models:exportBackup'),
     /** 从备份恢复（FEAT-3）：zip → 设置 + 指定库，返回 { settingsRestored, libraryRestored? } / { canceled } / { error } */

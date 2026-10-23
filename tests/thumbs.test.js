@@ -20,13 +20,14 @@ vi.mock('electron', () => ({
 // 缩略图渲染打桩：真实实现依赖 Electron BrowserWindow，此处模拟其响应协议
 vi.mock('../src/main/services/thumb-renderer', () => ({
   renderThumbJpeg: vi.fn(),
+  renderThumbFromPath: vi.fn(),
   destroyThumbRenderer: vi.fn(),
   setThumbRenderTimeoutForTests: vi.fn()
 }))
 
 import { getThumbPathDeferred, drainDeferredThumbs, clearDeferredJobs } from '../src/main/services/thumbs'
 import { setDataRoot } from '../src/main/services/store'
-import { renderThumbJpeg } from '../src/main/services/thumb-renderer'
+import { renderThumbFromPath } from '../src/main/services/thumb-renderer'
 
 const roots = []
 let root
@@ -37,9 +38,9 @@ let source
  * @param {{mode?: 'wide'|'small'|'broken'}} opts
  */
 function mockRender({ mode = 'wide' } = {}) {
-  if (mode === 'wide') vi.mocked(renderThumbJpeg).mockResolvedValue({ jpeg: Buffer.from('fake-jpeg') })
-  else if (mode === 'small') vi.mocked(renderThumbJpeg).mockResolvedValue({ small: true })
-  else vi.mocked(renderThumbJpeg).mockRejectedValue(new Error('解码失败'))
+  if (mode === 'wide') vi.mocked(renderThumbFromPath).mockResolvedValue({ jpeg: Buffer.from('fake-jpeg') })
+  else if (mode === 'small') vi.mocked(renderThumbFromPath).mockResolvedValue({ small: true })
+  else vi.mocked(renderThumbFromPath).mockRejectedValue(new Error('解码失败'))
 }
 
 /**
@@ -55,7 +56,7 @@ async function generateNow(src) {
 }
 
 beforeEach(async () => {
-  vi.mocked(renderThumbJpeg).mockReset()
+  vi.mocked(renderThumbFromPath).mockReset()
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-thumbs-'))
   roots.push(root)
   setDataRoot(root)
@@ -70,15 +71,16 @@ afterAll(async () => {
 })
 
 describe('缩略图生成（P2：渲染进程解码）', () => {
-  it('宽图生成缩略图：整图字节交渲染进程解码，主进程不触碰 nativeImage', async () => {
+  it('宽图生成缩略图：只传 mvimg 地址，主进程不读整图也不触碰 nativeImage', async () => {
     mockRender({ mode: 'wide' })
     const thumbPath = await generateNow(source)
     expect(thumbPath).toContain(path.join('.modelvault', 'thumbs'))
     expect(thumbPath.endsWith('.jpg')).toBe(true)
-    // P2 核心：解码/缩放/编码在渲染进程执行；主进程只读盘并把完整字节传出
-    expect(renderThumbJpeg).toHaveBeenCalledTimes(1)
-    const [buffer, opts] = vi.mocked(renderThumbJpeg).mock.calls[0]
-    expect(buffer.toString()).toBe('png-bytes')
+    // OP-03 核心：解码/缩放/编码与源图读取都在隐藏渲染进程；
+    // 主进程仅 stat 预检并传递受控的 mvimg:// 地址
+    expect(renderThumbFromPath).toHaveBeenCalledTimes(1)
+    const [url, opts] = vi.mocked(renderThumbFromPath).mock.calls[0]
+    expect(url).toBe(`mvimg://local/${encodeURIComponent(source)}`)
     expect(opts).toEqual({ thumbWidth: 640, minSourceWidth: 720, quality: 0.82 })
     // 缩略图文件已写入且内容为渲染进程回传的 JPEG 字节
     const written = await fs.readFile(thumbPath)
@@ -103,7 +105,7 @@ describe('缩略图生成（P2：渲染进程解码）', () => {
     // 已有缓存文件：deferred 直接返回路径，不再登记任务/渲染
     const second = await getThumbPathDeferred(source)
     expect(second).toBe(first)
-    expect(renderThumbJpeg).toHaveBeenCalledTimes(1)
+    expect(renderThumbFromPath).toHaveBeenCalledTimes(1)
   })
 })
 

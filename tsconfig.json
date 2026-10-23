@@ -10,5 +10,13 @@
     "strict": false,
     "skipLibCheck": true
   },
-  "include": ["src/shared/**/*.js", "src/preload/**/*.js"]
+  "include": [
+    "src/shared/**/*.js",
+    "src/preload/**/*.js",
+    "src/main/services/atomic-write.js",
+    "src/main/services/store-paths.js",
+    "src/main/services/library-index.js",
+    "src/renderer/src/store/search-query.js",
+    "src/renderer/src/store/cover-overrides.js"
+  ]
 }

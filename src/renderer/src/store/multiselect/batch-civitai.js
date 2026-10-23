@@ -1,6 +1,7 @@
 import { state } from '../state'
 import { toast, confirmDialog } from '../toast'
 import { applyMetaUpdates } from '../meta-apply'
+import { setModelCoverUrl } from '../cover-overrides'
 import { modelById } from '../selectors'
 
 /**
@@ -278,6 +279,7 @@ export async function batchCivitaiImages() {
           covers: imp.covers || [],
           hasManualCover: (imp.covers || []).length > 0
         }
+        setModelCoverUrl(id, imp.coverUrl)
       }
     }
     applyMetaUpdates(metas, (meta, cur) => ({

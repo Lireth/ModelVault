@@ -1,4 +1,5 @@
 import { state } from './state'
+import { setModelCoverUrl } from './cover-overrides'
 import { toast } from './toast'
 
 /**
@@ -49,6 +50,8 @@ function applyCoverResult(id, res) {
       covers: res.covers || [],
       hasManualCover: (res.covers || []).length > 0
     }
+    // OP-02：封面被替换/清空时同步覆盖，避免旧缩略图继续遮住新结果
+    setModelCoverUrl(id, res.coverUrl)
   }
 }
 
@@ -160,6 +163,8 @@ export async function clearAllCovers() {
       covers: [],
       hasManualCover: false
     }
+    // OP-02：清空覆盖，避免旧缩略图仍在卡片上显示
+    setModelCoverUrl(m.id, '')
   }
   toast('success', `已清空 ${res.cleared} 个模型共 ${res.images} 张示例图`)
   return true

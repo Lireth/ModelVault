@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { BrowserWindow, Menu, clipboard, shell } from 'electron'
+import { BrowserWindow, Menu, clipboard, dialog, shell } from 'electron'
 import logger from '../../logger'
+import { atomicWriteFile } from '../../services/atomic-write'
 import { isInRoot, getModelMeta, removeModelMeta } from '../../services/store'
 import { checkLibraryHealth, repairLibraryHealth } from '../../services/library-health'
 import { SIDECAR_PREVIEW_EXTS } from '../../services/scanner'
@@ -139,4 +140,38 @@ export function registerMiscHandlers() {
   wrapHandler('models:repairHealth', () => repairLibraryHealth(), {
     errorPrefix: '模型库修复失败'
   })
+
+  // 模型清单导出（FN-04）：渲染层已按当前筛选结果生成文本，主进程只负责
+  // 原生保存对话框与原子落盘；不接受渲染层传入路径，避免任意文件写入。
+  wrapHandler('models:exportModelList', async (event, { format, content } = {}) => {
+    const specs = {
+      csv: { ext: 'csv', label: 'CSV 文件' },
+      markdown: { ext: 'md', label: 'Markdown 文件' },
+      json: { ext: 'json', label: 'JSON 文件' }
+    }
+    const spec = Object.hasOwn(specs, format) ? specs[format] : null
+    if (!spec) return { error: '不支持的导出格式' }
+    if (typeof content !== 'string') return { error: '导出内容无效' }
+    // 字符上限由 schema 前置把关，这里再按 UTF-8 字节兜底（中文 3 字节/字）
+    if (Buffer.byteLength(content, 'utf-8') > 32 * 1024 * 1024) {
+      return { error: '导出内容过大（上限 32MB）' }
+    }
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const date = new Date().toISOString().slice(0, 10)
+    const result = await dialog.showSaveDialog(win, {
+      title: '导出模型清单',
+      defaultPath: `modelvault-models-${date}.${spec.ext}`,
+      filters: [{ name: spec.label, extensions: [spec.ext] }]
+    })
+    if (result.canceled || !result.filePath) return { canceled: true }
+    try {
+      await atomicWriteFile(result.filePath, content)
+      const stat = await fs.stat(result.filePath)
+      logger.info(`模型清单已导出: ${result.filePath}（${stat.size} 字节）`)
+      return { ok: true, path: result.filePath, sizeBytes: stat.size }
+    } catch (err) {
+      logger.warn(`模型清单导出失败: ${err.message}`)
+      return { error: `模型清单导出失败: ${err.message}` }
+    }
+  }, { errorPrefix: '模型清单导出失败' })
 }

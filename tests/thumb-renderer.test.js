@@ -64,6 +64,7 @@ vi.mock('electron', () => {
 
 import {
   renderThumbJpeg,
+  renderThumbFromPath,
   destroyThumbRenderer,
   setThumbRenderTimeoutForTests
 } from '../src/main/services/thumb-renderer'
@@ -113,6 +114,30 @@ it('渲染成功：发送任务载荷并在 thumb:done 后以 Buffer 结算', as
     jpeg: new Uint8Array([1, 2, 3])
   })
   await expect(p).resolves.toEqual({ jpeg: Buffer.from([1, 2, 3]) })
+})
+
+it('按 mvimg 地址派发任务：载荷携带 url 而非整图字节（OP-03）', async () => {
+  const p = renderThumbFromPath('mvimg://local/%2Ftmp%2Fcover.png', {
+    thumbWidth: 640,
+    minSourceWidth: 720,
+    quality: 0.82
+  })
+  await flush()
+  const w = onlyWindow()
+  const { channel, payload } = w.webContents.sent[0]
+  expect(channel).toBe('thumb:render')
+  expect(payload.url).toBe('mvimg://local/%2Ftmp%2Fcover.png')
+  expect(payload.buf).toBeUndefined()
+  expect(typeof payload.id).toBe('number')
+  w.webContents.emit('ipc-message', {}, 'thumb:done', { id: payload.id, small: true })
+  await expect(p).resolves.toEqual({ small: true })
+})
+
+it('空源图地址直接拒绝，不创建隐藏窗口', async () => {
+  await expect(
+    renderThumbFromPath('', { thumbWidth: 640, minSourceWidth: 720, quality: 0.82 })
+  ).rejects.toThrow('无效的源图地址')
+  expect(FakeBrowserWindow.instances).toHaveLength(0)
 })
 
 it('源图过小（small）：以 { small: true } 结算，调用方回退原图', async () => {

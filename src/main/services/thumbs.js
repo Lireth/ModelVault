@@ -6,7 +6,8 @@ import logger from '../logger'
 // 在模块初始化顺序变化时拿到未就绪绑定）
 import { getCurrentRoot } from './store-paths'
 import { runWithConcurrency } from '../utils'
-import { renderThumbJpeg } from './thumb-renderer'
+import { renderThumbFromPath } from './thumb-renderer'
+import { toImageUrl } from '../protocol'
 
 /**
  * 封面缩略图缓存：
@@ -61,8 +62,9 @@ async function generateThumb(absCover, mtimeMs, thumbPath) {
   // 大文件跳过（B2）：先 stat 校验字节数，避免超大图整读入内存
   const sourceStat = await fs.stat(absCover)
   if (sourceStat.size > MAX_SOURCE_BYTES) return ''
-  const buffer = await fs.readFile(absCover)
-  const result = await renderThumbJpeg(buffer, {
+  // OP-03：只传源图地址，由隐藏渲染进程经 mvimg:// 自行读取。主进程不再
+  // 读入整图并经 IPC 结构化克隆（单图可达 64MB，4 并发时峰值成倍放大）。
+  const result = await renderThumbFromPath(toImageUrl(absCover), {
     thumbWidth: THUMB_WIDTH,
     minSourceWidth: MIN_SOURCE_WIDTH,
     quality: JPEG_QUALITY / 100

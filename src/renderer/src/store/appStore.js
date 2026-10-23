@@ -94,6 +94,24 @@ export {
 // 跨库存储总览（FN-01，按需拉取，不参与当前库派生链）
 export { libraryOverview, loadLibraryOverview, resetLibraryOverview } from './library-overview'
 
+// 封面/缩略图展示覆盖（OP-02：避免缩略图回填触发全量派生重算）
+export {
+  applyCoverOverrides,
+  modelCoverUrl,
+  coverThumbUrl,
+  clearCoverOverrides
+} from './cover-overrides'
+
+// 当前筛选结果导出（FN-04）
+export {
+  EXPORT_FORMATS,
+  buildExportRows,
+  buildCsv,
+  buildMarkdown,
+  buildJson,
+  exportModelList
+} from './model-export'
+
 // 查找派生
 export { modelById } from './selectors'
 

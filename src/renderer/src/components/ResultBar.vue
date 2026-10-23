@@ -1,10 +1,11 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import {
   allTags,
   BASE_MODEL_FAMILIES,
   duplicateIdSet,
   duplicateWastedBytes,
+  exportModelList,
   formatSize,
   LORA_TAGS,
   selectRedundantDuplicates,
@@ -26,6 +27,23 @@ const duplicateCount = computed(() => duplicateIdSet.value.size)
 function onSelectRedundant() {
   const n = selectRedundantDuplicates()
   if (n > 0) toast('info', `已选中 ${n} 个冗余副本，复核后按 Delete 移入回收站`)
+}
+
+/* ---------------- 模型清单导出（FN-04） ---------------- */
+
+const exportDetails = ref(null)
+const exporting = ref(false)
+
+/** 导出当前筛选结果；点击后立即收起菜单，保存对话框由主进程弹出 */
+async function onExport(format) {
+  if (exportDetails.value) exportDetails.value.open = false
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    await exportModelList(format)
+  } finally {
+    exporting.value = false
+  }
 }
 </script>
 
@@ -97,6 +115,18 @@ function onSelectRedundant() {
         <option v-for="t in allTags" :key="t" :value="t">{{ t }}</option>
       </select>
     </label>
+    <!-- 模型清单导出（FN-04）：导出当前搜索/筛选/排序结果 -->
+    <details ref="exportDetails" class="export-menu">
+      <summary class="fav-filter export-trigger" title="导出当前筛选结果">
+        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M4 20h16" /></svg>
+        导出
+      </summary>
+      <div class="export-pop">
+        <button class="export-option" :disabled="exporting" @click="onExport('csv')">CSV（Excel）</button>
+        <button class="export-option" :disabled="exporting" @click="onExport('markdown')">Markdown 表格</button>
+        <button class="export-option" :disabled="exporting" @click="onExport('json')">JSON 数据</button>
+      </div>
+    </details>
   </div>
 </template>
 
@@ -110,5 +140,59 @@ function onSelectRedundant() {
 /* 子筛选下拉：靠结果栏右侧 */
 .sub-filter {
   margin-left: auto;
+}
+
+/* 导出菜单（FN-04）：原生 details 折叠，无需额外全局点击监听 */
+.export-menu {
+  position: relative;
+  margin-left: auto;
+}
+
+.export-trigger {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.export-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.export-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  min-width: 148px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.export-option {
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--font-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.export-option:hover {
+  background: var(--bg-hover);
+}
+
+.export-option:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 </style>

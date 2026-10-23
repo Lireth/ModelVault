@@ -57,6 +57,16 @@ export function registerImageScheme() {
  */
 const realpathCache = new Map()
 const REALPATH_CACHE_MAX = 8
+/**
+ * 不可变资产（.modelvault/covers|thumbs）的单文件请求缓存（OP-04）：
+ * 每张卡片图片此前都要 realpath + stat 两次系统调用；大库滚动时放大明显。
+ * 这两类文件由应用生成且文件名含时间戳/mtime（内容不可变），可短 TTL 缓存
+ * realpath 与「存在且为图片」的校验结果。TTL 同时限定异常场景（文件被外部
+ * 替换为 junction/非图片）的暴露窗口；根目录切换时整体清空。
+ */
+const immutableAssetCache = new Map()
+const IMMUTABLE_ASSET_CACHE_MAX = 512
+const IMMUTABLE_ASSET_TTL_MS = 30_000
 /** 上一次所见根目录（检测切换以失效 realpath 缓存） */
 let lastSeenRoot
 
@@ -89,6 +99,8 @@ async function isAllowedPath(realPath) {
   // 根目录切换时缓存整体失效：旧根的 realpath 不再适用于新根的归属判断
   if (root !== lastSeenRoot) {
     realpathCache.clear()
+    // OP-04：文件级缓存同样绑定根目录归属，切根必须整体失效
+    immutableAssetCache.clear()
     lastSeenRoot = root
   }
   const allowed = []
@@ -170,19 +182,42 @@ function registerMvimgHandler() {
       } catch {
         return new Response('Bad Request', { status: 400 })
       }
-      // 先解析符号链接/junction 得到真实路径，再校验归属（B8）
-      let realPath
-      try {
-        realPath = await fs.promises.realpath(filePath)
-      } catch {
-        return new Response('Not Found', { status: 404 })
+      // 先解析符号链接/junction 得到真实路径，再校验归属（B8）。
+      // OP-04：不可变资产命中短 TTL 缓存时跳过 realpath 与 stat（每张图片
+      // 至少两次系统调用）；sidecar 同名图内容可被外部替换，不进入缓存。
+      const immutableCandidate = isImmutableAssetPath(filePath)
+      const cacheKey = immutableCandidate ? filePath.toLowerCase() : ''
+      let realPath = ''
+      let cacheHit = false
+      if (cacheKey) {
+        const cached = immutableAssetCache.get(cacheKey)
+        if (cached && cached.expiresAt > Date.now()) {
+          realPath = cached.realPath
+          cacheHit = true
+        }
+      }
+      if (!realPath) {
+        try {
+          realPath = await fs.promises.realpath(filePath)
+        } catch {
+          return new Response('Not Found', { status: 404 })
+        }
       }
       if (!(await isAllowedPath(realPath))) {
         logger.warn(`mvimg 协议拒绝访问路径: ${filePath}`)
         return new Response('Forbidden', { status: 403 })
       }
-      if (!(await isValidImageFile(realPath))) {
+      if (!cacheHit && !(await isValidImageFile(realPath))) {
         return new Response('Not Found', { status: 404 })
+      }
+      if (cacheKey && !cacheHit) {
+        if (immutableAssetCache.size >= IMMUTABLE_ASSET_CACHE_MAX) {
+          immutableAssetCache.delete(immutableAssetCache.keys().next().value)
+        }
+        immutableAssetCache.set(cacheKey, {
+          realPath,
+          expiresAt: Date.now() + IMMUTABLE_ASSET_TTL_MS
+        })
       }
       const upstream = await net.fetch(pathToFileURL(realPath).toString())
       // 按资产命名稳定性下发缓存策略（A-05）：关联存储封面/缩略图不可变，

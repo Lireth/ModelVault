@@ -80,6 +80,18 @@ const EXPECTED_EXPORTS = [
   'libraryOverview',
   'loadLibraryOverview',
   'resetLibraryOverview',
+  // 封面/缩略图展示覆盖（OP-02）
+  'applyCoverOverrides',
+  'modelCoverUrl',
+  'coverThumbUrl',
+  'clearCoverOverrides',
+  // 模型清单导出（FN-04）
+  'EXPORT_FORMATS',
+  'buildExportRows',
+  'buildCsv',
+  'buildMarkdown',
+  'buildJson',
+  'exportModelList',
   // 查找派生
   'modelById',
   // 详情

@@ -22,6 +22,7 @@ vi.mock('electron', () => ({
 // 模拟「可缩放大图 → 返回 JPEG 字节」，使缩略图链路真实走完落盘路径
 vi.mock('../src/main/services/thumb-renderer', () => ({
   renderThumbJpeg: vi.fn(),
+  renderThumbFromPath: vi.fn(),
   destroyThumbRenderer: vi.fn(),
   setThumbRenderTimeoutForTests: vi.fn()
 }))
@@ -39,7 +40,7 @@ import { loadData, setDataRoot, getModelMeta, setModelMeta, DATA_DIR, COVERS_DIR
 import { findSidecarText } from '../src/main/services/scanner'
 import { clearDeferredJobs } from '../src/main/services/thumbs'
 import * as thumbsModule from '../src/main/services/thumbs'
-import { renderThumbJpeg } from '../src/main/services/thumb-renderer'
+import { renderThumbFromPath } from '../src/main/services/thumb-renderer'
 import logger from '../src/main/logger'
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
@@ -332,7 +333,7 @@ describe('startThumbDrain 窗口生命周期（A7）', () => {
     await fs.writeFile(path.join(coversDir, 'cover.png'), PNG_MAGIC)
     setModelMeta(abs, { cover: `${DATA_DIR}/${COVERS_DIR}/cover.png` })
     // 缩略图渲染桩：模拟可缩放大图，使缩略图生成真实走完落盘路径
-    vi.mocked(renderThumbJpeg).mockResolvedValue({ jpeg: Buffer.from('fake-jpeg') })
+    vi.mocked(renderThumbFromPath).mockResolvedValue({ jpeg: Buffer.from('fake-jpeg') })
     const [decorated] = await decorateModels([makeModel(abs)])
     return { abs, decorated }
   }
@@ -513,7 +514,7 @@ describe('OPT-1 轮播封面复用缩略图管线', () => {
       cover: `${DATA_DIR}/${COVERS_DIR}/c0.png`,
       covers: [`${DATA_DIR}/${COVERS_DIR}/c0.png`, `${DATA_DIR}/${COVERS_DIR}/c1.png`]
     })
-    vi.mocked(renderThumbJpeg).mockResolvedValue({ jpeg: Buffer.from('fake-jpeg') })
+    vi.mocked(renderThumbFromPath).mockResolvedValue({ jpeg: Buffer.from('fake-jpeg') })
     return { abs, c0, c1 }
   }
 
@@ -570,7 +571,7 @@ describe('OPT-1 轮播封面复用缩略图管线', () => {
     // 同名 sidecar 预览图（非 covers 成员）
     const sidecar = path.join(root, 'sidecar-default.png')
     await fs.writeFile(sidecar, PNG_MAGIC)
-    vi.mocked(renderThumbJpeg).mockResolvedValue({ jpeg: Buffer.from('fake-jpeg') })
+    vi.mocked(renderThumbFromPath).mockResolvedValue({ jpeg: Buffer.from('fake-jpeg') })
 
     const win = { isDestroyed: () => false, webContents: { send: vi.fn() } }
     const [decorated] = await decorateModels([makeModel(abs)])

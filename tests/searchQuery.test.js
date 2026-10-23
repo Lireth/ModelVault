@@ -61,6 +61,21 @@ describe('parseSearchQuery 解析器', () => {
     expect(parseSearchQuery('score:5').filters).toEqual([{ kind: 'score', op: '=', value: 5 }])
   })
 
+  it('OP 扩展：mtime 时间运算、author/trigger/hash 前缀', () => {
+    expect(parseSearchQuery('mtime:<7d').filters).toEqual([
+      { kind: 'mtime', op: '<', ms: 7 * 24 * 3600 * 1000 }
+    ])
+    // 缺省单位 d；支持 h/w/y
+    expect(parseSearchQuery('mtime:>30').filters[0]).toMatchObject({ kind: 'mtime', op: '>', ms: 30 * 24 * 3600 * 1000 })
+    expect(parseSearchQuery('mtime:<=12h').filters[0]).toMatchObject({ op: '<=', ms: 12 * 3600 * 1000 })
+    expect(parseSearchQuery('author:Alice').filters).toEqual([{ kind: 'author', text: 'alice' }])
+    expect(parseSearchQuery('trigger:neon').filters).toEqual([{ kind: 'trigger', text: 'neon' }])
+    expect(parseSearchQuery('hash:ABCD1234').filters).toEqual([{ kind: 'hash', text: 'abcd1234' }])
+    // 非法值整段回退自由文本
+    expect(parseSearchQuery('mtime:soon').filters).toEqual([])
+    expect(parseSearchQuery('hash:xyz').filters).toEqual([])
+  })
+
   it('空输入返回空', () => {
     expect(parseSearchQuery('')).toEqual({ text: '', filters: [] })
     expect(parseSearchQuery('   ')).toEqual({ text: '', filters: [] })
@@ -99,6 +114,29 @@ describe('matchSearchFilters 匹配器', () => {
     expect(matchSearchFilters(model({ favorite: true }), parseSearchQuery('fav:yes').filters)).toBe(true)
     expect(matchSearchFilters(model({ favorite: true }), parseSearchQuery('fav:no').filters)).toBe(false)
     expect(matchSearchFilters(model({ nsfw: true }), parseSearchQuery('nsfw:1').filters)).toBe(true)
+  })
+
+  it('mtime/author/trigger/hash 命中语义', () => {
+    const DAY = 24 * 3600 * 1000
+    const old = parseSearchQuery('mtime:>30d').filters
+    const recent = parseSearchQuery('mtime:<7d').filters
+    expect(matchSearchFilters(model({ mtimeMs: Date.now() - 40 * DAY }), old)).toBe(true)
+    expect(matchSearchFilters(model({ mtimeMs: Date.now() - 1 * DAY }), old)).toBe(false)
+    expect(matchSearchFilters(model({ mtimeMs: Date.now() - 1 * DAY }), recent)).toBe(true)
+    expect(matchSearchFilters(model({}), old)).toBe(false)
+
+    const author = parseSearchQuery('author:alice').filters
+    expect(matchSearchFilters(model({ autoInfo: { author: 'Alice' } }), author)).toBe(true)
+    expect(matchSearchFilters(model({ autoInfo: { author: 'Bob' } }), author)).toBe(false)
+
+    const trigger = parseSearchQuery('trigger:neon').filters
+    expect(matchSearchFilters(model({ triggerWords: 'cyberpunk, NEON' }), trigger)).toBe(true)
+    expect(matchSearchFilters(model({ autoInfo: { triggerCandidates: ['neon lights'] } }), trigger)).toBe(true)
+    expect(matchSearchFilters(model({ triggerWords: 'portrait' }), trigger)).toBe(false)
+
+    const hash = parseSearchQuery('hash:abcdef12').filters
+    expect(matchSearchFilters(model({ hash: 'ABCDEF12' + '0'.repeat(56) }), hash)).toBe(true)
+    expect(matchSearchFilters(model({ hash: '1234abcd' }), hash)).toBe(false)
   })
 
   it('多条件 AND', () => {

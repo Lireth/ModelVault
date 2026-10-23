@@ -36,7 +36,9 @@ const pending = new Map()
 /**
  * 渲染进程侧脚本（经 executeJavaScript 安装，幂等）：
  * 消息协议——
- * 入：{ id, buf, thumbWidth, minSourceWidth, quality }（webContents.send）
+ * 入：{ id, url?, buf?, thumbWidth, minSourceWidth, quality }（webContents.send）
+ *   url：源图 mvimg:// 地址（生产链路，渲染进程自行读取，主进程不整图读盘）；
+ *   buf：源图字节（保留给调用方/测试直接传入内存数据的路径）。
  * 出：{ id, small: true } 源图宽度不足免缩放；{ id, jpeg: Uint8Array } 成功；
  *     { id, error } 解码/编码失败（损坏文件、不支持格式等）。
  * 与原 nativeImage 实现的行为对齐：宽度 <= minSourceWidth 返回 small（调用方
@@ -48,17 +50,39 @@ const RENDERER_SCRIPT = `
   window.__mvThumbRenderer = true
   const { ipcRenderer } = require('electron')
   ipcRenderer.on('thumb:render', async (_e, task) => {
-    const { id, buf, thumbWidth, minSourceWidth, quality } = task
+    const { id, url, buf, thumbWidth, minSourceWidth, quality } = task
     let bitmap = null
     try {
-      bitmap = await createImageBitmap(new Blob([buf]))
-      if (bitmap.width <= minSourceWidth) {
+      // OP-03：优先按 URL 读取源图（读写都发生在渲染进程侧），避免主进程
+      // 读入整图后经 IPC 结构化克隆再复制一份；buf 路径保留兼容直传字节。
+      // 使用 Image 而非 fetch：自定义协议对 <img> 无 CORS 限制，且无需把
+      // 整图再复制进 Blob；解码仍由 Chromium 完成。
+      let source = null
+      let width = 0
+      let height = 0
+      if (url) {
+        source = await new Promise((resolve, reject) => {
+          const img = new Image()
+          img.onload = () => resolve(img)
+          img.onerror = () => reject(new Error('读取源图失败'))
+          img.src = url
+        })
+        width = source.naturalWidth
+        height = source.naturalHeight
+      } else {
+        bitmap = await createImageBitmap(new Blob([buf]))
+        source = bitmap
+        width = bitmap.width
+        height = bitmap.height
+      }
+      if (!width || !height) throw new Error('源图尺寸无效')
+      if (width <= minSourceWidth) {
         ipcRenderer.send('thumb:done', { id, small: true })
         return
       }
-      const height = Math.max(1, Math.round((bitmap.height * thumbWidth) / bitmap.width))
-      const canvas = new OffscreenCanvas(thumbWidth, height)
-      canvas.getContext('2d').drawImage(bitmap, 0, 0, thumbWidth, height)
+      const outHeight = Math.max(1, Math.round((height * thumbWidth) / width))
+      const canvas = new OffscreenCanvas(thumbWidth, outHeight)
+      canvas.getContext('2d').drawImage(source, 0, 0, thumbWidth, outHeight)
       const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality })
       ipcRenderer.send('thumb:done', { id, jpeg: new Uint8Array(await blob.arrayBuffer()) })
     } catch (err) {
@@ -173,6 +197,30 @@ function ensureWindowReady() {
  *   jpeg：缩放编码后的 JPEG 字节
  */
 export async function renderThumbJpeg(buffer, opts) {
+  return dispatchThumbTask({ buf: buffer, ...opts })
+}
+
+/**
+ * 按 mvimg:// 地址在隐藏渲染进程中读取并生成缩略图（OP-03 生产链路）。
+ * 源图字节只存在于渲染进程，主进程不再整图读入与 IPC 复制，大封面的
+ * 内存峰值与跨进程拷贝开销显著降低。
+ * @param {string} url 源图 mvimg:// 地址（由调用方经 toImageUrl 构造）
+ * @param {{thumbWidth: number, minSourceWidth: number, quality: number}} opts
+ * @returns {Promise<{small: true} | {jpeg: Buffer}>}
+ */
+export async function renderThumbFromPath(url, opts) {
+  if (typeof url !== 'string' || !url) {
+    return Promise.reject(new Error('无效的源图地址'))
+  }
+  return dispatchThumbTask({ url, ...opts })
+}
+
+/**
+ * 派发一次缩略图渲染任务并等待结果。
+ * @param {object} payload 任务载荷（buf 或 url + 渲染参数）
+ * @returns {Promise<{small: true} | {jpeg: Buffer}>}
+ */
+function dispatchThumbTask(payload) {
   const ready = ensureWindowReady()
   const id = nextTaskId++
   return new Promise((resolve, reject) => {
@@ -189,7 +237,7 @@ export async function renderThumbJpeg(buffer, opts) {
       .then(() => {
         const w = win
         if (!w || w.isDestroyed()) throw new Error('缩略图渲染窗口不可用')
-        w.webContents.send('thumb:render', { id, buf: buffer, ...opts })
+        w.webContents.send('thumb:render', { id, ...payload })
       })
       .catch((err) => {
         pending.delete(id)

@@ -1,4 +1,5 @@
 import { state } from './state'
+import { setModelCoverUrl } from './cover-overrides'
 import { toast } from './toast'
 
 /**
@@ -89,6 +90,7 @@ function applyCoverResult(id, res) {
       covers: res.covers || [],
       hasManualCover: (res.covers || []).length > 0
     }
+    setModelCoverUrl(id, res.coverUrl)
   }
 }
 

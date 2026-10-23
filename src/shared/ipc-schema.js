@@ -284,6 +284,16 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'models:exportBackup': vVoid(),
   'models:importBackup': vVoid(),
 
+  // ---------- 导出域 ----------
+  // FN-04：当前筛选结果的清单文本（csv/markdown/json）；路径由主进程
+  // 保存对话框决定，payload 不含路径。字符上限按最大 16M 控制克隆开销。
+  'models:exportModelList': vObj({
+    fields: {
+      format: vStr({ required: true, max: 16 }),
+      content: vStr({ required: true, max: 16 * 1024 * 1024 })
+    }
+  }),
+
   // ---------- 文件操作域 ----------
   'models:deleteModel': vObj({ fields: { id: ID } }),
   'models:reveal': vObj({

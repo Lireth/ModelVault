@@ -1,10 +1,12 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
+  coverThumbUrl,
   formatDate,
   formatParamSummary,
   formatSize,
   duplicateIdSet,
+  modelCoverUrl,
   multiSelectIdSet,
   openDetail,
   selectRangeTo,
@@ -21,14 +23,14 @@ const props = defineProps({
   model: { type: Object, required: true }
 })
 
+/** 默认封面展示 URL（OP-02：后台缩略图经独立覆盖映射更新，模型对象不变） */
+const coverSrc = computed(() => modelCoverUrl(props.model))
+
 /** 封面 URL 加载失败标记（文件被移动/删除时回退占位符，避免碎图） */
 const coverError = ref(false)
-watch(
-  () => props.model.coverUrl,
-  () => {
-    coverError.value = false
-  }
-)
+watch(coverSrc, () => {
+  coverError.value = false
+})
 
 /* ---------------- 封面悬停轮播（多预览图模型） ----------------
  * 模型带多张预览图（covers 由扫描装饰附带）时，悬停封面区自动轮播：
@@ -63,7 +65,8 @@ const cycleBrokenUrls = new Set()
  * 是悬停卡顿的根源；缩略图文件被清理/源图变更导致 404 时不产生碎图帧。
  */
 function displayUrlOf(c) {
-  return c.thumbUrl && !cycleBrokenUrls.has(c.thumbUrl) ? c.thumbUrl : c.url
+  const thumb = coverThumbUrl(c)
+  return thumb && !cycleBrokenUrls.has(thumb) ? thumb : c.url
 }
 
 /** 当前轮播图 URL（空串表示未轮播） */
@@ -256,8 +259,8 @@ const isDuplicate = computed(() => duplicateIdSet.value.has(props.model.id))
     ><svg v-if="selected" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8" /></svg></span>
     <div class="cover" @mouseenter="startCycle" @mouseleave="stopCycle">
       <img
-        v-if="model.coverUrl && !coverError"
-        :src="model.coverUrl"
+        v-if="coverSrc && !coverError"
+        :src="coverSrc"
         :alt="model.name"
         loading="lazy"
         draggable="false"
