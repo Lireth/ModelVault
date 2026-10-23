@@ -136,7 +136,9 @@ async function fileInfo(file) {
 
 /**
  * 元数据概要（纯函数，便于单测）：只统计数量，不携带任何模型路径。
- * @param {Record<string, object>} metaMap 绝对路径 → 元数据
+ * @param {Record<string, any>} metaMap 绝对路径 → 元数据
+ * @returns {{models: number, withCovers: number, withTags: number,
+ *   withParams: number, withNote: number, withHash: number}}
  */
 export function summarizeMetadata(metaMap) {
   const summary = {

@@ -59,10 +59,10 @@ const SIGNATURE_CHECK_TIMEOUT_MS = 20000
  * - 未配置（本地开发/未签名发布）时为空串，验签策略退化为仅 SHA256；
  * - 配置后强制要求更新包 Authenticode 状态 Valid 且指纹一致。
  */
-const BUILD_SIGNER_THUMBPRINT =
-  typeof __MODELVAULT_SIGNER_THUMBPRINT__ === 'string'
-    ? __MODELVAULT_SIGNER_THUMBPRINT__
-    : ''
+const BUILD_SIGNER_THUMBPRINT = /** @type {string} */ (
+  // @ts-ignore 构建期常量：release CI 经 Vite define 注入该全局标识符，类型层面不声明
+  typeof __MODELVAULT_SIGNER_THUMBPRINT__ === 'string' ? __MODELVAULT_SIGNER_THUMBPRINT__ : ''
+)
 
 /** 测试钩子：替换 PowerShell 查询结果（避免单测依赖真实证书/系统命令） */
 let authenticodeQueryOverride = null
@@ -142,7 +142,7 @@ export async function fetchAllowedUpdateUrl(url, options) {
  * 从 GitHub API release 响应中提取更新包资产（纯函数，单测锁定）：
  * 仅接受与本版本命名约定完全一致的资产（ModelVault-<latest>.exe[.sha256]），
  * 下载地址必须命中外链白名单（B3：https + github.com）。
- * @param {object} data GitHub API releases/latest 响应
+ * @param {Record<string, any>} data GitHub API releases/latest 响应（字段运行时校验）
  * @param {string} latest 最新版本号（不含 v 前缀）
  * @returns {{downloadUrl: string, checksumUrl: string, size: number} | null}
  *   任一资产缺失或地址不合规返回 null（视为不可应用内更新，回退下载页引导）
@@ -354,8 +354,9 @@ function queryAuthenticode(filePath) {
  * 未配置预期签名指纹时退化为仅 SHA256（保持未签名发布可更新）；
  * 配置后强制 Valid + 指纹匹配，任何异常均 fail-closed。
  * @param {string} filePath 更新包路径
- * @returns {Promise<{ok: true, required: boolean, thumbprint?: string, subject?: string} |
- *   {ok: false, required: true, error: string}>}
+ * @returns {Promise<{ok: boolean, required: boolean, thumbprint?: string,
+ *   subject?: string, error?: string}>}
+ *   ok=false 时 error 必有值（fail-closed）
  */
 export async function verifyUpdateSignature(filePath) {
   const rawExpected = signerThumbprintSetting()

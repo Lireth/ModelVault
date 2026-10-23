@@ -177,13 +177,17 @@ function writeBackupZipToFile(filePath, contents) {
       file.push(strToU8(text), true)
     }
 
-    /** 逐个封面流式写入：只保留当前读块 */
+    /** 逐个封面流式写入：只保留当前读块
+     * @param {{name: string, path: string}} cover 封面文件（名称 + 绝对路径）
+     * @returns {Promise<void>} 写入完成（含流结束）后 resolve
+     */
     const addCover = (cover) =>
       new Promise((resolveCover, rejectCover) => {
         const file = new ZipPassThrough(`${LIB_COVERS_PREFIX}${cover.name}`)
         archive.add(file)
         const stream = createReadStream(cover.path, { highWaterMark: UNZIP_CHUNK_SIZE })
-        stream.on('data', (chunk) => file.push(new Uint8Array(chunk)))
+        // 读块为 Buffer（未设编码）；显式收窄以满足 fflate push 的 Uint8Array 形参
+        stream.on('data', (chunk) => file.push(new Uint8Array(/** @type {Buffer} */ (chunk))))
         stream.on('end', () => {
           file.push(new Uint8Array(0), true)
           resolveCover()
@@ -231,9 +235,41 @@ const RESTORE_TMP_PREFIX = `${DATA_DIR}.restore-`
 const BACKUP_DIR_PREFIX = `${DATA_DIR}.bak-`
 
 /**
+ * 备份清单（manifest.json 经 parseBackupManifest 校验后的结构）
+ * @typedef {object} BackupManifest
+ * @property {string} app 备份格式标识（BACKUP_FORMAT）
+ * @property {number} version 备份格式版本
+ * @property {string} createdAt 创建时间（ISO 字符串）
+ * @property {string} appVersion 导出时的应用版本
+ * @property {boolean} settings 是否包含设置数据
+ * @property {'full'|'selected'|'metadata'} mode 备份范围
+ * @property {boolean} partial 是否为部分备份（合并恢复）
+ * @property {{root: string, models: number, covers: number}} [library] 库数据摘要（含库数据时存在）
+ */
+
+/**
+ * 备份恢复结果（importBackup 的统一返回形状；各路径仅填相关字段）
+ * @typedef {object} BackupRestoreResult
+ * @property {boolean} [canceled] 用户取消
+ * @property {boolean} [settingsRestored] 是否恢复了设置
+ * @property {object} [libraryRestored] 库恢复详情（restoreLibrary/restorePartialLibrary 结果）
+ * @property {number} [skipped] 解压/合并阶段跳过的条目数
+ * @property {boolean} [partial] 是否为部分（合并）恢复
+ * @property {string} [error] 错误信息（空缺表示无错误）
+ * @property {string} [root] 恢复目标根目录
+ * @property {number} [models] 恢复的模型数
+ * @property {number} [covers] 恢复的封面数
+ * @property {string} [mode] 备份范围模式
+ * @property {number} [added] 合并新增的模型数
+ * @property {number} [updated] 合并更新的模型数
+ * @property {string} [backupPath] 恢复前的 store.json 快照路径
+ */
+
+/**
  * 校验并解析备份清单（纯函数）。
  * @param {Uint8Array|null|undefined} bytes manifest.json 的内容字节
- * @returns {{ok: true, manifest: object} | {ok: false, error: string}}
+ * @returns {{ok: boolean, manifest?: BackupManifest, error?: string}}
+ *   ok=false 时 error 必有值；ok=true 时 manifest 必有值
  */
 export function parseBackupManifest(bytes) {
   if (!bytes || bytes.byteLength === 0) {
@@ -805,8 +841,9 @@ async function snapshotSelectiveStore(root, stamp) {
  * 仅支持当前激活库（setModelMeta 以当前根目录为基准）。
  * @param {string} root 当前激活模型根目录
  * @param {string} filePath 备份 zip
- * @param {object} manifest 已校验的清单
- * @returns {Promise<object>}
+ * @param {BackupManifest} manifest 已校验的清单
+ * @returns {Promise<{root: string, models: number, covers: number, skipped: number,
+ *   settingsRestored: boolean, partial: boolean, mode: string, backupPath: string}>}
  */
 async function restorePartialLibrary(root, filePath, manifest) {
   return runMaintenance('restore', root, async () => {
@@ -886,8 +923,7 @@ async function restorePartialLibrary(root, filePath, manifest) {
  * 从备份恢复：依次经原生对话框完成「选备份文件 →（含库数据时）选目标文件夹
  * → 覆盖确认」，全流程在主进程完成，渲染进程一次调用即可。
  * @param {import('electron').BrowserWindow} win 父窗口
- * @returns {Promise<{settingsRestored: boolean, libraryRestored?: object, skipped?: number}
- *   | {canceled: true} | {error: string}>}
+ * @returns {Promise<BackupRestoreResult>}
  */
 export async function importBackup(win) {
   const pick = await dialog.showOpenDialog(win, {

@@ -69,7 +69,7 @@ async function generateThumb(absCover, mtimeMs, thumbPath) {
     minSourceWidth: MIN_SOURCE_WIDTH,
     quality: JPEG_QUALITY / 100
   })
-  if (result.small) return ''
+  if ('small' in result) return ''
   await fs.mkdir(getThumbsDir(), { recursive: true })
   await fs.writeFile(thumbPath, result.jpeg)
   return thumbPath

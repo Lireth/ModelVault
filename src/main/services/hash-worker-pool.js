@@ -247,7 +247,7 @@ function failAll(err) {
  * 与原主进程实现语义一致：分块读取（8MB）、进度按块回调、AbortSignal 取消
  * 抛 AbortError；差别仅在于读盘与哈希 CPU 工作整体不在主进程线程执行。
  * @param {string} filePath 文件绝对路径
- * @param {import('electron').AbortSignal} [signal] 取消信号（可选）
+ * @param {AbortSignal} [signal] 取消信号（可选）
  * @param {(hashedBytes: number, totalBytes: number) => void} [onProgress]
  *   哈希进度回调（可选，每块读取后触发）
  * @param {{priority?: boolean}} [options] priority=true 为前台任务：

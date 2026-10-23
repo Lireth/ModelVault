@@ -86,9 +86,27 @@ function groupDuplicates(existingHashes) {
 }
 
 /**
+ * 库体检报告（collectHealth 的只读快照结构）
+ * @typedef {object} HealthReport
+ * @property {string} root 体检的模型根目录
+ * @property {number} checkedAt 体检时刻（Date.now()）
+ * @property {number} totalModels 元数据条目总数
+ * @property {number} totalCoverRefs 封面引用总数
+ * @property {{rel: string}[]} missingFiles 元数据存在但文件缺失的条目
+ * @property {{model: string, cover: string, reason: string}[]} brokenCovers 失效封面引用
+ * @property {{rel: string, code: string}[]} inaccessibleFiles 无法确认状态的模型文件
+ * @property {{model: string, cover: string, code: string}[]} inaccessibleCovers 无法确认状态的封面
+ * @property {{name: string, sizeBytes: number}[]} orphanCovers 无引用孤儿封面
+ * @property {{hash: string, models: string[]}[]} duplicateHashes 内容重复分组
+ * @property {boolean} dataReset 元数据是否曾被损坏重置
+ * @property {{missingFiles: number, brokenCovers: number, orphanCovers: number,
+ *   duplicateHashes: number, inaccessible: number, repairable: number}} summary 数量摘要
+ */
+
+/**
  * 收集当前库的体检报告（只读）。
  * @param {string} root 当前模型根目录
- * @returns {Promise<object>} 报告
+ * @returns {Promise<HealthReport>} 报告
  */
 async function collectHealth(root) {
   const entries = Object.entries(getMetaMapByAbsPath())

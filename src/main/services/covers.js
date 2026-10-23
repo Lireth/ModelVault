@@ -4,6 +4,10 @@ import path from 'node:path'
 import logger from '../logger'
 import { runWithConcurrency } from '../utils'
 import { IMAGE_EXTENSIONS } from './scanner'
+
+/**
+ * @typedef {import('electron').BrowserWindow} BrowserWindow
+ */
 // 直接依赖存储子模块而非聚合门面（services/store.js）：门面的重导出链在
 // 模块初始化顺序变化时可能拿到尚未就绪的绑定（A-02 引入 meta-relink 后
 // vitest 曾现 getReferencedCovers is not a function）；服务层直连叶子依赖更稳
@@ -201,7 +205,8 @@ export async function saveClipboardImage() {
       return { error: '剪贴板中没有图片内容' }
     }
     const mime = item.types.find((t) => t in MIME_EXT)
-    const blob = await item.getType(mime)
+    // ClipboardItem.getType 返回 Blob（运行时保证），显式收窄类型供类型检查
+    const blob = /** @type {Blob} */ (await item.getType(mime))
     // 大小预检（B5，与 importCoverFromPath 同一阈值）：剪贴板是唯一不经文件
     // 对话框的图片入口，合法的超大位图无上限落盘会占满磁盘并连锁导致原子写失败。
     // 先判 arrayBuffer 字节数，超限零写入（不创建封面目录）

@@ -267,7 +267,8 @@ function registerCivimgHandler() {
           if (mime) headers.set('Content-Type', mime)
           // 内容来自本地缓存且 URL 即键，与远程回源路径同等下发按天缓存
           headers.set('Cache-Control', 'public, max-age=86400')
-          return new Response(cached, { status: 200, headers })
+          // Buffer → Uint8Array 拷贝视图：满足 Response BodyInit 类型要求
+          return new Response(new Uint8Array(cached), { status: 200, headers })
         }
         await removeCivImageCache(target)
       }

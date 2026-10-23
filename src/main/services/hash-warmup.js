@@ -59,13 +59,25 @@ const sizeIndex = new Map()
 let progressListener = null
 
 /**
+ * 预热进度快照（emitProgress 组装，经监听器推送渲染层）
+ * @typedef {object} WarmupProgress
+ * @property {boolean} active 是否有进行中的哈希任务
+ * @property {string|null} id 模型 id（完成事件时非空）
+ * @property {number} percent 进度百分比（0-100）
+ * @property {number} hashedBytes 已计算字节数
+ * @property {number} totalBytes 本轮总字节数
+ * @property {number} done 本轮已完成模型数
+ * @property {number} remaining 队列剩余任务数
+ * @property {string} hash 刚完成计算的模型哈希（非完成事件为 ''）
+ */
+
+/**
  * 注册预热进度监听（与 setStoreSaveErrorListener 同一副作用注册模式）：
- * 监听器收到的快照形状为
- * { active, id, percent, hashedBytes, totalBytes, done, remaining, hash }。
+ * 监听器收到的快照形状见 WarmupProgress。
  * hash 仅在单个模型的计算完成事件（active=false 且 id 非空）携带有效值，
  * 渲染层据此把新算得的哈希回填到对应模型对象（FEAT-1 重复检测渐进可用，
  * 无需等待下次扫描）。
- * @param {(progress: object) => void} [fn] 进度快照回调（传空清除）
+ * @param {(progress: WarmupProgress) => void} [fn] 进度快照回调（传空清除）
  */
 export function setWarmupProgressListener(fn) {
   progressListener = typeof fn === 'function' ? fn : null
@@ -80,7 +92,8 @@ let lastEmitAt = 0
 /**
  * 推送一次进度快照（拼入实时队列计数；节流仅作用于高频的哈希块回调，
  * 状态跃迁经 force 立即送达）。
- * @param {object} snap 当前计算的温度快照 { active, id, percent, hashedBytes, totalBytes }
+ * @param {{active: boolean, id: string|null, percent: number, hashedBytes: number,
+ *   totalBytes: number, hash?: string}} snap 当前计算的温度快照
  * @param {boolean} [force] 跳过节流立即推送
  */
 function emitProgress(snap, force = false) {

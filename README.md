@@ -120,7 +120,7 @@ npm start
 | `npm start` / `npm run dev` | 启动开发模式（主进程/渲染进程热重载）            |
 | `npm run build`             | 编译主进程、preload、渲染进程到 `out/`           |
 | `npm run lint`              | ESLint 代码检查（flat config，错误级规则）       |
-| `npm run typecheck`         | TypeScript checkJs 类型检查（shared 契约层 + preload，渐进扩展） |
+| `npm run typecheck`         | TypeScript checkJs 类型检查（shared 契约层 + preload + 主进程服务层，渐进扩展） |
 | `npm test`                  | 运行单元测试（vitest，`test:watch` 为监视模式）  |
 | `npm run test:coverage`     | 运行单元测试并生成覆盖率报告（含防退化阈值门禁） |
 | `npm run preview`           | 以生产构建产物启动应用预览                       |
@@ -201,7 +201,7 @@ wrapHandler('my:channel', async (event, payload) => {
 
 ### 类型检查
 
-项目为纯 JavaScript，以 TypeScript 编译器 `checkJs` 模式做**纯类型检查**（`npm run typecheck`，无构建产物）：`tsconfig.json` 当前覆盖 `src/shared/`（IPC 通道单一来源注册表、默认设置等跨进程契约）与 `src/preload/`，`strict` 关闭以聚焦真实类型错误。覆盖范围与严格度按棘轮渐进扩展至主进程与渲染层；为共享模块补写 JSDoc 类型标注（如 `SchemaRule` typedef）即可让检查器捕获字段改名/漏改类回归。
+项目为纯 JavaScript，以 TypeScript 编译器 `checkJs` 模式做**纯类型检查**（`npm run typecheck`，无构建产物）：`tsconfig.json` 当前覆盖 `src/shared/`（IPC 通道单一来源注册表、默认设置等跨进程契约）、`src/preload/` 与 `src/main/services/` 全部主进程服务层（含其主进程内依赖模块），`strict` 关闭以聚焦真实类型错误。覆盖范围与严格度按棘轮渐进扩展至渲染层；为跨模块共享的数据结构补写 JSDoc 类型标注（如 `SchemaRule`/`WatcherState`/`BackupManifest` typedef）即可让检查器捕获字段改名/漏改类回归。
 
 ### 快捷键与窗口
 

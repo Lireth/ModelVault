@@ -108,7 +108,8 @@ export function isUnsafeModelKey(key) {
  */
 export function normalizeStoreData(parsed) {
   const models = {}
-  const source = parsed && typeof parsed === 'object' ? parsed.models : null
+  const source =
+    parsed && typeof parsed === 'object' ? /** @type {{models?: unknown}} */ (parsed).models : null
   if (source && typeof source === 'object') {
     for (const [key, meta] of Object.entries(source)) {
       if (isUnsafeModelKey(key)) continue

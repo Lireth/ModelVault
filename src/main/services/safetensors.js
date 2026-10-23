@@ -76,10 +76,25 @@ export function extractTagCandidates(raw, limit = TAG_CANDIDATES_LIMIT) {
 }
 
 /**
+ * safetensors 头部 __metadata__ 提取的结构化信息（展示字段 + 表单推荐值；
+ * 无意义字段均为空值，由调用方判断是否有可用内容）
+ * @typedef {object} SafetensorsInfo
+ * @property {string} title modelspec.title
+ * @property {string} author modelspec.author
+ * @property {string} baseModel 基底模型（ss_base_model_version / modelspec.architecture）
+ * @property {string} networkModule LoRA 网络模块（ss_network_module）
+ * @property {number|null} networkAlpha 网络权重 alpha
+ * @property {string} precision 精度（ss_mixed_precision / ss_precision）
+ * @property {number|null} resMin 推荐分辨率下限（较小值）
+ * @property {number|null} resMax 推荐分辨率上限（较大值）
+ * @property {string[]} triggerCandidates 触发词候选（按频次排序）
+ */
+
+/**
  * 从 __metadata__ 提取结构化信息（display 字段 + 可填入表单的推荐值）。
  * 返回对象中无意义字段均为空值，由调用方判断是否有可用内容。
- * @param {object} metadata safetensors 头部的 __metadata__ 对象（键为 ss_* / modelspec.* 等字面量）
- * @returns {object|null} 统一结构信息；metadata 无效返回 null
+ * @param {Record<string, any>} metadata safetensors 头部的 __metadata__ 对象（键为 ss_* / modelspec.* 等字面量）
+ * @returns {SafetensorsInfo|null} 统一结构信息；metadata 无效返回 null
  */
 export function extractSafetensorsInfo(metadata) {
   if (!metadata || typeof metadata !== 'object') return null
@@ -104,7 +119,7 @@ export function extractSafetensorsInfo(metadata) {
 
 /**
  * 判断解析结果是否包含可用内容（任一展示字段或推荐值非空）。
- * @param {object|null} info extractSafetensorsInfo 的结果
+ * @param {SafetensorsInfo|null} info extractSafetensorsInfo 的结果
  * @returns {boolean}
  */
 export function hasUsefulInfo(info) {

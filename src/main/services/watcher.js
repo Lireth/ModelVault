@@ -64,6 +64,32 @@ const DEFAULT_TRAVERSAL_CONCURRENCY = 8
 /** 内容快照中单目录内文件 stat 的并发上限（与目录池相乘仍有界） */
 const STAT_CONCURRENCY = 8
 
+/**
+ * 监控状态对象（syncWatcher 构造；stop/startNativeWatch/scheduleBroadcast
+ * 与轮询链路共享引用）
+ * @typedef {object} WatcherState
+ * @property {string} root 监控根目录（绝对路径）
+ * @property {boolean} enabled 是否启用自动重扫
+ * @property {Set<string>} excludeNames 用户排除目录名小写集合
+ * @property {Map<string, string[]>} snapshot 名称快照（目录绝对路径 -> 条目名列表）
+ * @property {Map<string, SnapshotEntry[]>|null} statSnapshot 内容快照（null 表示需重建基线）
+ * @property {number} lastContentCheckAt 最近一次内容校验时刻（Date.now()）
+ * @property {number} contentCheckInterval 内容校验间隔（ms，≤0 关闭）
+ * @property {number} traversalConcurrency 目录遍历并发上限
+ * @property {ReturnType<typeof setTimeout>|null} debounceTimer 广播防抖定时器
+ * @property {ReturnType<typeof setTimeout>|null} timer 巡检定时器
+ * @property {boolean} polling 当前是否有在途遍历
+ * @property {number} idleRounds 连续空闲轮数（退避爬梯）
+ * @property {Set<string>} pendingDirs 防抖静默期内累积的变更子树
+ * @property {number} pollInterval 基础轮询间隔（ms）
+ * @property {boolean} nativeWatch 是否启用原生事件监听
+ * @property {import('node:fs').FSWatcher|null} nativeWatcher 原生监听实例（未开启/失败为 null）
+ * @property {number[]=} backoff 空闲退避阶梯（未配置为恒定间隔）
+ * @property {number} debounceMs 广播防抖时长（ms）
+ * @property {() => boolean} isVisible 窗口可见性探测（测试可注入）
+ * @property {((delay: number) => void)|null} onPollScheduled 轮询安排通告（测试钩子）
+ */
+
 /** 当前监控状态（root/excludeNames/snapshot/定时器链） */
 let watcher = null
 
@@ -102,7 +128,7 @@ function toNameSet(names) {
 
 /**
  * 原生事件文件名 → 待广播子树（OP-05）。
- * @param {object} w 监控状态（读取 excludeNames）
+ * @param {WatcherState} w 监控状态（读取 excludeNames）
  * @param {string|null} filename fs.watch 回调的文件名（recursive 下为相对路径）
  * @returns {string[]|null} 子树数组；null 表示忽略该事件；空数组表示无法定位（全量兜底）
  */
@@ -123,7 +149,7 @@ function nativeEventDirs(w, filename) {
 
 /**
  * 启动原生递归监听（OP-05，仅作加速触发；失败时静默回落到轮询）。
- * @param {object} w 监控状态
+ * @param {WatcherState} w 监控状态
  */
 function startNativeWatch(w) {
   try {
@@ -211,7 +237,8 @@ export async function collectDirSnapshot(root, skipNames = new Set(), options = 
   let active = 0
   let settled = false
 
-  await new Promise((resolve, reject) => {
+  /** @type {Promise<void>} */
+  const walkDone = new Promise((resolve, reject) => {
     const finish = (err) => {
       if (settled) return
       settled = true
@@ -304,6 +331,7 @@ export async function collectDirSnapshot(root, skipNames = new Set(), options = 
     }
     pump()
   })
+  await walkDone
   return snapshot
 }
 
@@ -505,7 +533,11 @@ function runWalk(w, silent) {
         const names = namesFromSnapshot(snapshot)
         // 名称变化轮已触发重扫时内容基线会被置空：本轮只重建基线，不重复广播
         const changedDirs = w.statSnapshot
-          ? computeStatSnapshotDiff(w.root, w.statSnapshot, snapshot)
+          ? computeStatSnapshotDiff(
+              w.root,
+              w.statSnapshot,
+              /** @type {Map<string, SnapshotEntry[]>} */ (snapshot)
+            )
           : []
         w.statSnapshot = snapshot
         w.snapshot = names
@@ -518,7 +550,11 @@ function runWalk(w, silent) {
         return
       }
 
-      const changedDirs = computeSnapshotDiff(w.root, w.snapshot, snapshot)
+      const changedDirs = computeSnapshotDiff(
+        w.root,
+        w.snapshot,
+        /** @type {Map<string, string[]>} */ (snapshot)
+      )
       if (changedDirs.length === 0) {
         w.idleRounds += 1
         return
@@ -552,8 +588,11 @@ function runWalk(w, silent) {
  * @param {string[]} [excludeDirs] 排除目录名（与 scanner 同规则，遍历时剔除，
  *   避免被排除目录内的文件变化触发无意义重扫）
  * @param {{pollInterval?: number, broadcastDebounce?: number,
- *   contentCheckInterval?: number, traversalConcurrency?: number}} [timing]
- *   轮询间隔/广播防抖/内容校验间隔（毫秒）与目录遍历并发；
+ *   contentCheckInterval?: number, traversalConcurrency?: number,
+ *   nativeWatch?: boolean, backoff?: number[], isVisible?: () => boolean,
+ *   onPollScheduled?: (delay: number) => void}} [timing]
+ *   轮询间隔/广播防抖/内容校验间隔（毫秒）与目录遍历并发；nativeWatch 开启
+ *   原生事件监听；backoff 空闲退避阶梯；isVisible/onPollScheduled 为测试注入钩子；
  *   生产走默认值，测试注入小值（contentCheckInterval≤0 关闭内容校验）
  */
 export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {

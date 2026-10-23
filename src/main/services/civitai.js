@@ -137,7 +137,8 @@ function isAllowedCivitaiApiUrl(url) {
  * 已过期的 signal，使重试必然以 AbortError 失败。
  * @param {string} url API 地址
  * @param {object} [options] net.fetch 选项（signal 由本函数按 attempt 注入）
- * @returns {Promise<{response: Response} | {networkError: Error}>}
+ * @returns {Promise<{response?: Response, networkError?: Error}>}
+ *   两属性互斥：成功时仅 response，网络/超时失败时仅 networkError
  */
 async function fetchCivitaiApi(url, options = {}) {
   for (let attempt = 0; ; attempt++) {
@@ -201,7 +202,7 @@ const MIME_EXT = {
  * 语义与原主进程实现一致：分块读取、进度按块回调、AbortSignal 取消抛
  * AbortError。
  * @param {string} filePath 文件绝对路径
- * @param {import('electron').AbortSignal} [signal] 取消信号（可选）
+ * @param {AbortSignal} [signal] 取消信号（可选）
  * @param {(hashedBytes: number, totalBytes: number) => void} [onProgress]
  *   哈希进度回调（可选，每块读取后触发；预热链路据此推送进度标识）
  * @param {{priority?: boolean}} [options] priority=true 为前台任务（OPT-08）
@@ -254,14 +255,25 @@ export async function fetchCivitaiVersionByHash(hash) {
 }
 
 /**
+ * by-hash 端点响应经 normalizeVersionInfo 规范化后的信息结构
+ * @typedef {object} CivitaiVersionInfo
+ * @property {string} url 模型页链接（/models/{modelId}?modelVersionId={versionId}）
+ * @property {string} modelName 模型名
+ * @property {string} versionName 版本名
+ * @property {string} baseModel 基底模型
+ * @property {string[]} trainedWords 触发词
+ * @property {string} description 描述（富文本 HTML 原文）
+ * @property {{url: string, width: number, height: number, nsfw: boolean}[]} images 示例图片
+ * @property {{url: string, thumbnailUrl: string, width: number, height: number, nsfw: boolean}[]} videos 示例视频
+ */
+
+/**
  * 由 by-hash 端点响应构造规范化信息与页面 URL（纯函数，便于单测）。
  * 页面链接格式与 Civitai 官方一致：/models/{modelId}?modelVersionId={versionId}。
  * 示例媒体按 API 默认顺序（热度）截断；图片与视频分别输出
  * （FN-02：视频用于详情页预览播放，不参与封面导入）。
- * @param {object} raw API 响应 JSON
- * @returns {object|null} { url, modelName, versionName, baseModel, trainedWords,
- *   description, images: [{url, width, height, nsfw}],
- *   videos: [{url, thumbnailUrl, width, height, nsfw}] }
+ * @param {Record<string, any>} raw API 响应 JSON（逐字段运行时校验，不可信输入）
+ * @returns {CivitaiVersionInfo|null}
  */
 export function normalizeVersionInfo(raw) {
   if (!raw || typeof raw !== 'object') return null
@@ -400,9 +412,9 @@ export function stripHtml(html) {
  * 由 Civitai 版本信息与当前元数据构造「一键补全」补丁（纯函数）：
  * 仅补空缺字段——触发词为空时导入 trainedWords，备注为空时导入描述纯文本，
  * 绝不覆盖任何用户已有标注（与 sidecar/civitai.info 导入同一原则）。
- * @param {object} meta 当前模型元数据（判空基准）
- * @param {object} info normalizeVersionInfo 的规范化结果
- * @returns {{patch: object, applied: string[]}} patch 可合并到元数据；
+ * @param {Record<string, any>} meta 当前模型元数据（判空基准）
+ * @param {CivitaiVersionInfo} info normalizeVersionInfo 的规范化结果
+ * @returns {{patch: Record<string, any>, applied: string[]}} patch 可合并到元数据；
  *   applied 为实际补全的字段名列表（渲染层据此提示）
  */
 export function civitaiCompletePatch(meta, info) {

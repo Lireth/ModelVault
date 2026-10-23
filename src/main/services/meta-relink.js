@@ -31,12 +31,22 @@ export function splitRelKey(key) {
 }
 
 /**
+ * 重关联规划上下文（planMetaRelinks 构造，matchOneToOne 原位累积结果）
+ * @typedef {object} RelinkContext
+ * @property {Array<{key: string, name: string, ext: string, dir: string, hash?: string, hashMtime?: number}>} orphans 消失的旧键条目
+ * @property {Array<{key: string, name: string, ext: string, dir: string, mtimeMs: number}>} newcomers 无元数据的新模型
+ * @property {Set<string>} usedOrphans 已配对占用的孤儿键
+ * @property {Set<string>} usedNewcomers 已配对占用的新键
+ * @property {Array<[string, string]>} relinks 已确定的 [旧键, 新键] 对
+ */
+
+/**
  * 按分组键做 1:1 绑定：仅当某键下「未占用孤儿」与「未占用新模型」各恰好 1 个时
  * 才提交——双向唯一，杜绝多对一/一对多的顺序依赖式误绑。已被前序分层绑定的
  * 条目经占用集合剔除，分层强度依次递减。
- * @param {object} ctx 规划上下文
- * @param {(item: object) => string|null} orphanKey 孤儿分组键（null 不参与）
- * @param {(item: object) => string} newKey 新模型分组键
+ * @param {RelinkContext} ctx 规划上下文
+ * @param {(item: RelinkContext['orphans'][number]) => string|null} orphanKeyOf 孤儿分组键（null 不参与）
+ * @param {(item: RelinkContext['newcomers'][number]) => string} newKeyOf 新模型分组键
  */
 function matchOneToOne(ctx, orphanKeyOf, newKeyOf) {
   const orphanGroups = new Map()
@@ -119,7 +129,7 @@ export function planMetaRelinks(orphans, newcomers) {
  * 判断一条元数据是否不含任何用户价值数据（失效空条目）。
  * 这类条目可能由"标记后又取消""仅残留空骨架"等路径产生，孤儿化后可安全清理；
  * 任一标注、封面引用、参数或哈希存在时都必须保留。
- * @param {object|null} meta 规范化后的模型元数据
+ * @param {Record<string, any>|null} meta 规范化后的模型元数据
  * @returns {boolean}
  */
 export function isEmptyModelMeta(meta) {

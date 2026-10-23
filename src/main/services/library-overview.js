@@ -91,8 +91,34 @@ function storeEntry(root, relKey, meta) {
 }
 
 /**
+ * 库聚合条目（索引/元数据 → 只保留统计所需字段）
+ * @typedef {object} OverviewEntry
+ * @property {string} absPath 模型绝对路径
+ * @property {string} relPath 库内相对路径（POSIX）
+ * @property {string} name 文件名
+ * @property {number} size 文件字节数（store.json 来源为 0，容量未知）
+ * @property {string} hash SHA256（未知为 ''）
+ */
+
+/**
+ * 跨库总览报告（buildLibraryOverview 输出 / collectLibraryOverview 返回的 overview）
+ * @typedef {object} LibraryOverview
+ * @property {number} generatedAt 报告生成时刻
+ * @property {{libraries: number, availableLibraries: number, models: number,
+ *   knownBytes: number, hashedModels: number, crossGroups: number,
+ *   redundantCopies: number, wastedBytes: number, unknownSizeGroups: number}} totals 全局统计
+ * @property {Array<{root: string, name: string, exists: boolean, source: string,
+ *   savedAt: number, staleIndex: boolean, models: number, sizeKnownModels: number,
+ *   totalBytes: number, hashedModels: number, localDuplicateGroups: number}>} libraries 每库统计
+ * @property {Array<{hash: string, sizeBytes: number, sizeKnown: boolean, copies: number,
+ *   libraries: number, redundantCopies: number, wastedBytes: number,
+ *   members: Array<{root: string, rootKey: string, library: string, relPath: string,
+ *   name: string, size: number}>}>} crossLibraryGroups 跨库重复组（成员来自 ≥2 库）
+ */
+
+/**
  * 读取某库的 store.json（索引缺失时的回退）。
- * @returns {Promise<{entries: object[], savedAt: number} | null>} 不可读返回 null
+ * @returns {Promise<{entries: OverviewEntry[], savedAt: number} | null>} 不可读返回 null
  */
 async function readStoreEntries(root) {
   const file = getDataFilePath(root)
@@ -124,9 +150,9 @@ async function readStoreEntries(root) {
 /**
  * 聚合并输出跨库总览（纯函数，便于单测）。
  * @param {Array<{root: string, name?: string, exists?: boolean, source: string,
- *   savedAt?: number, models: object[]}>} libraries
+ *   savedAt?: number, models: OverviewEntry[]}>} libraries
  * @param {number} [now] 当前时间（测试注入）
- * @returns {object}
+ * @returns {LibraryOverview}
  */
 export function buildLibraryOverview(libraries, now = Date.now()) {
   const libs = (libraries || []).map((lib) => ({

@@ -124,7 +124,10 @@ export function classifySubCategory(relSegments) {
  * 递归扫描模型目录。
  * @param {string} root 模型根目录绝对路径
  * @param {(progress: {dirs: number, found: number, current: string}) => void} [onProgress] 进度回调
- * @param {{excludeDirs?: string[]|Set<string>, extensions?: string[]|Set<string>, signal?: AbortSignal}} [options] 额外排除的目录名（不区分大小写）、扫描的文件扩展名与取消信号
+ * @param {{excludeDirs?: string[]|Set<string>, extensions?: string[]|Set<string>,
+ *   signal?: AbortSignal, subDirs?: string[]}} [options]
+ *   额外排除的目录名（不区分大小写）、扫描的文件扩展名、取消信号；
+ *   subDirs 为 A-03 子树局部扫描的相对根 POSIX 目录列表（'' 表示根直属）
  * @returns {Promise<{models: Array, errors: Array, dirCount: number}>}
  * @throws {Error} name 为 'AbortError' 表示扫描被取消
  */
@@ -332,9 +335,9 @@ export async function findSidecarText(modelPath) {
  * - LoRA 且触发词为空：导入首行作为触发词，标记来源 sidecar；
  * - 两个条件独立判断，均不满足时不产生补丁（不覆盖任何用户数据）。
  * @param {string} type 模型类型（lora 时才考虑触发词导入）
- * @param {object} meta 当前模型元数据
+ * @param {Record<string, any>} meta 当前模型元数据
  * @param {string} text sidecar 文本内容（已修剪）
- * @returns {object|null} 可合并到元数据的补丁；无需导入返回 null
+ * @returns {Record<string, any>|null} 可合并到元数据的补丁；无需导入返回 null
  */
 export function sidecarImportPatch(type, meta, text) {
   const trimmed = typeof text === 'string' ? text.trim() : ''
@@ -382,9 +385,9 @@ export async function findSidecarCivitaiInfo(modelPath) {
  * - NSFW 未标记且来源明确为 NSFW：导入 nsfw 标记；
  * 均不满足时不产生补丁——绝不覆盖任何用户已有标注（与 .txt sidecar
  * 的「空字段才写入」同一原则）。
- * @param {object} meta 当前模型元数据（导入判空的基准）
- * @param {object} info findSidecarCivitaiInfo 解析出的 JSON
- * @returns {object|null} 可合并到元数据的补丁；无需导入返回 null
+ * @param {Record<string, any>} meta 当前模型元数据（导入判空的基准）
+ * @param {Record<string, any>} info findSidecarCivitaiInfo 解析出的 JSON（不可信输入）
+ * @returns {Record<string, any>|null} 可合并到元数据的补丁；无需导入返回 null
  */
 export function civitaiImportPatch(meta, info) {
   if (!info || typeof info !== 'object' || !meta) return null
