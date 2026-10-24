@@ -4,7 +4,7 @@
 ![Electron](https://img.shields.io/badge/Electron-44-47848F?logo=electron&logoColor=white)
 ![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?logo=vuedotjs&logoColor=white)
 ![Node](https://img.shields.io/badge/Node.js-%E2%89%A522.22-339933?logo=nodedotjs&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-vitest%20760%2B-6E9F18?logo=vitest&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-vitest%201235%2B-6E9F18?logo=vitest&logoColor=white)
 ![Release](https://img.shields.io/github/v/release/Lireth/ModelVault?include_prereleases&label=release)
 ![License](https://img.shields.io/github/license/Lireth/ModelVault)
 
@@ -39,7 +39,7 @@
 
 - **双视图浏览**：网格/列表切换，虚拟滚动支撑数千模型流畅浏览；缩略图后台缓存、多预览图悬停轮播；「智能视图」可保存当前搜索/筛选/排序组合，侧栏一键切换
 - **搜索与筛选**：按名称/备注/触发词搜索，按分类与收藏筛选，多种排序；搜索框支持结构化语法（与筛选叠加）：`base:pony`（基底家族）、`tag:"我的标签"`、`type:lora`、`size:>1gb`、`score:>=4`、`fav:yes`、`nsfw:no`，多个条件 AND 组合
-- **封面管理**：上传 / Ctrl+V 粘贴 / 拖拽导入多张预览图，可设默认封面，自动识别同名 sidecar 图，孤儿文件自动清理
+- **封面管理**：上传 / Ctrl+V 粘贴 / 拖拽导入多张预览图，可设默认封面，自动识别同名 sidecar 图，孤儿文件自动清理；一键移除全部示例图时同步清理对应失效缩略图
 - **收藏 / 评分 / NSFW**：星标收藏、五星评分即时保存；NSFW 模型封面默认模糊展示（可关闭）
 - **文件元数据自动解析**：safetensors 头部本地毫秒级解析（仅读头部，零网络）——训练元信息（标题/作者/基底模型/网络结构/精度/训练分辨率）、张量统计（参数量、主精度、文本编码器·UNet·VAE 字节构成）与按键名推导的架构家族（SD1.5/SDXL/Flux/SD3.5）；触发词候选与推荐分辨率一键填入，绝不覆盖用户标注
 - **标签管理**：设置页对全库自由标签重命名/合并/移除，整库生效并即时落盘（目标名已存在时自动合并）
@@ -48,13 +48,14 @@
 ### 批量与在线
 
 - **批量操作**：`Ctrl+点击` 快速多选、`Shift+点击` 范围选择（与资源管理器同语义）；批量收藏/评分/NSFW/标签/触发词填充/Civitai 识别/禁用/删除；长耗时批量可随时 `Esc` 请求取消并保留已完成部分
-- **Civitai 在线识别**：按文件 SHA256 反查模型版本，一键补全空缺的触发词与备注（绝不覆盖已有标注），可勾选示例图批量导入为封面；哈希结果持久缓存并由后台队列预热，首次识别也可秒级返回
+- **Civitai 在线识别**：走 civitai.red 站点（NSFW 模型无需跳转即可识别），按文件 SHA256 反查模型版本，一键补全空缺的触发词与备注（绝不覆盖已有标注），可勾选示例图批量导入为封面；哈希结果持久缓存并由后台队列预热，首次识别也可秒级返回
 - **应用内检查更新**：设置页一键查询 GitHub Releases 最新版本；启动后延迟静默自动检查（可关闭），发现新版本时提示并可直接在设置页下载
 
 ### 数据与体验
 
 - **关联存储**：界面设置（主题/视图/智能视图/扫描规则等）与封面、参数、备注等用户数据全部保存在模型根目录的 `.modelvault/` 内，按相对路径关联，随文件夹移动/复制保持关联——换电脑打开即恢复完整配置；库内移动/重命名后重扫时自动重关联元数据（宁可不绑也绝不绑错）；库目录离线（被移动/盘符未挂载）时写入自动挂起并保留在内存，恢复后补写，绝不在失效路径重建目录
-- **数据备份**：一键将当前库的设置与标注、封面打包为 zip，可恢复到任意模型文件夹
+- **数据备份**：一键将当前库的设置与标注、封面打包为 zip，支持完整 / 仅标注 / 当前筛选结果三种范围，可恢复到任意模型文件夹（恢复前自动快照防覆盖）；提供模型库体检——幽灵标注 / 失效封面引用 / 孤儿封面的只读检查与一键安全修复
+- **模型清单导出**：设置页「数据管理」中将当前搜索/筛选/排序结果导出为 CSV（Excel 可直接打开）/ Markdown 表格 / JSON（保留结构化字段），便于外部整理与分享
 - **体验细节**：亮/暗/跟随系统主题（同步原生标题栏）、强调色预设与自定义、卡片尺寸与展示内容配置、详情页全屏画廊、窗口尺寸位置记忆
 
 ## 界面展示
@@ -217,7 +218,7 @@ wrapHandler('my:channel', async (event, payload) => {
 
 ### 测试
 
-单元测试位于 `tests/`（51 个文件 / 790+ 用例）：主进程纯逻辑与 IPC handler（node 环境）、渲染层 store 按域拆分测试、组件交互测试（`@vue/test-utils` + jsdom，文件头 `// @vitest-environment jsdom` 声明）。Electron API 在 `tests/setup.js` 中统一 mock，公共挂载/IPC 脚手架在 `tests/helpers/` 中复用。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证；`npm run test:coverage` 受防退化阈值门禁约束（Statements 80.8% / Branches 73.3% / Functions 77.7% / Lines 82.8%，棘轮渐进上调），store-meta/store-settings/watcher/backup 等数据完整性关键服务另有 per-file 覆盖率地板（见 `vitest.config.mjs`）。
+单元测试位于 `tests/`（72 个文件 / 1235 用例）：主进程纯逻辑与 IPC handler（node 环境）、渲染层 store 按域拆分测试、组件交互测试（`@vue/test-utils` + jsdom，文件头 `// @vitest-environment jsdom` 声明）。Electron API 在 `tests/setup.js` 中统一 mock，公共挂载/IPC 脚手架在 `tests/helpers/` 中复用。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证；`npm run test:coverage` 受防退化阈值门禁约束（Statements 80% / Branches 73% / Functions 77% / Lines 82%，棘轮渐进上调），store-meta/store-settings/watcher/backup 等数据完整性关键服务另有 per-file 覆盖率地板（见 `vitest.config.mjs`）。
 
 ### CI 与发版
 
