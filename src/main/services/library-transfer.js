@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
+import { atomicWriteFile } from './atomic-write'
 import { runMaintenance } from './maintenance-lock'
 import { sidecarFilesFor } from './scanner'
 import { getCurrentRoot, isInRoot, toRelKey } from './store-paths'
@@ -57,8 +58,9 @@ async function readTargetStore(targetRoot) {
 async function writeTargetStore(targetRoot, store) {
   const dataDir = path.join(targetRoot, '.modelvault')
   await fs.mkdir(dataDir, { recursive: true })
-  const file = path.join(dataDir, 'store.json')
-  await fs.writeFile(file, JSON.stringify(store, null, 2))
+  await atomicWriteFile(path.join(dataDir, 'store.json'), JSON.stringify(store, null, 2), {
+    createDirs: false
+  })
 }
 
 /**
