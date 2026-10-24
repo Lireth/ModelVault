@@ -48,6 +48,15 @@ function serializeIndexTask(task) {
   return run
 }
 
+/**
+ * 等待索引写链上已排队的全部任务落定（退出路径收尾用）。
+ * 链尾 promise 永不拒绝：单个任务的失败已被各写入口捕获并记日志。
+ * @returns {Promise<void>}
+ */
+export function flushIndexWrites() {
+  return indexChain
+}
+
 /** 从模型 id 推导库内相对目录（POSIX；旧索引缺 relDir 时兜底） */
 function relDirFromId(root, id) {
   const rel = path.relative(root, id)

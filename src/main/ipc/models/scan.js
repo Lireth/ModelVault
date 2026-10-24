@@ -156,8 +156,12 @@ export function registerScanHandlers() {
       }
 
       // F1：全量扫描完成后写入本地索引（秒切库/启动缓存）。
-      // 索引只作展示缓存，写失败不影响本次扫描结果
-      await writeLibraryIndex(root, {
+      // P1-3：索引写移出扫描响应关键路径——大库 stringify + fsync 原子写
+      // 可达数百 ms，而索引只是展示缓存（写失败仅记日志、缺失时秒开回退
+      // 全量扫描），排队进串行链后立即继续构建响应；退出路径经
+      // flushIndexWrites 收尾，进程崩溃丢失的极端场景等价于索引不存在，
+      // 已有兜底
+      void writeLibraryIndex(root, {
         models: decorated,
         durationMs: Date.now() - startedAt
       })
@@ -313,7 +317,9 @@ export function registerScanHandlers() {
 
       // O8：把本次局部结果合并进本地索引（读改写串行；索引缺失时跳过，
       // 不凭空创建不完整索引）。切库秒开数据不再回放已删除/缺少新增模型。
-      await updateLibraryIndex(root, {
+      // P1-3：同全量扫描移出响应关键路径——排队串行链后立即返回，
+      // 退出路径经 flushIndexWrites 收尾
+      void updateLibraryIndex(root, {
         upsertModels: decorated,
         affectedDirs: subDirs
       })

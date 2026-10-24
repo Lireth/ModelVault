@@ -48,7 +48,7 @@ vi.mock('../src/main/services/watcher.js', async (importOriginal) => {
 vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([])
 
 import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
-import { readLibraryIndex, writeLibraryIndex } from '../src/main/services/library-index'
+import { flushIndexWrites, readLibraryIndex, writeLibraryIndex } from '../src/main/services/library-index'
 import { scanModels } from '../src/main/services/scanner'
 import { syncWatcher } from '../src/main/services/watcher'
 import {
@@ -350,6 +350,8 @@ describe('models:partialScan（A-03）', () => {
       dirs: ['lora']
     })
     expect(res.error).toBeUndefined()
+    // P1-3：索引写已移出响应关键路径（void 排队串行链），落定后再断言
+    await flushIndexWrites()
 
     const cached = await readLibraryIndex(root)
     const ids = cached.models.map((m) => m.id)

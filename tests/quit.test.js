@@ -5,7 +5,7 @@ import { fakeUserData } from './setup'
  * quit.js 单元测试（A4）：
  * 窗口全部关闭后的退出编排——
  * 1. 停止目录监控，防止退出过程中 watcher 再触发重扫；
- * 2. 等待元数据与窗口状态两路落盘后 app.quit()；
+ * 2. 等待元数据、窗口状态与本地索引各路落盘后 app.quit()；
  * 3. 落盘有确定性时间上限：磁盘挂起/被杀软锁文件时 flush 永不 settle，
  *    超时后记警告并 app.exit() 强制退出，保证「关窗后进程必退」。
  */
@@ -15,6 +15,7 @@ const stopWatcher = vi.fn(() => timeline.push('stopWatcher'))
 const flushStoreSave = vi.fn(async () => timeline.push('flushStore'))
 const flushSettingsSave = vi.fn(async () => {})
 const flushWindowStateSave = vi.fn(async () => timeline.push('flushWindow'))
+const flushIndexWrites = vi.fn(async () => timeline.push('flushIndex'))
 const quit = vi.fn(() => timeline.push('quit'))
 const exit = vi.fn(() => timeline.push('exit'))
 const loggerInfo = vi.fn()
@@ -38,6 +39,10 @@ vi.mock('../src/main/services/store', () => ({
   flushSettingsSave
 }))
 
+vi.mock('../src/main/services/library-index', () => ({
+  flushIndexWrites
+}))
+
 vi.mock('../src/main/services/watcher', () => ({
   stopWatcher
 }))
@@ -58,6 +63,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   flushStoreSave.mockImplementation(async () => timeline.push('flushStore'))
   flushWindowStateSave.mockImplementation(async () => timeline.push('flushWindow'))
+  flushIndexWrites.mockImplementation(async () => timeline.push('flushIndex'))
   quit.mockImplementation(() => timeline.push('quit'))
   exit.mockImplementation(() => timeline.push('exit'))
 })
@@ -73,8 +79,9 @@ describe('quitAfterFlush', () => {
     quitAfterFlush()
 
     await vi.waitFor(() => expect(quit).toHaveBeenCalledTimes(1))
-    expect(timeline).toEqual(['stopWatcher', 'flushStore', 'flushWindow', 'quit'])
+    expect(timeline).toEqual(['stopWatcher', 'flushStore', 'flushWindow', 'flushIndex', 'quit'])
     expect(flushSettingsSave).toHaveBeenCalledTimes(1)
+    expect(flushIndexWrites).toHaveBeenCalledTimes(1)
     expect(loggerInfo).toHaveBeenCalledWith(expect.stringContaining('应用退出'))
     // 未超时：不触发强制退出
     expect(exit).not.toHaveBeenCalled()

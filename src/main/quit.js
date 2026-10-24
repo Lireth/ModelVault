@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { flushSettingsSave, flushStoreSave } from './services/store'
 import { flushWindowStateSave } from './windows/mainWindow'
+import { flushIndexWrites } from './services/library-index'
 import { stopWatcher } from './services/watcher'
 import logger from './logger'
 
@@ -8,7 +9,8 @@ import logger from './logger'
  * 所有窗口关闭后的退出编排（window-all-closed）：
  *
  * 1. 停止目录监控：避免退出过程中 watcher 再次触发重扫；
- * 2. 等待元数据（store.json）与窗口状态（window-state.json）两路落盘——
+ * 2. 等待元数据（store.json）、窗口状态（window-state.json）与本地索引
+ *   （index.json，P1-3 起扫描响应不再等待索引写，退出口统一收尾）落盘——
  *    必须等待而非直接 quit，否则 app.quit() 会中断进行中的异步原子写，
  *    造成最后一批元数据修改丢失或 window-state.json 残留临时文件；
  * 3. 落盘有确定性时间上限（A4）：磁盘挂起/被杀毒软件锁文件时 flush 可能
@@ -34,7 +36,12 @@ export function quitAfterFlush() {
     )
     app.exit(0)
   }, FLUSH_TIMEOUT_MS)
-  Promise.all([flushStoreSave(), flushSettingsSave(), flushWindowStateSave()])
+  Promise.all([
+    flushStoreSave(),
+    flushSettingsSave(),
+    flushWindowStateSave(),
+    flushIndexWrites()
+  ])
     .catch((err) => {
       // 落盘失败不阻塞退出：flush* 内部已尽力保存并经通知链路告知用户
       logger.warn(`退出落盘未完全成功: ${err?.message || err}`)
