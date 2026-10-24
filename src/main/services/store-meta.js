@@ -615,7 +615,10 @@ function scheduleSave() {
   const scheduledRoot = getCurrentRoot()
   saveTimer = setTimeout(() => {
     saveTimer = null
-    if (getCurrentRoot() !== scheduledRoot) {
+    // 大小写不敏感同根判定（与 scan.js/library-index 的根比较口径一致）：
+    // 根仅大小写变化（对话框与设置文件对同一目录的两种拼写）不是跨库
+    // 切换，不应误判丢弃——数据不丢，但本次修改会延迟到下一次变更才落盘
+    if (String(getCurrentRoot()).toLowerCase() !== String(scheduledRoot).toLowerCase()) {
       logger.warn('丢弃跨根目录的迟到防抖保存（数据已在切库前落盘）')
       return
     }

@@ -659,6 +659,41 @@ describe('切换根目录与落盘链（A6）', () => {
     }
     expect(polluted).toBe(false)
   })
+
+  it('根目录仅大小写不同时不误判跨根：迟到防抖照常落盘（P0-7）', async () => {
+    const abs = await touchModel('case-variant.safetensors')
+    // 构造同一目录的另一种大小写拼写（Windows 文件系统大小写不敏感，
+    // 对话框与设置文件对同一根目录可能给出不同拼写）
+    const letterIndex = [...root].findIndex((ch) => /[a-z]/.test(ch))
+    const variant =
+      root.slice(0, letterIndex) + root[letterIndex].toUpperCase() + root.slice(letterIndex + 1)
+    expect(variant).not.toBe(root)
+    expect(variant.toLowerCase()).toBe(root.toLowerCase())
+
+    // 全新根无快照，首个防抖保存走 writeSnapshot 落 store.json（与上一用例
+    // 的污染判定目标同一路径）
+    const storeFile = path.join(root, '.modelvault', 'store.json')
+    vi.useFakeTimers()
+    try {
+      setModelMeta(abs, { alias: '大小写变体根的修改' }) // 防抖调度于原拼写根
+      // 裸切根到大小写变体：守卫不应视为跨根丢弃（对照上一用例的真跨根）
+      setDataRoot(variant)
+      await vi.advanceTimersByTimeAsync(500)
+    } finally {
+      vi.useRealTimers()
+    }
+    // fake timers 不拦截真实 fs I/O：轮询等待在途写盘落定后再判定
+    const deadline = Date.now() + 1000
+    let saved = false
+    while (Date.now() < deadline && !saved) {
+      try {
+        if ((await fs.readFile(storeFile, 'utf-8')).includes('大小写变体根的修改')) saved = true
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+    }
+    expect(saved).toBe(true)
+  })
 })
 
 describe('应用设置规范化', () => {
