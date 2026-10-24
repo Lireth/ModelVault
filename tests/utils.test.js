@@ -22,6 +22,11 @@ describe('isAllowedExternalUrl（B3 外链白名单）', () => {
     expect(isAllowedExternalUrl('https://github.com/')).toBe(true)
   })
 
+  it('放行 Civitai 站点链接（red 识别站 + com 历史数据兼容）', () => {
+    expect(isAllowedExternalUrl('https://civitai.red/models/123?modelVersionId=456')).toBe(true)
+    expect(isAllowedExternalUrl('https://civitai.com/models/123')).toBe(true)
+  })
+
   it('拒绝非 https 协议', () => {
     expect(isAllowedExternalUrl('http://github.com/x')).toBe(false)
     expect(isAllowedExternalUrl('file:///C:/Windows/system32/cmd.exe')).toBe(false)
