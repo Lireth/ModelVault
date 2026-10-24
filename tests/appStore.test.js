@@ -137,6 +137,7 @@ beforeEach(() => {
   replaceModels([])
   state.typeFilter = 'all'
   state.subFilter = ''
+  state.tagFilters = []
   state.showFavoritesOnly = false
   state.showDuplicatesOnly = false
   state.search = ''
@@ -936,7 +937,7 @@ describe('筛选与排序（filteredModels）', () => {
     state.search = ''
   })
 
-  it('自由标签筛选与标签池（F-5）：包含即命中，跨类型维度不随主分类清空', () => {
+  it('自由标签筛选与标签池（F-5/FEAT-01）：单标签命中、多标签 AND、跨类型不清空', () => {
     state.models = [
       makeModel('a', { type: 'lora', tags: ['赛博朋克', '服装'] }),
       makeModel('b', { type: 'checkpoint', tags: ['赛博朋克'] }),
@@ -945,16 +946,19 @@ describe('筛选与排序（filteredModels）', () => {
     // 标签池：按使用次数降序
     expect(allTags.value).toEqual(['赛博朋克', '服装'])
     // 筛选：包含该标签的模型命中（跨类型）
-    state.tagFilter = '赛博朋克'
+    state.tagFilters = ['赛博朋克']
     expect(filteredModels.value.map((m) => m.id)).toEqual(['a', 'b'])
-    state.tagFilter = '服装'
+    state.tagFilters = ['服装']
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['a'])
+    // 多标签为 AND：同时包含两个标签才命中
+    state.tagFilters = ['赛博朋克', '服装']
     expect(filteredModels.value.map((m) => m.id)).toEqual(['a'])
     // 跨类型维度：切主分类不清空（与 subFilter/baseFilter 不同）
     state.typeFilter = 'lora'
-    expect(state.tagFilter).toBe('服装')
+    expect(state.tagFilters).toEqual(['赛博朋克', '服装'])
     expect(filteredModels.value.map((m) => m.id)).toEqual(['a'])
     state.typeFilter = 'all'
-    state.tagFilter = ''
+    state.tagFilters = []
     // 库内无标签时标签池为空
     state.models = [makeModel('x', { tags: [] })]
     expect(allTags.value).toEqual([])

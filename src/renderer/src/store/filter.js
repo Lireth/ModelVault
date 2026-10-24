@@ -112,14 +112,14 @@ const filteredUnsorted = computed(() => {
   const { text, filters } = parseSearchQuery(state.search)
   const keyword = text.toLowerCase()
   const hasFilters = filters.length > 0
-  const { typeFilter, subFilter, baseFilter, tagFilter, showFavoritesOnly, showDuplicatesOnly } = state
+  const { typeFilter, subFilter, baseFilter, tagFilters, showFavoritesOnly, showDuplicatesOnly } = state
   // LoRA 分类筛选：仅选中 LoRA 分类且指定了子分类时生效
   const checkSub = typeFilter === 'lora' && subFilter
   // 基底模型家族筛选（F-2）：归一化比较（autoInfo 解析 + Civitai 回填双来源
   // 已在装饰层合成为 m.baseModel）；未解析基底（''）不命中任何家族
   const checkBase = baseFilter
-  // 自由标签筛选（F-5）：包含即命中（单选语义）
-  const checkTag = tagFilter
+  // 自由标签筛选（F-5/FEAT-01）：数组内全部标签同时存在才命中（AND）
+  const checkTags = Array.isArray(tagFilters) ? tagFilters : []
   // 重复筛选仅在开启时读取命中集合（关闭路径零额外开销）
   const dupes = showDuplicatesOnly ? duplicateIdSet.value : null
   const list = []
@@ -127,7 +127,10 @@ const filteredUnsorted = computed(() => {
     if (typeFilter !== 'all' && m.type !== typeFilter) continue
     if (checkSub && m.subCategory !== subFilter) continue
     if (checkBase && normalizeBaseModel(m.baseModel || m.autoInfo?.baseModel || '') !== checkBase) continue
-    if (checkTag && !(m.tags || []).includes(checkTag)) continue
+    if (checkTags.length > 0) {
+      const tags = m.tags || []
+      if (!checkTags.every((t) => tags.includes(t))) continue
+    }
     if (showFavoritesOnly && !m.favorite) continue
     if (dupes && !dupes.has(m.id)) continue
     if (keyword && !searchHaystack(m).includes(keyword)) continue

@@ -292,7 +292,7 @@ describe('IPC payload 通道校验（validateIpcPayload）', () => {
       typeFilter: 'all',
       subFilter: '',
       baseFilter: '',
-      tagFilter: '',
+      tagFilters: [],
       showFavoritesOnly: false,
       showDuplicatesOnly: false,
       sortBy: 'name',

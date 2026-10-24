@@ -780,6 +780,7 @@ describe('应用设置规范化', () => {
           search: '动漫',
           typeFilter: 'lora',
           subFilter: 'role',
+          tagFilters: ['角色', '风格', '角色'],
           showFavoritesOnly: true,
           showDuplicatesOnly: true,
           sortBy: 'mtime',
@@ -789,7 +790,7 @@ describe('应用设置规范化', () => {
         { id: 'v2', name: '  ' }, // 空白名称：剔除
         { id: 'v1', name: '重复id' }, // id 去重（首条保留）
         { id: 'v3', name: '缺省字段' }, // 其余字段回退默认
-        { id: 'v4', name: '未知排序', sortBy: 'xxx', sortAsc: 'yes' },
+        { id: 'v4', name: '未知排序', tagFilter: '旧标签', sortBy: 'xxx', sortAsc: 'yes' },
         'not-an-object' // 非对象：剔除
       ]
     })
@@ -802,7 +803,7 @@ describe('应用设置规范化', () => {
       typeFilter: 'lora',
       subFilter: 'role',
       baseFilter: '',
-      tagFilter: '',
+      tagFilters: ['角色', '风格'],
       showFavoritesOnly: true,
       showDuplicatesOnly: true,
       sortBy: 'mtime',
@@ -815,7 +816,7 @@ describe('应用设置规范化', () => {
       typeFilter: 'all',
       subFilter: '',
       baseFilter: '',
-      tagFilter: '',
+      tagFilters: [],
       showFavoritesOnly: false,
       showDuplicatesOnly: false,
       sortBy: 'name',
@@ -824,6 +825,8 @@ describe('应用设置规范化', () => {
     // 未知排序/非布尔方向回退默认
     expect(s.savedViews[2].sortBy).toBe('name')
     expect(s.savedViews[2].sortAsc).toBe(true)
+    // 旧视图单标签字符串迁移为数组（FEAT-01）
+    expect(s.savedViews[2].tagFilters).toEqual(['旧标签'])
   })
 
   it('savedViews 缺失或非数组时回退空数组，上限 20 个', async () => {

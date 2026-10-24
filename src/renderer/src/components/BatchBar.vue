@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import BatchTagEditor from './BatchTagEditor.vue'
 import {
   allFilteredSelected,
   batchAssignCivitaiTags,
@@ -7,6 +8,7 @@ import {
   batchCivitaiIdentify,
   batchCivitaiImages,
   batchDeleteModels,
+  batchEditTags,
   batchFavorite,
   batchNsfw,
   batchOrganizeByTags,
@@ -54,6 +56,27 @@ function toggleMore() {
 function runMore(action, ...args) {
   moreOpen.value = false
   action(...args)
+}
+
+/* ---------------- 批量自由标签编辑（FEAT-01） ---------------- */
+
+const tagEditorOpen = ref(false)
+
+/** 打开标签编辑层并收起「更多」菜单 */
+function openTagEditor() {
+  moreOpen.value = false
+  tagEditorOpen.value = true
+}
+
+/** 关闭标签编辑层 */
+function closeTagEditor() {
+  tagEditorOpen.value = false
+}
+
+/** 提交标签编辑：先关闭弹层，再执行批量更新（进度在批量栏展示） */
+function applyTagEditor(payload) {
+  tagEditorOpen.value = false
+  void batchEditTags(payload)
 }
 
 /** 点击菜单外部关闭（挂 document，点击在「更多」锚点外时收起） */
@@ -174,6 +197,14 @@ onUnmounted(() => {
             @click="runMore(batchCivitaiImages)"
           >获取示例图</button>
         </template>
+        <div class="bb-menu-label">标签</div>
+        <button
+          class="bb-menu-item"
+          role="menuitem"
+          :disabled="!batchReady"
+          title="为选中模型批量添加、移除或替换自由标签（支持从库内标签池点选，多标签按 AND 筛选）"
+          @click="openTagEditor"
+        >批量编辑标签…</button>
         <div class="bb-menu-label">文件</div>
         <button
           class="bb-menu-item"
@@ -206,6 +237,12 @@ onUnmounted(() => {
       <button class="btn btn-danger" :disabled="!batchReady" @click="batchDeleteModels">移入回收站</button>
       <button class="btn" :disabled="state.multiSelect.busy" @click="exitMultiSelect">退出多选</button>
     </div>
+
+    <BatchTagEditor
+      v-if="tagEditorOpen"
+      @close="closeTagEditor"
+      @apply="applyTagEditor"
+    />
   </div>
 </template>
 

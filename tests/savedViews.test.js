@@ -34,6 +34,7 @@ function makeApiMock() {
 function resetState() {
   state.typeFilter = 'all'
   state.subFilter = ''
+  state.tagFilters = []
   state.showFavoritesOnly = false
   state.search = ''
   state.sortBy = 'name'
@@ -145,6 +146,29 @@ describe('智能视图：应用', () => {
     expect(state.sortAsc).toBe(false)
     // 排序持久化（与手动改排序的既有行为一致）
     expect(window.api.settings.update).toHaveBeenCalledWith({ sortBy: 'size', sortAsc: false })
+  })
+
+  it('多标签筛选随视图保存/恢复，旧单标签字段迁移为数组（FEAT-01）', async () => {
+    state.tagFilters = ['赛博朋克', '服装']
+    await saveCurrentAsView('多标签')
+    const saved = window.api.settings.update.mock.calls[0][0].savedViews[0]
+    expect(saved.tagFilters).toEqual(['赛博朋克', '服装'])
+
+    // 旧视图只有单标签字符串：应用时迁移为数组
+    const legacy = seedView({ tagFilter: '旧标签' })
+    await applySavedView(legacy.id)
+    expect(state.tagFilters).toEqual(['旧标签'])
+
+    // 摘要按顿号拼接多标签
+    expect(
+      viewSummary({ ...state.settings.savedViews[0], tagFilters: ['a', 'b'] })
+    ).toContain('标签：a、b')
+    // 命中判定与标签选择顺序无关
+    state.settings.savedViews = [
+      { ...legacy, id: 'v-order', name: '顺序无关', tagFilters: ['b', 'a'] }
+    ]
+    state.tagFilters = ['a', 'b']
+    expect(activeSavedViewId.value).toBe('v-order')
   })
 
   it('LoRA 子分类筛选在 typeFilter watcher 清空后恢复', async () => {

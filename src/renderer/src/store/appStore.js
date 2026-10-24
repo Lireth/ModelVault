@@ -157,6 +157,8 @@ export {
   batchFavorite,
   batchNsfw,
   batchRating,
+  batchEditTags,
+  normalizeBatchTags,
   batchAssignCivitaiTags,
   batchOrganizeByTags,
   batchApplyTriggers,

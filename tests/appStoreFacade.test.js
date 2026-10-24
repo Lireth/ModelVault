@@ -136,6 +136,8 @@ const EXPECTED_EXPORTS = [
   'batchFavorite',
   'batchNsfw',
   'batchRating',
+  'batchEditTags',
+  'normalizeBatchTags',
   'batchAssignCivitaiTags',
   'batchOrganizeByTags',
   'batchApplyTriggers',

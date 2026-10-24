@@ -60,7 +60,7 @@ export const activeDynamicViewKey = computed(() => {
     state.typeFilter !== 'all' ||
     state.subFilter ||
     state.baseFilter ||
-    state.tagFilter ||
+    state.tagFilters.length > 0 ||
     state.showFavoritesOnly ||
     state.showDuplicatesOnly
   ) {
@@ -82,7 +82,7 @@ export function applyDynamicView(key) {
   state.typeFilter = 'all'
   state.subFilter = ''
   state.baseFilter = ''
-  state.tagFilter = ''
+  state.tagFilters = []
   state.showFavoritesOnly = false
   state.showDuplicatesOnly = false
   state.search = state.search.trim() === def.search ? '' : def.search

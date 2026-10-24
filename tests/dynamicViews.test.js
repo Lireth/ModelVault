@@ -38,7 +38,7 @@ beforeEach(() => {
   state.typeFilter = 'all'
   state.subFilter = ''
   state.baseFilter = ''
-  state.tagFilter = ''
+  state.tagFilters = []
   state.showFavoritesOnly = false
   state.showDuplicatesOnly = false
   replaceModels([
@@ -84,7 +84,7 @@ describe('applyDynamicView', () => {
   it('其他筛选存在时不算命中动态视图', () => {
     applyDynamicView('recent')
     expect(activeDynamicViewKey.value).toBe('recent')
-    state.tagFilter = '风格'
+    state.tagFilters = ['风格']
     expect(activeDynamicViewKey.value).toBe('')
   })
 })

@@ -351,7 +351,10 @@ export const IPC_PAYLOAD_SCHEMAS = {
             typeFilter: vStr({ max: 64 }),
             subFilter: vStr({ max: 128 }),
             baseFilter: vStr({ max: 64 }),
-            tagFilter: vStr({ max: 128 }),
+            // 自由标签筛选（FEAT-01）：数组（多标签 AND）；旧 tagFilter 单字符串
+            // 字段保留兼容历史设置，主进程 normalize 会迁移为 tagFilters
+            tagFilters: vArr({ max: 20, items: vStr({ max: 32 }) }),
+            tagFilter: vStr({ max: 32 }),
             showFavoritesOnly: vBool(),
             showDuplicatesOnly: vBool(),
             sortBy: vStr({ max: 16 }),

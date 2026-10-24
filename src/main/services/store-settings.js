@@ -116,6 +116,26 @@ function normalizeExtensions(raw) {
 }
 
 /**
+ * 规范化视图标签筛选（FEAT-01）：
+ * - 新数据为 tagFilters 数组；旧数据可能是单个 tagFilter 字符串；
+ * - 逐项 trim/截断/去重，最多 20 个。
+ * @param {unknown} raw tagFilters 数组或旧 tagFilter 字符串
+ * @returns {string[]}
+ */
+function normalizeViewTagFilters(raw) {
+  const list = Array.isArray(raw) ? raw : typeof raw === 'string' && raw ? [raw] : []
+  const out = []
+  for (const item of list) {
+    if (typeof item !== 'string') continue
+    const tag = item.trim().slice(0, 32)
+    if (!tag || out.includes(tag)) continue
+    out.push(tag)
+    if (out.length >= 20) break
+  }
+  return out
+}
+
+/**
  * 规范化智能视图列表（组合筛选收藏）：
  * 逐字段类型/长度校验（typeFilter/subFilter 不做枚举校验——非法值在渲染层
  * 仅表现为空筛选结果，无害；枚举单一来源在渲染层侧），id 去重，上限 20 个。
@@ -138,8 +158,8 @@ function normalizeSavedViews(raw) {
       subFilter: typeof v.subFilter === 'string' ? v.subFilter.slice(0, 50) : '',
       // 基底模型家族筛选（F-2）：旧视图缺省时为 ''（全部）
       baseFilter: typeof v.baseFilter === 'string' ? v.baseFilter.slice(0, 20) : '',
-      // 自由标签筛选（F-5）：旧视图缺省时为 ''（全部）
-      tagFilter: typeof v.tagFilter === 'string' ? v.tagFilter.slice(0, 32) : '',
+      // 自由标签筛选（F-5/FEAT-01）：新字段为数组；旧视图单字符串迁移
+      tagFilters: normalizeViewTagFilters(v.tagFilters ?? v.tagFilter),
       showFavoritesOnly: v.showFavoritesOnly === true,
       // 重复模型筛选（FEAT-1）：旧视图缺省该字段时为 false
       showDuplicatesOnly: v.showDuplicatesOnly === true,

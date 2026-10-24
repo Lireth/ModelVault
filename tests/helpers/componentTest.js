@@ -114,6 +114,7 @@ function resetStoreState() {
   replaceModels([])
   state.typeFilter = 'all'
   state.subFilter = ''
+  state.tagFilters = []
   state.showFavoritesOnly = false
   state.search = ''
   state.sortBy = 'name'
