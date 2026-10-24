@@ -104,12 +104,18 @@ function isRedirectCancelledError(err) {
  */
 function probeRedirectTarget(url, options) {
   return new Promise((resolve, reject) => {
+    // HeadersInit → net.request 要求的普通头记录（Accept/Referer 等简单值，
+    // 单值字符串化即可；探测请求不携带 body，无多值头语义）
+    const headersRecord = {}
+    for (const [name, value] of new Headers(options.headers || {})) {
+      headersRecord[name] = value
+    }
     const request = net.request({
       method: 'GET',
       url,
       redirect: 'manual',
       useSessionCookies: true,
-      headers: options.headers || {}
+      headers: headersRecord
     })
     let settled = false
     const finish = (ok, value) => {
@@ -138,7 +144,7 @@ function probeRedirectTarget(url, options) {
     })
     request.on('response', (incoming) => {
       // 未发 redirect 事件直接拿到响应（3xx 且无跳转目标等）：按终态返回空体
-      incoming.destroy?.()
+      // （IncomingMessage 无 destroy 方法，经 request.abort 中止 body 传输）
       request.abort?.()
       finish(true, {
         status: incoming.statusCode || 0,
