@@ -19,19 +19,29 @@ import logger from '../logger'
  *   解析问题，dev/打包/测试三环境行为完全一致；
  * - 取消：AbortSignal 触发时主进程立即 reject 并向 worker 发 abort 消息，
  *   worker 在下一读块边界检查后中止（在途读块最多 8MB 的收尾开销）；
- * - 崩溃自愈：worker 异常退出时拒绝当前任务与队列中全部任务（明确报错，
- *   不静默吞掉），下次调用时惰性重建 worker。
+ * - 崩溃自愈（OPT-05）：worker 崩溃时当前任务以可重试的 WorkerCrashError
+ *   拒绝，队列中尚未开始的任务保留，worker 退避重建后继续消费；连续崩溃
+ *   超过阈值时以 WorkerUnavailableError 拒绝剩余队列，避免无限重建。
  */
 
 /** worker 读块大小（8MB）：大文件吞吐与内存占用的平衡点（原 civitai.js HASH_CHUNK_SIZE） */
 const WORKER_CHUNK_SIZE = 8 * 1024 * 1024
+
+/** 崩溃后重启基础延迟（ms）：首次 250ms，按连续崩溃次数指数退避 */
+const RESTART_BASE_DELAY_MS = 250
+/** 崩溃后重启最大延迟（ms） */
+const RESTART_MAX_DELAY_MS = 4000
+/** 连续崩溃上限：达到后拒绝剩余队列，避免 worker 启动失败时无限重建 */
+const MAX_CRASH_STREAK = 3
 
 /**
  * worker 内联源码（CJS，eval 模式）：
  * 消息协议——
  * 入：{ type: 'hash', id, filePath } 派发任务；{ type: 'abort', id } 请求取消当前任务
  * 出：{ type: 'progress', id, hashedBytes, totalBytes }（每读块一次）；
- *     { type: 'done', id, hash } 成功；{ type: 'done', id, error, name } 失败（含取消）。
+ *     { type: 'done', id, hash } 成功；
+ *     { type: 'done', id, error, name, code } 失败（含取消；code 供上层识别
+ *     可重试的临时文件错误）。
  * 任务严格串行：主进程侧并发为 1，worker 内 aborted 标志只作用于当前任务
  * （任务开始时复位，abort 消息不会泄漏到后续任务）。
  */
@@ -70,7 +80,13 @@ parentPort.on('message', (msg) => {
       await handle.close()
     }
   })().catch((err) => {
-    parentPort.postMessage({ type: 'done', id, error: err.message, name: err.name })
+    parentPort.postMessage({
+      type: 'done',
+      id,
+      error: err.message,
+      name: err.name,
+      code: err.code
+    })
   })
 })
 `
@@ -82,11 +98,53 @@ function abortError() {
   return err
 }
 
+/**
+ * 线程池崩溃异常：当前任务可安全重试（哈希从文件头重新计算，无中间状态）。
+ * @param {string} message 错误文案
+ * @returns {Error}
+ */
+function workerCrashError(message) {
+  const err = new Error(message)
+  err.name = 'WorkerCrashError'
+  return err
+}
+
+/**
+ * 线程池连续崩溃后不可用异常：调用方应停止重试并反馈失败。
+ * @param {string} message 错误文案
+ * @returns {Error}
+ */
+function workerUnavailableError(message) {
+  const err = new Error(message)
+  err.name = 'WorkerUnavailableError'
+  return err
+}
+
+/** 可重试的临时文件错误码（文件被占用/句柄耗尽等，稍后重试可能成功） */
+const RETRYABLE_FILE_CODES = new Set(['EBUSY', 'EAGAIN', 'EMFILE', 'ENFILE', 'EOF', 'EPIPE'])
+
+/**
+ * 是否属于可重试的线程池/临时文件错误（OPT-05）：
+ * 仅覆盖 worker 崩溃、连续不可用与明确的临时文件错误；ENOENT/EACCES/
+ * 文件损坏等永久错误不重试，避免无效读盘循环。
+ * @param {any} err 错误对象
+ * @returns {boolean}
+ */
+export function isRetryableHashPoolError(err) {
+  if (!err) return false
+  if (err.name === 'WorkerCrashError' || err.name === 'WorkerUnavailableError') return true
+  return typeof err.code === 'string' && RETRYABLE_FILE_CODES.has(err.code)
+}
+
 /** 单例 worker（惰性创建；异常退出后置 null，下次任务重建） */
 let worker = null
 
 /** 派发序号：任务 id 单调递增，worker 消息按 id 回路由 */
 let nextTaskId = 0
+
+/** 崩溃重启定时器与连续崩溃计数（OPT-05） */
+let restartTimer = null
+let crashStreak = 0
 
 /**
  * 双通道任务队列（worker 并发 1：同一时刻至多一个在途任务）：
@@ -111,7 +169,8 @@ function preemptedError() {
  * 惰性创建 worker 并绑定消息路由：
  * - progress：按 id 匹配任务并转发 onProgress 回调；
  * - done：按 id 结算任务（成功/失败），空闲后立即泵出下一任务；
- * - error / exit：worker 崩溃——拒绝当前与队列中全部任务，置空待重建。
+ * - error / exit：worker 崩溃——当前任务以 WorkerCrashError 拒绝，队列保留
+ *   并退避重建后继续消费（OPT-05）。
  */
 function ensureWorker() {
   if (worker) return worker
@@ -119,6 +178,8 @@ function ensureWorker() {
   // unref：哈希预热是后台任务，不得阻止应用退出（退出编排不感知本线程）
   w.unref()
   w.on('message', (msg) => {
+    // 代际防护：崩溃重建后旧 worker 的迟到消息必须丢弃
+    if (worker !== w) return
     if (!msg || typeof msg.id !== 'number') return
     const task = currentTask
     if (!task || task.id !== msg.id) return
@@ -129,6 +190,8 @@ function ensureWorker() {
       return
     }
     if (msg.type === 'done') {
+      // worker 正常回传任一结果即视为健康，清零连续崩溃计数
+      crashStreak = 0
       // 后台任务被前台抢占：worker 在块边界中止后回传 AbortError。
       // 这里不自动重排（由哈希预热层按任务语义重新入队），只把错误类型
       // 改为 PreemptedError，避免上层把让路误报为“计算失败”。
@@ -137,8 +200,9 @@ function ensureWorker() {
       if (preempted) {
         task.reject(preemptedError())
       } else if (msg.error !== undefined) {
-        const err = new Error(msg.error)
+        const err = /** @type {Error & {code?: string}} */ (new Error(msg.error))
         if (msg.name) err.name = msg.name
+        if (msg.code) err.code = msg.code
         task.reject(err)
       } else {
         task.resolve(msg.hash)
@@ -146,13 +210,91 @@ function ensureWorker() {
       pump()
     }
   })
-  w.on('error', (err) => failAll(new Error(`哈希工作线程异常: ${err.message}`)))
+  w.on('error', (err) => {
+    if (worker !== w) return
+    handleWorkerFailure(w, err)
+  })
   w.on('exit', (code) => {
-    // 0 为正常终止（仅测试 reset 路径），非 0 视为崩溃
-    if (code !== 0) failAll(new Error(`哈希工作线程已退出（code=${code}）`))
+    // reset 路径先置空 worker 再 terminate，此处代际校验会忽略；
+    // 其余退出均按崩溃处理（含 code=0 的非预期退出）
+    if (worker !== w) return
+    handleWorkerFailure(w, new Error(`哈希工作线程已退出（code=${code}）`))
   })
   worker = w
   return w
+}
+
+/** 取消待执行的重启定时器 */
+function clearRestartTimer() {
+  if (!restartTimer) return
+  clearTimeout(restartTimer)
+  restartTimer = null
+}
+
+/**
+ * 拒绝队列中尚未开始的任务（连续崩溃达到上限/线程池重置）。
+ * @param {Error} err 拒绝原因
+ */
+function rejectQueued(err) {
+  for (const queue of [foregroundQueue, backgroundQueue]) {
+    while (queue.length > 0) {
+      const task = queue.shift()
+      if (task.settled) continue
+      task.settled = true
+      if (task.abortListener) task.signal?.removeEventListener('abort', task.abortListener)
+      task.reject(err)
+    }
+  }
+}
+
+/**
+ * 记录一次崩溃并安排退避重启：
+ * - 队列为空：本轮崩溃预算归零，不主动重建（等待下一次调用惰性创建）；
+ * - 连续崩溃未达上限：按 250ms→4s 指数退避后继续消费队列；
+ * - 达到上限：拒绝剩余队列，避免 worker 持续启动失败时无限重建。
+ */
+function recordCrash() {
+  crashStreak += 1
+  if (foregroundQueue.length === 0 && backgroundQueue.length === 0) {
+    crashStreak = 0
+    return
+  }
+  if (crashStreak >= MAX_CRASH_STREAK) {
+    rejectQueued(workerUnavailableError('哈希工作线程连续崩溃，已停止重建'))
+    crashStreak = 0
+    return
+  }
+  const delay = Math.min(
+    RESTART_BASE_DELAY_MS * 2 ** Math.max(0, crashStreak - 1),
+    RESTART_MAX_DELAY_MS
+  )
+  if (restartTimer) return
+  restartTimer = setTimeout(() => {
+    restartTimer = null
+    pump()
+  }, delay)
+  restartTimer.unref?.()
+}
+
+/**
+ * worker 崩溃处理：置空实例、终止残留、拒绝当前任务并进入重启流程。
+ * @param {Worker} w 崩溃的 worker 实例
+ * @param {Error} cause 崩溃原因
+ */
+function handleWorkerFailure(w, cause) {
+  if (worker !== w) return
+  worker = null
+  try {
+    w.terminate().catch(() => {})
+  } catch {
+    /* 进程已退出 */
+  }
+  const task = currentTask
+  if (task) {
+    settleCurrent()
+    task.reject(workerCrashError(`哈希工作线程异常: ${cause.message}`))
+  }
+  recordCrash()
 }
 
 /** 结束当前在途任务的占位（仅状态清理，结算本身由消息路由完成） */
@@ -180,6 +322,8 @@ function nextTask() {
  * 避免新旧任务并发读写同一个 worker 的共享 abort 标志。
  */
 function enqueueTask(task) {
+  // 新任务到达时无需继续等待退避：立即尝试重建并派发
+  clearRestartTimer()
   if (task.priority) {
     foregroundQueue.push(task)
     if (currentTask && !currentTask.priority && !currentTask.preempting && worker) {
@@ -208,35 +352,42 @@ function dequeueTask(task) {
  * 从队列泵出下一任务（串行）：前台优先；队列中已取消的任务直接跳过。
  */
 function pump() {
-  if (currentTask) return
+  if (currentTask || restartTimer) return
   const task = nextTask()
   if (!task) return
   currentTask = task
-  ensureWorker().postMessage({ type: 'hash', id: task.id, filePath: task.filePath })
+  let w
+  try {
+    w = ensureWorker()
+  } catch (err) {
+    const failure = workerCrashError(`哈希工作线程创建失败: ${err.message}`)
+    settleCurrent()
+    task.reject(failure)
+    recordCrash()
+    return
+  }
+  try {
+    w.postMessage({ type: 'hash', id: task.id, filePath: task.filePath })
+  } catch (err) {
+    // postMessage 失败通常意味着 worker 已终止：按崩溃路径重建
+    handleWorkerFailure(w, err)
+  }
 }
 
-/** worker 崩溃：拒绝当前与队列中全部任务，重建延迟到下次调用 */
+/** 线程池重置：清除重启计划并拒绝当前与队列中全部任务 */
 function failAll(err) {
+  clearRestartTimer()
+  crashStreak = 0
   if (currentTask) {
     const task = currentTask
     settleCurrent()
     task.reject(err)
   }
-  for (const queue of [foregroundQueue, backgroundQueue]) {
-    while (queue.length > 0) {
-      const task = queue.shift()
-      if (!task.settled) {
-        task.settled = true
-        if (task.abortListener) task.signal?.removeEventListener('abort', task.abortListener)
-        task.reject(err)
-      }
-    }
-  }
+  rejectQueued(err)
   if (worker) {
     const w = worker
-    // 必须先置空再终止：terminate 触发的 exit 事件经 failAll 幂等清理
-    // （队列已空、current 已空），而下次 ensureWorker 会重建新实例——
-    // 若仍指向已终止实例，postMessage 将被静默丢弃导致任务永久挂起
+    // 先置空再终止：terminate 触发的 exit 事件经代际校验忽略，
+    // 避免旧实例的退出误伤随后重建的新 worker
     worker = null
     w.terminate().catch(() => {})
   }
@@ -302,10 +453,20 @@ export function computeFileHashOffThread(filePath, signal, onProgress, options =
 
 /** 终止 worker 并清空全部内部状态（测试隔离用；生产代码严禁调用） */
 export async function resetHashPoolForTests() {
-  failAll(new Error('哈希线程池已重置'))
   const w = worker
-  worker = null
+  failAll(new Error('哈希线程池已重置'))
   nextTaskId = 0
   if (w) await w.terminate().catch(() => {})
   logger.info('哈希线程池已重置（测试）')
+}
+
+/**
+ * 强制终止当前 worker，模拟崩溃（仅供单元测试使用；生产代码严禁调用）。
+ * 不清理当前任务/队列，使退出事件走真实崩溃恢复路径。
+ * @returns {boolean} 是否存在可终止的 worker
+ */
+export function crashHashWorkerForTests() {
+  if (!worker) return false
+  worker.terminate().catch(() => {})
+  return true
 }

@@ -17,6 +17,8 @@ import crypto from 'node:crypto'
 
 import {
   computeFileHashOffThread,
+  crashHashWorkerForTests,
+  isRetryableHashPoolError,
   resetHashPoolForTests
 } from '../src/main/services/hash-worker-pool'
 
@@ -159,4 +161,45 @@ it('文件不存在：reject 且不中断后续任务', async () => {
   await expect(computeFileHashOffThread(missing)).rejects.toThrow()
   const { abs, expected } = await writeFixture('h.bin', Buffer.from('after-crash'))
   await expect(computeFileHashOffThread(abs)).resolves.toBe(expected)
+})
+
+it('可重试错误识别：仅 worker 崩溃/不可用与临时文件错误', () => {
+  expect(isRetryableHashPoolError({ name: 'WorkerCrashError' })).toBe(true)
+  expect(isRetryableHashPoolError({ name: 'WorkerUnavailableError' })).toBe(true)
+  expect(isRetryableHashPoolError({ code: 'EBUSY' })).toBe(true)
+  expect(isRetryableHashPoolError({ code: 'ENOENT' })).toBe(false)
+  expect(isRetryableHashPoolError({ name: 'AbortError' })).toBe(false)
+  expect(isRetryableHashPoolError(null)).toBe(false)
+})
+
+it('worker 崩溃：当前任务以 WorkerCrashError 拒绝，排队任务重建后继续完成', async () => {
+  // 64MB 多读块文件确保崩溃发生在任务执行中，而不是恰好已完成
+  const big = await writeFixture('crash-big.bin', Buffer.alloc(64 * 1024 * 1024, 5))
+  const small = await writeFixture('crash-small.bin', Buffer.from('after-worker-crash'))
+
+  let progressStarted = false
+  const first = computeFileHashOffThread(big.abs, undefined, () => {
+    progressStarted = true
+  })
+  const firstOutcome = first.then(
+    () => 'resolved',
+    (err) => err
+  )
+  // 第二个任务进入队列；崩溃后必须保留并在新 worker 中完成
+  const second = computeFileHashOffThread(small.abs)
+
+  const deadline = Date.now() + 3000
+  while (!progressStarted && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  expect(progressStarted).toBe(true)
+  expect(crashHashWorkerForTests()).toBe(true)
+
+  const crashErr = await firstOutcome
+  expect(crashErr).toMatchObject({ name: 'WorkerCrashError' })
+  await expect(second).resolves.toBe(small.expected)
+
+  // 重启后线程池仍可继续服务
+  const next = await writeFixture('crash-next.bin', Buffer.from('next-task'))
+  await expect(computeFileHashOffThread(next.abs)).resolves.toBe(next.expected)
 })

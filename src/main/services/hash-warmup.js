@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import logger from '../logger'
 import { getModelMeta, setModelMeta } from './store'
 import { computeFileHash } from './civitai'
+import { isRetryableHashPoolError } from './hash-worker-pool'
 
 /**
  * 模型哈希后台预热服务（Civitai 识别加速）：
@@ -26,7 +27,9 @@ import { computeFileHash } from './civitai'
  *   （与 ipc/models/civitai.js ensureHash 的既有约定一致）；
  * - 扫描让路：全量/局部扫描期间暂停取队（正在计算的单个文件不中断），
  *   扫描结束后自动恢复，避免预热拖慢扫描；
- * - 容错：文件已删除/移动（stat 失败）静默跳过，不中断队列。
+ * - 容错：文件已删除/移动（stat 失败）静默跳过，不中断队列；
+ * - 临时故障重试（OPT-05）：线程池崩溃/连续不可用/临时文件占用统一在
+ *   computeAndCacheHash 内重试（最多 2 次，退避 300ms），永久错误不重试。
  */
 
 /** 普通入队后的延迟启动间隔（ms）：避开扫描刚结束/缩略图生成的 I/O 高峰 */
@@ -34,6 +37,24 @@ const WARMUP_DELAY_MS = 3000
 
 /** 进度事件节流间隔（ms）：哈希每块（8MB）回调一次，高频事件须限流 */
 const PROGRESS_INTERVAL_MS = 300
+
+/**
+ * 线程池临时故障重试（OPT-05）：worker 崩溃/临时文件占用时最多重试 2 次；
+ * 退避等待与线程池重启延迟（250ms 起）错开，避免立即撞上未就绪的新 worker。
+ */
+const TRANSIENT_RETRY_MAX = 2
+const TRANSIENT_RETRY_DELAY_MS = 300
+
+/** 重试退避时长（测试可注入 0 避免真实等待） */
+let transientRetryDelayMs = TRANSIENT_RETRY_DELAY_MS
+
+/**
+ * 注入临时故障重试退避时长（仅供单元测试使用；生产代码严禁调用）
+ * @param {number} ms 毫秒数
+ */
+export function setHashRetryDelayForTests(ms) {
+  transientRetryDelayMs = Number.isFinite(ms) && ms >= 0 ? ms : TRANSIENT_RETRY_DELAY_MS
+}
 
 /**
  * 哈希预热策略（O1）：
@@ -146,10 +167,57 @@ let draining = false
 /** 扫描期间置 true：drain 暂停取队（已在计算的单个文件不中断） */
 let paused = false
 
+/** 等待指定毫秒（重试退避） */
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * 带临时故障重试的哈希计算（OPT-05）：
+ * 仅对 worker 崩溃/连续不可用/临时文件占用等可恢复错误重试，最多 2 次；
+ * 每次重试前复位进度并等待线程池退避重启。永久错误（ENOENT/EACCES 等）
+ * 直接抛出，不进行无效重试。
+ * @param {string} id 模型绝对路径
+ * @param {boolean} priority 是否前台优先任务
+ * @param {{active: boolean, id: string, percent: number, hashedBytes: number,
+ *   totalBytes: number, hash: string}} snap 进度快照
+ * @returns {Promise<string>} SHA256
+ */
+async function computeHashWithRetry(id, priority, snap) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await computeFileHash(
+        id,
+        undefined,
+        (hashedBytes, totalBytes) => {
+          snap.hashedBytes = hashedBytes
+          snap.totalBytes = totalBytes
+          snap.percent =
+            totalBytes > 0 ? Math.min(100, Math.round((hashedBytes / totalBytes) * 100)) : 0
+          emitProgress(snap)
+        },
+        { priority }
+      )
+    } catch (err) {
+      if (attempt >= TRANSIENT_RETRY_MAX || !isRetryableHashPoolError(err)) throw err
+      logger.warn(
+        `哈希计算临时失败，${transientRetryDelayMs}ms 后重试` +
+          `（第 ${attempt + 1}/${TRANSIENT_RETRY_MAX} 次）: ${id} ${err.message}`
+      )
+      // 上一次尝试可能已推送过部分进度：重试前复位，避免界面停在旧百分比
+      snap.percent = 0
+      snap.hashedBytes = 0
+      snap.totalBytes = 0
+      emitProgress(snap, true)
+      await delay(transientRetryDelayMs)
+    }
+  }
+}
+
 /**
  * 计算并缓存模型哈希（预热与识别链路共用的单一入口）：
  * 同一模型同 mtime 已在计算中时复用同一 Promise；完成后重读最新元数据
- * 回写 hash/hashMtime。
+ * 回写 hash/hashMtime。线程池临时故障自动重试（OPT-05）。
  * @param {string} id 模型绝对路径
  * @param {number} mtimeMs 调用方 stat 到的文件 mtime（保证缓存与文件版本对应）
  * @param {{priority?: boolean}} [options] priority=true 为前台任务（详情页/识别），
@@ -166,17 +234,7 @@ export function computeAndCacheHash(id, mtimeMs, options = {}) {
     const snap = { active: true, id, percent: 0, hashedBytes: 0, totalBytes: 0, hash: '' }
     try {
       emitProgress(snap, true)
-      const hash = await computeFileHash(
-        id,
-        undefined,
-        (hashedBytes, totalBytes) => {
-          snap.hashedBytes = hashedBytes
-          snap.totalBytes = totalBytes
-          snap.percent = totalBytes > 0 ? Math.min(100, Math.round((hashedBytes / totalBytes) * 100)) : 0
-          emitProgress(snap)
-        },
-        { priority }
-      )
+      const hash = await computeHashWithRetry(id, priority, snap)
       snap.hash = hash
       // 写盘前重读最新元数据：哈希计算期间用户可能已并发保存其他字段
       const latest = getModelMeta(id) || {}

@@ -28,6 +28,7 @@ import {
   requestHashWarmup,
   resetHashWarmupForTests,
   resumeHashWarmup,
+  setHashRetryDelayForTests,
   setWarmupProgressListener,
   whenWarmupIdle
 } from '../src/main/services/hash-warmup'
@@ -44,6 +45,7 @@ const roots = []
 beforeEach(async () => {
   vi.clearAllMocks()
   resetHashWarmupForTests()
+  setHashRetryDelayForTests(0)
   setWarmupProgressListener(null)
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-warmup-'))
   roots.push(root)
@@ -53,6 +55,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   resetHashWarmupForTests()
+  setHashRetryDelayForTests(300)
   for (const dir of roots) {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
   }
@@ -124,6 +127,39 @@ describe('computeAndCacheHash', () => {
       expect.any(Function),
       { priority: true }
     )
+  })
+
+  it('OPT-05：线程池临时崩溃后自动重试并完成，进度在重试前复位', async () => {
+    const id = await makeModel('retry-crash.safetensors')
+    const { mtimeMs } = await fs.stat(id)
+    const crash = Object.assign(new Error('worker crashed'), { name: 'WorkerCrashError' })
+    computeFileHash.mockRejectedValueOnce(crash).mockResolvedValueOnce(fakeHash(40))
+    const events = []
+    setWarmupProgressListener((p) => events.push({ ...p }))
+
+    await expect(computeAndCacheHash(id, mtimeMs)).resolves.toBe(fakeHash(40))
+    expect(computeFileHash).toHaveBeenCalledTimes(2)
+    expect(getModelMeta(id).hash).toBe(fakeHash(40))
+    // 重试前推送 active + percent=0，避免界面停在失败尝试的旧百分比
+    expect(
+      events.some((e) => e.active === true && e.id === id && e.percent === 0)
+    ).toBe(true)
+  })
+
+  it('OPT-05：线程池持续不可用时重试耗尽，失败且不写缓存', async () => {
+    const id = await makeModel('retry-exhausted.safetensors')
+    const { mtimeMs } = await fs.stat(id)
+    const crash = Object.assign(new Error('worker unavailable'), {
+      name: 'WorkerUnavailableError'
+    })
+    computeFileHash.mockRejectedValue(crash)
+
+    await expect(computeAndCacheHash(id, mtimeMs)).rejects.toMatchObject({
+      name: 'WorkerUnavailableError'
+    })
+    // 初始 1 次 + 重试 2 次
+    expect(computeFileHash).toHaveBeenCalledTimes(3)
+    expect(getModelMeta(id)?.hash).toBeUndefined()
   })
 })
 
