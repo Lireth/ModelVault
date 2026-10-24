@@ -8,9 +8,9 @@ import {
 
 /**
  * 窄屏操作菜单（OPT-1）：
- * 侧边栏操作区（重新扫描/选择文件夹）在窗口宽度 <900px 时
+ * 侧边栏操作区（重新扫描/选择文件夹）在窗口宽度 <960px 时
  * 被 Sidebar.vue 的媒体查询整体隐藏，核心操作在窄窗口下不可达。
- * 此处于标题栏提供替代入口（☰ 按钮 + 下拉菜单），仅在同样 <900px 时显示；
+ * 此处于标题栏提供替代入口（☰ 按钮 + 下拉菜单），仅在同样 <960px 时显示；
  * 宽屏下 display:none，桌面端布局与交互零变化。
  */
 
@@ -55,8 +55,8 @@ function onWindowKeydown(e) {
   }
 }
 
-/** 断点与 Sidebar.vue 的 900px 联动：跨回宽屏时关闭菜单，避免触发按钮已隐藏而菜单残留 */
-const narrowQuery = window.matchMedia('(max-width: 900px)')
+/** 断点与 Sidebar.vue 的 960px 联动：跨回宽屏时关闭菜单，避免触发按钮已隐藏而菜单残留 */
+const narrowQuery = window.matchMedia('(max-width: 960px)')
 function onNarrowChange(e) {
   if (!e.matches) closeMenu()
 }
@@ -82,7 +82,7 @@ onBeforeUnmount(() => {
       <span class="brand-en">ModelVault</span>
     </div>
 
-    <!-- 窄屏操作入口（OPT-1）：仅 <900px 显示，替代被隐藏的侧边栏操作区 -->
+    <!-- 窄屏操作入口（OPT-1）：仅 <960px 显示，替代被隐藏的侧边栏操作区 -->
     <div ref="menuRoot" class="narrow-actions">
       <button
         class="wc-btn narrow-actions-btn"
@@ -119,7 +119,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* 窄屏操作入口（OPT-1）：默认隐藏，<900px 时显示（断点与 Sidebar.vue 联动） */
+/* 窄屏操作入口（OPT-1）：默认隐藏，<960px 时显示（断点与 Sidebar.vue 联动） */
 .narrow-actions {
   display: none;
   position: relative;
