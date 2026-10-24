@@ -51,8 +51,10 @@ export default defineConfig({
         // 原 1~2pt 余量已多次把偶发波动误判为回归；这些模块仍保留独立地板，
         // 覆盖率回落超出此余量须显式决策而非被全局均值掩盖 ----------
 
-        // 关联存储（store.json 元数据读写/迁移/重关联/落盘链）
-        '**/src/main/services/store-meta.js': {
+        // 关联存储（store.json 元数据读写/迁移/重关联/落盘链；O1 拆分后逻辑
+        // 位于 store-meta（核心+门面）与 store-meta-normalize/state/journal/
+        // persist 四个子模块，glob 键对匹配文件取聚合值判定）
+        '**/src/main/services/store-meta*.js': {
           statements: 88, branches: 82.5, functions: 92, lines: 94
         },
         // 应用设置双层存储（引导层 + 随库 settings.json）
