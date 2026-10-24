@@ -231,6 +231,18 @@ export function registerStoreHandlers() {
       syncWatcher(root, settings.autoRescan === true, settings.excludeDirs || [], {
         nativeWatch: true
       })
+      // 切库即作废旧库的后台哈希预热队列：秒切库不经过扫描链路的 full 快照
+      // 重播种，旧库排队任务若继续消费，会对已不在当前根内的文件白算
+      // SHA256——跨根写守卫使结果无法落盘，纯浪费分钟级磁盘 IO（后台校验
+      // 扫描失败/取消时该队列会一直消费到空）。以索引模型的 size/mtime 按
+      // 新库策略整体重播种（full=true 丢弃旧排队项并重置体积索引）；随后的
+      // 后台校验扫描完成时再次 full 播种，幂等无冲突。索引模型即上次扫描的
+      // 装饰结果（含 id/size/mtimeMs），readLibraryIndex 的宽返回类型在此断言
+      const indexModels = /** @type {any[]} */ (cachedIndex.models)
+      requestHashWarmup(indexModels, {
+        mode: settings.hashWarmup,
+        full: true
+      })
       logger.info(
         `模型库已打开（本地索引 ${cachedIndex.models.length} 个模型）: ${root}`
       )

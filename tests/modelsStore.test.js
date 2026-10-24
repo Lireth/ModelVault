@@ -33,9 +33,24 @@ vi.mock('../src/main/services/watcher', () => ({
   stopWatcher: vi.fn()
 }))
 
+// 仅替换 computeFileHash：预热作废测试需要可控/可观测的哈希计算（避免真实
+// worker 线程参与）；civitai 其余导出保持原实现供依赖链使用
+vi.mock('../src/main/services/civitai', async (importOriginal) => ({
+  ...(await importOriginal()),
+  computeFileHash: vi.fn()
+}))
+
 import { paramSummaryFromMeta, sidecarFilesFor } from '../src/main/ipc/models/misc'
 import { registerStoreHandlers } from '../src/main/ipc/models/store'
 import { syncWatcher } from '../src/main/services/watcher'
+import { computeFileHash } from '../src/main/services/civitai'
+import {
+  pauseHashWarmup,
+  requestHashWarmup,
+  resetHashWarmupForTests,
+  resumeHashWarmup,
+  whenWarmupIdle
+} from '../src/main/services/hash-warmup'
 import { getCurrentRoot, loadSettings } from '../src/main/services/store'
 import { getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
 
@@ -149,11 +164,77 @@ describe('models:openLibrary 秒切库（F1）', () => {
 
   beforeEach(() => {
     vi.mocked(syncWatcher).mockClear()
+    vi.mocked(computeFileHash).mockReset()
+    resetHashWarmupForTests()
     registerStoreHandlers()
   })
 
   afterAll(() => {
     for (const dir of tmpRoots) fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('切库后作废旧库的后台哈希预热队列并按新库索引重播种', async () => {
+    // 复现缺陷：秒切库不经过扫描链路的 full 快照重播种，旧库排队中的批量
+    // 哈希任务继续消费，对已不在当前根内的文件白算 SHA256（结果被跨根
+    // 写守卫丢弃，纯浪费磁盘 IO）
+    const rootA = fs.mkdtempSync(path.join(os.tmpdir(), 'modelvault-open-a-'))
+    const rootB = fs.mkdtempSync(path.join(os.tmpdir(), 'modelvault-open-b-'))
+    tmpRoots.push(rootA, rootB)
+    fs.writeFileSync(
+      path.join(fakeUserData, 'settings.json'),
+      JSON.stringify({ modelsFolder: rootA, modelsFolders: [rootA, rootB], autoScan: false })
+    )
+    await loadSettings()
+    // 库 A 激活为当前根（loadStore 的 ensureRootStore 路径）
+    const idA = path.join(rootA, 'old.safetensors')
+    fs.writeFileSync(idA, 'x'.repeat(16))
+    await getRegisteredHandler('models:loadStore')(makeEvent())
+    expect(getCurrentRoot()).toBe(rootA)
+
+    // 库 B 索引：同尺寸双模型（缺省 candidates 策略下碰撞组 ≥2 才会入队）
+    const idB1 = path.join(rootB, 'b1.safetensors')
+    const idB2 = path.join(rootB, 'b2.safetensors')
+    fs.writeFileSync(idB1, 'y'.repeat(16))
+    fs.writeFileSync(idB2, 'y'.repeat(16))
+    writeIndex(rootB, [
+      {
+        id: idB1,
+        name: 'b1',
+        type: 'lora',
+        ext: '.safetensors',
+        size: 16,
+        mtimeMs: 1,
+        relDir: ''
+      },
+      {
+        id: idB2,
+        name: 'b2',
+        type: 'lora',
+        ext: '.safetensors',
+        size: 16,
+        mtimeMs: 1,
+        relDir: ''
+      }
+    ])
+
+    vi.mocked(computeFileHash).mockResolvedValue('a'.repeat(64))
+    // 模拟旧库的后台批量预热在途：暂停取队 + delayMs:0，任务确定性滞留队列
+    pauseHashWarmup()
+    requestHashWarmup([idA], { mode: 'full', full: true, delayMs: 0 })
+
+    const res = await getRegisteredHandler('models:openLibrary')(makeEvent(), { folder: rootB })
+    expect(res.cached).toBe(true)
+    expect(getCurrentRoot()).toBe(rootB)
+
+    // 恢复取队（重播种的 3s 延迟启动到期后 drain 自动执行）：旧库任务必须
+    // 已被作废，仅新库碰撞组入队计算
+    resumeHashWarmup()
+    await whenWarmupIdle()
+
+    const hashed = vi.mocked(computeFileHash).mock.calls.map((c) => c[0])
+    expect(hashed).not.toContain(idA)
+    expect(hashed).toContain(idB1)
+    expect(hashed).toContain(idB2)
   })
 
   it('有索引时切换根目录并返回缓存模型/设置', async () => {
