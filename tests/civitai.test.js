@@ -7,7 +7,7 @@ import { fakeUserData } from './setup'
  */
 vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
-  net: { fetch: vi.fn() }
+  net: { fetch: vi.fn(), request: vi.fn() }
 }))
 
 import { civitaiTagsToTag, civitaiTypeToTag } from '../src/shared/model-categories'
@@ -164,6 +164,60 @@ describe('Civitai 网络边界（V-06）', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 1, type: 'LORA' }), { status: 200 }))
     const allowed = await fetchCivitaiModelType('123')
     expect(allowed).toEqual({ found: true, type: 'LORA', tags: [] })
+  })
+
+  /** 构造只发一次 redirect 事件的 net.request 桩（Electron manual 模式） */
+  function fakeRedirectingRequest(target) {
+    return (opts) => {
+      expect(opts.redirect).toBe('manual')
+      expect(opts.useSessionCookies).toBe(true)
+      const listeners = {}
+      const req = {
+        on: (evt, cb) => {
+          (listeners[evt] ||= []).push(cb)
+          return req
+        },
+        end: () => {
+          queueMicrotask(() => {
+            listeners.redirect?.[0]?.(302, 'GET', target, { Location: [target] })
+          })
+        },
+        followRedirect: () => {},
+        cancel: () => {},
+        destroy: () => {}
+      }
+      return req
+    }
+  }
+
+  it('Electron 不支持 manual 重定向时（Redirect was cancelled），经 net.request 探测目标并逐跳继续', async () => {
+    // Electron 实际行为：net.fetch manual 模式遇 3xx 直接抛错而非返回 3xx 响应
+    vi.mocked(net.fetch).mockImplementation(async (url) => {
+      if (String(url) === 'https://civitai.com/api/v1/models/1') {
+        throw new Error('Redirect was cancelled')
+      }
+      return new Response(JSON.stringify({ id: 1, type: 'LORA' }), { status: 200 })
+    })
+    vi.mocked(net.request).mockImplementation(
+      fakeRedirectingRequest('https://api.civitai.com/api/v1/models/1')
+    )
+
+    const res = await fetchCivitaiModelType('1')
+    expect(res).toEqual({ found: true, type: 'LORA', tags: [] })
+    expect(net.fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('探测到的重定向目标不在白名单时同样拒绝（探测路径保持 V-06 门禁）', async () => {
+    vi.mocked(net.fetch).mockImplementation(async () => {
+      throw new Error('Redirect was cancelled')
+    })
+    vi.mocked(net.request).mockImplementation(
+      fakeRedirectingRequest('https://evil.example.com/x')
+    )
+
+    const res = await fetchCivitaiModelType('1')
+    expect(res.found).toBe(false)
+    expect(res.error).toContain('重定向目标不在白名单')
   })
 
   it('API JSON 超过体积上限时拒绝读取', async () => {
