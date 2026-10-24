@@ -107,6 +107,9 @@ function resetStoreState() {
   state.backgroundScanning = false
   state.importing = false
   state.scanError = ''
+  // F1-offline：离线态与失效库清单
+  state.folderMissing = false
+  state.missingRoots = []
   state.progress = { dirs: 0, found: 0, current: '' }
   replaceModels([])
   state.typeFilter = 'all'

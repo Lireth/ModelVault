@@ -61,6 +61,7 @@ export {
   chooseFolder,
   switchRoot,
   removeRoot,
+  relocateFolder,
   scanModels,
   cancelScan,
   applyThumbUpdates,

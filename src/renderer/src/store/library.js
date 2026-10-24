@@ -50,15 +50,38 @@ function applyLibrarySettings(settings) {
 }
 
 /**
+ * 库恢复可用（F1-offline）：清除离线态并把该库移出失效清单。
+ * 调用时机必须在激活库身份（state.folder）提交之后——folderMissing
+ * 语义恒指向当前 state.folder，先提交再清除不会出现「清错库」的窗口。
+ * @param {string} root 已确认可用的库根目录
+ */
+function markRootAvailable(root) {
+  state.folderMissing = false
+  if (!root || state.missingRoots.length === 0) return
+  const lower = root.toLowerCase()
+  if (state.missingRoots.includes(lower)) {
+    state.missingRoots = state.missingRoots.filter((r) => r !== lower)
+  }
+}
+
+/**
  * 应用初始化：加载持久化数据与应用设置。
  * F1：有本地索引时先秒开列表（booting 立即结束），再后台校验；
  * 无索引时保持原有自动扫描流程。
+ * F1-offline：激活库路径失效时跳过注定失败的自动扫描，直接进入离线态。
  */
 export async function initApp() {
   try {
     bindSystemThemeListener()
     const data = await window.api.models.loadStore()
     state.folder = data.settings?.modelsFolder || ''
+    // F1-offline：回填失效库清单（小写化），侧栏据此对失效条目灰显标记；
+    // 与激活库是否失效无关——其他已保存库同样可能盘符未挂载
+    state.missingRoots = Array.isArray(data.rootStatuses)
+      ? data.rootStatuses
+          .filter((r) => r && r.exists === false && typeof r.folder === 'string')
+          .map((r) => r.folder.toLowerCase())
+      : []
     replaceSettings({ ...defaultSettings(), ...data.settings })
     applyTheme(state.settings.theme)
     // 应用默认排序方式与方向、首页视图模式
@@ -67,7 +90,11 @@ export async function initApp() {
     if (state.settings.viewMode) state.viewMode = state.settings.viewMode
 
     const cached = data.cachedIndex
-    if (state.folder && Array.isArray(cached?.models) && cached.models.length > 0) {
+    if (data.folderMissing === true) {
+      // 库路径失效（被移动/重命名/盘符未挂载）：离线页/横幅承担提示与
+      // 恢复入口，不再触发注定失败的自动扫描与错误 toast
+      state.folderMissing = true
+    } else if (state.folder && Array.isArray(cached?.models) && cached.models.length > 0) {
       // 秒开上次索引；autoScan 开启时后台校验，关闭时保持缓存展示
       // OP-02：索引装饰结果自带最新缩略图 URL，展示覆盖从空开始
       clearCoverOverrides()
@@ -220,6 +247,22 @@ export async function switchRoot(folder) {
   try {
     const res = await window.api.models.openLibrary(folder)
     if (res?.error) {
+      // F1-offline：目标库路径失效——提交目标库身份并进入离线态
+      // （离线页提供重新定位/重试入口；主进程根目录未切换，旧库数据完好，
+      // 切回时经本地索引秒开恢复）
+      if (res.folderMissing === true) {
+        state.folder = folder
+        clearCoverOverrides()
+        clearHashOverrides()
+        replaceModels([])
+        state.lastScan = null
+        state.folderMissing = true
+        const lower = folder.toLowerCase()
+        if (!state.missingRoots.includes(lower)) {
+          state.missingRoots = [...state.missingRoots, lower]
+        }
+        return
+      }
       toast('error', res.error)
       return
     }
@@ -230,6 +273,8 @@ export async function switchRoot(folder) {
       clearHashOverrides()
       replaceModels(res.models)
       state.folder = res.root || folder
+      // F1-offline：目标库可打开（主进程已通过存在性校验），清除离线残留
+      markRootAvailable(state.folder)
       state.lastScan = {
         count: res.models.length,
         durationMs: res.durationMs || 0
@@ -266,6 +311,44 @@ export async function removeRoot(folder) {
   )
   const ok = await saveSettings({ modelsFolders: next })
   if (ok) toast('success', '已从模型库列表移除（磁盘数据不受影响）')
+}
+
+/**
+ * 重新定位失效的模型库（F1-offline 离线页/横幅主按钮）：
+ * 文件夹被移动/重命名后由用户对话框指向新位置——主进程 chooseFolder
+ * 会把新路径并入库列表白名单；此处立即把旧失效路径移出列表
+ * （清理死条目不等扫描结果：扫描成功≠选对了目录，选错目录也会
+ * 「成功」扫描；清理失败仅 toast 不阻断恢复流程），随后扫描新路径。
+ * 关联存储 .modelvault/ 随库文件夹整体移动，扫描成功即自动恢复
+ * 全部标注/封面/参数。取消选择时保持离线态不变。
+ */
+export async function relocateFolder() {
+  // 与 chooseFolder 同规则：扫描/校验/导入进行中拒绝切换，避免半状态
+  if (state.scanning || state.partialScanning || state.backgroundScanning || state.importing) {
+    toast('warn', '正在扫描、校验或导入中，请稍候')
+    return
+  }
+  const oldFolder = state.folder
+  try {
+    const folder = await window.api.models.chooseFolder()
+    if (!folder) return // 取消选择：保持离线态不变
+    // 重定位是显式的库身份迁移：立即提交新路径（离线页/侧栏即时反映），
+    // 不等扫描结果——V-02 的「失败保持旧库」语义不适用于旧库已失效的场景
+    state.folder = folder
+    // 立即清理死条目（选择相同路径时无需清理：不存在死条目）
+    if (oldFolder && oldFolder.toLowerCase() !== folder.toLowerCase()) {
+      const lower = oldFolder.toLowerCase()
+      const next = (state.settings.modelsFolders || []).filter(
+        (f) => f.toLowerCase() !== lower
+      )
+      await saveSettings({ modelsFolders: next })
+      // 死条目从失效清单一并移除：库列表已不含该路径，标记失去对象
+      state.missingRoots = state.missingRoots.filter((r) => r !== lower)
+    }
+    await scanModels(folder)
+  } catch (err) {
+    toast('error', `重新定位文件夹失败: ${err.message}`)
+  }
 }
 
 /**
@@ -313,6 +396,14 @@ export async function scanModels(folder = state.folder, options = {}) {
       return false
     }
     if (res.error) {
+      // F1-offline：库路径失效——置位离线态并跳过错误 toast
+      // （离线页/横幅承担提示与恢复入口）；后台校验路径同样静默置位
+      if (res.folderMissing === true) {
+        state.folderMissing = true
+        return false
+      }
+      // 普通扫描错误证明目录存在（存在性校验先于扫描执行），离线态若残留则清除
+      state.folderMissing = false
       if (background) {
         // 后台校验失败不覆盖已展示的本地索引，也不触发全屏错误态
         toast('warn', `后台校验失败，继续使用本地索引：${res.error}`)
@@ -330,6 +421,8 @@ export async function scanModels(folder = state.folder, options = {}) {
     replaceModels(res.models)
     // 扫描成功后才提交激活库（主进程已在同一维护锁内完成切根）
     state.folder = res.root || targetRoot
+    // F1-offline：库恢复可用——清除离线态并把该库移出失效清单
+    markRootAvailable(state.folder)
     state.lastScan = { count: res.models.length, durationMs: res.durationMs }
     // 库设置随模型库走：切库扫描（chooseFolder/switchRoot）返回目标库的设置
     applyLibrarySettings(res.settings)

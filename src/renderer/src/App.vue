@@ -15,7 +15,7 @@ import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import VirtualModelList from './components/VirtualModelList.vue'
 import { useGlobalShortcuts } from './composables/useGlobalShortcuts'
 import { useMainProcessEvents } from './composables/useMainProcessEvents'
-import { filteredModels, initApp, scanModels, state } from './store/appStore'
+import { filteredModels, initApp, relocateFolder, scanModels, state } from './store/appStore'
 
 // 次要页面异步加载（OP-01）：设置页/统计页仅在打开时渲染，按需加载可显著
 // 缩减启动期首包解析与执行量。详情页保持同步引用——其 Teleport 骨架常驻，
@@ -97,14 +97,26 @@ onUnmounted(() => {
 
         <!-- 模型预览区 -->
         <template v-else>
-          <!-- 重扫失败但仍有上次结果：顶部错误横幅（B15） -->
-          <div v-if="state.scanError && !state.scanning && state.models.length > 0" class="scan-error-bar alert-gold">
+          <!-- 离线横幅（F1-offline 双形态之一）：库路径失效但有缓存模型可展示时
+               顶部提示（区别于金色 scan-error-bar 的普通扫描失败）；空库时的
+               全屏形态由 LibraryStates 离线分支承担 -->
+          <div v-if="state.folderMissing && state.models.length > 0" class="offline-bar">
+            <span class="offline-text" :title="state.folder">
+              ⚠ 模型文件夹不可用：{{ state.folder }}（可能被移动、重命名或盘符未挂载，重新定位后标注自动恢复）
+            </span>
+            <button class="offline-btn" @click="relocateFolder">重新定位</button>
+            <button class="offline-btn" @click="scanModels()">重试</button>
+          </div>
+
+          <!-- 重扫失败但仍有上次结果：顶部错误横幅（B15）；
+               离线态语义更明确，优先由离线形态承担（F1-offline） -->
+          <div v-if="state.scanError && !state.folderMissing && !state.scanning && state.models.length > 0" class="scan-error-bar alert-gold">
             <span class="scan-error-text" :title="state.scanError">⚠ {{ state.scanError }}</span>
             <button class="scan-error-retry" @click="scanModels">重试</button>
           </div>
 
-          <!-- 搜索 + 排序 + 视图切换（选择文件夹后显示） -->
-          <LibraryToolbar v-if="state.folder" ref="toolbarRef" />
+          <!-- 搜索 + 排序 + 视图切换（选择文件夹后显示；两种离线形态都隐藏工具栏） -->
+          <LibraryToolbar v-if="state.folder && !state.folderMissing" ref="toolbarRef" />
 
           <!-- 启动/引导/扫描/失败/空库五态互斥；库中有模型时渲染默认插槽 -->
           <LibraryStates>
@@ -165,6 +177,44 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 16px;
   align-content: start;
+}
+
+/* ---------- 离线横幅（F1-offline）：warning 色系，区别于金色 scan-error-bar ---------- */
+.offline-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  border-radius: var(--radius-md);
+}
+
+.offline-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-xs);
+  color: var(--warning);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.offline-btn {
+  flex-shrink: 0;
+  font-size: var(--font-xs);
+  padding: 3px 16px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--warning);
+  background: transparent;
+  color: var(--warning);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.offline-btn:hover {
+  background: var(--warning);
+  color: var(--on-accent);
 }
 
 /* ---------- 扫描错误警示条：容器视觉为 main.css 公共类 .alert-gold ---------- */

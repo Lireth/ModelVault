@@ -151,6 +151,15 @@ export const state = shallowReactive({
   // 但同样参与「切库/再次扫描」的互斥判断，避免旧根结果合并进新库。
   partialScanning: false,
   scanError: '',
+  // 库路径失效/离线态（F1-offline）：当前激活库目录不可用（被移动/重命名、
+  // 盘符未挂载、网络盘断开）。true 时界面进入离线形态——有缓存模型时 App.vue
+  // 顶部离线横幅，空库时 LibraryStates 全屏离线页；与 scanError 互斥
+  // （离线语义更明确，展示优先级更高）。扫描成功或重新定位后清除
+  folderMissing: false,
+  // 失效库根目录清单（小写路径数组，整体替换赋值）：
+  // 启动时由 loadStore 的 rootStatuses 回填，扫描成功/切换失效库时增删；
+  // 侧栏库列表据此对失效条目灰显标记
+  missingRoots: [],
   progress: { dirs: 0, found: 0, current: '' }, // 每次整体替换，无需深响应
   lastScan: null, // { count, durationMs }
   models: shallowReactive([]),

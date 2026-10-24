@@ -167,6 +167,20 @@ describe('models:partialScan（A-03）', () => {
     expect(vi.mocked(scanModels).mock.calls.at(-1)[2].subDirs).toEqual(['lora'])
   })
 
+  it('目录不存在时局部扫描返回失效标志（F1-offline：渲染层据此置位离线态且不降级全扫）', async () => {
+    const gone = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-partial-gone-'))
+    roots.push(gone)
+    await registerLibrary(gone)
+    // 注册后删除目录，模拟会话中途失效（盘符断开/文件夹被移动）
+    await fs.rm(gone, { recursive: true, force: true })
+    const partial = getRegisteredHandler('models:partialScan')
+    const scanCallsBefore = vi.mocked(scanModels).mock.calls.length
+    const res = await partial(makeEvent(), { folder: gone, dirs: ['lora'] })
+    expect(res).toEqual({ error: '模型文件夹不存在或不是目录', folderMissing: true })
+    // 扫描器未被调用（存在性校验前置短路）
+    expect(vi.mocked(scanModels).mock.calls.length).toBe(scanCallsBefore)
+  })
+
   it('OPT-07：局部扫描跳过装饰缓存，新增 sidecar 即时导入', async () => {
     await registerLibrary(root)
     const abs = path.join(root, 'late-sidecar.safetensors')
@@ -548,18 +562,27 @@ describe('models:scan 模型库白名单（B1）', () => {
 })
 
 describe('models:scan 目录校验与回写（C6）', () => {
-  it('不存在的目录拒绝扫描', async () => {
+  it('不存在的目录拒绝扫描并携带失效标志（F1-offline）', async () => {
     const scan = getRegisteredHandler('models:scan')
     const res = await scan(makeEvent(), { folder: path.join(root, 'no-such-dir') })
-    expect(res).toEqual({ error: '模型文件夹不存在或不是目录' })
+    expect(res).toEqual({ error: '模型文件夹不存在或不是目录', folderMissing: true })
   })
 
-  it('路径为文件时拒绝扫描', async () => {
+  it('路径为文件时拒绝扫描并携带失效标志（F1-offline）', async () => {
     const file = path.join(root, 'a-file.safetensors')
     await fs.writeFile(file, 'x')
     const scan = getRegisteredHandler('models:scan')
     const res = await scan(makeEvent(), { folder: file })
-    expect(res).toEqual({ error: '模型文件夹不存在或不是目录' })
+    expect(res).toEqual({ error: '模型文件夹不存在或不是目录', folderMissing: true })
+  })
+
+  it('正常扫描路径不携带 folderMissing 字段（F1-offline 契约边界）', async () => {
+    await registerLibrary(root)
+    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 0 })
+    const scan = getRegisteredHandler('models:scan')
+    const res = await scan(makeEvent(), { folder: root })
+    expect(res.error).toBeUndefined()
+    expect(res).not.toHaveProperty('folderMissing')
   })
 
   it('显式传入白名单内目录扫描成功后回写 settings.modelsFolder', async () => {

@@ -68,6 +68,15 @@ function rootName(f) {
   return parts[parts.length - 1] || f
 }
 
+/**
+ * 失效库标记（F1-offline）：missingRoots 为小写路径清单（启动时 loadStore
+ * 回填，切换/扫描联动增删）；失效条目灰显 + 警示点，点击仍可切换——
+ * 切换后进入离线态，语义自洽
+ */
+function isRootMissing(f) {
+  return state.missingRoots.includes(f.toLowerCase())
+}
+
 function selectType(key) {
   state.typeFilter = key
 }
@@ -106,10 +115,11 @@ function onScanClick() {
         <li v-for="f in otherRoots" :key="f">
           <button
             class="root-item"
-            :title="`${f}（点击切换）`"
+            :class="{ 'root-offline': isRootMissing(f) }"
+            :title="isRootMissing(f) ? `${f}（文件夹不可用——点击切换后可重新定位）` : `${f}（点击切换）`"
             @click="switchRoot(f)"
           >
-            <span class="root-dot"></span>
+            <span class="root-dot" :class="{ 'root-dot-offline': isRootMissing(f) }"></span>
             <span class="root-name">{{ rootName(f) }}</span>
             <span
               class="root-remove"
@@ -330,6 +340,18 @@ function onScanClick() {
 
 .root-item:hover .root-dot {
   border-color: var(--accent);
+}
+
+/* 失效库条目（F1-offline）：名称灰显 + 警示点（金色填充）；
+   双类提升优先级，防止 .root-item:hover .root-dot 规则盖掉警示色 */
+.root-item.root-offline .root-name {
+  color: var(--text-muted);
+}
+
+.root-item .root-dot.root-dot-offline,
+.root-item:hover .root-dot.root-dot-offline {
+  border-color: var(--favorite);
+  background: color-mix(in srgb, var(--favorite) 40%, transparent);
 }
 
 .root-name {

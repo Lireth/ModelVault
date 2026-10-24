@@ -368,4 +368,76 @@ describe('models:openLibrary 秒切库（F1）', () => {
       (await getRegisteredHandler('models:openLibrary')(makeEvent(), { folder: missing })).error
     ).toContain('模型文件夹不存在')
   })
+
+  it('目标库不存在时返回 folderMissing 标志（F1-offline：渲染层据此进入离线态）', async () => {
+    const missing = path.join(os.tmpdir(), 'modelvault-open-gone')
+    writeSettings({ modelsFolder: missing, modelsFolders: [missing] })
+    await loadSettings()
+    fs.rmSync(missing, { recursive: true, force: true })
+    const res = await getRegisteredHandler('models:openLibrary')(makeEvent(), { folder: missing })
+    expect(res.error).toContain('模型文件夹不存在')
+    expect(res.folderMissing).toBe(true)
+  })
+})
+
+describe('models:loadStore 库路径失效检测（F1-offline）', () => {
+  const tmpRoots = []
+
+  beforeEach(() => {
+    vi.mocked(syncWatcher).mockClear()
+    vi.mocked(computeFileHash).mockReset()
+    resetHashWarmupForTests()
+    registerStoreHandlers()
+  })
+
+  afterAll(() => {
+    for (const dir of tmpRoots) fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  /** 直接写 settings.json（绕过服务层校验，允许指向不存在的路径） */
+  function writeRawSettings(raw) {
+    fs.writeFileSync(path.join(fakeUserData, 'settings.json'), JSON.stringify(raw))
+  }
+
+  it('激活库不存在时返回 folderMissing: true，rootStatuses 覆盖库列表全量', async () => {
+    const existing = fs.mkdtempSync(path.join(os.tmpdir(), 'modelvault-ls-ok-'))
+    tmpRoots.push(existing)
+    const gone = path.join(os.tmpdir(), 'modelvault-ls-gone-never')
+    fs.rmSync(gone, { recursive: true, force: true })
+    writeRawSettings({ modelsFolder: gone, modelsFolders: [gone, existing] })
+
+    const res = await getRegisteredHandler('models:loadStore')(makeEvent())
+
+    expect(res.folderMissing).toBe(true)
+    expect(res.cachedIndex).toBeNull()
+    expect(res.rootStatuses).toEqual([
+      { folder: gone, exists: false },
+      { folder: existing, exists: true }
+    ])
+    // 失效路径不得被重建 .modelvault（既有 C6/O5 防护保持）
+    expect(fs.existsSync(path.join(gone, '.modelvault'))).toBe(false)
+  })
+
+  it('未配置激活库时 folderMissing: false 且 rootStatuses 为空', async () => {
+    writeRawSettings({ modelsFolder: '', modelsFolders: [] })
+    const res = await getRegisteredHandler('models:loadStore')(makeEvent())
+    expect(res.folderMissing).toBe(false)
+    expect(res.rootStatuses).toEqual([])
+  })
+
+  it('激活库正常时 folderMissing: false，失效的非激活库仍被标记', async () => {
+    const ok = fs.mkdtempSync(path.join(os.tmpdir(), 'modelvault-ls-main-'))
+    tmpRoots.push(ok)
+    const goneOther = path.join(os.tmpdir(), 'modelvault-ls-gone-other')
+    fs.rmSync(goneOther, { recursive: true, force: true })
+    writeRawSettings({ modelsFolder: ok, modelsFolders: [ok, goneOther] })
+
+    const res = await getRegisteredHandler('models:loadStore')(makeEvent())
+
+    expect(res.folderMissing).toBe(false)
+    expect(res.rootStatuses).toEqual([
+      { folder: ok, exists: true },
+      { folder: goneOther, exists: false }
+    ])
+  })
 })

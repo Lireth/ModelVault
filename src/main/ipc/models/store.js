@@ -48,6 +48,28 @@ function isKnownLibrary(dir) {
 }
 
 /**
+ * 库列表全量根目录的存在性快照（F1-offline 库路径失效处理）：
+ * 渲染层侧栏据 exists=false 的条目对失效库给出灰显标记；响应同时携带
+ * 激活库的 folderMissing 标志，供渲染层进入离线态（重新定位/重试闭环）。
+ * 并行 stat（库列表上限 20 条）：未挂载盘符的单次 stat 可能阻塞数秒，
+ * 并行后总耗时取决于最慢一条而非串行累加。
+ * @param {unknown} folders 设置中的模型库列表
+ * @returns {Promise<Array<{folder: string, exists: boolean}>>}
+ */
+async function collectRootStatuses(folders) {
+  const list = Array.isArray(folders)
+    ? folders.filter((f) => typeof f === 'string' && f)
+    : []
+  return Promise.all(
+    list.map(async (folder) => ({
+      folder,
+      // checkExistingDirectory 返回空串表示存在（O2 助手语义）
+      exists: (await checkExistingDirectory(folder)) === ''
+    }))
+  )
+}
+
+/**
  * F1：用当前内存元数据覆盖索引中的用户标注字段。
  * 索引是上一次全量扫描的快照；收藏/评分/备注等可能在扫描后修改。
  * 覆盖标量标注保证秒开列表即刻准确；封面/缩略图仍由后台校验刷新。
@@ -153,12 +175,16 @@ export function registerStoreHandlers() {
     try {
       const settings = await loadSettings()
       let cachedIndex = null
+      // F1-offline：激活库路径失效标志（目录被移动/重命名/盘符未挂载）——
+      // 渲染层据此进入明确的离线态，而非笼统的扫描失败 toast
+      let folderMissing = false
       if (settings.modelsFolder) {
         // 已设置目录不存在（如磁盘离线/被移动）时不切换关联存储，
         // 防止后续元数据写入在不存在的路径下重建目录树。
         // checkExistingDirectory 返回空串表示存在（O2 助手语义）
         const dirMissing = await checkExistingDirectory(settings.modelsFolder)
         if (dirMissing) {
+          folderMissing = true
           logger.warn(`已设置的模型目录不存在，跳过关联存储加载: ${settings.modelsFolder}`)
         } else {
           await ensureRootStore(settings.modelsFolder, { maintenanceToken: token })
@@ -198,9 +224,14 @@ export function registerStoreHandlers() {
           )
         }
       }
+      // F1-offline：库列表全量根目录存在性快照随响应回传（含正常分支）——
+      // 激活库正常时，其他已保存库同样可能因盘符未挂载而失效，侧栏需要标记
+      const rootStatuses = await collectRootStatuses(settings.modelsFolders)
       return {
         settings,
-        cachedIndex
+        cachedIndex,
+        folderMissing,
+        rootStatuses
       }
     } finally {
       releaseMaintenance(token)
@@ -217,7 +248,9 @@ export function registerStoreHandlers() {
       return { error: '该目录不在模型库列表中' }
     }
     const dirInvalid = await checkExistingDirectory(root, '模型文件夹不存在或不是目录')
-    if (dirInvalid) return { error: dirInvalid }
+    // F1-offline：附失效标志——渲染层据此提交目标库身份并进入离线态
+    // （重新定位/重试闭环），而非笼统的错误 toast
+    if (dirInvalid) return { error: dirInvalid, folderMissing: true }
 
     // 先探测索引：无可用索引时不切换主进程根目录，交由渲染层走
     // scanModels 的 V-02 状态机（扫描失败可回滚旧库）

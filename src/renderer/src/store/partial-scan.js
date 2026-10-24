@@ -195,6 +195,14 @@ export async function partialScanModels(dirs) {
       if (root !== state.folder || token !== scanToken) return
       // 全量扫描已接管：其结果覆盖全库，无需再降级重扫
       if (state.scanning) return
+      // F1-offline：库路径失效不降级全量扫描（注定连环失败并弹误导 toast）——
+      // 直接置位离线态，由离线页/横幅承担提示与恢复入口；排队子树同样注定
+      // 失败，一并丢弃
+      if (res.folderMissing === true) {
+        clearQueue()
+        state.folderMissing = true
+        return
+      }
       // 局部失败保守降级为全量扫描，保证最终与磁盘一致；
       // 全量扫描延后到 finalize（此时 partialScanning 已复位）
       toast('warn', '增量刷新失败，已改为完整扫描')

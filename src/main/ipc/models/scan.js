@@ -81,7 +81,9 @@ export function registerScanHandlers() {
       // 或误传文件/系统根）在 ensureRootStore 中创建 .modelvault 写入元数据
       const dirInvalid = await checkExistingDirectory(root, '模型文件夹不存在或不是目录')
       if (dirInvalid) {
-        return { error: dirInvalid }
+        // F1-offline：附失效标志，渲染层进入离线态（离线页/横幅承担提示），
+        // 不再弹笼统的扫描失败 toast
+        return { error: dirInvalid, folderMissing: true }
       }
       // 白名单校验（B1）：扫描目录必须已在模型库列表中。存在性校验只保证
       // 「路径可用」，不保证「用户想把这里当库」——无白名单时任意可写目录
@@ -273,7 +275,9 @@ export function registerScanHandlers() {
       }
       const dirInvalid = await checkExistingDirectory(root, '模型文件夹不存在或不是目录')
       if (dirInvalid) {
-        return { error: dirInvalid }
+        // F1-offline：同全量扫描——附失效标志，渲染层置位离线态且不再
+        // 降级为注定连环失败的全量扫描
+        return { error: dirInvalid, folderMissing: true }
       }
       // 局部扫描只作用于当前根（V-02）：渲染层请求发出后根已切换时直接拒绝，
       // 绝不能借 ensureRootStore 把主进程根目录切回旧库

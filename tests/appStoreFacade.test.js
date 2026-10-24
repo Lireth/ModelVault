@@ -54,6 +54,8 @@ const EXPECTED_EXPORTS = [
   'chooseFolder',
   'switchRoot',
   'removeRoot',
+  // 库路径失效闭环（F1-offline）：离线页/横幅的「重新定位文件夹」入口
+  'relocateFolder',
   'scanModels',
   'cancelScan',
   'applyThumbUpdates',

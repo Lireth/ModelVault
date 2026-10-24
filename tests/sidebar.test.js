@@ -66,6 +66,30 @@ describe('Sidebar 模型库移除键盘可达（OPT-2 回归）', () => {
   })
 })
 
+describe('Sidebar 失效库标记（F1-offline）', () => {
+  it('失效库条目带 root-offline 标记、警示点与不可用提示（小写路径比较）', () => {
+    setupTwoRoots()
+    state.missingRoots = ['d:\\libb']
+    const wrapper = mount(Sidebar)
+    const item = wrapper.find('.root-item')
+    expect(item.classes()).toContain('root-offline')
+    expect(item.attributes('title')).toContain('文件夹不可用')
+    expect(item.find('.root-dot').classes()).toContain('root-dot-offline')
+    wrapper.unmount()
+  })
+
+  it('正常库不带失效标记；当前激活库不在 otherRoots 中不参与标记', () => {
+    setupTwoRoots()
+    // 激活库 libA 失效也不出现在列表（otherRoots 已剔除）；libB 正常
+    state.missingRoots = ['d:\\liba']
+    const wrapper = mount(Sidebar)
+    const item = wrapper.find('.root-item')
+    expect(item.classes()).not.toContain('root-offline')
+    expect(item.find('.root-dot').classes()).not.toContain('root-dot-offline')
+    wrapper.unmount()
+  })
+})
+
 describe('Sidebar 智能视图（组合筛选收藏）', () => {
   /** settings.update 回显合并结果（与主进程返回完整设置一致） */
   function echoSettingsUpdate() {
