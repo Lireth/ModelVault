@@ -4,7 +4,8 @@ import path from 'node:path'
 import { BrowserWindow } from 'electron'
 import logger from '../logger'
 import { relativeWithin, runWithConcurrency } from '../utils'
-import { MAX_SCAN_DEPTH, isExcludedScanName, isVisibleScanEntry } from './scanner'
+import { dedupeAndPruneDescendants, isRelDirInScope } from '../../shared/scan-dirs'
+import { MAX_SCAN_DEPTH, isExcludedScanName, isExcludedScanEntryName, isVisibleScanEntry } from './scanner'
 
 /**
  * 模型目录变更监控（E8；A8 轮询快照 + OP-05 原生事件加速）：
@@ -28,6 +29,16 @@ import { MAX_SCAN_DEPTH, isExcludedScanName, isVisibleScanEntry } from './scanne
  *   防抖静默期内多次变更只触发一次广播；
  * - 快照原语（collectDirSnapshot / snapshotsEqual）同时是后续
  *   「按变更子树局部重扫」的能力基础。
+ *
+ * OPT-02 扫描/监控基线协同：
+ * - 扫描遍历顺带产出 dirSnapshot（目录绝对路径 → 条目名），全量扫描完成后
+ *   直接作为监控基线，不再扫描结束后再做一次全树 readdir；局部扫描只回填
+ *   受影响子树；
+ * - 扫描期间（setWatcherScanning）暂停巡检与广播，变更目录先累积；扫描成功
+ *   后基线已被扫描结果覆盖，停扫时只补发未被覆盖的子树，避免「扫描已包含的
+ *   变更」再次触发局部扫描；
+ * - 原生事件广播后对相关子树做一次名称/内容快照回填，使下一轮轮询不再因
+ *   旧基线重复检出同一变更（消除重复 models:fsChanged 与重复局部扫描）。
  */
 
 /** 基础轮询间隔（ms）：目录最近有变更时以此间隔巡检 */
@@ -75,8 +86,15 @@ const STAT_CONCURRENCY = 8
  * @property {ReturnType<typeof setTimeout>|null} debounceTimer 广播防抖定时器
  * @property {ReturnType<typeof setTimeout>|null} timer 巡检定时器
  * @property {boolean} polling 当前是否有在途遍历
+ * @property {boolean} refreshing 是否正在回填原生事件后的子树快照
+ * @property {boolean} scanning 是否处于扫描期（暂停巡检与广播，变更先累积）
+ * @property {boolean} pendingNeedsRefresh 待广播变更是否来自原生事件（需回填基线）
+ * @property {boolean} delivering 是否正在交付防抖广播（串行化原生事件回填）
+ * @property {Array<object>} deliverQueue 待交付广播队列（扫描期清空）
+ * @property {number} snapshotRevision 快照基线代际（并发遍历丢弃依据）
  * @property {number} idleRounds 连续空闲轮数（退避爬梯）
- * @property {Set<string>} pendingDirs 防抖静默期内累积的变更子树
+ * @property {Set<string>} pendingDirs 防抖静默期内累积的变更子树（原生事件候选）
+ * @property {Set<string>} pendingConfirmedDirs 轮询已确认的变更子树（基线已更新）
  * @property {number} pollInterval 基础轮询间隔（ms）
  * @property {boolean} nativeWatch 是否启用原生事件监听
  * @property {import('node:fs').FSWatcher|null} nativeWatcher 原生监听实例（未开启/失败为 null）
@@ -153,7 +171,8 @@ function startNativeWatch(w) {
       if (w !== watcher) return // 旧根在途事件：丢弃（B2 代际防护）
       const dirs = nativeEventDirs(w, filename)
       if (dirs === null) return
-      scheduleBroadcast(w, dirs)
+      // refresh：原生事件后回填快照基线，避免下一轮轮询重复检出同一变更
+      scheduleBroadcast(w, dirs, { refresh: true })
     })
     native.on('error', (err) => {
       logger.warn(`原生目录监听异常，回落到轮询: ${err.message}`)
@@ -218,8 +237,9 @@ function compareEntryName(a, b) {
  *
  * @param {string} root 遍历根目录
  * @param {Set<string>} [skipNames] 用户排除目录名小写集合（与 scanner 同规则）
- * @param {{withStats?: boolean, concurrency?: number}} [options]
- *   withStats: 是否采集文件 size/mtime（内容变更检测）；concurrency: 目录并发上限
+ * @param {{withStats?: boolean, concurrency?: number, startDepth?: number}} [options]
+ *   withStats: 是否采集文件 size/mtime（内容变更检测）；concurrency: 目录并发上限；
+ *   startDepth: 起始目录相对扫描根的深度（子树回填时保持全库深度上限语义）
  * @returns {Promise<Map<string, string[]|SnapshotEntry[]>>} 目录快照
  */
 export async function collectDirSnapshot(root, skipNames = new Set(), options = {}) {
@@ -227,9 +247,13 @@ export async function collectDirSnapshot(root, skipNames = new Set(), options = 
   const skip = new Set(skipNames)
   const withStats = options.withStats === true
   const concurrency = normalizeConcurrency(options.concurrency)
+  const startDepth =
+    Number.isFinite(options.startDepth) && options.startDepth > 0
+      ? Math.floor(options.startDepth)
+      : 0
 
   /** 动态目录队列 + 固定 worker 数：不一次性为整棵树创建 Promise */
-  const queue = [{ dir: root, isRoot: true, depth: 0 }]
+  const queue = [{ dir: root, isRoot: true, depth: startDepth }]
   let active = 0
   let settled = false
 
@@ -414,6 +438,263 @@ export function computeStatSnapshotDiff(root, oldSnap, newSnap) {
   return [...dirs].sort()
 }
 
+/** 根目录比较：Windows 大小写不敏感 */
+function sameRoot(a, b) {
+  return String(a).toLowerCase() === String(b).toLowerCase()
+}
+
+/**
+ * 规范化扫描产出的目录名快照（OPT-02）：
+ * - 只保留根内键，越界项丢弃；
+ * - 剔除内置/用户排除目录键（扫描期间排除设置变更时的兜底）；
+ * - 条目名过滤隐藏项/put_ 临时项并稳定排序，与 collectDirSnapshot 同构。
+ * @param {string} root 模型根目录
+ * @param {Map<string, string[]>} snapshot 扫描产出的目录快照
+ * @param {Set<string>} excludeNames 用户排除目录名小写集合
+ * @returns {Map<string, string[]>} 可用的名称快照
+ */
+function sanitizeBaseline(root, snapshot, excludeNames) {
+  const out = new Map()
+  if (!(snapshot instanceof Map)) return out
+  for (const [abs, names] of snapshot) {
+    if (typeof abs !== 'string' || !Array.isArray(names)) continue
+    const rel = relativeWithin(abs, root)
+    if (rel === null) continue
+    const segments = rel === '' ? [] : rel.split(path.sep)
+    if (segments.some((seg) => isExcludedScanName(seg, excludeNames))) continue
+    out.set(
+      abs,
+      names
+        .filter((name) => typeof name === 'string' && name && !isExcludedScanEntryName(name))
+        .sort()
+    )
+  }
+  return out
+}
+
+/** 删除某目录及其全部后代的快照条目（目录被删除/子树回填前调用） */
+function removeSnapshotSubtree(w, absDir) {
+  for (const dir of [...w.snapshot.keys()]) {
+    if (relativeWithin(dir, absDir) !== null) w.snapshot.delete(dir)
+  }
+  if (w.statSnapshot) {
+    for (const dir of [...w.statSnapshot.keys()]) {
+      if (relativeWithin(dir, absDir) !== null) w.statSnapshot.delete(dir)
+    }
+  }
+}
+
+/**
+ * 清理已被扫描范围覆盖的待广播子树（OPT-02）：
+ * - scopes=null 表示全量扫描，全部覆盖；
+ * - 数组按局部扫描语义（'' 仅根直属），只清理真正被覆盖的目录；
+ * - 清理后若无剩余项，取消已安排的防抖广播（扫描结果已包含这些变更）。
+ */
+function clearScannedPendingDirs(w, scopes) {
+  const clearSet = (set) => {
+    if (scopes === null) {
+      set.clear()
+      return
+    }
+    for (const dir of [...set]) {
+      if (isRelDirInScope(dir, scopes)) set.delete(dir)
+    }
+  }
+  clearSet(w.pendingDirs)
+  clearSet(w.pendingConfirmedDirs)
+  if (
+    w.pendingDirs.size === 0 &&
+    w.pendingConfirmedDirs.size === 0 &&
+    w.debounceTimer
+  ) {
+    clearTimeout(w.debounceTimer)
+    w.debounceTimer = null
+  }
+}
+
+/** 全量扫描基线：整体替换名称快照，内容基线延后重建 */
+function applyFullBaseline(w, snapshot) {
+  const baseline = sanitizeBaseline(w.root, snapshot, w.excludeNames)
+  if (baseline.size === 0) return false
+  w.snapshot = baseline
+  w.statSnapshot = null
+  w.snapshotRevision += 1
+  // 扫描已完成；内容基线留到下一个内容校验周期重建，避免扫描后立即全树 stat
+  w.lastContentCheckAt = Date.now()
+  w.idleRounds = 0
+  clearScannedPendingDirs(w, null)
+  return true
+}
+
+/** 局部扫描基线：按受影响子树替换名称快照，范围外条目保持原样 */
+function applyPartialBaseline(w, dirs, snapshot) {
+  const scopes = dedupeAndPruneDescendants(Array.isArray(dirs) ? dirs : [])
+  if (scopes.length === 0) return false
+  const baseline = sanitizeBaseline(w.root, snapshot, w.excludeNames)
+  for (const rel of scopes) {
+    const abs = rel === '' ? w.root : path.join(w.root, ...rel.split('/'))
+    if (rel === '') {
+      // 空串仅代表根目录直属：只替换根目录自身条目，保留已存在的后代快照
+      w.snapshot.delete(abs)
+      if (w.statSnapshot) w.statSnapshot.delete(abs)
+      continue
+    }
+    removeSnapshotSubtree(w, abs)
+  }
+  for (const [abs, names] of baseline) {
+    const rel = relativeWithin(abs, w.root)
+    if (rel === null) continue
+    const relPosix = rel === '' ? '' : rel.split(path.sep).join('/')
+    if (!isRelDirInScope(relPosix, scopes)) continue
+    w.snapshot.set(abs, names)
+  }
+  // 非根子树扫描后目录可能已消失：快照中不存在该键即视为删除
+  for (const rel of scopes) {
+    if (rel === '') continue
+    const abs = path.join(w.root, ...rel.split('/'))
+    if (!w.snapshot.has(abs)) removeSnapshotSubtree(w, abs)
+  }
+  w.statSnapshot = null
+  w.snapshotRevision += 1
+  // 保留原内容校验节奏：局部扫描不推迟范围外目录的同名覆盖检测
+  w.idleRounds = 0
+  clearScannedPendingDirs(w, scopes)
+  return true
+}
+
+/**
+ * 原生事件广播后回填相关子树快照（OPT-02）：
+ * 事件只用于提前触发，快照才是正确性来源；若不回填，下一轮轮询会把同一
+ * 变更再当作新变更广播一次，导致重复局部扫描。
+ * @param {WatcherState} w 监控状态
+ * @param {string[]} relDirs 变更子树（空数组表示无法定位，按全根处理）
+ * @returns {Promise<void>}
+ */
+async function refreshSnapshotScopes(w, relDirs) {
+  if (w !== watcher || w.refreshing) return
+  w.refreshing = true
+  try {
+    const scopes = dedupeAndPruneDescendants(
+      Array.isArray(relDirs) && relDirs.length > 0 ? relDirs : ['']
+    )
+    for (const rel of scopes) {
+      if (w !== watcher) return
+      const depth = rel === '' ? 0 : rel.split('/').length
+      if (depth > MAX_SCAN_DEPTH) continue
+      const abs = rel === '' ? w.root : path.join(w.root, ...rel.split('/'))
+      if (relativeWithin(abs, w.root) === null) continue
+      const withStats = Boolean(w.statSnapshot)
+      let snapshot
+      try {
+        snapshot = await collectDirSnapshot(abs, w.excludeNames, {
+          withStats,
+          concurrency: w.traversalConcurrency,
+          startDepth: depth
+        })
+      } catch (err) {
+        // 子树在事件与回填之间被删除：移除其快照即可，由父目录条目反映变更
+        if (rel !== '' && (err?.code === 'ENOENT' || err?.code === 'ENOTDIR')) {
+          removeSnapshotSubtree(w, abs)
+          continue
+        }
+        throw err
+      }
+      if (w !== watcher) return
+      if (rel === '') {
+        // 无法定位子树（filename 缺失等）：按全根刷新，后续轮询以本次为基线
+        w.snapshot = withStats ? namesFromSnapshot(snapshot) : snapshot
+        w.statSnapshot = withStats ? snapshot : null
+        continue
+      }
+      removeSnapshotSubtree(w, abs)
+      for (const [dir, entries] of snapshot) {
+        w.snapshot.set(dir, withStats ? entries.map((entry) => entry.name) : entries)
+        if (withStats && w.statSnapshot) w.statSnapshot.set(dir, entries)
+      }
+    }
+  } catch (err) {
+    logger.warn(
+      `原生事件快照回填失败${w === watcher ? '，已停止监控' : '（旧根已丢弃）'}: ${err.message}`
+    )
+    if (w === watcher) stopWatcher()
+  } finally {
+    if (w === watcher) {
+      // 即便本次回填提前返回/部分更新，也推进代际，令并发中的巡检快照作废
+      w.snapshotRevision += 1
+      w.refreshing = false
+    }
+  }
+}
+
+/**
+ * 防抖结束时交付广播（OPT-02）：
+ * - 轮询已确认的变更（confirmedDirs）直接参与广播；
+ * - 原生事件候选（nativeDirs）先回填快照，再与回填前的基线做差异比较，
+ *   只有真实变化才广播——重复/噪声事件不再触发第二次局部扫描；
+ * - 两类来源取并集并去重，仍保持「一次防抖窗只广播一次」。
+ * @param {WatcherState} w 监控状态
+ * @param {string[]} nativeDirs 原生事件候选子树
+ * @param {string[]} confirmedDirs 轮询已确认的变更子树
+ * @param {boolean} needsRefresh 是否需要回填原生事件候选快照
+ * @returns {Promise<void>}
+ */
+async function deliverBroadcast(w, nativeDirs, confirmedDirs, needsRefresh) {
+  if (w !== watcher || w.scanning) return
+  let dirs = [...confirmedDirs]
+  if (needsRefresh) {
+    const before = new Map(w.snapshot)
+    const beforeStats = w.statSnapshot ? new Map(w.statSnapshot) : null
+    await refreshSnapshotScopes(w, nativeDirs)
+    if (w !== watcher || w.scanning) return
+    const refreshed =
+      beforeStats && w.statSnapshot
+        ? computeStatSnapshotDiff(w.root, beforeStats, w.statSnapshot)
+        : computeSnapshotDiff(w.root, before, w.snapshot)
+    dirs = [...new Set([...dirs, ...refreshed])].sort()
+  }
+  if (dirs.length === 0) {
+    // 原生事件未产生任何快照差异（重复/噪声事件）：不广播，避免重复局部扫描
+    return
+  }
+  logger.info(`检测到模型目录变更，触发重扫: ${w.root}（${dirs.length} 个子树）`)
+  broadcast(w.root, dirs)
+}
+
+/** 串行消费广播队列：同一 watcher 同一时刻只交付一轮，避免回填交叉 */
+async function pumpDeliverQueue(w) {
+  if (w.delivering) return
+  w.delivering = true
+  try {
+    while (w === watcher && w.deliverQueue.length > 0) {
+      const entry = w.deliverQueue.shift()
+      try {
+        await deliverBroadcast(w, entry.nativeDirs, entry.confirmedDirs, entry.needsRefresh)
+      } catch (err) {
+        // 单批失败不阻塞后续批次；下一轮轮询仍会兜底检出未广播的变更
+        logger.warn(`目录变更广播交付失败: ${err.message}`)
+      }
+    }
+  } finally {
+    w.delivering = false
+  }
+}
+
+/** 安排防抖广播定时器（扫描期/已有定时器时不重复安排） */
+function scheduleBroadcastTimer(w) {
+  if (w !== watcher || w.scanning || w.debounceTimer) return
+  w.debounceTimer = setTimeout(() => {
+    w.debounceTimer = null
+    const nativeDirs = [...w.pendingDirs].sort()
+    const confirmedDirs = [...w.pendingConfirmedDirs].sort()
+    w.pendingDirs.clear()
+    w.pendingConfirmedDirs.clear()
+    const needsRefresh = w.pendingNeedsRefresh
+    w.pendingNeedsRefresh = false
+    w.deliverQueue.push({ nativeDirs, confirmedDirs, needsRefresh })
+    void pumpDeliverQueue(w)
+  }, w.debounceMs)
+}
+
 /**
  * 防抖广播：静默期内多轮变更只广播一次，变更目录取并集（A-03）。
  * 代际校验（B2 修复）：w 已不是当前 watcher（stop/syncWatcher 切换到新根）
@@ -422,19 +703,23 @@ export function computeStatSnapshotDiff(root, oldSnap, newSnap) {
  * partialScan(旧根) 把用户刚切换的库静默切回旧根。
  * diff 目录在每轮发现变更时合入 w.pendingDirs，广播载荷携带 { root, dirs }，
  * 渲染层据此只重扫这些子树。
+ * @param {WatcherState} w 监控状态
+ * @param {string[]} changedDirs 变更子树
+ * @param {{refresh?: boolean}} [options] refresh=true 表示来源为原生事件，
+ *   广播后需回填快照基线（OPT-02）
  */
-function scheduleBroadcast(w, changedDirs = []) {
+function scheduleBroadcast(w, changedDirs = [], options = {}) {
   if (w !== watcher) return
+  if (options.refresh === true) {
+    w.pendingNeedsRefresh = true
+  } else {
+    // 轮询快照已更新：这些目录是已确认变更，无需回填即可广播
+    for (const d of changedDirs) w.pendingConfirmedDirs.add(d)
+  }
   if (!Array.isArray(w.pendingDirs)) w.pendingDirs = new Set()
   for (const d of changedDirs) w.pendingDirs.add(d)
-  if (w.debounceTimer) clearTimeout(w.debounceTimer)
-  w.debounceTimer = setTimeout(() => {
-    w.debounceTimer = null
-    const dirs = [...w.pendingDirs].sort()
-    w.pendingDirs.clear()
-    logger.info(`检测到模型目录变更，触发重扫: ${w.root}（${dirs.length} 个子树）`)
-    broadcast(w.root, dirs)
-  }, w.debounceMs)
+  if (w.scanning) return
+  scheduleBroadcastTimer(w)
 }
 
 /**
@@ -477,8 +762,9 @@ function scheduleNextWalk(w) {
 }
 
 function runWalk(w, silent) {
-  // 上一次遍历未完成（超大目录树）时本轮跳过读盘，仅安排下一轮，避免并发遍历
-  if (w.polling) {
+  // 上一次遍历未完成（超大目录树）/快照回填中/扫描期：本轮跳过读盘，
+  // 仅安排下一轮，避免并发遍历或与扫描基线互相覆盖（OPT-02）
+  if (w.polling || w.refreshing || w.scanning) {
     scheduleNextWalk(w)
     return
   }
@@ -496,10 +782,24 @@ function runWalk(w, silent) {
       const wantStats =
         contentEnabled &&
         (silent || Date.now() - w.lastContentCheckAt >= w.contentCheckInterval)
+      const revisionAtStart = w.snapshotRevision
       const snapshot = await collectDirSnapshot(w.root, w.excludeNames, {
         withStats: wantStats,
         concurrency: w.traversalConcurrency
       })
+
+      // 遍历期间进入扫描期/开始原生事件回填/基线已被其他路径更新：本轮结果
+      // 可能落后于对方基线，直接丢弃，避免用旧快照覆盖新基线并重复广播
+      if (
+        w !== watcher ||
+        w.refreshing ||
+        w.scanning ||
+        w.snapshotRevision !== revisionAtStart
+      ) {
+        // 对方基线更新意味着目录刚有活动：退避重置，下一轮尽快复核
+        w.idleRounds = 0
+        return
+      }
 
       if (silent) {
         if (wantStats) {
@@ -511,6 +811,7 @@ function runWalk(w, silent) {
           w.statSnapshot = null
           w.lastContentCheckAt = 0
         }
+        w.snapshotRevision += 1
         return
       }
 
@@ -527,6 +828,7 @@ function runWalk(w, silent) {
           : []
         w.statSnapshot = snapshot
         w.snapshot = names
+        w.snapshotRevision += 1
         if (changedDirs.length === 0) {
           w.idleRounds += 1
           return
@@ -546,6 +848,7 @@ function runWalk(w, silent) {
         return
       }
       w.snapshot = snapshot
+      w.snapshotRevision += 1
       // 名称变化已触发重扫（扫描会读到当前内容）；内容基线失效，下个内容
       // 校验轮静默重建，避免对同一批变更重复广播
       w.statSnapshot = null
@@ -568,6 +871,50 @@ function runWalk(w, silent) {
 }
 
 /**
+ * 扫描期开关（OPT-02）：扫描期间暂停巡检与广播，变更目录先累积；
+ * 扫描成功后由 syncWatcher（全量）或 refreshWatcherBaseline（局部）覆盖基线并
+ * 清理已覆盖项；停扫时只补发未被扫描覆盖的子树。
+ * @param {boolean} scanning 是否进入扫描期
+ */
+export function setWatcherScanning(scanning) {
+  const w = watcher
+  if (!w) return
+  const next = scanning === true
+  if (w.scanning === next) return
+  w.scanning = next
+  if (next) {
+    // 已安排的广播先按住：扫描结果可能已包含这些变更，停扫时再按基线过滤
+    if (w.debounceTimer) {
+      clearTimeout(w.debounceTimer)
+      w.debounceTimer = null
+    }
+    // 已进入交付队列但尚未广播的批次同样作废（在途批次会检查 scanning 后跳过）
+    w.deliverQueue.length = 0
+    return
+  }
+  if (w.pendingDirs.size > 0 || w.pendingConfirmedDirs.size > 0) {
+    scheduleBroadcastTimer(w)
+  }
+}
+
+/**
+ * 局部扫描完成后回填监控基线（OPT-02）：
+ * 只替换受影响子树的目录名快照，范围外基线保持原样；同时清理已被扫描
+ * 覆盖的待广播目录，避免扫描结果再次触发局部扫描。
+ * @param {string} root 扫描的模型根目录
+ * @param {string[]} dirs 本次局部扫描的子树（POSIX 相对路径，'' 为根直属）
+ * @param {Map<string, string[]>} snapshot scanner 返回的目录名快照
+ * @returns {boolean} 是否成功应用到当前监控状态
+ */
+export function refreshWatcherBaseline(root, dirs, snapshot) {
+  const w = watcher
+  if (!w || !w.enabled || !sameRoot(w.root, root)) return false
+  // 空快照合法：本次扫描的子树已被删除，需要移除对应旧基线条目
+  if (!(snapshot instanceof Map)) return false
+  return applyPartialBaseline(w, dirs, snapshot)
+}
+
+/**
  * 同步目录监控状态（扫描成功后与设置变更时调用）。
  * @param {string} root 当前模型根目录
  * @param {boolean} enabled 是否启用自动重扫（settings.autoRescan）
@@ -575,18 +922,25 @@ function runWalk(w, silent) {
  *   避免被排除目录内的文件变化触发无意义重扫）
  * @param {{pollInterval?: number, broadcastDebounce?: number,
  *   contentCheckInterval?: number, traversalConcurrency?: number,
- *   nativeWatch?: boolean, backoff?: number[], isVisible?: () => boolean,
+ *   nativeWatch?: boolean, baseline?: Map<string, string[]>,
+ *   backoff?: number[], isVisible?: () => boolean,
  *   onPollScheduled?: (delay: number) => void}} [timing]
  *   轮询间隔/广播防抖/内容校验间隔（毫秒）与目录遍历并发；nativeWatch 开启
- *   原生事件监听；backoff 空闲退避阶梯；isVisible/onPollScheduled 为测试注入钩子；
- *   生产走默认值，测试注入小值（contentCheckInterval≤0 关闭内容校验）
+ *   原生事件监听；baseline 为全量扫描产出的目录名快照（OPT-02：直接作为
+ *   监控基线，跳过扫描后的重复全树遍历）；backoff 空闲退避阶梯；
+ *   isVisible/onPollScheduled 为测试注入钩子；生产走默认值，测试注入小值
+ *   （contentCheckInterval≤0 关闭内容校验）
  */
 export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
   const wantEnabled = enabled === true
-  if (watcher && watcher.root === root && watcher.enabled === wantEnabled) {
-    // 同根同状态（如每次扫描完成后的重复同步）：仅刷新排除名单即返回，
+  if (watcher && sameRoot(watcher.root, root) && watcher.enabled === wantEnabled) {
+    // 同根同状态（如每次扫描完成后的重复同步）：刷新排除名单；若本次扫描
+    // 提供了目录快照，直接覆盖基线并清理已扫描的待广播项（OPT-02），
     // 不重启遍历（skipNames 每轮遍历时读取，热生效）
     watcher.excludeNames = toNameSet(excludeDirs)
+    if (timing.baseline instanceof Map && timing.baseline.size > 0) {
+      applyFullBaseline(watcher, timing.baseline)
+    }
     // OP-05：原生监听曾因异常退出（或首次不可用）时，借同步时机尝试重建
     if (watcher.nativeWatch && !watcher.nativeWatcher) {
       startNativeWatch(watcher)
@@ -616,8 +970,15 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
     debounceTimer: null,
     timer: null,
     polling: false,
+    refreshing: false,
+    scanning: false,
+    pendingNeedsRefresh: false,
+    delivering: false,
+    deliverQueue: [],
+    snapshotRevision: 0,
     idleRounds: 0,
     pendingDirs: new Set(),
+    pendingConfirmedDirs: new Set(),
     pollInterval: pollMs,
     // OP-05 原生监听状态（未开启/启动失败为 null）
     nativeWatch,
@@ -636,6 +997,12 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
     onPollScheduled: typeof timing.onPollScheduled === 'function' ? timing.onPollScheduled : null
   }
   watcher = w
+  // OPT-02：本次扫描已产出目录快照时直接复用为监控基线，无需扫描结束后
+  // 再做一次全树 readdir；内容基线留待下个内容校验周期静默重建。
+  const reusedBaseline =
+    timing.baseline instanceof Map && timing.baseline.size > 0
+      ? applyFullBaseline(w, timing.baseline)
+      : false
   if (nativeWatch && !startNativeWatch(w)) {
     // 原生监听不可用：退回原轮询节奏（避免 15s 起步导致变更发现过慢）
     w.pollInterval = DEFAULT_POLL_INTERVAL
@@ -644,16 +1011,21 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
   logger.info(
     `目录监控已启动（autoRescan，基础轮询 ${w.pollInterval}ms` +
       (w.nativeWatcher ? '，原生事件监听已启用' : '') +
+      (reusedBaseline ? '，复用扫描目录快照' : '') +
       (w.backoff ? `，空闲退避至 ${w.backoff[w.backoff.length - 1]}ms` : '') +
       (w.contentCheckInterval > 0
         ? `，内容校验 ${w.contentCheckInterval}ms`
         : '，内容校验已关闭') +
       `）: ${root}`
   )
-  // 立即建立基准快照（不等首个间隔；只记录不比对）：
-  // 启用前已存在的文件、以及随后才出现的 .modelvault 都不产生首次误报。
-  // 基准轮结束后由递归 setTimeout 链安排后续巡检
-  runWalk(w, true)
+  if (reusedBaseline) {
+    // 已有权威名称基线：直接进入轮询链，不再立即遍历全树
+    scheduleNextWalk(w)
+  } else {
+    // 无扫描基线时保留原行为：立即建立基准快照（不等首个间隔；只记录不比对），
+    // 启用前已存在的文件、以及随后才出现的 .modelvault 都不产生首次误报。
+    runWalk(w, true)
+  }
 }
 
 /** 停止目录监控（应用退出时调用） */

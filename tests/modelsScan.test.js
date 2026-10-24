@@ -41,7 +41,12 @@ vi.mock('../src/main/services/scanner.js', async (importOriginal) => {
 // 用于断言扫描完成时以「最新设置」而非扫描前快照同步排除名单（E8 竞态回归）
 vi.mock('../src/main/services/watcher.js', async (importOriginal) => {
   const actual = await importOriginal()
-  return { ...actual, syncWatcher: vi.fn() }
+  return {
+    ...actual,
+    syncWatcher: vi.fn(),
+    refreshWatcherBaseline: vi.fn(),
+    setWatcherScanning: vi.fn()
+  }
 })
 
 // setStoreSaveErrorListener 的广播使用 getAllWindows（注册时不触发，桩需存在）
@@ -50,7 +55,11 @@ vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([])
 import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
 import { flushIndexWrites, readLibraryIndex, writeLibraryIndex } from '../src/main/services/library-index'
 import { scanModels } from '../src/main/services/scanner'
-import { syncWatcher } from '../src/main/services/watcher'
+import {
+  refreshWatcherBaseline,
+  setWatcherScanning,
+  syncWatcher
+} from '../src/main/services/watcher'
 import {
   getCurrentRoot,
   loadData,
@@ -634,6 +643,48 @@ describe('扫描完成以最新设置同步目录监控（E8 竞态回归）', (
     await pending
     const calls = vi.mocked(syncWatcher).mock.calls
     expect(calls.at(-1)).toEqual([root, false, ['temp-out'], { nativeWatch: true }])
+  })
+})
+
+describe('OPT-02 扫描/监控基线协同', () => {
+  it('全量扫描产出的目录快照作为 watcher 基线传递', async () => {
+    await registerLibrary(root)
+    vi.mocked(syncWatcher).mockClear()
+    const baseline = new Map([[root, ['a.safetensors']]])
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 1,
+      dirSnapshot: baseline
+    })
+
+    const scan = getRegisteredHandler('models:scan')
+    const res = await scan(makeEvent(), { folder: root })
+    expect(res.error).toBeUndefined()
+    expect(vi.mocked(syncWatcher).mock.calls.at(-1)?.[3]).toEqual({
+      nativeWatch: true,
+      baseline
+    })
+  })
+
+  it('局部扫描完成回填受影响子树基线，并在扫描前后暂停/恢复监控', async () => {
+    await registerLibrary(root)
+    vi.mocked(refreshWatcherBaseline).mockClear()
+    vi.mocked(setWatcherScanning).mockClear()
+    const baseline = new Map([[path.join(root, 'lora'), ['a.safetensors']]])
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 1,
+      dirSnapshot: baseline
+    })
+
+    const partial = getRegisteredHandler('models:partialScan')
+    const res = await partial(makeEvent(), { folder: root, dirs: ['lora'] })
+    expect(res.error).toBeUndefined()
+    expect(refreshWatcherBaseline).toHaveBeenCalledWith(root, ['lora'], baseline)
+    expect(setWatcherScanning).toHaveBeenNthCalledWith(1, true)
+    expect(setWatcherScanning).toHaveBeenLastCalledWith(false)
   })
 })
 

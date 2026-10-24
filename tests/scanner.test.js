@@ -219,6 +219,26 @@ describe('scanModels', () => {
     expect(models[0].name).toBe('b')
   })
 
+  it('OPT-02：扫描同时产出与 watcher 同构的目录名快照', async () => {
+    const { dirSnapshot } = await scanModels(root, undefined, { excludeDirs: ['temp'] })
+    expect(dirSnapshot).toBeInstanceOf(Map)
+    const rootNames = dirSnapshot.get(root)
+    expect(rootNames).toContain('a.safetensors')
+    expect(rootNames).toContain('lora')
+    // 非模型文件、排除目录、隐藏/put_ 临时项与 watcher 快照一致
+    expect(rootNames).toContain('notes')
+    expect(rootNames).not.toContain('put_interfaces.bin')
+    expect(dirSnapshot.has(path.join(root, 'temp'))).toBe(false)
+    expect(dirSnapshot.get(path.join(root, 'lora'))).toContain('b.ckpt')
+    // 条目名排序稳定，便于与 watcher 快照逐项比较
+    expect([...rootNames]).toEqual([...rootNames].sort())
+
+    // 子树局部扫描只包含实际读取的目录
+    const partial = await scanModels(root, undefined, { subDirs: ['lora'] })
+    expect(partial.dirSnapshot.has(path.join(root, 'lora'))).toBe(true)
+    expect(partial.dirSnapshot.has(root)).toBe(false)
+  })
+
   it('子树重复/重叠时按 id 去重，扫描结果不含重复模型（B-01 防御）', async () => {
     await fs.mkdir(path.join(root, 'lora', 'sub'), { recursive: true })
     await fs.writeFile(path.join(root, 'lora', 'sub', 'nested.safetensors'), 'x')

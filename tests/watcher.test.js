@@ -33,6 +33,8 @@ import {
   collectDirSnapshot,
   computeSnapshotDiff,
   computeStatSnapshotDiff,
+  refreshWatcherBaseline,
+  setWatcherScanning,
   snapshotsEqual,
   stopWatcher,
   syncWatcher
@@ -276,6 +278,20 @@ describe('collectDirSnapshot / snapshotsEqual', () => {
     expect(snapshot.has(depth8)).toBe(true)
     expect(snapshot.has(depth9)).toBe(false)
   })
+
+  it('OPT-02：startDepth 让子树回填保持全库深度上限语义', async () => {
+    const depth7 = path.join(root, ...Array.from({ length: 7 }, (_, i) => `s${i}`))
+    const depth8 = path.join(depth7, 's7')
+    const depth9 = path.join(depth8, 's8')
+    await fs.mkdir(depth9, { recursive: true })
+    await fs.writeFile(path.join(depth8, 'm8.safetensors'), 'x')
+    await fs.writeFile(path.join(depth9, 'm9.safetensors'), 'x')
+
+    // 从第 7 层子树开始回填：第 8 层仍应采集，第 9 层与全库快照一致地忽略
+    const snapshot = await collectDirSnapshot(depth7, new Set(), { startDepth: 7 })
+    expect(snapshot.has(depth8)).toBe(true)
+    expect(snapshot.has(depth9)).toBe(false)
+  })
 })
 
 describe('computeSnapshotDiff（A-03 增量扫描的变更子树定位）', () => {
@@ -475,6 +491,292 @@ describe('syncWatcher 目录监控（A8）', () => {
       () => sentEvents.some((e) => e.payload.root === rootB),
       '切根后新根的变更未广播（新 watcher 被误停？）'
     )
+  })
+})
+
+describe('OPT-02 扫描/监控基线协同', () => {
+  it('全量扫描基线直接复用：不再在扫描后做全树重建', async () => {
+    await fs.writeFile(path.join(root, 'existing.safetensors'), 'x')
+    // 故意提供缺少现有条目的基线：若仍执行一次基准遍历，基线会被纠正为
+    // 磁盘现状而不广播；直接复用该基线则首个轮询必然检出差异。
+    syncWatcher(root, true, [], {
+      pollInterval: 20,
+      broadcastDebounce: 20,
+      contentCheckInterval: 0,
+      baseline: new Map([[root, []]])
+    })
+    await waitFor(() => sentEvents.length >= 1, '复用基线后未检出差异')
+    expect(sentEvents[0].payload.dirs).toEqual([''])
+  })
+
+  it('正确基线不产生首次误报，后续变更仍只广播一次', async () => {
+    const baseline = await collectDirSnapshot(root)
+    syncWatcher(root, true, [], {
+      pollInterval: 20,
+      broadcastDebounce: 20,
+      contentCheckInterval: 0,
+      baseline
+    })
+    await sleep(120)
+    expect(sentEvents).toHaveLength(0)
+
+    await fs.writeFile(path.join(root, 'later.safetensors'), 'x')
+    await waitFor(() => sentEvents.length >= 1, '后续变更未广播')
+    await sleep(150)
+    expect(sentEvents).toHaveLength(1)
+  })
+
+  it('局部扫描基线回填后，轮询不再重复广播同一变更', async () => {
+    syncWatcher(root, true, [], {
+      pollInterval: 200,
+      broadcastDebounce: 20,
+      contentCheckInterval: 0
+    })
+    await sleep(40)
+    sentEvents.length = 0
+
+    await fs.writeFile(path.join(root, 'refreshed.safetensors'), 'x')
+    const snapshot = await collectDirSnapshot(root)
+    expect(refreshWatcherBaseline(root, [''], snapshot)).toBe(true)
+    await sleep(450)
+    expect(sentEvents).toHaveLength(0)
+  })
+
+  it('原生事件广播后回填基线，轮询不重复广播同一变更', async () => {
+    syncWatcher(root, true, [], {
+      nativeWatch: true,
+      pollInterval: 80,
+      broadcastDebounce: 20,
+      contentCheckInterval: 0,
+      isVisible: () => true,
+      onPollScheduled: () => {}
+    })
+    await sleep(80)
+    sentEvents.length = 0
+
+    await fs.writeFile(path.join(root, 'native-once.safetensors'), 'x')
+    await waitFor(() => sentEvents.length >= 1, '原生事件未广播', 3000)
+    // 轮询周期 80ms：若广播后的快照回填缺失，下一轮会再次检出同一变更
+    await sleep(350)
+    expect(sentEvents).toHaveLength(1)
+  })
+
+  it('扫描期暂停广播，停扫后只补发未覆盖变更', async () => {
+    syncWatcher(root, true, [], {
+      pollInterval: 30,
+      broadcastDebounce: 20,
+      contentCheckInterval: 0
+    })
+    await sleep(60)
+    sentEvents.length = 0
+
+    setWatcherScanning(true)
+    await fs.writeFile(path.join(root, 'during-scan.safetensors'), 'x')
+    await sleep(150)
+    expect(sentEvents).toHaveLength(0)
+
+    setWatcherScanning(false)
+    await waitFor(() => sentEvents.length >= 1, '停扫后未补发未覆盖变更')
+    await sleep(150)
+    expect(sentEvents).toHaveLength(1)
+  })
+
+  it('扫描基线覆盖变更后停扫不补发，消除重复局部扫描', async () => {
+    syncWatcher(root, true, [], {
+      pollInterval: 30,
+      broadcastDebounce: 20,
+      contentCheckInterval: 0
+    })
+    await sleep(60)
+    sentEvents.length = 0
+
+    setWatcherScanning(true)
+    await fs.writeFile(path.join(root, 'covered.safetensors'), 'x')
+    const snapshot = await collectDirSnapshot(root)
+    // 模拟全量扫描成功后的基线回写
+    syncWatcher(root, true, [], { baseline: snapshot })
+    setWatcherScanning(false)
+
+    await sleep(200)
+    expect(sentEvents).toHaveLength(0)
+  })
+
+  it('全量基线过滤非法/越界/排除/隐藏条目，全部非法时回退基准遍历', async () => {
+    await fs.mkdir(path.join(root, 'temp'))
+    await fs.writeFile(path.join(root, 'a.safetensors'), 'x')
+    const badBaseline = new Map([
+      [123, ['x']],
+      [path.join(root, 'temp'), ['x']],
+      [path.join(root, '..', 'outside'), ['x']],
+      [path.join(root, 'lora'), 'not-array'],
+      [root, ['a.safetensors', '.hidden', 'put_tmp']]
+    ])
+    syncWatcher(root, true, ['temp'], {
+      pollInterval: 100000,
+      broadcastDebounce: 20,
+      contentCheckInterval: 0,
+      baseline: badBaseline
+    })
+    await sleep(100)
+    expect(sentEvents).toHaveLength(0)
+
+    // 全部条目非法/越界：基线清洗后为空，回退到原有基准遍历
+    stopWatcher()
+    sentEvents.length = 0
+    syncWatcher(root, true, [], {
+      pollInterval: 100000,
+      broadcastDebounce: 20,
+      contentCheckInterval: 0,
+      baseline: new Map([[123, ['x']]])
+    })
+    await sleep(80)
+    expect(sentEvents).toHaveLength(0)
+  })
+
+  it('局部基线只合并受影响子树，空快照移除已删除子树', async () => {
+    await fs.mkdir(path.join(root, 'lora', 'sub'), { recursive: true })
+    await fs.writeFile(path.join(root, 'lora', 'sub', 'a.safetensors'), 'x')
+    syncWatcher(root, true, [], {
+      pollInterval: 100000,
+      contentCheckInterval: 0
+    })
+    await sleep(40)
+    sentEvents.length = 0
+
+    const loraSnapshot = await collectDirSnapshot(path.join(root, 'lora'))
+    const snapshot = new Map([
+      ...loraSnapshot,
+      [root, ['ignored-out-of-scope']],
+      [123, ['bad-key']]
+    ])
+    expect(refreshWatcherBaseline(path.join(root, '..'), ['lora'], snapshot)).toBe(false)
+    expect(refreshWatcherBaseline(root, [], snapshot)).toBe(false)
+    expect(refreshWatcherBaseline(root, ['lora'], null)).toBe(false)
+    expect(refreshWatcherBaseline(root, ['lora'], snapshot)).toBe(true)
+    await sleep(80)
+    expect(sentEvents).toHaveLength(0)
+
+    // 空快照代表子树已删除：移除对应旧基线但不抛错
+    await fs.rm(path.join(root, 'lora'), { recursive: true, force: true })
+    expect(refreshWatcherBaseline(root, ['lora'], new Map())).toBe(true)
+    stopWatcher()
+    expect(refreshWatcherBaseline(root, ['lora'], new Map())).toBe(false)
+  })
+
+  it('局部根直属基线同步清理根目录内容快照', async () => {
+    await fs.writeFile(path.join(root, 'root-file.safetensors'), 'x')
+    syncWatcher(root, true, [], {
+      pollInterval: 100000,
+      contentCheckInterval: 30
+    })
+    await sleep(120)
+    sentEvents.length = 0
+
+    const snapshot = await collectDirSnapshot(root)
+    expect(refreshWatcherBaseline(root, [''], snapshot)).toBe(true)
+    await sleep(80)
+    expect(sentEvents).toHaveLength(0)
+  })
+
+  it('局部基线清理已覆盖的待广播变更并取消防抖定时器', async () => {
+    syncWatcher(root, true, [], {
+      pollInterval: 20,
+      broadcastDebounce: 200,
+      contentCheckInterval: 0
+    })
+    await sleep(60)
+    sentEvents.length = 0
+
+    await fs.writeFile(path.join(root, 'pending.safetensors'), 'x')
+    await sleep(80)
+    const snapshot = await collectDirSnapshot(root)
+    expect(refreshWatcherBaseline(root, [''], snapshot)).toBe(true)
+    await sleep(300)
+    expect(sentEvents).toHaveLength(0)
+  })
+
+  it('原生事件子树回填：噪声不广播，真实变更/删除按子树广播（含内容基线）', async () => {
+    const originalWatch = fsSync.watch
+    const fake = new EventEmitter()
+    fake.close = vi.fn()
+    let onNativeEvent = null
+    fsSync.watch = (_root, _opts, cb) => {
+      onNativeEvent = cb
+      return fake
+    }
+    try {
+      await fs.mkdir(path.join(root, 'lora'))
+      await fs.writeFile(path.join(root, 'lora', 'a.safetensors'), 'x')
+      syncWatcher(root, true, [], {
+        nativeWatch: true,
+        pollInterval: 100000,
+        broadcastDebounce: 20,
+        contentCheckInterval: 30,
+        isVisible: () => true,
+        onPollScheduled: () => {}
+      })
+      await sleep(120)
+      sentEvents.length = 0
+
+      // 噪声事件：磁盘无实际变化，回填后差异为空，不广播
+      onNativeEvent('change', 'noise.txt')
+      await sleep(100)
+      expect(sentEvents).toHaveLength(0)
+
+      // 真实子树变更：只广播该子树
+      await fs.writeFile(path.join(root, 'lora', 'b.safetensors'), 'x')
+      onNativeEvent('change', path.join('lora', 'b.safetensors'))
+      await waitFor(() => sentEvents.length >= 1, '子树变更未广播', 3000)
+      expect(sentEvents[0].payload.dirs).toEqual(['lora'])
+
+      // 子树被删除：事件与回填之间目录消失，移除旧基线并广播删除子树
+      sentEvents.length = 0
+      await fs.rm(path.join(root, 'lora'), { recursive: true, force: true })
+      onNativeEvent('change', path.join('lora', 'b.safetensors'))
+      await waitFor(() => sentEvents.length >= 1, '删除子树未广播', 3000)
+      expect(sentEvents[0].payload.dirs).toContain('lora')
+    } finally {
+      fsSync.watch = originalWatch
+    }
+  })
+
+  it('扫描期开关幂等，取消已安排广播并在停扫后补发累积变更', async () => {
+    const originalWatch = fsSync.watch
+    const fake = new EventEmitter()
+    fake.close = vi.fn()
+    let onNativeEvent = null
+    fsSync.watch = (_root, _opts, cb) => {
+      onNativeEvent = cb
+      return fake
+    }
+    try {
+      syncWatcher(root, true, [], {
+        nativeWatch: true,
+        pollInterval: 100000,
+        broadcastDebounce: 100,
+        contentCheckInterval: 0,
+        isVisible: () => true,
+        onPollScheduled: () => {}
+      })
+      await sleep(60)
+      sentEvents.length = 0
+
+      await fs.writeFile(path.join(root, 'scan-window.safetensors'), 'x')
+      onNativeEvent('change', 'scan-window.safetensors')
+      await sleep(5)
+      setWatcherScanning(true) // 取消已安排防抖广播
+      setWatcherScanning(true) // 幂等
+      await fs.writeFile(path.join(root, 'during-scan.safetensors'), 'x')
+      onNativeEvent('change', 'during-scan.safetensors') // 扫描期事件仅累积
+      await sleep(150)
+      expect(sentEvents).toHaveLength(0)
+
+      setWatcherScanning(false)
+      await waitFor(() => sentEvents.length >= 1, '停扫后未补发累积变更')
+      expect(sentEvents).toHaveLength(1)
+    } finally {
+      fsSync.watch = originalWatch
+    }
   })
 })
 

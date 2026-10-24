@@ -157,7 +157,11 @@ export function classifySubCategory(relSegments) {
  *   signal?: AbortSignal, subDirs?: string[]}} [options]
  *   额外排除的目录名（不区分大小写）、扫描的文件扩展名、取消信号；
  *   subDirs 为 A-03 子树局部扫描的相对根 POSIX 目录列表（'' 表示根直属）
- * @returns {Promise<{models: Array, errors: Array, dirCount: number}>}
+ * @returns {Promise<{models: Array, errors: Array, dirCount: number,
+ *   dirSnapshot: Map<string, string[]>}>}
+ *   dirSnapshot 为本次实际读取目录的「目录绝对路径 → 排序条目名」快照，
+ *   供 watcher 直接作为监控基线（OPT-02：扫描与监控共用同一份目录事实，
+ *   避免扫描结束后再做一次全树遍历，也避免旧基线重复触发局部扫描）。
  * @throws {Error} name 为 'AbortError' 表示扫描被取消
  */
 export async function scanModels(root, onProgress, options = {}) {
@@ -170,6 +174,9 @@ export async function scanModels(root, onProgress, options = {}) {
   const signal = options.signal
   const models = []
   const errors = []
+  // OPT-02：扫描遍历顺带收集目录名快照（与 watcher 的可见性/深度规则一致），
+  // 作为监控基线复用；仅保存目录名，不额外 stat 或读文件。
+  const dirSnapshot = new Map()
   // 同一次扫描内按绝对路径去重（B-01 防御）：子树集合若出现父子重叠，
   // 同一文件会被递归访问两次。调用方已在入参层剔除后代，此处兜底保证
   // 扫描结果永远不含重复 id（重复卡片、统计翻倍、缩略图重复登记）。
@@ -219,10 +226,12 @@ export async function scanModels(root, onProgress, options = {}) {
 
     // 先遍历目录项：入队子目录 + 收集待 stat 的模型文件
     const fileEntries = []
+    const visibleNames = []
     for (const entry of entries) {
       // O11：与 watcher 共享同一可见性策略（隐藏/put_/符号链接/排除目录）
       if (!isVisibleScanEntry(entry, userExclude)) continue
       const name = entry.name
+      visibleNames.push(name)
 
       const fullPath = path.join(dir, name)
       const relChild = rel ? `${rel}/${name}` : name
@@ -248,6 +257,8 @@ export async function scanModels(root, onProgress, options = {}) {
       if (!extensions.has(path.extname(name).toLowerCase())) continue
       fileEntries.push({ fullPath, name, relChild })
     }
+    // OPT-02：记录本目录的可见条目名（与 watcher 快照同构，排序保证稳定比较）
+    dirSnapshot.set(dir, visibleNames.sort())
 
     // 并行 stat（仅取 size/mtime）：流式固定并发池（与 watcher 共用
     // utils.runWithConcurrency，O-5）——完成一个补位一个，无「批内并发、
@@ -293,7 +304,7 @@ export async function scanModels(root, onProgress, options = {}) {
     })
   }
 
-  return { models, errors, dirCount }
+  return { models, errors, dirCount, dirSnapshot }
 }
 
 /**

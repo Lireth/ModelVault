@@ -4,7 +4,7 @@ import { getCurrentRoot, getSettings, relinkScannedMeta, updateSettings } from '
 import { scanModels } from '../../services/scanner'
 import { pruneOrphanCovers } from '../../services/covers'
 import { clearDeferredJobs } from '../../services/thumbs'
-import { syncWatcher } from '../../services/watcher'
+import { refreshWatcherBaseline, setWatcherScanning, syncWatcher } from '../../services/watcher'
 import { pauseHashWarmup, requestHashWarmup, resumeHashWarmup } from '../../services/hash-warmup'
 import {
   getMaintenanceState,
@@ -75,6 +75,9 @@ export function registerScanHandlers() {
     let completed = false
 
     try {
+      // OPT-02：扫描期间暂停目录监控巡检与广播，变更先累积；扫描成功后
+      // 用本次目录快照覆盖基线，停扫时只补发未被扫描覆盖的子树
+      setWatcherScanning(true)
       // 扫描期间暂停后台哈希预热取队（正在计算的单个文件不中断），结束后恢复
       pauseHashWarmup()
       // 扫描目录必须是已存在的目录（C6）：防止任意字符串路径（如已删除目录、
@@ -116,7 +119,7 @@ export function registerScanHandlers() {
       let lastSent = 0
       // 应用扫描规则：排除目录 + 扫描文件扩展名（来自应用设置）
       const appSettings = getSettings()
-      const { models, errors, dirCount } = await scanModels(
+      const { models, errors, dirCount, dirSnapshot } = await scanModels(
         root,
         (progress) => {
           const now = Date.now()
@@ -187,11 +190,17 @@ export function registerScanHandlers() {
       // 同步目录监控状态（E8）：autoRescan 开启时监听当前根目录，变更触发自动重扫。
       // 排除名单须现读内存设置而非扫描前快照：扫描期间用户经 settings:update
       // 更新过 excludeDirs 时，旧快照会把 watcher 名单回退为扫描前的值
+      const watcherTiming = { nativeWatch: true }
+      // OPT-02：扫描已产出目录名快照，直接交给 watcher 作为基线，跳过
+      // 扫描结束后的重复全树遍历；旧版本/mock 缺该字段时保持原有行为
+      if (dirSnapshot instanceof Map && dirSnapshot.size > 0) {
+        watcherTiming.baseline = dirSnapshot
+      }
       syncWatcher(
         root,
         getSettings().autoRescan === true,
         getSettings().excludeDirs || [],
-        { nativeWatch: true }
+        watcherTiming
       )
 
       completed = true
@@ -221,6 +230,8 @@ export function registerScanHandlers() {
       scanAbort = null
       releaseMaintenance(token)
       resumeHashWarmup()
+      // 停扫：补发扫描未覆盖的变更子树（已覆盖项由基线回填时清理）
+      setWatcherScanning(false)
     }
   }, { errorPrefix: '扫描失败' })
 
@@ -252,6 +263,9 @@ export function registerScanHandlers() {
     const signal = abort.signal
     const startedAt = Date.now()
     try {
+      // OPT-02：与全量扫描一致，局部扫描期间暂停监控巡检/广播并按扫描
+      // 范围回填基线，避免扫描已覆盖的变更再次触发局部扫描
+      setWatcherScanning(true)
       // 与全量扫描一致：扫描期间暂停后台哈希预热取队，结束后恢复
       pauseHashWarmup()
       // 子树清洗在锁内完成：失败路径统一经 finally 释放锁
@@ -340,6 +354,12 @@ export function registerScanHandlers() {
         full: false
       })
 
+      // OPT-02：只回填受影响子树的监控基线，并清理这些子树对应的待广播项；
+      // 范围外基线保持原样，未覆盖的新变更仍会在停扫后补发。
+      if (scanResult.dirSnapshot instanceof Map) {
+        refreshWatcherBaseline(root, subDirs, scanResult.dirSnapshot)
+      }
+
       logger.info(
         `局部扫描完成：${subDirs.length} 个子树 → ${decorated.length} 个模型 / 重关联 ${relinkResult.relinked} 个`
       )
@@ -354,6 +374,7 @@ export function registerScanHandlers() {
       scanAbort = null
       releaseMaintenance(token)
       resumeHashWarmup()
+      setWatcherScanning(false)
     }
   }, { errorPrefix: '局部扫描失败' })
 }
