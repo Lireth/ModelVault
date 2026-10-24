@@ -11,7 +11,14 @@ import { isValidImageFile } from '../../services/covers'
 import { drainDeferredThumbs, getThumbPathDeferred, pruneThumbs } from '../../services/thumbs'
 import { checkSafetensorsHealthy, readSafetensorsInfo } from '../../services/safetensors'
 import { toImageUrl } from '../../protocol'
-import { decorateCache, getThumbDrainPromise, setThumbDrainPromise } from './model-state'
+import {
+  DECORATE_CACHE_DEFAULT_LIMIT,
+  decorateCache,
+  getDecorateCacheLimit,
+  getThumbDrainPromise,
+  setDecorateCacheLimit,
+  setThumbDrainPromise
+} from './model-state'
 import { abortError, boundedMapSet, runWithConcurrency } from '../../utils'
 
 /**
@@ -24,8 +31,45 @@ import { abortError, boundedMapSet, runWithConcurrency } from '../../utils'
 /** 并行装饰的最大在途数（流式并发池上限）：完成一个补位一个，文件句柄峰值恒定 */
 const DECORATE_BATCH_SIZE = 64
 
-/** 缓存容量上限：超出后按插入顺序淘汰最旧条目 */
-const DECORATE_CACHE_MAX = 8000
+/**
+ * 大库装饰缓存容量策略（OPT-04）：
+ * - 至少保留默认 8000 条，避免小库因容量过小导致重复 IO；
+ * - 按模型数留 10% 余量（全量扫描后调整），使库规模超过 8000 时仍能整库命中；
+ * - 硬上限 50000 条，防止 20 万模型索引把装饰结果（含嵌套参数/autoInfo）
+ *   无限驻留内存；超出部分按 LRU 淘汰。
+ */
+const DECORATE_CACHE_HARD_MAX = 50000
+
+/** 测试可注入的容量策略上下限（生产使用上方常量） */
+let cachePolicyMin = DECORATE_CACHE_DEFAULT_LIMIT
+let cachePolicyHardMax = DECORATE_CACHE_HARD_MAX
+
+/**
+ * 计算某模型规模下的装饰缓存目标容量。
+ * @param {number} modelCount 当前库模型数
+ * @returns {number} 容量上限
+ */
+export function computeDecorateCacheLimit(modelCount) {
+  const count = Number.isFinite(modelCount) && modelCount > 0 ? Math.floor(modelCount) : 0
+  // 整数运算实现 10% 向上取整，避免 1.1 浮点误差把 9000 算成 9901
+  const target = Math.ceil((count * 11) / 10)
+  return Math.min(cachePolicyHardMax, Math.max(cachePolicyMin, target))
+}
+
+/**
+ * 注入装饰缓存策略上下限（仅供单元测试使用；生产代码严禁调用）。
+ * @param {{min?: number, max?: number}} [policy]
+ */
+export function setDecorateCachePolicyForTests(policy = {}) {
+  cachePolicyMin =
+    Number.isFinite(policy.min) && policy.min >= 1
+      ? Math.floor(policy.min)
+      : DECORATE_CACHE_DEFAULT_LIMIT
+  cachePolicyHardMax =
+    Number.isFinite(policy.max) && policy.max >= cachePolicyMin
+      ? Math.floor(policy.max)
+      : DECORATE_CACHE_HARD_MAX
+}
 
 /**
  * 后台缩略图延迟登记的归属表：源图路径 -> 引用该封面的模型 id 集合。
@@ -405,9 +449,29 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
     tags: meta.tags || [],
     autoInfo
   }
-  // 写入装饰缓存（容量超限时按插入顺序淘汰最旧条目，C4 共享工具）
-  boundedMapSet(decorateCache, model.id, { mtimeMs: model.mtimeMs, signature, thumbPath, deferredCover, decorated }, DECORATE_CACHE_MAX)
+  // 写入装饰缓存（容量超限时按 LRU 顺序淘汰最旧条目，C4 共享工具）
+  boundedMapSet(
+    decorateCache,
+    model.id,
+    { mtimeMs: model.mtimeMs, signature, thumbPath, deferredCover, decorated },
+    getDecorateCacheLimit()
+  )
   return decorated
+}
+
+/**
+ * 全量扫描后的缓存生命周期清理（OPT-04）：
+ * 移除已不在当前库中的模型条目，再按当前容量裁剪 LRU 尾部。
+ * @param {Set<string>} validIds 当前库全部模型 id
+ */
+function pruneDecorateCache(validIds) {
+  for (const id of [...decorateCache.keys()]) {
+    if (!validIds.has(id)) decorateCache.delete(id)
+  }
+  const limit = getDecorateCacheLimit()
+  while (decorateCache.size > limit) {
+    decorateCache.delete(decorateCache.keys().next().value)
+  }
 }
 
 /**
@@ -415,7 +479,8 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
  * 末尾按已使用的缩略图清单清理失效缩略图文件。
  * @param {Array<object>} models 扫描出的模型列表
  * @param {AbortSignal} [signal] 取消信号（每任务开始前检查）
- * @param {{pruneThumbs?: boolean, forceRefresh?: boolean}} [opts]
+ * @param {{pruneThumbs?: boolean, forceRefresh?: boolean,
+ *   adaptCacheSize?: boolean}} [opts]
  *   pruneThumbs=false 跳过末尾的失效缩略图清理（局部增量扫描必传）：
  *   局部装饰仅覆盖变更子树，usedThumbs 不含子树外模型的缩略图，此时按名单
  *   清理会把子树外有效缩略图全部误删——且装饰缓存命中路径不会重新生成，
@@ -423,12 +488,20 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
  *   「不做孤儿清理，全量扫描兜底」）。
  *   forceRefresh=true 跳过缓存重新装饰（局部扫描必传）：变更子树内的
  *   sidecar/封面文件可能变化而未改动模型 mtime，缓存命中会遮蔽这些变化。
+ *   adaptCacheSize=true 表示本次是全量库快照（OPT-04）：按模型总数调整
+ *   LRU 容量，并清理不在当前库中的缓存条目；局部扫描不得传。
  */
 export async function decorateModels(models, signal, opts = {}) {
   const usedThumbs = new Set()
   // 结果按索引回填：流式池完成顺序不定，回填保持与输入一致的顺序
   const result = new Array(models.length)
   const forceRefresh = opts.forceRefresh === true
+  const adaptCacheSize = opts.adaptCacheSize === true
+  const fullModelIds = adaptCacheSize
+    ? new Set(models.map((m) => /** @type {{id: string}} */ (m).id))
+    : null
+  // OPT-04：先按当前库规模调整容量，再开始装饰；扩容后整库条目可留在 LRU
+  if (adaptCacheSize) setDecorateCacheLimit(computeDecorateCacheLimit(models.length))
   // 流式固定并发池（与 scanner/watcher 共用 utils.runWithConcurrency，O-5）：
   // 完成一个补位一个，消除「批内并发、批间串行」的整批等待尾延迟——每批
   // 最慢的模型（多封面逐张 stat + safetensors 头解析）不再拖住同批其余任务。
@@ -442,6 +515,8 @@ export async function decorateModels(models, signal, opts = {}) {
     },
     DECORATE_BATCH_SIZE
   )
+  // OPT-04：全量扫描结束后清理陈旧条目并裁剪到当前容量；局部扫描不清理
+  if (adaptCacheSize && fullModelIds) pruneDecorateCache(fullModelIds)
   if (opts.pruneThumbs !== false) await pruneThumbs(usedThumbs)
   return result
 }

@@ -51,16 +51,40 @@ export const decorateCache = new Map()
 /** 缓存对应的模型根目录（切换根目录时清空缓存） */
 let decorateCacheRoot = null
 
+/** 缓存默认容量（与 decorate.js 的最小容量保持一致） */
+export const DECORATE_CACHE_DEFAULT_LIMIT = 8000
+
+/** 当前缓存容量（OPT-04：全量扫描按库规模自适应调整） */
+let decorateCacheLimit = DECORATE_CACHE_DEFAULT_LIMIT
+
 /** 获取缓存对应的模型根目录 */
 export function getDecorateCacheRoot() {
   return decorateCacheRoot
 }
 
+/** 获取当前装饰缓存容量 */
+export function getDecorateCacheLimit() {
+  return decorateCacheLimit
+}
+
+/**
+ * 设置装饰缓存容量（由全量扫描按当前模型数调整；切换根目录时复位）。
+ * @param {number} limit 容量上限
+ */
+export function setDecorateCacheLimit(limit) {
+  decorateCacheLimit =
+    Number.isFinite(limit) && limit >= 1
+      ? Math.floor(limit)
+      : DECORATE_CACHE_DEFAULT_LIMIT
+}
+
 /**
  * 切换装饰缓存对应根目录：清空缓存并记录新根目录（原子语义，
  * 调用方不得分两步操作 Map 与 root，否则缓存内容与根目录标识会短暂不一致）。
+ * 容量同步复位到默认值，随后由全量扫描按新库规模重新调整。
  */
 export function resetDecorateCache(root) {
   decorateCache.clear()
   decorateCacheRoot = root
+  decorateCacheLimit = DECORATE_CACHE_DEFAULT_LIMIT
 }

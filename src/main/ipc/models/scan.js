@@ -143,7 +143,8 @@ export function registerScanHandlers() {
       // 哈希履历在本次结果中即时生效
       const relinkResult = relinkScannedMeta(models)
 
-      const decorated = await decorateModels(models, signal)
+      // OPT-04：全量扫描按库规模自适应装饰缓存容量并清理陈旧条目
+      const decorated = await decorateModels(models, signal, { adaptCacheSize: true })
       // 原始扫描数组的元素壳随装饰完成立即释放（O8）：装饰结果为字段浅拷贝的
       // 新对象，原始元素不再被引用；大库扫描期间原始数组、装饰数组与 IPC
       // 结构化克隆三份并存，此步可砍掉约 1/3 的瞬时内存峰值

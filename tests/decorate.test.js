@@ -34,8 +34,23 @@ vi.mock('../src/main/services/scanner.js', async (importOriginal) => {
   return { ...actual, findSidecarText: vi.fn() }
 })
 
-import { decorateModels, metaSignature, resolveCoverSafe, startThumbDrain, clearDeferredOwners, trackDeferredOwner } from '../src/main/ipc/models/decorate'
-import { awaitThumbDrain, getThumbDrainPromise } from '../src/main/ipc/models/model-state'
+import {
+  computeDecorateCacheLimit,
+  decorateModels,
+  metaSignature,
+  resolveCoverSafe,
+  setDecorateCachePolicyForTests,
+  startThumbDrain,
+  clearDeferredOwners,
+  trackDeferredOwner
+} from '../src/main/ipc/models/decorate'
+import {
+  awaitThumbDrain,
+  decorateCache,
+  getDecorateCacheLimit,
+  getThumbDrainPromise,
+  resetDecorateCache
+} from '../src/main/ipc/models/model-state'
 import { loadData, setDataRoot, getModelMeta, setModelMeta, DATA_DIR, COVERS_DIR } from '../src/main/services/store'
 import { findSidecarText } from '../src/main/services/scanner'
 import { clearDeferredJobs } from '../src/main/services/thumbs'
@@ -68,9 +83,13 @@ beforeEach(async () => {
   roots.push(root)
   setDataRoot(root)
   await loadData()
+  setDecorateCachePolicyForTests()
+  resetDecorateCache(root)
 })
 
 afterEach(async () => {
+  setDecorateCachePolicyForTests()
+  resetDecorateCache(null)
   for (const dir of roots) {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
   }
@@ -201,6 +220,50 @@ describe('decorateModels 元数据装饰', () => {
     const decorated = await decorateModels(models)
     expect(decorated).toHaveLength(150)
     expect(decorated.map((m) => m.name)).toEqual(models.map((m) => m.name))
+  })
+})
+
+describe('OPT-04 装饰缓存容量与生命周期', () => {
+  it('容量策略：最小 8000、按模型数留 10% 余量、硬上限 50000', () => {
+    expect(computeDecorateCacheLimit(0)).toBe(8000)
+    expect(computeDecorateCacheLimit(100)).toBe(8000)
+    expect(computeDecorateCacheLimit(9000)).toBe(9900)
+    expect(computeDecorateCacheLimit(200000)).toBe(50000)
+  })
+
+  it('全量快照扩容缓存、清理已删除条目并按容量裁剪', async () => {
+    setDecorateCachePolicyForTests({ min: 2, max: 10 })
+    const models = []
+    for (let i = 0; i < 6; i++) {
+      const abs = path.join(root, `cache-${i}.safetensors`)
+      await fs.writeFile(abs, 'x')
+      models.push(makeModel(abs))
+    }
+
+    await decorateModels(models, undefined, { adaptCacheSize: true })
+    // ceil(6 * 1.1) = 7：整库 6 条全部留在缓存
+    expect(getDecorateCacheLimit()).toBe(7)
+    expect(decorateCache.size).toBe(6)
+
+    // 模拟库内 3 个文件被删除后的全量扫描：容量收敛到 4，陈旧条目清理
+    await decorateModels(models.slice(0, 3), undefined, { adaptCacheSize: true })
+    expect(getDecorateCacheLimit()).toBe(4)
+    expect(decorateCache.size).toBe(3)
+    const ids = new Set(models.slice(0, 3).map((m) => m.id))
+    expect([...decorateCache.keys()].every((id) => ids.has(id))).toBe(true)
+  })
+
+  it('模型数超过硬上限时按 LRU 保留不超过上限的条目', async () => {
+    setDecorateCachePolicyForTests({ min: 2, max: 5 })
+    const models = []
+    for (let i = 0; i < 8; i++) {
+      const abs = path.join(root, `cap-${i}.safetensors`)
+      await fs.writeFile(abs, 'x')
+      models.push(makeModel(abs))
+    }
+    await decorateModels(models, undefined, { adaptCacheSize: true })
+    expect(getDecorateCacheLimit()).toBe(5)
+    expect(decorateCache.size).toBe(5)
   })
 })
 
