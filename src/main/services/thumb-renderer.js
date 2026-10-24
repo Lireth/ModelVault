@@ -1,4 +1,5 @@
-import { BrowserWindow } from 'electron'
+import path from 'node:path'
+import { app, BrowserWindow } from 'electron'
 import logger from '../logger'
 
 /**
@@ -14,17 +15,23 @@ import logger from '../logger'
  * + OffscreenCanvas）在独立渲染进程中执行，结果以 ArrayBuffer 经 IPC 传回。
  * Chromium 原生编解码覆盖项目支持的全部封面格式（jpg/png/webp/gif/bmp）。
  *
- * 安全说明：窗口为本应用自有的空页面（about:blank），不加载任何远程内容，
- * 仅执行内置的渲染脚本；nodeIntegration 仅用于该脚本内获取 ipcRenderer。
+ * 安全说明（OPT-01）：窗口仅加载 about:blank，页面本身不执行任何脚本；
+ * 渲染逻辑收敛在独立 preload（src/preload/thumb-preload.js）中。窗口开启
+ * sandbox/contextIsolation 并关闭 nodeIntegration——即使图片解码环节触发
+ * 渲染进程漏洞，也无法获得 Node/文件系统能力。窗口空闲且无在途任务时
+ * 自动销毁，回收隐藏渲染进程的常驻内存。
  */
 
 /** 单任务渲染超时（ms）：渲染进程挂死/GPU 异常时兜底失败回退原图 */
 const RENDER_TIMEOUT_MS = 20000
 
-/** 隐藏窗口单例（惰性创建；异常退出/超时后销毁，下次任务重建） */
+/** 空闲回收（ms）：无在途任务后保留窗口的时间，超时即销毁并等待下次惰性重建 */
+const IDLE_DESTROY_MS = 60000
+
+/** 隐藏窗口单例（惰性创建；异常退出/超时/空闲回收后销毁，下次任务重建） */
 let win = null
 
-/** 窗口就绪 promise（loadURL + 渲染脚本安装完成） */
+/** 窗口就绪 promise（loadURL 完成，preload 已由 Electron 在页面加载前执行） */
 let readyPromise = null
 
 /** 任务派发序号 */
@@ -33,66 +40,50 @@ let nextTaskId = 0
 /** 在途任务表：id -> { resolve, reject, timer } */
 const pending = new Map()
 
+/** 空闲回收定时器（无在途任务时启动） */
+let idleTimer = null
+
+/** 空闲回收时长（测试可注入小值） */
+let idleTimeoutMs = IDLE_DESTROY_MS
+
 /**
- * 渲染进程侧脚本（经 executeJavaScript 安装，幂等）：
- * 消息协议——
- * 入：{ id, url?, buf?, thumbWidth, minSourceWidth, quality }（webContents.send）
- *   url：源图 mvimg:// 地址（生产链路，渲染进程自行读取，主进程不整图读盘）；
- *   buf：源图字节（保留给调用方/测试直接传入内存数据的路径）。
- * 出：{ id, small: true } 源图宽度不足免缩放；{ id, jpeg: Uint8Array } 成功；
- *     { id, error } 解码/编码失败（损坏文件、不支持格式等）。
- * 与原 nativeImage 实现的行为对齐：宽度 <= minSourceWidth 返回 small（调用方
- * 回退原图）；解码失败返回 error（调用方回退原图，等价原 isEmpty() 分支）。
+ * 缩略图 preload 绝对路径：主进程产物位于 out/main/index.js，
+ * preload 与其同级位于 out/preload/thumb-preload.js。开发与打包目录结构一致。
+ * @returns {string} preload 绝对路径
  */
-const RENDERER_SCRIPT = `
-;(function () {
-  if (window.__mvThumbRenderer) return
-  window.__mvThumbRenderer = true
-  const { ipcRenderer } = require('electron')
-  ipcRenderer.on('thumb:render', async (_e, task) => {
-    const { id, url, buf, thumbWidth, minSourceWidth, quality } = task
-    let bitmap = null
-    try {
-      // OP-03：优先按 URL 读取源图（读写都发生在渲染进程侧），避免主进程
-      // 读入整图后经 IPC 结构化克隆再复制一份；buf 路径保留兼容直传字节。
-      // 使用 Image 而非 fetch：自定义协议对 <img> 无 CORS 限制，且无需把
-      // 整图再复制进 Blob；解码仍由 Chromium 完成。
-      let source = null
-      let width = 0
-      let height = 0
-      if (url) {
-        source = await new Promise((resolve, reject) => {
-          const img = new Image()
-          img.onload = () => resolve(img)
-          img.onerror = () => reject(new Error('读取源图失败'))
-          img.src = url
-        })
-        width = source.naturalWidth
-        height = source.naturalHeight
-      } else {
-        bitmap = await createImageBitmap(new Blob([buf]))
-        source = bitmap
-        width = bitmap.width
-        height = bitmap.height
-      }
-      if (!width || !height) throw new Error('源图尺寸无效')
-      if (width <= minSourceWidth) {
-        ipcRenderer.send('thumb:done', { id, small: true })
-        return
-      }
-      const outHeight = Math.max(1, Math.round((height * thumbWidth) / width))
-      const canvas = new OffscreenCanvas(thumbWidth, outHeight)
-      canvas.getContext('2d').drawImage(source, 0, 0, thumbWidth, outHeight)
-      const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality })
-      ipcRenderer.send('thumb:done', { id, jpeg: new Uint8Array(await blob.arrayBuffer()) })
-    } catch (err) {
-      ipcRenderer.send('thumb:done', { id, error: (err && err.message) || String(err) })
-    } finally {
-      if (bitmap) bitmap.close()
-    }
-  })
-})()
-`
+function getThumbPreloadPath() {
+  return path.join(app.getAppPath(), 'out', 'preload', 'thumb-preload.js')
+}
+
+/**
+ * 判断给定 webContents 是否属于缩略图隐藏窗口（IPC 来源白名单用）。
+ * 隐藏窗口的 preload 只需 on/send 两条缩略图通道；任何 invoke 调用都应
+ * 在主进程入口被拒绝，避免图片解码环节被利用后进一步触达业务 IPC。
+ * @param {import('electron').WebContents | null | undefined} contents
+ * @returns {boolean}
+ */
+export function isThumbRendererContents(contents) {
+  return Boolean(win && !win.isDestroyed() && contents && win.webContents === contents)
+}
+
+/** 取消空闲回收（有新任务派发/窗口销毁时调用） */
+function clearIdleTimer() {
+  if (!idleTimer) return
+  clearTimeout(idleTimer)
+  idleTimer = null
+}
+
+/** 安排空闲回收：仅当窗口存在且没有在途任务时启动；重复调用幂等 */
+function scheduleIdleDestroy() {
+  if (idleTimer || pending.size > 0 || !win) return
+  idleTimer = setTimeout(() => {
+    idleTimer = null
+    if (pending.size > 0) return
+    logger.info(`缩略图渲染窗口空闲 ${idleTimeoutMs}ms，已回收`)
+    destroyWindow()
+  }, idleTimeoutMs)
+  idleTimer.unref?.()
+}
 
 /** 渲染任务超时上限（测试钩子：注入小值避免真实等待） */
 let renderTimeoutMs = RENDER_TIMEOUT_MS
@@ -105,6 +96,14 @@ export function setThumbRenderTimeoutForTests(ms) {
   renderTimeoutMs = Number.isFinite(ms) && ms > 0 ? ms : RENDER_TIMEOUT_MS
 }
 
+/**
+ * 注入空闲回收时长（仅供单元测试使用；生产代码严禁调用）
+ * @param {number} ms 空闲毫秒数
+ */
+export function setThumbRendererIdleTimeoutForTests(ms) {
+  idleTimeoutMs = Number.isFinite(ms) && ms > 0 ? ms : IDLE_DESTROY_MS
+}
+
 /** 拒绝全部在途任务并清空任务表 */
 function failAll(err) {
   for (const task of pending.values()) {
@@ -114,8 +113,12 @@ function failAll(err) {
   pending.clear()
 }
 
-/** 销毁隐藏窗口（主窗口关闭/异常清理路径调用） */
+/**
+ * 销毁隐藏窗口（主窗口关闭/异常清理/空闲回收路径调用）。
+ * 空闲定时器一并取消，避免对已销毁窗口重复调度。
+ */
 function destroyWindow() {
+  clearIdleTimer()
   const w = win
   win = null
   readyPromise = null
@@ -123,23 +126,42 @@ function destroyWindow() {
 }
 
 /**
- * 惰性创建隐藏渲染窗口并安装渲染脚本：
+ * 结算一条在途任务：清理超时计时器、移出 pending，按结果 resolve/reject；
+ * 无剩余任务时安排空闲回收（OPT-01）。
+ * @param {number} id 任务 id
+ * @param {{value?: any, error?: Error}} outcome 成功值或失败错误（二选一）
+ */
+function settleTask(id, outcome) {
+  const task = pending.get(id)
+  if (!task) return
+  pending.delete(id)
+  clearTimeout(task.timer)
+  if (outcome.error) task.reject(outcome.error)
+  else task.resolve(outcome.value)
+  scheduleIdleDestroy()
+}
+
+/**
+ * 惰性创建隐藏渲染窗口：
  * - show:false + skipTaskbar：完全不可见，不进任务栏；
+ * - sandbox/contextIsolation 开启、nodeIntegration 关闭（OPT-01）：页面与
+ *   preload 均无 Node 能力，仅 preload 保留受限的 ipcRenderer；
  * - backgroundThrottling:false：隐藏窗口内 Promise/canvas 不被节流；
- * - loadURL 失败/渲染脚本安装失败：readyPromise reject，本次任务报错回退。
+ * - loadURL 失败：readyPromise reject，本次任务报错回退原图。
  */
 function ensureWindowReady() {
+  clearIdleTimer()
   if (win && !win.isDestroyed() && readyPromise) return readyPromise
   destroyWindow()
   const w = new BrowserWindow({
     show: false,
     skipTaskbar: true,
     webPreferences: {
-      // 渲染脚本经 executeJavaScript 安装，需要 nodeIntegration 获取 ipcRenderer；
-      // 页面为本应用自有空页（about:blank），无远程内容，攻击面可控
-      nodeIntegration: true,
-      contextIsolation: false,
-      sandbox: false,
+      // 渲染逻辑收敛在专用 preload；页面为 about:blank，不执行任何页面脚本
+      preload: getThumbPreloadPath(),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
       backgroundThrottling: false,
       spellcheck: false
     }
@@ -153,32 +175,27 @@ function ensureWindowReady() {
     failAll(new Error('缩略图渲染进程异常退出'))
   })
 
-  // 渲染进程回传结果（ipcRenderer.send -> ipc-message 通道）
+  // preload 回传结果（ipcRenderer.send -> ipc-message 通道）
   w.webContents.on('ipc-message', (_event, channel, payload) => {
     if (channel !== 'thumb:done' || !payload || typeof payload.id !== 'number') return
-    const task = pending.get(payload.id)
-    if (!task) return
-    pending.delete(payload.id)
-    clearTimeout(task.timer)
     if (payload.error) {
-      task.reject(new Error(payload.error))
+      settleTask(payload.id, { error: new Error(payload.error) })
     } else if (payload.small) {
-      task.resolve({ small: true })
+      settleTask(payload.id, { value: { small: true } })
     } else if (payload.jpeg) {
-      task.resolve({ jpeg: Buffer.from(payload.jpeg) })
+      settleTask(payload.id, { value: { jpeg: Buffer.from(payload.jpeg) } })
     } else {
-      task.reject(new Error('缩略图渲染响应无效'))
+      settleTask(payload.id, { error: new Error('缩略图渲染响应无效') })
     }
   })
 
   readyPromise = (async () => {
     await w.loadURL('about:blank')
     if (w.isDestroyed()) throw new Error('缩略图渲染窗口已销毁')
-    await w.webContents.executeJavaScript(RENDERER_SCRIPT)
   })()
-  // 初始化失败（loadURL/executeJavaScript 异常）：记日志并销毁窗口，使下次
-  // 调用走全新创建而非复用已失败的 readyPromise（否则后续任务永久失败）；
-  // 挂起在途任务由各自 await 的 readyPromise 按错误回退原图
+  // 初始化失败（loadURL 异常）：记日志并销毁窗口，使下次调用走全新创建
+  // 而非复用已失败的 readyPromise（否则后续任务永久失败）；挂起在途任务
+  // 由各自 await 的 readyPromise 按错误回退原图
   const current = readyPromise
   readyPromise.catch((err) => {
     logger.warn(`缩略图渲染窗口初始化失败: ${err.message}`)
@@ -221,17 +238,17 @@ export async function renderThumbFromPath(url, opts) {
  * @returns {Promise<{small: true} | {jpeg: Buffer}>}
  */
 function dispatchThumbTask(payload) {
+  clearIdleTimer()
   const ready = ensureWindowReady()
   const id = nextTaskId++
   return new Promise((resolve, reject) => {
     const task = { resolve, reject, timer: null }
     pending.set(id, task)
     task.timer = setTimeout(() => {
-      // 超时：拒绝本任务并销毁窗口——渲染进程已不可信（挂死/GPU 异常），
+      // 超时：渲染进程已不可信（挂死/GPU 异常），拒绝全部在途任务并销毁窗口，
       // 下次任务经 ensureWindowReady 重建全新实例
-      pending.delete(id)
+      failAll(new Error(`缩略图渲染超时（${renderTimeoutMs}ms）`))
       destroyWindow()
-      reject(new Error(`缩略图渲染超时（${renderTimeoutMs}ms）`))
     }, renderTimeoutMs)
     ready
       .then(() => {
@@ -240,9 +257,7 @@ function dispatchThumbTask(payload) {
         w.webContents.send('thumb:render', { id, ...payload })
       })
       .catch((err) => {
-        pending.delete(id)
-        clearTimeout(task.timer)
-        reject(err)
+        settleTask(id, { error: err })
       })
   })
 }

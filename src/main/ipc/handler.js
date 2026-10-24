@@ -4,6 +4,7 @@ import logger from '../logger'
 import { getCurrentRoot, isInRoot } from '../services/store'
 import { validateIpcPayload } from '../../shared/ipc-schema'
 import { isPathRealWithin, resolveRealPath } from '../utils'
+import { isThumbRendererContents } from '../services/thumb-renderer'
 
 /**
  * IPC handler 统一包装与入参校验助手（O1/O2 样板收敛）：
@@ -36,6 +37,12 @@ import { isPathRealWithin, resolveRealPath } from '../utils'
 export function wrapHandler(channel, handler, opts = {}) {
   const prefix = opts.errorPrefix || '操作失败'
   ipcMain.handle(channel, async (event, payload) => {
+    // OPT-01：缩略图隐藏窗口只允许 on/send 两条缩略图通道；即使其
+    // preload 被图片解码漏洞利用，也不能借 invoke 触达业务 IPC。
+    if (isThumbRendererContents(event?.sender)) {
+      logger.warn(`拒绝来自缩略图渲染窗口的 IPC 调用: ${channel}`)
+      return { error: '不允许的 IPC 来源' }
+    }
     try {
       // O-2 结构门禁：非法 payload 不进入业务代码（语义校验仍在 handler 内）
       const schemaError = validateIpcPayload(channel, payload)

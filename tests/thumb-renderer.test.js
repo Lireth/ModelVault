@@ -25,6 +25,7 @@ vi.mock('electron', () => {
     }
     async executeJavaScript(code) {
       this.installedScript = code
+      this.executeJavaScriptCalls = (this.executeJavaScriptCalls || 0) + 1
     }
     emit(channel, ...args) {
       for (const fn of this.handlers[channel] || []) fn(...args)
@@ -58,7 +59,11 @@ vi.mock('electron', () => {
   return {
     BrowserWindow: FakeBrowserWindow,
     __FakeBrowserWindow: FakeBrowserWindow,
-    app: { getPath: vi.fn(() => fakeUserData), isPackaged: true }
+    app: {
+      getPath: vi.fn(() => fakeUserData),
+      getAppPath: vi.fn(() => fakeUserData),
+      isPackaged: true
+    }
   }
 })
 
@@ -66,7 +71,9 @@ import {
   renderThumbJpeg,
   renderThumbFromPath,
   destroyThumbRenderer,
-  setThumbRenderTimeoutForTests
+  isThumbRendererContents,
+  setThumbRenderTimeoutForTests,
+  setThumbRendererIdleTimeoutForTests
 } from '../src/main/services/thumb-renderer'
 import logger from '../src/main/logger'
 import { BrowserWindow as FakeBrowserWindow } from 'electron'
@@ -81,6 +88,7 @@ beforeEach(() => {
 afterEach(() => {
   destroyThumbRenderer()
   setThumbRenderTimeoutForTests(20000)
+  setThumbRendererIdleTimeoutForTests(60000)
   vi.useRealTimers()
 })
 
@@ -212,7 +220,22 @@ it('destroyThumbRenderer：拒绝在途任务（主窗口关闭链路防进程�
   await expect(p).rejects.toThrow('缩略图渲染服务已销毁')
 })
 
-it('隐藏窗口创建参数：不可见、不进任务栏、禁用后台节流', async () => {
+it('isThumbRendererContents：只识别当前隐藏窗口（业务 IPC 来源拒绝依据）', async () => {
+  expect(isThumbRendererContents(null)).toBe(false)
+  const p = renderThumbJpeg(Buffer.from('x'), {
+    thumbWidth: 640,
+    minSourceWidth: 720,
+    quality: 0.82
+  })
+  await flush()
+  const w = onlyWindow()
+  expect(isThumbRendererContents(w.webContents)).toBe(true)
+  expect(isThumbRendererContents({})).toBe(false)
+  // 在途任务由 afterEach 的 destroy 拒绝并兜底
+  p.catch(() => {})
+})
+
+it('隐藏窗口创建参数：沙箱化、无 Node 能力、禁用后台节流', async () => {
   const p = renderThumbJpeg(Buffer.from('x'), {
     thumbWidth: 640,
     minSourceWidth: 720,
@@ -222,9 +245,63 @@ it('隐藏窗口创建参数：不可见、不进任务栏、禁用后台节流'
   const w = onlyWindow()
   expect(w.opts.show).toBe(false)
   expect(w.opts.skipTaskbar).toBe(true)
-  expect(w.opts.webPreferences.backgroundThrottling).toBe(false)
-  // 渲染脚本经 executeJavaScript 安装（幂等标志位在脚本自身）
-  expect(w.webContents.installedScript).toContain('__mvThumbRenderer')
+  expect(w.opts.webPreferences).toMatchObject({
+    nodeIntegration: false,
+    contextIsolation: true,
+    sandbox: true,
+    backgroundThrottling: false,
+    spellcheck: false
+  })
+  // 渲染逻辑收敛在专用 preload，不再向隐藏页面注入 Node 脚本
+  expect(w.opts.webPreferences.preload).toContain('thumb-preload.js')
+  expect(w.webContents.executeJavaScriptCalls || 0).toBe(0)
   // 在途任务不等待结算（20s 真实超时）：afterEach 的 destroy 会拒绝并兜底
   p.catch(() => {})
+})
+
+it('空闲回收：任务完成且无在途任务后销毁窗口，下次任务重建', async () => {
+  setThumbRendererIdleTimeoutForTests(5)
+  const p = renderThumbJpeg(Buffer.from('x'), {
+    thumbWidth: 640,
+    minSourceWidth: 720,
+    quality: 0.82
+  })
+  await flush()
+  const w = onlyWindow()
+  const { payload } = w.webContents.sent[0]
+  w.webContents.emit('ipc-message', {}, 'thumb:done', { id: payload.id, small: true })
+  await expect(p).resolves.toEqual({ small: true })
+
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  expect(w.destroyed).toBe(true)
+
+  // 空闲销毁后按需重建，服务仍可用
+  const p2 = renderThumbJpeg(Buffer.from('y'), {
+    thumbWidth: 640,
+    minSourceWidth: 720,
+    quality: 0.82
+  })
+  await flush()
+  expect(FakeBrowserWindow.instances).toHaveLength(2)
+  const w2 = FakeBrowserWindow.instances[1]
+  const { payload: payload2 } = w2.webContents.sent[0]
+  w2.webContents.emit('ipc-message', {}, 'thumb:done', { id: payload2.id, small: true })
+  await expect(p2).resolves.toEqual({ small: true })
+})
+
+it('空闲回收：仍有在途任务时不销毁窗口', async () => {
+  setThumbRendererIdleTimeoutForTests(5)
+  const p = renderThumbJpeg(Buffer.from('x'), {
+    thumbWidth: 640,
+    minSourceWidth: 720,
+    quality: 0.82
+  })
+  await flush()
+  const w = onlyWindow()
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  expect(w.destroyed).toBe(false)
+
+  const { payload } = w.webContents.sent[0]
+  w.webContents.emit('ipc-message', {}, 'thumb:done', { id: payload.id, small: true })
+  await expect(p).resolves.toEqual({ small: true })
 })

@@ -1,6 +1,7 @@
-import { app, BrowserWindow, protocol } from 'electron'
+import { app, BrowserWindow, nativeImage, protocol } from 'electron'
 import fs from 'node:fs/promises'
 import logger from './logger'
+import { renderThumbJpeg } from './services/thumb-renderer'
 
 /**
  * 启动冒烟检查（V-05，仅 MODELVAULT_SMOKE=1 时由 index.js 调用）：
@@ -13,6 +14,8 @@ import logger from './logger'
 
 /** 单项检查超时（页面加载/executeJavaScript 共用） */
 const CHECK_TIMEOUT_MS = 20000
+/** 缩略图真实渲染检查超时（沙箱化隐藏窗口 + preload 链路） */
+const THUMB_CHECK_TIMEOUT_MS = 15000
 /** 整体兜底超时：任何卡死都必须让 CI 拿到明确失败而非挂起 */
 const TOTAL_TIMEOUT_MS = 40000
 
@@ -144,6 +147,24 @@ export async function runStartupSmoke(win) {
       name: 'preload-ipc',
       ok: Boolean(info && typeof info.version === 'string' && info.electron),
       detail: info ? `version=${info.version} electron=${info.electron}` : 'window.api 不可用'
+    })
+
+    // OPT-01：真实渲染一次缩略图，验证沙箱化隐藏窗口 + 专用 preload 的
+    // 加载路径与画布链路在开发/打包目录下均可用（纯内存图，不依赖模型库）
+    const sourceSize = 800
+    const bitmap = Buffer.alloc(sourceSize * sourceSize * 4, 0xff)
+    const png = nativeImage
+      .createFromBitmap(bitmap, { width: sourceSize, height: sourceSize })
+      .toPNG()
+    const thumb = await withTimeout(
+      renderThumbJpeg(png, { thumbWidth: 640, minSourceWidth: 720, quality: 0.8 }),
+      THUMB_CHECK_TIMEOUT_MS,
+      '缩略图渲染检查'
+    )
+    checks.push({
+      name: 'thumb-renderer',
+      ok: Boolean(thumb && thumb.jpeg && thumb.jpeg.length > 0),
+      detail: thumb?.jpeg ? `jpeg=${thumb.jpeg.length}B` : '未生成 JPEG'
     })
 
     const windows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())

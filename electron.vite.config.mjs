@@ -1,5 +1,6 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import vue from '@vitejs/plugin-vue'
+import { fileURLToPath } from 'node:url'
 import { applyProductionCsp } from './scripts/csp.mjs'
 
 /**
@@ -29,9 +30,17 @@ export default defineConfig({
       )
     }
   },
-  // 预加载脚本
+  // 预加载脚本：应用主 preload 与缩略图隐藏窗口专用 preload（OPT-01）
   preload: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        input: {
+          index: fileURLToPath(new URL('./src/preload/index.js', import.meta.url)),
+          'thumb-preload': fileURLToPath(new URL('./src/preload/thumb-preload.js', import.meta.url))
+        }
+      }
+    }
   },
   // 渲染进程：集成 Vue 3，支持 HMR 热重载
   renderer: {
