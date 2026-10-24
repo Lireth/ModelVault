@@ -188,6 +188,20 @@ describe('decorateModels 元数据装饰', () => {
       name: 'AbortError'
     })
   })
+
+  it('多批规模（>2×并发上限）下结果顺序与输入一致（流式池索引回填，P1-1）', async () => {
+    // 150 超过原批模型的 2×64：流式池完成顺序不定（各模型 sidecar 探测/
+    // 头部解析耗时不同），顺序只能由索引回填保证
+    const models = []
+    for (let i = 0; i < 150; i++) {
+      const abs = path.join(root, `order-${String(i).padStart(3, '0')}.safetensors`)
+      await fs.writeFile(abs, 'x')
+      models.push(makeModel(abs))
+    }
+    const decorated = await decorateModels(models)
+    expect(decorated).toHaveLength(150)
+    expect(decorated.map((m) => m.name)).toEqual(models.map((m) => m.name))
+  })
 })
 
 describe('OPT-07 局部扫描缓存感知 sidecar/封面变化', () => {

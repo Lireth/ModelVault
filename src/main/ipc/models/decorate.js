@@ -12,7 +12,7 @@ import { drainDeferredThumbs, getThumbPathDeferred, pruneThumbs } from '../../se
 import { checkSafetensorsHealthy, readSafetensorsInfo } from '../../services/safetensors'
 import { toImageUrl } from '../../protocol'
 import { decorateCache, getThumbDrainPromise, setThumbDrainPromise } from './model-state'
-import { abortError, boundedMapSet } from '../../utils'
+import { abortError, boundedMapSet, runWithConcurrency } from '../../utils'
 
 /**
  * 扫描结果装饰管线：为扫描出的模型列表补齐封面、缩略图、元数据标注、
@@ -21,7 +21,7 @@ import { abortError, boundedMapSet } from '../../utils'
  * mtime 与元数据签名均未变化的模型跳过全部文件 IO。
  */
 
-/** 并行装饰的分批大小：单批内并发 stat，批间串行，避免一次性打开过多文件句柄 */
+/** 并行装饰的最大在途数（流式并发池上限）：完成一个补位一个，文件句柄峰值恒定 */
 const DECORATE_BATCH_SIZE = 64
 
 /** 缓存容量上限：超出后按插入顺序淘汰最旧条目 */
@@ -411,10 +411,10 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
 }
 
 /**
- * 分批并行装饰模型列表，保持输入顺序；
+ * 并行装饰模型列表，保持输入顺序；
  * 末尾按已使用的缩略图清单清理失效缩略图文件。
  * @param {Array<object>} models 扫描出的模型列表
- * @param {AbortSignal} [signal] 取消信号（批间检查）
+ * @param {AbortSignal} [signal] 取消信号（每任务开始前检查）
  * @param {{pruneThumbs?: boolean, forceRefresh?: boolean}} [opts]
  *   pruneThumbs=false 跳过末尾的失效缩略图清理（局部增量扫描必传）：
  *   局部装饰仅覆盖变更子树，usedThumbs 不含子树外模型的缩略图，此时按名单
@@ -426,16 +426,22 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
  */
 export async function decorateModels(models, signal, opts = {}) {
   const usedThumbs = new Set()
-  const result = []
+  // 结果按索引回填：流式池完成顺序不定，回填保持与输入一致的顺序
+  const result = new Array(models.length)
   const forceRefresh = opts.forceRefresh === true
-  for (let i = 0; i < models.length; i += DECORATE_BATCH_SIZE) {
-    if (signal?.aborted) throw abortError()
-    const batch = models.slice(i, i + DECORATE_BATCH_SIZE)
-    const decoratedBatch = await Promise.all(
-      batch.map((m) => decorateOne(m, usedThumbs, forceRefresh))
-    )
-    result.push(...decoratedBatch)
-  }
+  // 流式固定并发池（与 scanner/watcher 共用 utils.runWithConcurrency，O-5）：
+  // 完成一个补位一个，消除「批内并发、批间串行」的整批等待尾延迟——每批
+  // 最慢的模型（多封面逐张 stat + safetensors 头解析）不再拖住同批其余任务。
+  // 并发峰值与原批大小一致（句柄峰值不变）；取消检查从批间提前到每任务前，
+  // 响应更及时且异常类型不变（AbortError）
+  await runWithConcurrency(
+    models,
+    async (m, index) => {
+      if (signal?.aborted) throw abortError()
+      result[index] = await decorateOne(m, usedThumbs, forceRefresh)
+    },
+    DECORATE_BATCH_SIZE
+  )
   if (opts.pruneThumbs !== false) await pruneThumbs(usedThumbs)
   return result
 }
