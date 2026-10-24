@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
 import { fakeUserData } from './setup'
 import fs from 'node:fs'
+import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -112,6 +113,8 @@ describe('models:loadStore 目录监控启动路径（OPT-19）', () => {
 
   beforeEach(() => {
     vi.mocked(syncWatcher).mockClear()
+    vi.mocked(computeFileHash).mockReset()
+    resetHashWarmupForTests()
     registerStoreHandlers()
   })
 
@@ -131,6 +134,73 @@ describe('models:loadStore 目录监控启动路径（OPT-19）', () => {
     const root = writeSettings({ autoScan: false, autoRescan: false })
     await getRegisteredHandler('models:loadStore')(makeEvent())
     expect(syncWatcher).toHaveBeenCalledWith(root, false, [], { nativeWatch: true })
+  })
+
+  it('loadStore 用索引 size/mtime 播种预热：缓存有效且体积唯一的库启动零 stat 零哈希（P1-2）', async () => {
+    const root = writeSettings({ autoScan: false })
+    const id1 = path.join(root, 'a.safetensors')
+    const id2 = path.join(root, 'b.safetensors')
+    fs.writeFileSync(id1, 'x'.repeat(16))
+    fs.writeFileSync(id2, 'y'.repeat(32))
+    const s1 = await fsp.stat(id1)
+    const s2 = await fsp.stat(id2)
+    // 模拟「缓存了哈希的大库」：两模型哈希均已缓存且与 mtime 匹配
+    fs.mkdirSync(path.join(root, '.modelvault'), { recursive: true })
+    fs.writeFileSync(
+      path.join(root, '.modelvault', 'store.json'),
+      JSON.stringify({
+        version: 1,
+        models: {
+          'a.safetensors': { hash: 'a'.repeat(64), hashMtime: s1.mtimeMs },
+          'b.safetensors': { hash: 'b'.repeat(64), hashMtime: s2.mtimeMs }
+        }
+      })
+    )
+    // 本地索引携带 size/mtime（上次扫描的装饰结果）
+    fs.writeFileSync(
+      path.join(root, '.modelvault', 'index.json'),
+      JSON.stringify({
+        version: 1,
+        root,
+        savedAt: 1,
+        durationMs: 42,
+        models: [
+          {
+            id: id1,
+            name: 'a',
+            type: 'lora',
+            ext: '.safetensors',
+            size: s1.size,
+            mtimeMs: s1.mtimeMs,
+            relDir: ''
+          },
+          {
+            id: id2,
+            name: 'b',
+            type: 'lora',
+            ext: '.safetensors',
+            size: s2.size,
+            mtimeMs: s2.mtimeMs,
+            relDir: ''
+          }
+        ]
+      })
+    )
+    await loadSettings()
+
+    vi.mocked(computeFileHash).mockResolvedValue('c'.repeat(64))
+    const statSpy = vi.spyOn(fsp, 'stat')
+    try {
+      await getRegisteredHandler('models:loadStore')(makeEvent())
+      // 旧实现播种裸 id：全部入队，3s 后由 drain 逐个 stat 复核缓存
+      await whenWarmupIdle()
+      const statPaths = statSpy.mock.calls.map((c) => String(c[0]))
+      expect(statPaths).not.toContain(id1)
+      expect(statPaths).not.toContain(id2)
+      expect(computeFileHash).not.toHaveBeenCalled()
+    } finally {
+      statSpy.mockRestore()
+    }
   })
 })
 

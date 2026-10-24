@@ -146,6 +146,49 @@ describe('requestHashWarmup（队列消费）', () => {
     expect(computeFileHash).not.toHaveBeenCalled()
   })
 
+  it('full 模式携带 mtime 的缓存有效条目免入队（零 stat，P1-2）', async () => {
+    const a = await makeModel('w2b.safetensors')
+    const b = await makeModel('w2c.safetensors')
+    const sa = await fs.stat(a)
+    const sb = await fs.stat(b)
+    // a 缓存有效；b 无缓存——只有 b 应入队计算
+    setModelMeta(a, { hash: fakeHash(11), hashMtime: sa.mtimeMs })
+    computeFileHash.mockResolvedValue(fakeHash(12))
+    const statSpy = vi.spyOn(fs, 'stat')
+    try {
+      requestHashWarmup(
+        [
+          { id: a, size: sa.size, mtimeMs: sa.mtimeMs },
+          { id: b, size: sb.size, mtimeMs: sb.mtimeMs }
+        ],
+        { mode: 'full', full: true, delayMs: 0 }
+      )
+      await whenWarmupIdle()
+      expect(computeFileHash).toHaveBeenCalledTimes(1)
+      expect(computeFileHash.mock.calls[0][0]).toBe(b)
+      // 缓存有效的 a 在入队侧被过滤：drain 不再为其发起 stat 复核
+      expect(statSpy.mock.calls.map((c) => c[0])).toEqual([b])
+    } finally {
+      statSpy.mockRestore()
+    }
+  })
+
+  it('裸 id（mtime 未知）在 full 模式仍保守入队，由 drain stat 复核（P1-2 行为锁定）', async () => {
+    const a = await makeModel('w2d.safetensors')
+    const { mtimeMs } = await fs.stat(a)
+    setModelMeta(a, { hash: fakeHash(13), hashMtime: mtimeMs })
+    const statSpy = vi.spyOn(fs, 'stat')
+    try {
+      requestHashWarmup([a], { mode: 'full', full: true, delayMs: 0 })
+      await whenWarmupIdle()
+      // 无 mtime 信息时不能断言缓存有效：入队后经实时 stat 复核跳过
+      expect(statSpy.mock.calls.map((c) => c[0])).toEqual([a])
+      expect(computeFileHash).not.toHaveBeenCalled()
+    } finally {
+      statSpy.mockRestore()
+    }
+  })
+
   it('文件已删除的模型静默跳过，不中断队列', async () => {
     const gone = path.join(root, 'gone.safetensors')
     const alive = await makeModel('alive.safetensors')

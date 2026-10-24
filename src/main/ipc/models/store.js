@@ -164,12 +164,26 @@ export function registerStoreHandlers() {
           await ensureRootStore(settings.modelsFolder, { maintenanceToken: token })
           // 清理不再被元数据引用的孤儿封面文件
           await pruneOrphanCovers()
+          // F1：返回上次全量扫描的本地索引，渲染层可先秒开列表再后台校验
+          cachedIndex = await readLibraryIndex(settings.modelsFolder)
+          if (cachedIndex) {
+            cachedIndex = {
+              ...cachedIndex,
+              models: overlayCurrentMeta(cachedIndex.models)
+            }
+          }
           // 启动后后台预热缺失的模型哈希（Civitai 识别加速）：仅入队，
           // 由预热服务延迟逐个处理，已缓存/文件缺失的条目消费时秒级跳过。
-          // O1：启动时只有元数据键、没有体积——full=true 重置体积索引，
-          // candidates 策略下由 drain 逐个 stat 后按真实体积决定是否计算。
-          // 仅取 id 列表，不构造随响应回传的完整元数据映射（启动 IPC 瘦身）
-          requestHashWarmup(getModelIdsByAbsPath(), {
+          // P1-2：播种改用索引模型自带的 size/mtime——此前只有元数据键的
+          // 裸 id，candidates 策略下全部入队由 drain 逐个串行 stat，缓存哈希
+          // 的大库（网络盘尤甚）启动后是分钟级纯 stat 开销；现在体积唯一者
+          // 直接不入队（零 IO）。full=true 重置体积索引；索引模型即上次扫描
+          // 的装饰结果（readLibraryIndex 宽返回类型在此断言），无索引时回退
+          // 裸 id 列表（不构造随响应回传的完整元数据映射，启动 IPC 瘦身）
+          const warmupSeed = cachedIndex
+            ? /** @type {any[]} */ (cachedIndex.models)
+            : getModelIdsByAbsPath()
+          requestHashWarmup(warmupSeed, {
             mode: settings.hashWarmup,
             full: true
           })
@@ -182,14 +196,6 @@ export function registerStoreHandlers() {
             settings.excludeDirs || [],
             { nativeWatch: true }
           )
-          // F1：返回上次全量扫描的本地索引，渲染层可先秒开列表再后台校验
-          cachedIndex = await readLibraryIndex(settings.modelsFolder)
-          if (cachedIndex) {
-            cachedIndex = {
-              ...cachedIndex,
-              models: overlayCurrentMeta(cachedIndex.models)
-            }
-          }
         }
       }
       return {

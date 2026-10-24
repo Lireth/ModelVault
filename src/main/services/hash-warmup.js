@@ -359,7 +359,14 @@ export function requestHashWarmup(items, opts = {}) {
     }
     if (mode === 'off') continue
     if (mode === 'full') {
-      if (pushQueue(item.id, false, 'full')) added = true
+      // P1-2：缓存有效（哈希存在且 mtime 与本次快照一致）的条目免入队——
+      // 此前全量模式下已缓存条目也逐个入队，由 drain 串行 stat 复核后跳过，
+      // 缓存哈希的大库启动/扫描后是分钟级的纯 stat 开销。扫描/openLibrary/
+      // loadStore 路径传入的 mtime 即最新事实（扫描为实时 stat、索引为上次
+      // 扫描快照）；mtime 未知的裸 id 保守入队（hasValidCachedHash 为 false），
+      // 行为与旧实现一致。识别链路 ensureHash 以实时 stat 复核缓存，跳过方
+      // 不引入陈旧哈希风险
+      if (!hasValidCachedHash(item.id) && pushQueue(item.id, false, 'full')) added = true
       continue
     }
     // candidates：体积已知则先记录分组，待全部条目登记后统一判定；
