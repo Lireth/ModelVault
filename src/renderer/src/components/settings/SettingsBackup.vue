@@ -5,6 +5,7 @@ import {
   clearAllCovers,
   confirmDialog,
   defaultSettings,
+  exportModelList,
   filteredModels,
   replaceSettings,
   scanModels,
@@ -23,6 +24,9 @@ import {
 const emit = defineEmits(['restored'])
 
 const backupBusy = ref(false)
+
+/** 模型清单导出进行中标记（FN-04，自结果栏移入设置页） */
+const exportListBusy = ref(false)
 
 /** 全库示例图清理进行中标记（按钮禁用，防重复触发） */
 const clearingCovers = ref(false)
@@ -204,6 +208,17 @@ function onExportSelectedBackup() {
   })
 }
 
+/** 导出当前搜索/筛选/排序结果的模型清单（FN-04），格式见按钮 */
+async function onExportList(format) {
+  if (exportListBusy.value) return
+  exportListBusy.value = true
+  try {
+    await exportModelList(format)
+  } finally {
+    exportListBusy.value = false
+  }
+}
+
 /** 导出全库标注但不含封面（FN-08） */
 function onExportMetadataBackup() {
   onExportBackup({ mode: 'metadata' })
@@ -280,6 +295,22 @@ async function onImportBackup() {
         >导出当前筛选…</button>
         <button class="btn" :disabled="backupBusy" @click="onExportMetadataBackup">仅导出标注…</button>
         <button class="btn" :disabled="backupBusy" @click="onImportBackup">从备份恢复…</button>
+      </div>
+    </div>
+
+    <!-- 模型清单导出（FN-04，自结果栏移入）：导出当前搜索/筛选/排序结果 -->
+    <div class="setting-row">
+      <div class="setting-info">
+        <span class="setting-title">模型清单导出</span>
+        <span class="setting-desc">
+          将当前搜索/筛选/排序结果导出为清单文件（CSV 可用 Excel 打开，Markdown 为表格，
+          JSON 保留结构化字段与推荐参数），便于外部整理、分享与审阅。
+        </span>
+      </div>
+      <div class="setting-actions">
+        <button class="btn" :disabled="exportListBusy" @click="onExportList('csv')">CSV（Excel）…</button>
+        <button class="btn" :disabled="exportListBusy" @click="onExportList('markdown')">Markdown 表格…</button>
+        <button class="btn" :disabled="exportListBusy" @click="onExportList('json')">JSON 数据…</button>
       </div>
     </div>
 
