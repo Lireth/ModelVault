@@ -1,6 +1,5 @@
 <script setup>
 import { computed } from 'vue'
-import SidebarDynamicViews from './sidebar/SidebarDynamicViews.vue'
 import SidebarRoots from './sidebar/SidebarRoots.vue'
 import SidebarTypes from './sidebar/SidebarTypes.vue'
 import SidebarViews from './sidebar/SidebarViews.vue'
@@ -10,7 +9,6 @@ import { chooseFolder, openSettings, openStats, scanModels, state } from '../sto
  * 侧栏编排壳（OPT-01 拆分）：
  * - 模型库切换（E7 多根目录 + 失效标记）→ sidebar/SidebarRoots.vue
  * - 智能视图（组合筛选收藏 + 内联命名表单）→ sidebar/SidebarViews.vue
- * - 动态视图（FN-07 内置规则实时求值）→ sidebar/SidebarDynamicViews.vue
  * - 分类筛选（全部 + 五大类型计数）→ sidebar/SidebarTypes.vue
  * - 板块标题样式（.side-section h3）→ main.css 公共类
  * 本文件保留：侧栏布局、模型文件夹信息、操作按钮区、底部页面入口。
@@ -55,9 +53,6 @@ function onScanClick() {
 
     <!-- 智能视图（组合筛选收藏）：当前搜索/分类/收藏/排序组合存为命名视图，一键切换 -->
     <SidebarViews />
-
-    <!-- 动态视图（FN-07）：内置规则随模型实时求值（未评分/近 30 天/长期未更新） -->
-    <SidebarDynamicViews />
 
     <!-- 分类筛选 -->
     <SidebarTypes />

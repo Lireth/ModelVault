@@ -116,9 +116,6 @@ export {
 // 模型对比（FN-03）
 export { COMPARE_MAX_MODELS, compareState, openCompare, closeCompare } from './compare'
 
-// 内置动态智能视图（FN-07）
-export { dynamicViews, activeDynamicViewKey, applyDynamicView } from './dynamic-views'
-
 // 启动自动检查更新（O-3）
 export { updateAvailable, applyUpdateAvailable } from './update'
 

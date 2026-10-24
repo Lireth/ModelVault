@@ -99,10 +99,6 @@ const EXPECTED_EXPORTS = [
   'compareState',
   'openCompare',
   'closeCompare',
-  // 内置动态智能视图（FN-07）
-  'dynamicViews',
-  'activeDynamicViewKey',
-  'applyDynamicView',
   // 启动自动检查更新（O-3）
   'updateAvailable',
   'applyUpdateAvailable',
