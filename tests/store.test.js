@@ -27,6 +27,7 @@ import {
   switchDataRoot,
   updateSettings
 } from '../src/main/services/store'
+import { setSnapshotWorkerThresholdForTests } from '../src/main/services/store-meta-persist'
 import { fakeUserData } from './setup'
 
 /**
@@ -1253,5 +1254,23 @@ describe('库离线写入防护（O5）', () => {
 
     expect(getSettings().theme).toBe('light')
     await expect(fs.access(root)).rejects.toThrow()
+  })
+})
+
+describe('OPT-03 元数据快照序列化降载', () => {
+  it('强制 worker 快照路径仍写出完整且可解析的 store.json', async () => {
+    const abs = await touchModel('worker-snapshot.safetensors')
+    setModelMeta(abs, { alias: '线程序列化', tags: ['a', 'b'] })
+    setSnapshotWorkerThresholdForTests(0)
+    try {
+      await saveStoreNow()
+    } finally {
+      setSnapshotWorkerThresholdForTests(2000)
+    }
+    const text = await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
+    expect(text).toContain('线程序列化')
+    const parsed = JSON.parse(text)
+    expect(parsed.version).toBe(1)
+    expect(parsed.models['worker-snapshot.safetensors'].tags).toEqual(['a', 'b'])
   })
 })

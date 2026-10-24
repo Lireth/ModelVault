@@ -16,10 +16,16 @@ vi.mock('electron', () => ({
 
 import {
   INDEX_VERSION,
+  flushIndexWrites,
+  getQueuedIndexUpdateCountForTests,
+  queueLibraryIndexUpdate,
   readLibraryIndex,
+  resetIndexWriteStateForTests,
+  setIndexWorkerThresholdForTests,
   updateLibraryIndex,
   writeLibraryIndex
 } from '../src/main/services/library-index'
+import { resetJsonSerializerForTests } from '../src/main/services/json-serializer'
 
 let root
 const roots = []
@@ -30,6 +36,8 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  resetIndexWriteStateForTests()
+  await resetJsonSerializerForTests()
   for (const dir of roots) {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
   }
@@ -94,6 +102,64 @@ describe('library-index', () => {
     const cached = await readLibraryIndex(root)
     expect(cached.models).toHaveLength(1)
     expect(cached.models[0].name).toBe('ok.safetensors')
+  })
+})
+
+describe('OPT-03 大库索引写盘降载', () => {
+  it('内容未变化时跳过重复写盘（savedAt/durationMs 不参与指纹）', async () => {
+    const models = [model('a.safetensors'), model('b.safetensors')]
+    expect(await writeLibraryIndex(root, { models, durationMs: 123 })).toBe(true)
+    const file = path.join(root, '.modelvault', 'index.json')
+    const first = JSON.parse(await fs.readFile(file, 'utf-8'))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    // 内容完全一致：即使扫描耗时不同也不重写
+    expect(await writeLibraryIndex(root, { models, durationMs: 999 })).toBe(true)
+    const second = JSON.parse(await fs.readFile(file, 'utf-8'))
+    expect(second.savedAt).toBe(first.savedAt)
+    expect(second.durationMs).toBe(123)
+
+    // 内容变化必须写盘
+    models[0].size = 2
+    expect(await writeLibraryIndex(root, { models, durationMs: 456 })).toBe(true)
+    const third = JSON.parse(await fs.readFile(file, 'utf-8'))
+    expect(third.models[0].size).toBe(2)
+    expect(third.savedAt).toBeGreaterThanOrEqual(first.savedAt)
+  })
+
+  it('索引文件被外部删除时即使指纹一致也重新写入', async () => {
+    const models = [model('a.safetensors')]
+    await writeLibraryIndex(root, { models })
+    const file = path.join(root, '.modelvault', 'index.json')
+    await fs.rm(file)
+    expect(await writeLibraryIndex(root, { models })).toBe(true)
+    await expect(fs.access(file)).resolves.toBeUndefined()
+  })
+
+  it('超过阈值时走 JSON worker 序列化路径', async () => {
+    setIndexWorkerThresholdForTests(0)
+    const models = [model('a.safetensors'), model('b.safetensors')]
+    expect(await writeLibraryIndex(root, { models, durationMs: 7 })).toBe(true)
+    const cached = await readLibraryIndex(root)
+    expect(cached.models).toEqual(models)
+    expect(cached.durationMs).toBe(7)
+  })
+
+  it('局部索引更新合并入队，flush 后一次应用全部变化', async () => {
+    await writeLibraryIndex(root, { models: [model('a.safetensors')] })
+    queueLibraryIndexUpdate(root, {
+      upsertModels: [model('b.safetensors')]
+    })
+    queueLibraryIndexUpdate(root, {
+      upsertModels: [model('c.safetensors')],
+      removeIds: [path.join(root, 'a.safetensors')]
+    })
+    expect(getQueuedIndexUpdateCountForTests()).toBe(1)
+
+    await flushIndexWrites()
+    expect(getQueuedIndexUpdateCountForTests()).toBe(0)
+    const cached = await readLibraryIndex(root)
+    expect(cached.models.map((m) => m.name)).toEqual(['b.safetensors', 'c.safetensors'])
   })
 })
 

@@ -6,6 +6,7 @@ import { notifyStoreSaveError } from './store-events'
 import { isUnsafeModelKey } from './store-meta-normalize'
 import { removeJournalDir } from './store-meta-journal'
 import { metaState } from './store-meta-state'
+import { serializeJsonOffThread } from './json-serializer'
 import { getCurrentRoot, getDataDir, getDataFilePath, getJournalDir } from './store-paths'
 
 /**
@@ -29,6 +30,20 @@ const SAVE_DELAY = 500
  * 全量快照并清空日志；退出、备份、切库、备份恢复等路径强制快照。
  */
 const JOURNAL_COMPACT_ENTRIES = 200
+
+/**
+ * 全量快照超过该模型数时把 JSON.stringify 移入序列化线程（OPT-03）：
+ * 大库快照可达数十 MB，主线程同步序列化会造成窗口/进度条卡顿。
+ */
+const SNAPSHOT_WORKER_THRESHOLD = 2000
+/** 快照 worker 阈值（测试可注入 0 强制走 worker） */
+let snapshotWorkerThreshold = SNAPSHOT_WORKER_THRESHOLD
+
+/** 注入快照 worker 阈值（仅供单元测试使用；生产代码严禁调用） */
+export function setSnapshotWorkerThresholdForTests(count) {
+  snapshotWorkerThreshold =
+    Number.isFinite(count) && count >= 0 ? count : SNAPSHOT_WORKER_THRESHOLD
+}
 
 /**
  * 根目录可用性探测缓存（O5）的有效期：只缓存「可用」结果，避免正常落盘前
@@ -121,11 +136,15 @@ export function scheduleSave() {
  */
 async function writeSnapshot() {
   if (!(await ensureDataDir())) return false
-  // 版本快照必须在同步序列化之前捕获：JSON.stringify 期间/写盘 await 期间
-  // 若有新变更，dirtyKeys 不能整体清空（否则丢失尚未落盘的修改）
+  // 版本快照必须在序列化/写盘之前捕获：序列化与写盘 await 期间若有新变更，
+  // dirtyKeys 不能整体清空（否则丢失尚未落盘的修改）
   const versionAtWrite = metaState.mutationVersion
   const payload = { version: 1, models: metaState.data.models, journalSeq: metaState.journalSeq }
-  const text = JSON.stringify(payload)
+  // OPT-03：大库全量快照序列化交给 worker，避免主进程长时间阻塞
+  const text =
+    Object.keys(metaState.data.models).length >= snapshotWorkerThreshold
+      ? (await serializeJsonOffThread(payload)).text
+      : JSON.stringify(payload)
   // createDirs=false（O5）：目录已由 ensureDataDir 确认，写入阶段绝不重建根目录树
   await atomicWriteFile(getDataFilePath(), text, { createDirs: false })
   metaState.hasSnapshot = true
