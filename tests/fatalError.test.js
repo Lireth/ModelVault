@@ -5,7 +5,7 @@ import { fakeUserData } from './setup'
  * fatal-error.js 单元测试（A3）：
  * 主进程未捕获异常的处理策略——
  * 1. 记录日志（含堆栈）；
- * 2. 尽力落盘（防抖中的元数据先行保存）；
+ * 2. 尽力落盘（防抖中的元数据、设置与窗口状态先行保存）；
  * 3. 展示错误框告知用户；
  * 4. relaunch + exit 优雅重启。
  * 处理进行中的后续异常被忽略，不重复触发重启。
@@ -14,6 +14,7 @@ import { fakeUserData } from './setup'
 const timeline = []
 const flushStoreSave = vi.fn()
 const flushSettingsSave = vi.fn()
+const flushWindowStateSave = vi.fn()
 const showErrorBox = vi.fn()
 const relaunch = vi.fn()
 const exit = vi.fn()
@@ -37,6 +38,10 @@ vi.mock('../src/main/logger', () => ({
 vi.mock('../src/main/services/store', () => ({
   flushStoreSave,
   flushSettingsSave
+}))
+
+vi.mock('../src/main/windows/mainWindow', () => ({
+  flushWindowStateSave
 }))
 
 /** 每个用例以全新模块实例运行（处理中标记为模块级状态，跨用例需复位） */
@@ -77,8 +82,9 @@ describe('handleUncaughtException', () => {
     expect(loggerError).toHaveBeenCalledWith(expect.stringContaining('Error: boom'))
     // 顺序：先尽力保存数据，再提示用户，最后重启
     expect(timeline).toEqual(['flush', 'dialog', 'relaunch', 'exit'])
-    // 设置与元数据两路都尽力落盘
+    // 设置、元数据与窗口状态三路都尽力落盘（与 quit.js 退出路径对齐）
     expect(flushSettingsSave).toHaveBeenCalledTimes(1)
+    expect(flushWindowStateSave).toHaveBeenCalledTimes(1)
     expect(showErrorBox).toHaveBeenCalledWith(
       expect.stringContaining('模匣'),
       expect.stringContaining('重启')

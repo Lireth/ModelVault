@@ -13,10 +13,38 @@ const DEFAULT_HEIGHT = 800
 /** 窗口状态持久化文件（保存在 %APPDATA%\modelvault\） */
 const WINDOW_STATE_FILE = 'window-state.json'
 
+/**
+ * 窗口状态文件体积上限：文件位于 userData（半信任面，可能被外部工具改写
+ * 或写坏），异常膨胀的文件直接回退默认值，不进入 JSON.parse
+ */
+const MAX_STATE_FILE_BYTES = 64 * 1024
+/** 窗口尺寸合理范围（px）：下限排除零/负值与过小窗口，上限排除 1e12 类畸形值 */
+const MIN_DIMENSION = 200
+const MAX_DIMENSION = 20000
+/** 窗口坐标绝对值上限（px）：多显示器拼接下合理坐标远小于此量级 */
+const MAX_COORDINATE = 100000
+
 let mainWindow = null
 
 /** close 时发起的窗口状态保存 promise（退出路径等待其完成，防止原子写被中断） */
 let pendingStateSave = null
+
+/**
+ * 窗口几何数值是否在合理范围内：仅 Number.isFinite 不足以拦截负数尺寸与
+ * 1e12 类极端值——它们会原样进入 BrowserWindow 构造，导致启动窗口行为
+ * 不可预期（如不可见/占满虚拟桌面）。
+ * @returns {boolean}
+ */
+function isPlausibleGeometry(x, y, width, height) {
+  return (
+    width >= MIN_DIMENSION &&
+    width <= MAX_DIMENSION &&
+    height >= MIN_DIMENSION &&
+    height <= MAX_DIMENSION &&
+    Math.abs(x) <= MAX_COORDINATE &&
+    Math.abs(y) <= MAX_COORDINATE
+  )
+}
 
 /**
  * 加载上次保存的窗口状态（尺寸/位置/是否最大化）。
@@ -25,9 +53,18 @@ let pendingStateSave = null
 export async function loadWindowState() {
   try {
     const file = path.join(app.getPath('userData'), WINDOW_STATE_FILE)
+    const { size } = await fs.stat(file)
+    if (size > MAX_STATE_FILE_BYTES) {
+      logger.warn(`窗口状态文件异常膨胀（${size} 字节），回退默认窗口状态`)
+      return null
+    }
     const raw = JSON.parse(await fs.readFile(file, 'utf-8'))
     const { x, y, width, height } = raw || {}
     if (![x, y, width, height].every((n) => Number.isFinite(n))) return null
+    if (!isPlausibleGeometry(x, y, width, height)) {
+      logger.warn(`窗口状态几何数值超出合理范围，回退默认窗口状态: ${JSON.stringify({ x, y, width, height })}`)
+      return null
+    }
     const visible = screen.getAllDisplays().some((d) => {
       const a = d.workArea
       return x + width > a.x && y + height > a.y && x < a.x + a.width && y < a.y + a.height
