@@ -1,30 +1,35 @@
 <script setup>
 import { computed } from 'vue'
+import StatsBaseBreakdown from './stats/StatsBaseBreakdown.vue'
+import StatsCoverage from './stats/StatsCoverage.vue'
+import StatsDuplicates from './stats/StatsDuplicates.vue'
+import StatsExtBreakdown from './stats/StatsExtBreakdown.vue'
+import StatsOverview from './stats/StatsOverview.vue'
+import StatsRatingBreakdown from './stats/StatsRatingBreakdown.vue'
+import StatsTopSize from './stats/StatsTopSize.vue'
+import StatsTypeBreakdown from './stats/StatsTypeBreakdown.vue'
 import {
   BASE_MODEL_FAMILIES,
   duplicateGroups,
   duplicateWastedBytes,
   MODEL_TYPES,
-  formatSize,
-  openDetail,
   state,
   typeInfo
 } from '../store/appStore'
 import { normalizeBaseModel } from '../../../shared/model-categories'
 
 /**
- * 库统计区（F7，F-3 图表化增强）：
- * - 总览数字（数量/容量/平均/收藏/评分/损坏/NSFW/近 30 天更新）+
- *   分类容量堆叠条（一键看「磁盘被谁吃了」）+ 分类明细行；
- * - 格式分布（按扩展名聚合，与扫描文件类型设置呼应）；
- * - 评分分布（5★ → 1★ + 未评分）；
- * - 标注覆盖率（引导补全标注）；
- * - 基底模型分布（F-2 数据：autoInfo 解析 + Civitai 回填，按家族归一化）；
- * - 重复占用（FEAT-1：冗余副本可释放空间，给清理动机）；
- * - 最占空间 TOP 5（占比条 + 点击打开详情）。
+ * 库统计区编排壳（F7，F-3 图表化增强；OPT-01 板块组件化）：
+ * - 总览数字 → stats/StatsOverview.vue
+ * - 分类占比 / 格式分布（堆叠条 + 明细行）→ stats/StatsTypeBreakdown.vue /
+ *   stats/StatsExtBreakdown.vue
+ * - 标注覆盖率 / 评分分布 / 基底模型分布（占比条）→ stats/StatsCoverage.vue /
+ *   stats/StatsRatingBreakdown.vue / stats/StatsBaseBreakdown.vue
+ * - 重复占用 → stats/StatsDuplicates.vue；最占空间 TOP 5 → stats/StatsTopSize.vue
+ * - 区块/堆叠条/占比条共享视觉 → main.css（.stats-section 前缀原语）
+ * 本文件保留：全部派生计算（单一来源，经 props 下发各板块）。
  * 全部由渲染层 state.models 派生，零 IPC、随扫描/标注即时刷新；
- * 图表为纯 CSS 条形（无图表库依赖）。本组件为「轻量统计形态」——完整
- * 占用分析面板曾在功能精简阶段被移除，重启时以设置页区块而非独立面板落地。
+ * 图表为纯 CSS 条形（无图表库依赖）。
  */
 
 const stats = computed(() => {
@@ -92,12 +97,6 @@ function hasAnyParams(m) {
   )
 }
 
-/** 占比（0-100 整数；空库返回 0） */
-function pctOf(n) {
-  const total = stats.value.total
-  return total === 0 ? 0 : Math.round((n / total) * 100)
-}
-
 /** 单模型平均容量（空库返回 0）：辅助判断库内模型的普遍体积 */
 const avgBytes = computed(() =>
   stats.value.total ? Math.round(stats.value.totalBytes / stats.value.total) : 0
@@ -145,12 +144,6 @@ const topSize = computed(() => {
 })
 
 /* ---------------- F-3 图表化增强 ---------------- */
-
-/** 分类容量堆叠条的百分比（容量为零时返回 0，避免除零） */
-function bytePctOf(bytes) {
-  const total = stats.value.totalBytes
-  return total > 0 ? Math.round((bytes / total) * 100) : 0
-}
 
 /**
  * 格式分布（按扩展名聚合）：与分类占比同款堆叠条 + 明细行；
@@ -262,184 +255,32 @@ const dupStats = computed(() => {
 
 <template>
   <div class="stats-section">
-    <div class="stats-overview">
-      <div class="stat-item">
-        <span class="stat-num">{{ stats.total }}</span>
-        <span class="stat-label">个模型</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-num">{{ formatSize(stats.totalBytes) }}</span>
-        <span class="stat-label">总容量</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-num">{{ formatSize(avgBytes) }}</span>
-        <span class="stat-label">平均容量</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-num">{{ stats.favorites }}</span>
-        <span class="stat-label">收藏</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-num">{{ stats.rated }}</span>
-        <span class="stat-label">已评分</span>
-      </div>
-      <div class="stat-item" :class="{ 'stat-warn': stats.suspect > 0 }">
-        <span class="stat-num">{{ stats.suspect }}</span>
-        <span class="stat-label">疑似损坏</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-num">{{ stats.nsfw }}</span>
-        <span class="stat-label">NSFW</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-num">{{ stats.recent }}</span>
-        <span class="stat-label">近 30 天更新</span>
-      </div>
-    </div>
+    <StatsOverview :stats="stats" :avg-bytes="avgBytes" />
 
     <div class="stats-grid">
       <!-- 分类占比 -->
-      <div class="stats-block">
-        <h4>分类占比</h4>
-        <!-- 容量堆叠条（F-3）：按字节占比分色，一眼看出磁盘大头 -->
-        <div
-          v-if="typeRows.length && stats.totalBytes > 0"
-          class="stack-bar"
-          role="img"
-          aria-label="各分类容量占比"
-        >
-          <div
-            v-for="t in typeRows"
-            :key="t.key"
-            class="stack-seg"
-            :style="{ flex: t.bytes, background: t.color }"
-            :title="`${t.label}：${formatSize(t.bytes)}（${bytePctOf(t.bytes)}%）`"
-          ></div>
-        </div>
-        <ul v-if="typeRows.length" class="type-stats">
-          <li v-for="t in typeRows" :key="t.key">
-            <span class="type-dot" :style="{ background: t.color }"></span>
-            <span class="type-name">{{ t.label }}</span>
-            <span class="type-count">{{ t.count }} 个</span>
-            <span class="type-size">{{ formatSize(t.bytes) }}</span>
-            <span class="type-pct">{{ t.pct }}%</span>
-          </li>
-        </ul>
-        <p v-else class="stats-empty">尚未扫描模型</p>
-      </div>
+      <StatsTypeBreakdown :rows="typeRows" :total-bytes="stats.totalBytes" />
 
       <!-- 标注覆盖率 -->
-      <div class="stats-block">
-        <h4>标注覆盖率</h4>
-        <div v-if="stats.total" class="coverage">
-          <div v-for="row in coverageRows" :key="row.key" class="cov-row">
-            <span class="cov-label">{{ row.label }}</span>
-            <div class="cov-bar">
-              <div class="cov-fill" :style="{ width: `${pctOf(row.value)}%` }"></div>
-            </div>
-            <span class="cov-value cov-wide">{{ row.value }} 项 · {{ pctOf(row.value) }}%</span>
-          </div>
-        </div>
-        <p v-else class="stats-empty">尚未扫描模型</p>
-      </div>
+      <StatsCoverage :rows="coverageRows" :total="stats.total" />
     </div>
 
     <div class="stats-grid">
       <!-- 格式分布：按扩展名聚合（与扫描文件类型设置呼应） -->
-      <div class="stats-block">
-        <h4>格式分布</h4>
-        <div
-          v-if="extRows.length && stats.totalBytes > 0"
-          class="stack-bar"
-          role="img"
-          aria-label="各格式容量占比"
-        >
-          <div
-            v-for="e in extRows"
-            :key="e.ext"
-            class="stack-seg"
-            :style="{ flex: e.bytes, background: e.color }"
-            :title="`.${e.ext}：${formatSize(e.bytes)}（${bytePctOf(e.bytes)}%）`"
-          ></div>
-        </div>
-        <ul v-if="extRows.length" class="type-stats">
-          <li v-for="e in extRows" :key="e.ext">
-            <span class="type-dot" :style="{ background: e.color }"></span>
-            <span class="type-name">.{{ e.ext }}</span>
-            <span class="type-count">{{ e.count }} 个</span>
-            <span class="type-size">{{ formatSize(e.bytes) }}</span>
-            <span class="type-pct">{{ e.pct }}%</span>
-          </li>
-        </ul>
-        <p v-else class="stats-empty">尚未扫描模型</p>
-      </div>
+      <StatsExtBreakdown :rows="extRows" :total-bytes="stats.totalBytes" />
 
       <!-- 评分分布：定位评分集中度与待评分存量 -->
-      <div class="stats-block">
-        <h4>评分分布</h4>
-        <div v-if="ratingRows.length" class="coverage">
-          <div v-for="r in ratingRows" :key="r.star" class="cov-row">
-            <span class="cov-label" :title="r.label">{{ r.label }}</span>
-            <div class="cov-bar">
-              <div class="cov-fill" :style="{ width: `${r.pct}%` }"></div>
-            </div>
-            <span class="cov-value cov-wide">{{ r.count }} 个 · {{ r.pct }}%</span>
-          </div>
-        </div>
-        <p v-else class="stats-empty">尚未扫描模型</p>
-      </div>
+      <StatsRatingBreakdown :rows="ratingRows" />
     </div>
 
     <!-- 基底模型分布（F-3，数据源 F-2）：清理「基底不匹配」模型时的全局视角 -->
-    <div v-if="baseRows.total" class="stats-block">
-      <h4>基底模型分布</h4>
-      <p class="base-note">
-        已识别 {{ baseRows.total }} 个模型的基底（safetensors 头部解析 / Civitai 识别）
-      </p>
-      <div class="coverage">
-        <div v-for="row in baseRows.rows" :key="row.key" class="cov-row">
-          <span class="cov-label base-label" :title="`${row.label}：${formatSize(row.bytes)}`">
-            {{ row.label }}
-          </span>
-          <div class="cov-bar">
-            <div class="cov-fill" :style="{ width: `${row.pct}%` }"></div>
-          </div>
-          <span class="cov-value cov-wide">{{ row.count }} 个 · {{ row.pct }}%</span>
-        </div>
-      </div>
-    </div>
+    <StatsBaseBreakdown v-if="baseRows.total" :data="baseRows" />
 
     <!-- 重复占用（F-3，数据源 FEAT-1）：把「可释放空间」量化为清理动机 -->
-    <div v-if="dupStats" class="stats-block">
-      <h4>重复占用</h4>
-      <p class="dup-summary">
-        {{ dupStats.groups }} 组重复内容、{{ dupStats.redundant }} 个冗余副本，
-        可释放 <strong>{{ formatSize(duplicateWastedBytes) }}</strong>（约占总容量 {{ dupStats.wastedPct }}%）
-      </p>
-      <div class="cov-row">
-        <span class="cov-label">可释放</span>
-        <div class="cov-bar">
-          <div class="cov-fill dup-fill" :style="{ width: `${dupStats.wastedPct}%` }"></div>
-        </div>
-        <span class="cov-value">{{ dupStats.wastedPct }}%</span>
-      </div>
-      <p class="stats-empty">在结果栏开启「重复」筛选并「选中冗余项」即可批量清理</p>
-    </div>
+    <StatsDuplicates v-if="dupStats" :dup="dupStats" :wasted-bytes="duplicateWastedBytes" />
 
     <!-- 最占空间 TOP 5：占比条直观看占用，点击行打开模型详情 -->
-    <div v-if="topSize.length" class="stats-block">
-      <h4>最占空间 TOP 5</h4>
-      <ol class="top-list">
-        <li v-for="t in topSize" :key="t.id" class="top-row" title="打开模型详情" @click="openDetail(t.id)">
-          <span class="top-name">{{ t.name }}</span>
-          <div class="top-bar">
-            <div class="top-fill" :style="{ width: `${t.pct}%` }"></div>
-          </div>
-          <span class="top-size">{{ formatSize(t.size) }}</span>
-          <span class="top-pct">{{ t.pct }}%</span>
-        </li>
-      </ol>
-    </div>
+    <StatsTopSize v-if="topSize.length" :rows="topSize" />
   </div>
 </template>
 
@@ -450,282 +291,10 @@ const dupStats = computed(() => {
   gap: 16px;
 }
 
-.stats-overview {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.stat-item {
-  flex: 1;
-  min-width: 110px;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg) 55%, transparent);
-  padding: 12px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-/* 统计数字：极光渐变文字，与品牌色呼应 */
-.stat-num {
-  font-size: 18px;
-  font-weight: 700;
-  background: var(--accent-grad);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  font-variant-numeric: tabular-nums;
-  width: fit-content;
-}
-
-.stat-label {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-/* 疑似损坏 > 0：渐变数字转警示红（background-clip: text 下换背景色即可） */
-.stat-warn .stat-num {
-  background: var(--danger);
-}
-
 .stats-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
-}
-
-.stats-block {
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg) 55%, transparent);
-  padding: 12px 16px;
-}
-
-.stats-block h4 {
-  font-size: 11px;
-  letter-spacing: 1px;
-  color: var(--text-muted);
-  margin-bottom: 8px;
-}
-
-/* 分类容量堆叠条（F-3）：flex 比例即字节占比，段间留 1px 视觉分隔 */
-.stack-bar {
-  display: flex;
-  height: 10px;
-  border-radius: var(--radius-full);
-  overflow: hidden;
-  gap: 1px;
-  margin-bottom: 10px;
-  background: var(--bg-hover);
-}
-
-.stack-seg {
-  min-width: 2px;
-  transition: flex var(--dur-base) var(--ease-out);
-}
-
-/* 基底模型分布 */
-.base-note {
-  font-size: var(--font-xs);
-  color: var(--text-muted);
-  margin: 0 0 8px;
-}
-
-.base-label {
-  width: 88px;
-}
-
-/* 值列加宽（数量 + 百分比），覆盖率/基底分布共用 */
-.cov-wide {
-  width: 96px;
-  white-space: nowrap;
-}
-
-/* 重复占用 */
-.dup-summary {
-  font-size: var(--font-xs);
-  color: var(--text-muted);
-  margin: 0 0 8px;
-}
-
-.dup-summary strong {
-  color: var(--warning);
-  font-variant-numeric: tabular-nums;
-}
-
-/* 可释放占比条：警示色与「该清理了」语义呼应 */
-.dup-fill {
-  background: var(--warning);
-}
-
-.stats-empty {
-  font-size: var(--font-xs);
-  color: var(--text-muted);
-  margin: 4px 0;
-}
-
-.type-stats {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.type-stats li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--font-xs);
-}
-
-/* 类型色点样式（.type-dot）为 main.css 公共类 */
-
-.type-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.type-count,
-.type-pct {
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.type-size {
-  color: var(--text-muted);
-  min-width: 64px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.type-pct {
-  min-width: 36px;
-  text-align: right;
-}
-
-.coverage {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.cov-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: var(--font-xs);
-}
-
-.cov-label {
-  width: 76px;
-  flex-shrink: 0;
-  color: var(--text-muted);
-}
-
-.cov-bar {
-  flex: 1;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--bg-hover);
-  overflow: hidden;
-}
-
-.cov-fill {
-  height: 100%;
-  border-radius: 3px;
-  /* 覆盖率进度：极光渐变 */
-  background: var(--accent-grad);
-  transition: width var(--dur-base) var(--ease-out);
-}
-
-.cov-value {
-  width: 36px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
-}
-
-.top-list {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  counter-reset: top;
-}
-
-.top-list li {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: var(--font-xs);
-}
-
-/* TOP 行可点击：hover 高亮（负 margin 让高亮区外扩不出血） */
-.top-row {
-  cursor: pointer;
-  padding: 3px 8px;
-  margin: 0 -8px;
-  border-radius: var(--radius-sm);
-  transition: background var(--dur-fast) var(--ease-out);
-}
-
-.top-row:hover {
-  background: var(--bg-hover);
-}
-
-.top-list li::before {
-  counter-increment: top;
-  content: counter(top);
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--bg-hover);
-  color: var(--text-muted);
-  font-size: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.top-name {
-  flex: 1.4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 容量占比条：占总容量的比例，一眼看出单模型占用级别 */
-.top-bar {
-  flex: 1;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--bg-hover);
-  overflow: hidden;
-}
-
-.top-fill {
-  height: 100%;
-  border-radius: 2px;
-  background: var(--accent-grad);
-}
-
-.top-size {
-  color: var(--text-muted);
-  min-width: 64px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.top-pct {
-  color: var(--text-muted);
-  min-width: 36px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 720px) {

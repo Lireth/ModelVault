@@ -1,26 +1,20 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
-import { PARAM_LIMITS, SAMPLERS, SCHEDULERS, PRECISIONS } from '../../constants/modelParams'
-import {
-  closeDetail,
-  saveModelData,
-  selectedModel,
-  setModelTags,
-  setNsfw,
-  setRating,
-  state,
-  subCategoryInfo,
-  tagsForType,
-  toast,
-  toggleFavorite
-} from '../../store/appStore'
+import MetaFlags from './MetaFlags.vue'
+import MetaParamsForm from './MetaParamsForm.vue'
+import MetaTagsEditor from './MetaTagsEditor.vue'
+import { PARAM_LIMITS } from '../../constants/modelParams'
+import { closeDetail, saveModelData, selectedModel, state, toast } from '../../store/appStore'
 
 /**
- * 详情页中部标注表单列（O-4 自 ModelDetail.vue 按域拆出）：
- * 表单本地副本与脏数据保护（C8）、推荐参数编辑与校验、备注/触发词/
- * 备注名、收藏/NSFW/评分快捷标记。自动解析与 Civitai 面板已移至详情页
- * 第三列（ModelDetail.vue 编排），其「一键填入」经 defineExpose 暴露的
- * 方法直接写本地表单。焦点陷阱与 ESC/右键菜单留在 ModelDetail.vue。
+ * 详情页中部标注表单列编排壳（O-4 自 ModelDetail.vue 拆出；OPT-01 板块组件化）：
+ * - 收藏 / 评分行 → detail/MetaFlags.vue
+ * - 命名与标签（备注名 + 二级分类 + 自由标签）→ detail/MetaTagsEditor.vue
+ * - 推荐参数 / 触发词 / 备注 → detail/MetaParamsForm.vue
+ * - 板块标题样式（.detail-form-col h3）→ main.css 公共类
+ * 本文件保留：表单本地副本与脏数据保护（C8）、保存编排（校验/提交/
+ * 基线刷新）、自动解析「一键填入」暴露方法。板块子组件经 form prop
+ * 共享同一表单副本（reactive 对象，v-model 直接写入）。
  */
 
 const busy = ref(false)
@@ -57,9 +51,6 @@ function fillForm(model) {
   // 脏检测基线快照（C8）：填充后与表单当前值对比（字段快照，见 formDirty）
   formSnapshot.value = { ...form }
 }
-
-/** 当前生效的分类标签展示信息（自动分配：文件夹名 / Civitai 类型 / 大模型基底） */
-const currentSubInfo = computed(() => subCategoryInfo(selectedModel.value?.subCategory))
 
 /* ---------------- 表单脏数据保护（C8） ---------------- */
 
@@ -125,95 +116,6 @@ function onAutoApplyTriggers(words) {
 
 /** 供 ModelDetail.vue 第三列的 AutoInfoPanel「一键填入」跨列调用 */
 defineExpose({ onAutoApplyResolution, onAutoApplyTriggers })
-
-/* ---------------- 收藏 / 评分 ---------------- */
-
-/** 详情页切换收藏 */
-async function onToggleFavorite() {
-  const model = selectedModel.value
-  if (!model) return
-  try {
-    await toggleFavorite(model.id)
-  } catch (err) {
-    toast('error', `收藏操作失败: ${err.message}`)
-  }
-}
-
-/** 详情页切换 NSFW 标记（勾选后首页卡片预览图模糊展示） */
-async function onToggleNsfw() {
-  const model = selectedModel.value
-  if (!model) return
-  try {
-    await setNsfw(model.id, !model.nsfw)
-  } catch (err) {
-    toast('error', `NSFW 标记操作失败: ${err.message}`)
-  }
-}
-
-/** 点击星标设置评分（点击当前评分则清零） */
-async function onSetRating(value) {
-  const model = selectedModel.value
-  if (!model) return
-  const next = model.rating === value ? 0 : value
-  try {
-    await setRating(model.id, next)
-  } catch (err) {
-    toast('error', `评分失败: ${err.message}`)
-  }
-}
-
-/** 复制触发词到剪贴板（一键复制表单当前内容） */
-async function copyTriggerWords() {
-  const text = form.triggerWords.trim()
-  if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
-    toast('success', '触发词已复制到剪贴板')
-  } catch {
-    // 剪贴板 API 不可用时的降级方案
-    const ta = document.createElement('textarea')
-    ta.value = text
-    document.body.appendChild(ta)
-    ta.select()
-    document.execCommand('copy')
-    document.body.removeChild(ta)
-    toast('success', '触发词已复制到剪贴板')
-  }
-}
-
-/* ---------------- 自由标签（F-5，即时保存） ---------------- */
-
-/** 标签上限（与主进程 MAX_TAGS 一致，前置提示用） */
-const MAX_TAGS = 20
-
-/** 当前标签列表：以本地模型元素为单一事实源（setModelTags 成功后同步） */
-const tags = computed(() => selectedModel.value?.tags || [])
-
-const newTag = ref('')
-
-/** 添加标签：trim + 长度/数量/重复校验后整体覆写提交 */
-async function addTag() {
-  const model = selectedModel.value
-  const t = newTag.value.trim().slice(0, 32)
-  newTag.value = ''
-  if (!model || !t) return
-  if (tags.value.some((x) => x.toLowerCase() === t.toLowerCase())) {
-    toast('info', '标签已存在')
-    return
-  }
-  if (tags.value.length >= MAX_TAGS) {
-    toast('warn', `标签最多 ${MAX_TAGS} 个`)
-    return
-  }
-  await setModelTags(model.id, [...tags.value, t])
-}
-
-/** 删除标签 */
-async function removeTag(tag) {
-  const model = selectedModel.value
-  if (!model) return
-  await setModelTags(model.id, tags.value.filter((x) => x !== tag))
-}
 
 /** 将表单收集为可校验的参数对象 */
 function collectParams() {
@@ -287,37 +189,8 @@ async function onSave() {
 <template>
   <!-- 中部：推荐参数与标注（根节点承接 grid 列布局） -->
   <div class="detail-form-col">
-    <!-- 收藏 / 评分 -->
-    <div class="flags-row">
-      <button
-        class="fav-toggle"
-        :class="{ active: selectedModel.favorite }"
-        type="button"
-        :title="selectedModel.favorite ? '取消收藏' : '收藏该模型'"
-        @click="onToggleFavorite"
-      >
-        <svg viewBox="0 0 24 24" width="12" height="12" :fill="selectedModel.favorite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z" /></svg>
-        {{ selectedModel.favorite ? '已收藏' : '收藏' }}
-      </button>
-      <button
-        class="nsfw-toggle"
-        :class="{ active: selectedModel.nsfw }"
-        type="button"
-        :title="selectedModel.nsfw ? '取消 NSFW 标记' : '标记为 NSFW（首页预览图将模糊展示，可在设置中关闭）'"
-        @click="onToggleNsfw"
-      >NSFW</button>
-      <div class="rating" title="点击星标评分，再次点击当前星标清除">
-        <span class="rating-label">评分</span>
-        <button
-          v-for="i in 5"
-          :key="i"
-          class="star"
-          :class="{ on: i <= (selectedModel.rating || 0) }"
-          type="button"
-          @click="onSetRating(i)"
-        ><svg viewBox="0 0 24 24" width="16" height="16" :fill="i <= (selectedModel.rating || 0) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z" /></svg></button>
-      </div>
-    </div>
+    <!-- 收藏 / 评分（OPT-01 拆分：detail/MetaFlags.vue） -->
+    <MetaFlags />
 
     <!-- 健康检查警示（F6）：下载损坏/中断的模型提前可见，避免使用时才发现 -->
     <div v-if="selectedModel.suspect" class="suspect-warn alert-warning" role="alert">
@@ -325,129 +198,11 @@ async function onSave() {
       该文件疑似损坏（结构校验失败或 0 字节），在绘画工具中加载可能失败，建议重新下载或移入回收站。
     </div>
 
-    <!-- 命名与标签：显示名 + 二级分类（只读） + 自由标签集中于一区 -->
-    <h3>命名与标签</h3>
-    <label class="field">
-      <span>备注名（卡片显示名，为空时显示文件名）</span>
-      <input v-model="form.alias" type="text" maxlength="100" :placeholder="selectedModel.name" />
-    </label>
-    <div class="tags-editor">
-      <!-- 二级分类标签：自动分配（所在文件夹名 / Civitai 类型 / 大模型基底），只读 -->
-      <span
-        v-if="tagsForType(selectedModel.type) && currentSubInfo"
-        class="subcat-chip locked"
-        :style="{ borderColor: currentSubInfo.color, color: currentSubInfo.color }"
-        :title="selectedModel.type === 'checkpoint' ? '大模型自动标注为基底模型' : '二级分类（自动分配）'"
-      >{{ currentSubInfo.label }}</span>
-      <!-- 自由标签（F-5）：即时保存，与二级分类标签（固定枚举）互补 -->
-      <span v-for="t in tags" :key="t" class="tag-chip">
-        {{ t }}
-        <button
-          class="tag-remove"
-          type="button"
-          :title="`删除标签「${t}」`"
-          :aria-label="`删除标签「${t}」`"
-          @click="removeTag(t)"
-        >×</button>
-      </span>
-      <input
-        v-model="newTag"
-        class="tag-input"
-        type="text"
-        maxlength="32"
-        placeholder="添加标签，回车确认"
-        spellcheck="false"
-        @keydown.enter.prevent="addTag"
-      />
-    </div>
-    <span v-if="tagsForType(selectedModel.type) && !currentSubInfo" class="subcat-hint">
-      二级分类未分配（可在文件所在文件夹按标签命名自动匹配，或使用批量栏「Civitai 分配标签」，仅 LoRA）
-    </span>
+    <!-- 命名与标签（OPT-01 拆分：detail/MetaTagsEditor.vue） -->
+    <MetaTagsEditor :form="form" />
 
-    <!-- 推荐参数（含 LoRA 触发词：同属「使用信息」，集中编排） -->
-    <h3>推荐参数</h3>
-    <div class="form-grid">
-      <label class="field">
-        <span>采样步数 (Sampling Steps)</span>
-        <input v-model="form.steps" type="number" :min="PARAM_LIMITS.steps.min" :max="PARAM_LIMITS.steps.max" placeholder="如 20 / 28 / 30" />
-      </label>
-      <label class="field range-field">
-        <span>CFG 值（范围）</span>
-        <div class="range-inputs">
-          <input v-model="form.cfgMin" type="number" :min="PARAM_LIMITS.cfg.min" :max="PARAM_LIMITS.cfg.max" step="0.5" placeholder="最小，如 4" />
-          <input v-model="form.cfgMax" type="number" :min="PARAM_LIMITS.cfg.min" :max="PARAM_LIMITS.cfg.max" step="0.5" placeholder="最大，如 8" />
-        </div>
-      </label>
-      <label class="field range-field">
-        <span>推荐分辨率（宽 = 高，px）</span>
-        <div class="range-inputs">
-          <input v-model="form.resMin" type="number" :min="PARAM_LIMITS.res.min" :max="PARAM_LIMITS.res.max" placeholder="最小，如 512" />
-          <input v-model="form.resMax" type="number" :min="PARAM_LIMITS.res.min" :max="PARAM_LIMITS.res.max" placeholder="最大，如 1024" />
-        </div>
-      </label>
-      <label class="field">
-        <span>采样器 (Sampler)</span>
-        <input v-model="form.sampler" list="sampler-list" placeholder="选择或输入采样器" />
-        <datalist id="sampler-list">
-          <option v-for="s in SAMPLERS" :key="s" :value="s" />
-        </datalist>
-      </label>
-      <label class="field">
-        <span>调度器 (Scheduler)</span>
-        <input v-model="form.scheduler" list="scheduler-list" placeholder="选择或输入调度器" />
-        <datalist id="scheduler-list">
-          <option v-for="s in SCHEDULERS" :key="s" :value="s" />
-        </datalist>
-      </label>
-      <label class="field">
-        <span>精度 (Precision)</span>
-        <input v-model="form.precision" list="precision-list" placeholder="选择或输入精度，如 FP16" />
-        <datalist id="precision-list">
-          <option v-for="p in PRECISIONS" :key="p" :value="p" />
-        </datalist>
-      </label>
-    </div>
-
-    <!-- 触发词：仅 LoRA 模型提供，支持一键复制 -->
-    <template v-if="selectedModel.type === 'lora'">
-      <div class="trigger-head">
-        <span class="trigger-title">触发词</span>
-        <span v-if="selectedModel.triggerWordsSource" class="sidecar-hint">
-          来自同名 {{ selectedModel.triggerWordsSource === 'civitai' ? '.civitai.info' : '.txt' }} 自动导入，可自由修改
-        </span>
-      </div>
-      <div class="trigger-row">
-        <textarea
-          v-model="form.triggerWords"
-          class="trigger-input"
-          rows="2"
-          maxlength="1000"
-          spellcheck="false"
-          placeholder="如：xxx, yyy（多个触发词用逗号分隔），点击「保存参数」生效"
-        ></textarea>
-        <button
-          class="btn"
-          type="button"
-          :disabled="!form.triggerWords.trim()"
-          title="复制触发词到剪贴板"
-          @click="copyTriggerWords"
-        >复制</button>
-      </div>
-    </template>
-
-    <h3>
-      备注
-      <span v-if="selectedModel.noteSource === 'sidecar'" class="sidecar-hint">
-        来自同名 .txt 自动导入，可自由修改
-      </span>
-    </h3>
-    <textarea
-      v-model="form.note"
-      class="note-input"
-      rows="3"
-      maxlength="2000"
-      placeholder="记录模型触发词、适用风格、注意事项…"
-    ></textarea>
+    <!-- 推荐参数 / 触发词 / 备注（OPT-01 拆分：detail/MetaParamsForm.vue） -->
+    <MetaParamsForm :form="form" />
 
     <div class="form-actions">
       <button class="btn btn-primary" :disabled="busy" @click="onSave">保存参数</button>
@@ -478,296 +233,8 @@ async function onSave() {
   flex-shrink: 0;
 }
 
-.detail-form-col h3 {
-  font-size: var(--font-xs);
-  color: var(--accent);
-  letter-spacing: 1px;
-  margin: 6px 0 0;
-}
-
-/* ---------- 收藏 / 评分 ---------- */
-.flags-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 16px;
-}
-
-.fav-toggle {
-  border: 1px solid var(--glass-border-bright);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg) 55%, transparent);
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-  padding: 6px 16px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out);
-}
-
-.fav-toggle:hover {
-  border-color: var(--favorite);
-  color: var(--favorite);
-}
-
-.fav-toggle.active {
-  border-color: var(--favorite);
-  color: var(--favorite);
-  font-weight: 600;
-  box-shadow: var(--glow-favorite);
-}
-
-/* NSFW 标记按钮：激活时红色高亮，提示首页预览图将被模糊 */
-.nsfw-toggle {
-  border: 1px solid var(--glass-border-bright);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg) 55%, transparent);
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-  padding: 6px 16px;
-  cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
-}
-
-.nsfw-toggle:hover {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-
-.nsfw-toggle.active {
-  border-color: var(--danger);
-  color: var(--danger);
-  font-weight: 600;
-  background: color-mix(in srgb, var(--danger) 8%, transparent);
-}
-
-.rating {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.rating-label {
-  font-size: var(--font-xs);
-  color: var(--text-muted);
-  margin-right: 6px;
-}
-
-.star {
-  border: none;
-  background: transparent;
-  color: var(--border);
-  line-height: 1;
-  padding: 1px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  transition: color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out),
-    filter var(--dur-fast) var(--ease-out);
-}
-
-.star:hover {
-  transform: scale(1.15);
-}
-
-.star.on {
-  color: var(--favorite);
-  filter: drop-shadow(0 0 4px rgba(245, 179, 1, 0.35));
-}
-
-/* 触发词小节标题（与备注 h3 视觉同族，避免套用 h3 的 letter-spacing 溢出） */
-.trigger-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.trigger-title {
-  font-size: var(--font-xs);
-  color: var(--accent);
-  letter-spacing: 1px;
-}
-
-/* 触发词行：文本框占满剩余宽度，复制按钮固定在右侧 */
-.trigger-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.trigger-row .btn {
-  flex-shrink: 0;
-}
-
-.trigger-input {
-  flex: 1;
-  min-width: 0;
-  padding: 8px 12px;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg) 55%, transparent);
-  color: var(--text);
-  font-size: var(--font-sm);
-  outline: none;
-  resize: vertical;
-  font-family: inherit;
-  line-height: 1.6;
-}
-
-.trigger-input:focus {
-  border-color: var(--accent);
-}
-
-/* ---------- 自由标签编辑器（F-5） ---------- */
-.tags-editor {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.tag-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 6px 3px 12px;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: var(--accent);
-  font-size: var(--font-xs);
-  max-width: 200px;
-  overflow-wrap: anywhere;
-}
-
-.tag-remove {
-  border: none;
-  background: transparent;
-  color: inherit;
-  font-size: 13px;
-  line-height: 1;
-  padding: 0 4px;
-  cursor: pointer;
-  border-radius: 50%;
-}
-
-.tag-remove:hover {
-  color: var(--danger);
-}
-
-/* 内边距/字号与 .field input 同源，保证与备注名、参数输入框等高（视觉协调） */
-.tag-input {
-  flex: 1;
-  min-width: 140px;
-  padding: 8px 12px;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--bg) 55%, transparent);
-  color: var(--text);
-  font-size: var(--font-sm);
-  outline: none;
-}
-
-.tag-input:focus {
-  border-color: var(--accent);
-}
-
-.subcat-chip {
-  /* 与 .tag-chip 等高：同内边距与字号，二级分类 chip 与自由标签 chip 并排协调 */
-  padding: 3px 12px;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--bg) 55%, transparent);
-  color: var(--text);
-  font-size: var(--font-xs);
-  cursor: pointer;
-}
-
-.subcat-chip:hover {
-  border-color: var(--text-muted);
-}
-
-.subcat-chip.active {
-  background: var(--bg-active);
-  border-width: 1.5px;
-  font-weight: 600;
-}
-
-/* 自动分类标签（如大模型的基底模型）：不可点击更改 */
-.subcat-chip.locked {
-  cursor: default;
-  opacity: 0.9;
-}
-
-.subcat-hint {
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.form-grid {
-  display: grid;
-  /* 150px 下限：中部列宽下可排 3 列，较 2 列显著压缩纵向空间 */
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 10px;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.field span {
-  font-size: var(--font-xs);
-  color: var(--text-muted);
-}
-
-.field input,
-.note-input {
-  padding: 8px 12px;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg) 55%, transparent);
-  color: var(--text);
-  font-size: var(--font-sm);
-  outline: none;
-  width: 100%;
-}
-
-.field input:focus,
-.note-input:focus {
-  border-color: var(--accent);
-}
-
-/* CFG 范围输入：两个数字框并排 */
-.range-inputs {
-  display: flex;
-  gap: 6px;
-}
-
-.range-inputs input {
-  min-width: 0;
-  flex: 1;
-}
-
-.note-input {
-  resize: vertical;
-  font-family: inherit;
-  line-height: 1.6;
-}
-
-/* sidecar 自动导入来源提示（备注标题右侧） */
-.sidecar-hint {
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--text-muted);
-  letter-spacing: 0;
-  text-transform: none;
-}
+/* 板块标题样式（.detail-form-col h3）已上移 main.css：
+   scoped 样式不会作用于 detail/ 子组件内部的 h3 */
 
 .form-actions {
   display: flex;
@@ -775,4 +242,3 @@ async function onSave() {
   margin-top: 8px;
 }
 </style>
-

@@ -40,6 +40,11 @@ export default [
     rules: {
       // App.vue / Sidebar.vue 为既定命名（根组件与单词汇组件），不做多词强制
       'vue/multi-word-component-names': 'off',
+      // OPT-01 板块拆分模式：父组件持有响应式表单副本（useSettingsForm /
+      // MetaForm），板块子组件经 prop 共享同一对象并写入其字段（v-model）。
+      // shallowOnly 保持禁止整体替换/直接变异 prop 本身，仅放行共享对象的
+      // 深层字段写入——这是本项目设置页/详情表单拆分的既定数据流约定
+      'vue/no-mutating-props': ['error', { shallowOnly: true }],
       // 下划线开头参数/变量视为有意忽略
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }]
     }
