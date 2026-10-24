@@ -19,7 +19,9 @@
  *   （只查类型不查空值），避免双重报错文案漂移；
  * - 字符串上限与 store-meta.normalizeModelMeta 的落盘截断点对齐并留余量
  *   （alias 100/note 2000/triggerWords 1000 → schema 取 2~10 倍），schema
- *   只拦截滥用输入，正常超长输入仍走既有截断行为，不产生回归。
+ *   只拦截滥用输入，正常超长输入仍走既有截断行为，不产生回归；
+ * - 未声明 max 的对象/数组取全局默认上限（DEFAULT_MAX_*，见常量处说明），
+ *   宽松区域的值由 validateOpaque 按同一组默认值兜底规模与嵌套深度。
  *
  * 登记原则（O1 fail-closed）：
  * - 全部 invoke 通道必须在此登记：带参通道登记对象 schema，无 payload 通道
@@ -34,6 +36,21 @@
  */
 
 import { MAX_PARTIAL_SCAN_DIRS_INPUT } from './scan-dirs'
+
+/**
+ * 未显式声明 max 时的全局默认规模/深度上限（fail-closed 收口）：
+ * 注册表仅对部分通道声明了键数/元素数上限，其余通道若完全不设防，被入侵
+ * 的渲染进程可发送任意规模的 payload（数万键对象 / 万级元素数组 / 深层
+ * 嵌套），结构化克隆与递归校验的成本无界。默认上限封住该滥用面；显式
+ * 声明的 max 始终优先，且可大于默认值（如 exportBackup ids 的 20000、
+ * organizeByTags moves 的 10000）。宽松区域（loose 对象的未知键、无
+ * fields/items 规则的值）不经过 fields/items 递归，由 validateOpaque
+ * 按同一组默认值兜底。
+ */
+export const DEFAULT_MAX_OBJECT_KEYS = 64
+export const DEFAULT_MAX_ARRAY_ITEMS = 1024
+/** 对象/数组最大嵌套深度（顶层 payload 为第 1 层） */
+export const DEFAULT_MAX_DEPTH = 5
 
 /**
  * 主进程 → 渲染进程事件通道（O9 单一来源）：
@@ -57,6 +74,7 @@ export const IPC_EVENT_CHANNELS = Object.freeze([
  * @property {string} kind 规则类型：void/string/boolean/int/array/object
  * @property {boolean} [required] 字段必须存在（undefined 即失败）
  * @property {number} [max] string 长度 / array 元素数 / object 键数 / int 数值上界
+ *   （object/array 缺省时取全局默认上限 DEFAULT_MAX_OBJECT_KEYS/DEFAULT_MAX_ARRAY_ITEMS）
  * @property {number} [min] int 数值下界
  * @property {SchemaRule} [items] array：逐元素规则
  * @property {Object<string, SchemaRule>} [fields] object：声明字段规则
@@ -111,13 +129,51 @@ export function vVoid() {
 }
 
 /**
+ * 宽松区域兜底校验：loose 对象的未知键、无 fields/items 规则的值不经
+ * schema 递归，若不设防，深层嵌套/超大规模的对象会原样通过结构门禁并
+ * 完整进入结构化克隆与 handler。按全局默认上限递归收口；不校验具体类型
+ * ——宽松语义保持不变，只限规模与深度。
+ * @param {any} value 待校验值
+ * @param {string} label 错误信息中的路径
+ * @param {number} depth 当前嵌套深度（顶层为 1）
+ * @returns {string} 合法返回空串，非法返回中文错误文案
+ */
+function validateOpaque(value, label, depth) {
+  if (depth > DEFAULT_MAX_DEPTH) {
+    return `${label} 嵌套层级超限（≤${DEFAULT_MAX_DEPTH}）`
+  }
+  if (Array.isArray(value)) {
+    if (value.length > DEFAULT_MAX_ARRAY_ITEMS) {
+      return `${label} 数量超限（≤${DEFAULT_MAX_ARRAY_ITEMS}）`
+    }
+    for (let i = 0; i < value.length; i++) {
+      const err = validateOpaque(value[i], `${label}[${i}]`, depth + 1)
+      if (err) return err
+    }
+    return ''
+  }
+  if (typeof value === 'object' && value !== null) {
+    const keys = Object.keys(value)
+    if (keys.length > DEFAULT_MAX_OBJECT_KEYS) {
+      return `${label} 字段数超限（≤${DEFAULT_MAX_OBJECT_KEYS}）`
+    }
+    for (const key of keys) {
+      const err = validateOpaque(value[key], `${label}.${key}`, depth + 1)
+      if (err) return err
+    }
+  }
+  return ''
+}
+
+/**
  * 校验单个值是否满足规则。
  * @param {any} value 待校验值
  * @param {SchemaRule} rule 字段规则（构造器产物）
  * @param {string} label 错误信息中的字段名（数组元素递归时带下标）
+ * @param {number} [depth] 当前嵌套深度（顶层为 1；用于默认深度上限）
  * @returns {string} 合法返回空串，非法返回中文错误文案
  */
-export function validateValue(value, rule, label) {
+export function validateValue(value, rule, label, depth = 1) {
   if (value === undefined) {
     return rule.required ? `${label} 缺失` : ''
   }
@@ -143,10 +199,19 @@ export function validateValue(value, rule, label) {
     }
     case 'array': {
       if (!Array.isArray(value)) return `${label} 须为数组`
-      if (rule.max && value.length > rule.max) return `${label} 数量超限（≤${rule.max}）`
+      if (depth > DEFAULT_MAX_DEPTH) return `${label} 嵌套层级超限（≤${DEFAULT_MAX_DEPTH}）`
+      // 未声明 max 时取全局默认上限（显式声明始终优先，可大于默认值）
+      const maxItems = rule.max ?? DEFAULT_MAX_ARRAY_ITEMS
+      if (value.length > maxItems) return `${label} 数量超限（≤${maxItems}）`
       if (rule.items) {
         for (let i = 0; i < value.length; i++) {
-          const err = validateValue(value[i], rule.items, `${label}[${i}]`)
+          const err = validateValue(value[i], rule.items, `${label}[${i}]`, depth + 1)
+          if (err) return err
+        }
+      } else {
+        // 无逐元素规则：宽松语义保持，但规模/深度按默认上限兜底
+        for (let i = 0; i < value.length; i++) {
+          const err = validateOpaque(value[i], `${label}[${i}]`, depth + 1)
           if (err) return err
         }
       }
@@ -154,12 +219,20 @@ export function validateValue(value, rule, label) {
     }
     case 'object': {
       if (typeof value !== 'object' || Array.isArray(value)) return `${label} 须为对象`
+      if (depth > DEFAULT_MAX_DEPTH) return `${label} 嵌套层级超限（≤${DEFAULT_MAX_DEPTH}）`
       const keys = Object.keys(value)
-      if (rule.max && keys.length > rule.max) return `${label} 字段数超限（≤${rule.max}）`
+      // 未声明 max 时取全局默认上限（显式声明始终优先，可大于默认值）
+      const maxKeys = rule.max ?? DEFAULT_MAX_OBJECT_KEYS
+      if (keys.length > maxKeys) return `${label} 字段数超限（≤${maxKeys}）`
       if (rule.fields) {
         for (const [name, child] of Object.entries(rule.fields)) {
           // 顶层（label 为空串）错误信息用裸字段名；嵌套字段保留完整路径
-          const err = validateValue(value[name], child, label ? `${label}.${name}` : name)
+          const err = validateValue(
+            value[name],
+            child,
+            label ? `${label}.${name}` : name,
+            depth + 1
+          )
           if (err) return err
         }
         if (!rule.loose) {
@@ -167,6 +240,23 @@ export function validateValue(value, rule, label) {
           if (unknown.length > 0) {
             return `${label || '参数'} 包含未知字段: ${unknown.slice(0, 5).join(', ')}`
           }
+        } else {
+          // loose 对象的未知键：handler 不消费，但规模/深度仍须兜底
+          for (const key of keys) {
+            if (key in rule.fields) continue
+            const err = validateOpaque(
+              value[key],
+              label ? `${label}.${key}` : key,
+              depth + 1
+            )
+            if (err) return err
+          }
+        }
+      } else {
+        // 无 fields 规则（如 saveModelData.params）：值全量按默认上限兜底
+        for (const key of keys) {
+          const err = validateOpaque(value[key], label ? `${label}.${key}` : key, depth + 1)
+          if (err) return err
         }
       }
       return ''

@@ -11,7 +11,9 @@ import {
   vInt,
   vArr,
   vObj,
-  vVoid
+  vVoid,
+  DEFAULT_MAX_OBJECT_KEYS,
+  DEFAULT_MAX_ARRAY_ITEMS
 } from '../src/shared/ipc-schema'
 
 /**
@@ -119,6 +121,72 @@ describe('IPC schema 校验器（validateValue）', () => {
     expect(validateValue(null, rule, 'f')).toBe('')
     expect(validateValue({}, rule, 'f')).toBe('f 不接受参数')
     expect(validateValue('x', rule, 'f')).toBe('f 不接受参数')
+  })
+
+  it('默认规模上限：未声明 max 的对象/数组按全局默认收口，显式声明优先', () => {
+    // 未声明 max 的 loose 对象：未知键总数按默认上限收口（宽松语义不变）
+    const loose = vObj({ fields: { id: vStr({ max: 10 }) } })
+    const ok = { id: 'a' }
+    for (let i = 0; i < DEFAULT_MAX_OBJECT_KEYS - 1; i++) ok[`k${i}`] = i
+    expect(validateValue(ok, loose, 'f')).toBe('')
+    const tooMany = { id: 'a' }
+    for (let i = 0; i < DEFAULT_MAX_OBJECT_KEYS; i++) tooMany[`k${i}`] = i
+    expect(validateValue(tooMany, loose, 'f')).toBe('f 字段数超限（≤64）')
+
+    // 未声明 max 的数组：默认元素数上限收口（无 items 时值走宽松兜底）
+    const arr = vArr()
+    expect(validateValue(new Array(DEFAULT_MAX_ARRAY_ITEMS).fill('x'), arr, 'f')).toBe('')
+    expect(
+      validateValue(new Array(DEFAULT_MAX_ARRAY_ITEMS + 1).fill('x'), arr, 'f')
+    ).toBe('f 数量超限（≤1024）')
+
+    // 显式声明始终优先（可大于默认值）：exportBackup ids 声明 20000
+    const ids = new Array(1500).fill('C:/m/a.safetensors')
+    expect(validateIpcPayload('models:exportBackup', { mode: 'selected', ids })).toBe('')
+    const over = new Array(20001).fill('C:/m/a.safetensors')
+    expect(validateIpcPayload('models:exportBackup', { mode: 'selected', ids: over })).toBe(
+      'ids 数量超限（≤20000）'
+    )
+  })
+
+  it('默认深度上限与宽松区域兜底（params 值 / loose 未知键 / 声明路径深度）', () => {
+    // 深层嵌套链（8 层）：params 无 fields 规则，值按默认深度兜底拒绝
+    const deep = {}
+    let node = deep
+    for (let i = 0; i < 8; i++) {
+      node.a = {}
+      node = node.a
+    }
+    expect(
+      validateIpcPayload('models:saveModelData', { id: 'C:/m/a.safetensors', params: deep })
+    ).toContain('嵌套层级超限')
+
+    // 正常扁平 params 放行
+    expect(
+      validateIpcPayload('models:saveModelData', {
+        id: 'C:/m/a.safetensors',
+        params: { steps: 28, sampler: 'euler' }
+      })
+    ).toBe('')
+
+    // params 值中的超宽对象（单键但子键 65 个）按默认键数兜底拒绝
+    const wide = { a: {} }
+    for (let i = 0; i < DEFAULT_MAX_OBJECT_KEYS + 1; i++) wide.a[`k${i}`] = 1
+    expect(
+      validateIpcPayload('models:saveModelData', { id: 'C:/m/a.safetensors', params: wide })
+    ).toContain('字段数超限')
+
+    // loose 通道未知键中的深嵌套同样被兜底（handler 不消费该键）
+    expect(
+      validateIpcPayload('models:popupMenu', { id: 'C:/m/a.safetensors', evil: deep })
+    ).toContain('嵌套层级超限')
+
+    // 声明路径的合法深度不受影响：savedViews 结构（根→数组→条目→字段 = 4 层）
+    expect(
+      validateIpcPayload('settings:update', {
+        savedViews: [{ id: 'v1', name: 'n', search: '', typeFilter: 'lora' }]
+      })
+    ).toBe('')
   })
 })
 
