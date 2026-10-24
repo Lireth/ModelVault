@@ -8,11 +8,12 @@ import { computeFileHashOffThread } from './hash-worker-pool'
  * - 由模型文件流式计算 SHA256（复用元数据层的 hash/hashMtime 缓存字段），
  *   经 Civitai API 按哈希反查模型版本（by-hash 端点，社区通行做法）；
  * - 识别成功时生成 Civitai 页面 URL 与「一键补全」元数据补丁（纯函数）。
- * 网络请求走 Electron net.fetch（Chromium 网络栈，继承系统代理，项目约定，
- * 与 updater.js 同一模式）。本服务不做任何用户数据覆盖判断之外的写盘。
+ * 网络请求走 Electron net.fetch（Chromium 网络栈，直连目标站点：不配置
+ * 也不回退任何代理逻辑，网络不可达按既有错误链路返回失败）。本服务不做
+ * 任何用户数据覆盖判断之外的写盘。
  */
 
-const CIVITAI_API_BASE = 'https://civitai.com/api/v1'
+const CIVITAI_API_BASE = 'https://civitai.red/api/v1'
 /** 关闭 Civitai 开关时主进程统一拒绝文案（IPC 与 civimg 代理共用） */
 export const CIVITAI_DISABLED_ERROR = 'Civitai 功能已关闭'
 /** 请求超时（ms），与 updater.js 一致 */
@@ -126,7 +127,9 @@ function probeRedirectTarget(url, options) {
     }
     request.on('redirect', (statusCode, _method, redirectUrl, responseHeaders) => {
       const headers = headersOf(responseHeaders)
-      request.cancel()
+      // ClientRequest 的取消方法是 abort（无 cancel/destroy；用可选链防御
+      // Electron 版本 API 差异，避免事件处理器内抛错演变成主进程致命错误）
+      request.abort?.()
       finish(true, {
         status: statusCode,
         location: headers.get('location') || redirectUrl || '',
@@ -136,6 +139,7 @@ function probeRedirectTarget(url, options) {
     request.on('response', (incoming) => {
       // 未发 redirect 事件直接拿到响应（3xx 且无跳转目标等）：按终态返回空体
       incoming.destroy?.()
+      request.abort?.()
       finish(true, {
         status: incoming.statusCode || 0,
         location: '',
@@ -146,12 +150,12 @@ function probeRedirectTarget(url, options) {
     const { signal } = options
     if (signal) {
       if (signal.aborted) {
-        request.destroy?.()
+        request.abort?.()
         finish(false, new DOMException('已终止', 'AbortError'))
         return
       }
       signal.addEventListener('abort', () => {
-        request.destroy?.()
+        request.abort?.()
         finish(false, new DOMException('已终止', 'AbortError'))
       }, { once: true })
     }
@@ -199,6 +203,13 @@ async function fetchWithAllowedRedirects(url, options, isAllowed, label) {
 }
 
 /**
+ * Civitai 站点基域（com 主站 + red 镜像站，NSFW 内容在 red 站无需跳转即可识别）。
+ * API/图片请求统一从 red 站发起；白名单同时保留 com 域——历史数据中的
+ * com 页面链接与两站间的重定向均需放行。
+ */
+const CIVITAI_BASE_HOSTS = ['civitai.com', 'civitai.red']
+
+/**
  * Civitai API 域名白名单（含子域）：API 初始地址固定，此校验只用于重定向。
  * @param {string} url 待校验 URL
  * @returns {boolean}
@@ -206,8 +217,9 @@ async function fetchWithAllowedRedirects(url, options, isAllowed, label) {
 function isAllowedCivitaiApiUrl(url) {
   try {
     const parsed = new URL(url)
+    if (parsed.protocol !== 'https:') return false
     const host = parsed.hostname.toLowerCase()
-    return parsed.protocol === 'https:' && (host === 'civitai.com' || host.endsWith('.civitai.com'))
+    return CIVITAI_BASE_HOSTS.some((base) => host === base || host.endsWith(`.${base}`))
   } catch {
     return false
   }
@@ -251,21 +263,19 @@ async function fetchCivitaiApi(url, options = {}) {
 }
 
 /**
- * Civitai 示例图 CDN 域名白名单：API 响应中的图片 URL 不可信，
- * 下载入口仅放行官方 CDN 主机（防 SSRF/任意文件落盘）。
- */
-const CIVITAI_IMAGE_HOSTS = new Set(['image.civitai.com'])
-
-/**
  * 校验示例图 URL 是否允许下载（纯函数，便于单测）：
- * 必须 https 协议且主机命中 Civitai CDN 白名单。
+ * 必须 https 协议且主机命中 Civitai 基域白名单（含子域——CDN 会随迁移
+ * 变更主机名，如 image.civitai.com → blobs-b2.civitai.com，按基域后缀
+ * 匹配避免每次迁移都更新白名单）。
  * @param {unknown} url 待校验 URL
  * @returns {boolean}
  */
 export function isAllowedCivitaiImageUrl(url) {
   try {
     const parsed = new URL(String(url))
-    return parsed.protocol === 'https:' && CIVITAI_IMAGE_HOSTS.has(parsed.host)
+    if (parsed.protocol !== 'https:') return false
+    const host = parsed.hostname.toLowerCase()
+    return CIVITAI_BASE_HOSTS.some((base) => host === base || host.endsWith(`.${base}`))
   } catch {
     return false
   }
@@ -402,7 +412,7 @@ export function normalizeVersionInfo(raw) {
           : ''
     }))
   return {
-    url: `https://civitai.com/models/${modelId}?modelVersionId=${versionId}`,
+    url: `https://civitai.red/models/${modelId}?modelVersionId=${versionId}`,
     modelName: typeof raw.model?.name === 'string' ? raw.model.name : '',
     versionName: typeof raw.name === 'string' ? raw.name : '',
     baseModel: typeof raw.baseModel === 'string' ? raw.baseModel : '',
@@ -415,14 +425,14 @@ export function normalizeVersionInfo(raw) {
 
 /**
  * 由 Civitai 模型页 URL 提取模型 id（纯函数，便于单测）：
- * 仅接受 https://civitai.com/models/{数字id} 形式（与元数据层
+ * 仅接受 https://civitai.{com|red}/models/{数字id} 形式（与元数据层
  * civitaiUrl 的写入校验同源），可选尾段（slug/query）忽略。
  * @param {string} url Civitai 模型页 URL
  * @returns {string|null} 模型 id 字符串，格式不符返回 null
  */
 export function parseCivitaiModelId(url) {
   if (typeof url !== 'string') return null
-  const m = url.match(/^https:\/\/civitai\.com\/models\/(\d+)(?:[/?#]|$)/)
+  const m = url.match(/^https:\/\/civitai\.(?:com|red)\/models\/(\d+)(?:[/?#]|$)/)
   return m ? m[1] : null
 }
 
@@ -534,7 +544,7 @@ export async function fetchCivitaiImage(url) {
     {
       headers: {
         Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-        Referer: 'https://civitai.com/'
+        Referer: 'https://civitai.red/'
       },
       signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS)
     },
@@ -559,7 +569,7 @@ const RANGE_HEADER_RE = /^bytes=\d{0,16}-\d{0,16}$/
 export async function fetchCivitaiVideo(url, range = '') {
   const headers = {
     Accept: 'video/mp4,video/webm,video/*;q=0.9,*/*;q=0.5',
-    Referer: 'https://civitai.com/'
+    Referer: 'https://civitai.red/'
   }
   if (typeof range === 'string' && range.trim()) {
     const value = range.trim()

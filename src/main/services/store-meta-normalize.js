@@ -153,10 +153,10 @@ export function normalizeModelMeta(raw) {
     hash: typeof raw.hash === 'string' && /^[0-9a-f]{64}$/i.test(raw.hash) ? raw.hash.toLowerCase() : '',
     hashMtime: Number.isFinite(raw.hashMtime) ? raw.hashMtime : 0,
     // Civitai 在线识别结果（识别成功时由 models:civitaiIdentify 写入）：
-    // 模型页面 URL（仅放行 civitai.com 页面链接，渲染层经外链白名单打开）
+    // 模型页面 URL（放行 civitai.{com,red} 页面链接，渲染层经外链白名单打开）
     civitaiUrl:
       typeof raw.civitaiUrl === 'string' &&
-      /^https:\/\/civitai\.com\/models\/\d+/.test(raw.civitaiUrl)
+      /^https:\/\/civitai\.(?:com|red)\/models\/\d+/.test(raw.civitaiUrl)
         ? raw.civitaiUrl
         : '',
     // 基底模型（F-2 筛选数据源之二）：Civitai 识别回填（safetensors 头部

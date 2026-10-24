@@ -242,7 +242,7 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
     expect(res.status).toBe(200)
     expect(vi.mocked(net.fetch)).toHaveBeenCalledWith(
       target,
-      expect.objectContaining({ headers: expect.objectContaining({ Referer: 'https://civitai.com/' }) })
+      expect.objectContaining({ headers: expect.objectContaining({ Referer: 'https://civitai.red/' }) })
     )
     expect(res.headers.get('Cache-Control')).toContain('max-age=86400')
   })

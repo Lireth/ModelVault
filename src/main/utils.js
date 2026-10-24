@@ -111,12 +111,13 @@ export function boundedMapSet(map, key, value, max) {
 
 /**
  * 允许 shell.openExternal 拉起的域名白名单（B3）：
- * 应用外链出口为设置页的 GitHub 下载页与详情页的 Civitai 模型页，
+ * 应用外链出口为设置页的 GitHub 下载页与详情页的 Civitai 模型页
+ * （civitai.red 为识别站点，civitai.com 兼容历史数据中的旧链接），
  * 新增外链场景时在此显式登记具体域名——禁止通配、禁止子域放行
  * （用户信息段伪装 github.com@evil.com 与外形相似域名
  * github.com.evil.com 均会因真实主机不匹配而被拒绝）。
  */
-const ALLOWED_EXTERNAL_HOSTS = new Set(['github.com', 'civitai.com'])
+const ALLOWED_EXTERNAL_HOSTS = new Set(['github.com', 'civitai.com', 'civitai.red'])
 
 /**
  * 校验外部 URL 是否允许经 shell.openExternal 拉起（B3）：

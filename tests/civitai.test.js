@@ -37,14 +37,17 @@ setCivitaiApiInterval(0)
  */
 
 describe('parseCivitaiModelId', () => {
-  it('从模型页 URL 提取数字 id（含 slug 与 query 变体）', () => {
+  it('从模型页 URL 提取数字 id（含 slug 与 query 变体，com/red 两站均接受）', () => {
     expect(parseCivitaiModelId('https://civitai.com/models/12345')).toBe('12345')
+    expect(parseCivitaiModelId('https://civitai.red/models/12345')).toBe('12345')
     expect(parseCivitaiModelId('https://civitai.com/models/12345/some-name')).toBe('12345')
     expect(parseCivitaiModelId('https://civitai.com/models/12345?modelVersionId=678')).toBe('12345')
+    expect(parseCivitaiModelId('https://civitai.red/models/12345?modelVersionId=678')).toBe('12345')
   })
 
   it('非模型页 URL 或坏数据返回 null', () => {
     expect(parseCivitaiModelId('https://civitai.com/models/abc')).toBe(null)
+    expect(parseCivitaiModelId('https://civitai.com.evil.com/models/123')).toBe(null)
     expect(parseCivitaiModelId('https://evil.com/models/123')).toBe(null)
     expect(parseCivitaiModelId('not-a-url')).toBe(null)
     expect(parseCivitaiModelId('')).toBe(null)
@@ -168,7 +171,8 @@ describe('Civitai 网络边界（V-06）', () => {
 
   /** 构造只发一次 redirect 事件的 net.request 桩（Electron manual 模式） */
   function fakeRedirectingRequest(target) {
-    return (opts) => {
+    const requests = []
+    const impl = (opts) => {
       expect(opts.redirect).toBe('manual')
       expect(opts.useSessionCookies).toBe(true)
       const listeners = {}
@@ -183,28 +187,34 @@ describe('Civitai 网络边界（V-06）', () => {
           })
         },
         followRedirect: () => {},
-        cancel: () => {},
-        destroy: () => {}
+        // ClientRequest 的真实取消方法是 abort（无 cancel/destroy）
+        abort: () => requests.push('abort'),
+        destroy: undefined
       }
+      requests.request = req
       return req
     }
+    impl.requests = requests
+    return impl
   }
 
   it('Electron 不支持 manual 重定向时（Redirect was cancelled），经 net.request 探测目标并逐跳继续', async () => {
     // Electron 实际行为：net.fetch manual 模式遇 3xx 直接抛错而非返回 3xx 响应
+    const requestStub = fakeRedirectingRequest('https://api.civitai.com/api/v1/models/1')
     vi.mocked(net.fetch).mockImplementation(async (url) => {
-      if (String(url) === 'https://civitai.com/api/v1/models/1') {
+      if (String(url) === 'https://civitai.red/api/v1/models/1') {
         throw new Error('Redirect was cancelled')
       }
       return new Response(JSON.stringify({ id: 1, type: 'LORA' }), { status: 200 })
     })
-    vi.mocked(net.request).mockImplementation(
-      fakeRedirectingRequest('https://api.civitai.com/api/v1/models/1')
-    )
+    vi.mocked(net.request).mockImplementation(requestStub)
 
     const res = await fetchCivitaiModelType('1')
     expect(res).toEqual({ found: true, type: 'LORA', tags: [] })
     expect(net.fetch).toHaveBeenCalledTimes(2)
+    // 探测完成后经 abort 取消底层请求（ClientRequest 无 cancel/destroy 方法，
+    // 回归防御：调用不存在的方法会在事件处理器内抛错并演变为致命错误）
+    expect(requestStub.requests).toContain('abort')
   })
 
   it('探测到的重定向目标不在白名单时同样拒绝（探测路径保持 V-06 门禁）', async () => {
@@ -327,7 +337,7 @@ describe('normalizeVersionInfo', () => {
       description: '<p>desc</p>',
       model: { id: 123, name: 'Some LoRA' }
     })
-    expect(info.url).toBe('https://civitai.com/models/123?modelVersionId=456')
+    expect(info.url).toBe('https://civitai.red/models/123?modelVersionId=456')
     expect(info.modelName).toBe('Some LoRA')
     expect(info.versionName).toBe('v2.0')
     expect(info.baseModel).toBe('SDXL 1.0')
@@ -411,12 +421,16 @@ describe('normalizeVersionInfo', () => {
 })
 
 describe('isAllowedCivitaiImageUrl', () => {
-  it('仅放行 https 协议的 Civitai CDN 主机', () => {
+  it('仅放行 https 协议的 Civitai 基域主机（com/red 含子域，覆盖 CDN 迁移主机名）', () => {
     expect(isAllowedCivitaiImageUrl('https://image.civitai.com/a.jpeg')).toBe(true)
+    expect(isAllowedCivitaiImageUrl('https://blobs-b2.civitai.com/a.jpeg')).toBe(true)
+    expect(isAllowedCivitaiImageUrl('https://image.civitai.red/a.jpeg')).toBe(true)
     expect(isAllowedCivitaiImageUrl('http://image.civitai.com/a.jpeg')).toBe(false)
+    expect(isAllowedCivitaiImageUrl('http://image.civitai.red/a.jpeg')).toBe(false)
     expect(isAllowedCivitaiImageUrl('https://evil.com/a.jpeg')).toBe(false)
     // 子域伪装与用户信息段伪装均拒绝（真实主机不匹配）
     expect(isAllowedCivitaiImageUrl('https://image.civitai.com.evil.com/a.jpeg')).toBe(false)
+    expect(isAllowedCivitaiImageUrl('https://image.civitai.red.evil.com/a.jpeg')).toBe(false)
     expect(isAllowedCivitaiImageUrl('https://image.civitai.com@evil.com/a.jpeg')).toBe(false)
     expect(isAllowedCivitaiImageUrl('not-a-url')).toBe(false)
     expect(isAllowedCivitaiImageUrl(null)).toBe(false)
