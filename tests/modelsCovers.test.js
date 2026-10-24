@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
+import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -295,5 +296,39 @@ describe('models:importCover', () => {
     const handler = getRegisteredHandler('models:importCover')
     const res = await handler(makeEvent(), { id: outsideId, path: png })
     expect(res.error).toBe('封面关联失败（模型需位于当前模型根目录内）')
+  })
+})
+
+describe('models:clearAllCovers', () => {
+  it('清空引用并删除封面后，同步清理对应缩略图（含 mtime 变体），无关缩略图保留', async () => {
+    const id = await touchModel()
+    const meta = presetCovers(id, 1)
+    const thumbsDir = path.join(root, '.modelvault', 'thumbs')
+    await fs.mkdir(thumbsDir, { recursive: true })
+    // 按thumbs 命名规则（路径哈希-mtime.jpg）构造：同源图两个 mtime 变体 + 一个无关缩略图
+    const absCover = path.join(root, meta.covers[0])
+    const hash = crypto.createHash('md5').update(absCover.toLowerCase()).digest('hex').slice(0, 16)
+    const thumbA = path.join(thumbsDir, `${hash}-111.jpg`)
+    const thumbB = path.join(thumbsDir, `${hash}-222.jpg`)
+    const unrelated = path.join(thumbsDir, 'aaaaaaaaaaaaaaaa-333.jpg')
+    await fs.writeFile(thumbA, 'a')
+    await fs.writeFile(thumbB, 'b')
+    await fs.writeFile(unrelated, 'c')
+
+    const handler = getRegisteredHandler('models:clearAllCovers')
+    const res = await handler(makeEvent())
+
+    expect(res).toEqual({ cleared: 1, images: 1 })
+    expect(getModelMeta(id).covers).toEqual([])
+    await expect(fs.access(thumbA)).rejects.toThrow()
+    await expect(fs.access(thumbB)).rejects.toThrow()
+    await expect(fs.access(unrelated)).resolves.toBeUndefined()
+  })
+
+  it('无封面数据的库返回零计数', async () => {
+    await touchModel()
+    const handler = getRegisteredHandler('models:clearAllCovers')
+    const res = await handler(makeEvent())
+    expect(res).toEqual({ cleared: 0, images: 0 })
   })
 })

@@ -3,7 +3,7 @@ import logger from '../../logger'
 import { runWithConcurrency } from '../../utils'
 import { getMetaMapByAbsPath, getModelMeta, relativizeCover, setModelMeta } from '../../services/store'
 import { deleteCoverFile, importCoverFromPath, pickAndSaveCover, saveClipboardImage } from '../../services/covers'
-import { getThumbPathDeferred } from '../../services/thumbs'
+import { getThumbPathDeferred, removeThumbsForSources } from '../../services/thumbs'
 import { toImageUrl } from '../../protocol'
 import { resolveCoverSafe, sendThumbReady, startThumbDrain, trackDeferredOwner } from './decorate'
 import { wrapHandler, checkModelId } from '../handler'
@@ -215,6 +215,9 @@ export function registerCoverHandlers() {
     // pruneOrphanCovers 周期清理兜底）。OPT-09：全库封面可能数千张，
     // 统一有界并发，避免瞬时耗尽文件句柄
     await runWithConcurrency(deletions, (abs) => deleteCoverFile(abs), 8)
+    // 同步清理被移除封面对应的失效缩略图（按源图路径哈希前缀精确匹配，
+    // 不误删 sidecar 预览图等仍在使用的缩略图；失败不阻塞清理结果）
+    await removeThumbsForSources(deletions)
     logger.info(`已清空全部示例图: ${clearedModels} 个模型共 ${clearedImages} 张`)
     return { cleared: clearedModels, images: clearedImages }
   }, { errorPrefix: '示例图清空失败' })

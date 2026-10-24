@@ -175,3 +175,34 @@ export async function pruneThumbs(keepNames) {
     if (err.code !== 'ENOENT') logger.warn(`缩略图清理失败: ${err.message}`)
   }
 }
+
+/**
+ * 立即删除指定源图对应的全部缩略图（按路径哈希前缀匹配，覆盖 mtime 变体）。
+ * 供「移除全部示例图」链路同步清理失效缓存，无需等待下次全量扫描的
+ * pruneThumbs 兜底；仅命中传入源图的缩略图，sidecar 预览图等仍在使用的
+ * 缩略图不受影响。
+ * @param {string[]} absCovers 已删除的封面源图绝对路径
+ */
+export async function removeThumbsForSources(absCovers) {
+  const list = (Array.isArray(absCovers) ? absCovers : []).filter(
+    (p) => typeof p === 'string' && p
+  )
+  if (list.length === 0 || !getCurrentRoot()) return
+  try {
+    const dir = getThumbsDir()
+    const prefixes = new Set(
+      list.map(
+        (p) =>
+          crypto.createHash('md5').update(p.toLowerCase()).digest('hex').slice(0, 16)
+      )
+    )
+    const entries = await fs.readdir(dir)
+    // 缩略图文件名为「<16 位路径哈希>-<mtime>.jpg」，前缀匹配即命中同一源图
+    const stale = entries.filter((n) => prefixes.has(n.slice(0, 16)))
+    if (stale.length === 0) return
+    await runWithConcurrency(stale, (n) => fs.rm(path.join(dir, n), { force: true }), 16)
+    logger.info(`已清理 ${stale.length} 个移除封面对应的缩略图`)
+  } catch (err) {
+    if (err.code !== 'ENOENT') logger.warn(`缩略图清理失败: ${err.message}`)
+  }
+}
