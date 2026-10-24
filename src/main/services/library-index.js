@@ -76,7 +76,7 @@ function serializeIndexTask(task) {
  * 调用 updateLibraryIndex 会在同步阶段排入串行链，随后由 flush 等待链尾。
  * @returns {void}
  */
-export function flushQueuedIndexUpdates() {
+function flushQueuedIndexUpdates() {
   for (const [key, entry] of [...pendingIndexUpdates]) {
     pendingIndexUpdates.delete(key)
     if (entry.timer) clearTimeout(entry.timer)
@@ -314,12 +314,6 @@ function payloadFromEntry(entry) {
     removeIds: [...entry.removeIds],
     affectedDirs: entry.affectedDirs ? [...entry.affectedDirs] : null
   }
-}
-
-/** 注入合并窗口时长（仅供单元测试使用；生产代码严禁调用） */
-export function setIndexUpdateDebounceForTests(ms) {
-  indexUpdateDebounceMs =
-    Number.isFinite(ms) && ms >= 0 ? ms : INDEX_UPDATE_DEBOUNCE_MS
 }
 
 /** 强制 worker 序列化路径（仅供单元测试使用；0 表示所有写入走 worker） */

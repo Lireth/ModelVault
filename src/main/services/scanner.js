@@ -39,7 +39,7 @@ const EXCLUDED_ENTRY = /^(put_|\.)/i
  * Windows 文件系统大小写不敏感，统一按小写比较，避免大小写变体漏排除。
  * `.git`/`.modelvault` 同时命中隐藏项规则，此处显式登记以防规则演进时失配。
  */
-export const SCAN_EXCLUDED_DIRS = new Set([
+const SCAN_EXCLUDED_DIRS = new Set([
   'node_modules',
   '.git',
   '.modelvault',
@@ -61,7 +61,7 @@ export function isExcludedScanEntryName(name) {
  * @param {unknown} name 目录名
  * @returns {boolean}
  */
-export function isExcludedScanDirName(name) {
+function isExcludedScanDirName(name) {
   return typeof name === 'string' && SCAN_EXCLUDED_DIRS.has(name.toLowerCase())
 }
 

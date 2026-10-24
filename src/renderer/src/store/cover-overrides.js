@@ -37,7 +37,7 @@ export function clearModelCoverOverrides(ids) {
 }
 
 /** 设置某封面路径的缩略图 URL */
-export function setCoverThumbUrl(path, url) {
+function setCoverThumbUrl(path, url) {
   if (typeof path === 'string' && path && typeof url === 'string' && url) byPath.set(path, url)
 }
 

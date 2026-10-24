@@ -15,6 +15,7 @@ import {
 } from './store-paths'
 import { getMetaMapByAbsPath } from './store-meta'
 import { getSettings } from './store-settings'
+import { normalizeLibraryRoots } from './library-overview'
 
 /**
  * 诊断包导出（FN-05）：
@@ -161,20 +162,6 @@ export function summarizeMetadata(metaMap) {
   return summary
 }
 
-/** 归一化并去重库列表（Windows 大小写不敏感） */
-export function normalizeLibraryRoots(roots) {
-  const seen = new Set()
-  const result = []
-  for (const root of roots || []) {
-    if (typeof root !== 'string' || !root.trim()) continue
-    const key = path.resolve(root).toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    result.push(root)
-  }
-  return result
-}
-
 /** 库的基础信息（只读 stat，不读取索引内容） */
 async function collectLibraryInfo(root) {
   const index = await fileInfo(getIndexFilePath(root))
@@ -191,7 +178,7 @@ async function collectLibraryInfo(root) {
  * 构建诊断报告对象（不含日志正文）。
  * @returns {Promise<object>}
  */
-export async function collectDiagnosticsReport() {
+async function collectDiagnosticsReport() {
   const settings = getSettings()
   const activeRoot = getCurrentRoot()
   const roots = normalizeLibraryRoots([

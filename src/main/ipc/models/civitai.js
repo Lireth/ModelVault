@@ -269,7 +269,7 @@ function broadcastWarmupProgress(progress) {
 }
 
 /** 立即送达已累积的哈希完成批次 */
-export function flushWarmupCompletionBatch() {
+function flushWarmupCompletionBatch() {
   if (pendingHashCompletions.length === 0) {
     if (hashCompletionTimer) {
       clearTimeout(hashCompletionTimer)

@@ -50,7 +50,7 @@ import { MAX_PARTIAL_SCAN_DIRS_INPUT } from './scan-dirs'
 export const DEFAULT_MAX_OBJECT_KEYS = 64
 export const DEFAULT_MAX_ARRAY_ITEMS = 1024
 /** 对象/数组最大嵌套深度（顶层 payload 为第 1 层） */
-export const DEFAULT_MAX_DEPTH = 5
+const DEFAULT_MAX_DEPTH = 5
 
 /**
  * 主进程 → 渲染进程事件通道（O9 单一来源）：
