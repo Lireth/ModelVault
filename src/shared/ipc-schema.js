@@ -407,14 +407,6 @@ export const IPC_PAYLOAD_SCHEMAS = {
     }
   }),
   'models:popupMenu': vObj({ fields: { id: ID } }),
-  // F-2 回收站桥接：最近删除记录查看与一键恢复（恢复目标限定当前库内路径）
-  'models:listDeleted': vVoid(),
-  'models:restoreDeleted': vObj({
-    fields: { absPath: vStr({ required: true, max: 2000 }) }
-  }),
-  'models:forgetDeleted': vObj({
-    fields: { absPath: vStr({ required: true, max: 2000 }) }
-  }),
   // F-3 跨库传输：ids 为当前库内模型路径；targetRoot 必须是已保存的其他
   // 模型库（handler 校验 ∈ settings.modelsFolders 且 ≠ 当前根）；mode 枚举
   // 语义在 handler（copy/move）

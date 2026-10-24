@@ -5,12 +5,6 @@ import { atomicWriteFile } from '../../services/atomic-write'
 import { getCurrentRoot, getModelMeta, removeModelMeta } from '../../services/store'
 import { updateLibraryIndex } from '../../services/library-index'
 import { checkLibraryHealth, repairLibraryHealth } from '../../services/library-health'
-import {
-  forgetDeletedModel,
-  listDeletedModels,
-  recordModelDeletion,
-  restoreDeletedModel
-} from '../../services/trash-log'
 import { sidecarFilesFor } from '../../services/scanner'
 import {
   wrapHandler,
@@ -81,9 +75,6 @@ export function registerMiscHandlers() {
         logger.warn(`sidecar 清理失败（不影响删除）: ${f} ${err.message}`)
       })
     }
-    // F-2 回收站桥接：快照元数据并记录原路径（须在 removeModelMeta 之前），
-    // 供「最近删除」一键恢复；失败仅告警，不阻塞删除主流程
-    await recordModelDeletion(id, sidecarFilesFor(id))
     removeModelMeta(id)
     // O8：即时从本地索引移除，切库秒开不再回放已删除模型
     await updateLibraryIndex(getCurrentRoot(), { removeIds: [id] })
@@ -161,14 +152,6 @@ export function registerMiscHandlers() {
   wrapHandler('models:repairHealth', () => repairLibraryHealth(), {
     errorPrefix: '模型库修复失败'
   })
-
-  // F-2 回收站桥接：最近删除记录查看 / 一键恢复 / 忽略。
-  // 恢复安全门禁在服务层（isInRoot 限定当前库、原位置占用即拒绝），此处透传
-  wrapHandler('models:listDeleted', () => listDeletedModels())
-  wrapHandler('models:restoreDeleted', (event, { absPath } = {}) => restoreDeletedModel(absPath), {
-    errorPrefix: '恢复失败'
-  })
-  wrapHandler('models:forgetDeleted', (event, { absPath } = {}) => forgetDeletedModel(absPath))
 
   // 模型清单导出（FN-04）：渲染层已按当前筛选结果生成文本，主进程只负责
   // 原生保存对话框与原子落盘；不接受渲染层传入路径，避免任意文件写入。
