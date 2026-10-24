@@ -287,6 +287,83 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
     expect(isCivitaiVideoUrl(null)).toBe(false)
   })
 
+  it('图片代理响应头按白名单重建：Set-Cookie/Content-Disposition/X-* 不透传', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response('upstream-error-page', {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html',
+          'Set-Cookie': 'session=secret; Path=/',
+          'Content-Disposition': 'attachment; filename="x.png"',
+          'X-Custom-Header': 'leak',
+          ETag: '"etag-1"'
+        }
+      })
+    )
+    const res = await civHandler(makeCivRequest('https://image.civitai.com/h/5.png'))
+    expect(res.status).toBe(200)
+    // 上游附带头一律不透传（cookie 注入通道切断），白名单子集保留
+    expect(res.headers.get('Set-Cookie')).toBeNull()
+    expect(res.headers.get('Content-Disposition')).toBeNull()
+    expect(res.headers.get('X-Custom-Header')).toBeNull()
+    expect(res.headers.get('ETag')).toBe('"etag-1"')
+    expect(res.headers.get('Cache-Control')).toContain('max-age=86400')
+  })
+
+  it('视频代理：非法 Range 头丢弃后按无 Range 回源，合法单区间照常透传', async () => {
+    // 每次回源生成新 Response（body 一次性，不可复用同一实例）
+    vi.mocked(net.fetch).mockImplementation(() =>
+      Promise.resolve(new Response('vid', { status: 200, headers: { 'Content-Type': 'video/mp4' } }))
+    )
+    const target = 'https://image.civitai.com/x/evil.mp4'
+
+    // 多区间（逗号）：合法 header 值但不符白名单格式 → 不透传
+    const multi = makeCivRequest(target)
+    multi.headers = new Headers({ range: 'bytes=0-1,5-9' })
+    await civHandler(multi)
+    expect(vi.mocked(net.fetch).mock.calls[0][1].headers.Range).toBeUndefined()
+
+    // 字节数超长（>16 位）→ 不透传
+    const huge = makeCivRequest(target)
+    huge.headers = new Headers({ range: 'bytes=99999999999999999999-' })
+    await civHandler(huge)
+    expect(vi.mocked(net.fetch).mock.calls[1][1].headers.Range).toBeUndefined()
+
+    // 合法闭区间 / 开区间 → 原样透传
+    const closed = makeCivRequest(target)
+    closed.headers = new Headers({ range: 'bytes=100-200' })
+    await civHandler(closed)
+    expect(vi.mocked(net.fetch).mock.calls[2][1].headers.Range).toBe('bytes=100-200')
+    const open = makeCivRequest(target)
+    open.headers = new Headers({ range: 'bytes=10-' })
+    await civHandler(open)
+    expect(vi.mocked(net.fetch).mock.calls[3][1].headers.Range).toBe('bytes=10-')
+  })
+
+  it('视频代理响应头按白名单重建：Set-Cookie 不透传，Content-Range/Content-Length 保留', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response('vid', {
+        status: 206,
+        headers: {
+          'Content-Type': 'video/mp4',
+          'Content-Range': 'bytes 0-2/100',
+          'Content-Length': '3',
+          'Set-Cookie': 'track=1',
+          'X-Upstream': 'leak'
+        }
+      })
+    )
+    const request = makeCivRequest('https://image.civitai.com/x/v.mp4')
+    request.headers = new Headers({ range: 'bytes=0-2' })
+    const res = await civHandler(request)
+    expect(res.status).toBe(206)
+    expect(res.headers.get('Set-Cookie')).toBeNull()
+    expect(res.headers.get('X-Upstream')).toBeNull()
+    // 流式播放语义所需的头保留
+    expect(res.headers.get('Content-Range')).toBe('bytes 0-2/100')
+    expect(res.headers.get('Content-Length')).toBe('3')
+  })
+
   /** 最小 PNG 文件头（通过魔数校验，可入缓存） */
   const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
 

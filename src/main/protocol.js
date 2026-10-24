@@ -154,6 +154,38 @@ function withCacheHeaders(upstream, immutable) {
   })
 }
 
+/**
+ * civimg 代理允许透传给渲染进程的上游响应头白名单（媒体语义所需子集）。
+ * 上游（Civitai CDN）响应头不整体透传：Set-Cookie 可能落入 civimg 来源的
+ * cookie 存储（standard+secure scheme 下的行为随 Electron 版本演进），
+ * Content-Disposition/X-* 等与媒体展示无关——代理响应面确定化。
+ * Cache-Control 由本方缓存策略另行下发，不从上游继承。
+ */
+const PROXY_SAFE_RESPONSE_HEADERS = [
+  'Content-Type',
+  'Accept-Ranges',
+  'Content-Range',
+  'ETag',
+  'Last-Modified'
+]
+
+/**
+ * 按白名单重建代理响应头。
+ * @param {Response} upstream 上游响应
+ * @param {string[]} [extra] 额外放行的头（流式视频需 Content-Length 配合
+ *   Content-Range 支撑拖动播放）
+ * @returns {Headers} 白名单重建后的新 Headers
+ */
+function proxyMediaHeaders(upstream, extra = []) {
+  const source = upstream.headers || new Headers()
+  const headers = new Headers()
+  for (const name of [...PROXY_SAFE_RESPONSE_HEADERS, ...extra]) {
+    const value = source.get(name)
+    if (value) headers.set(name, value)
+  }
+  return headers
+}
+
 /** 在 app ready 之后调用，注册协议处理器（mvimg 本地图 + civimg 远程代理） */
 export function registerImageProtocolHandler() {
   registerMvimgHandler()
@@ -290,8 +322,10 @@ function registerCivimgHandler() {
       if (isImageBuffer(buf)) {
         await saveCivImageCache(target, buf)
       }
-      // 远程图内容一般不可变，按天缓存减轻 CDN 与代理压力
-      const headers = new Headers(upstream.headers)
+      // 远程图内容一般不可变，按天缓存减轻 CDN 与代理压力。
+      // 响应头按白名单重建（不透传上游 Set-Cookie 等）；响应体为完整
+      // Buffer，长度由 Response 自动计算，不继承上游可能失真的 Content-Length
+      const headers = proxyMediaHeaders(upstream)
       headers.set('Cache-Control', 'public, max-age=86400')
       return new Response(buf, {
         status: upstream.status,
@@ -334,7 +368,9 @@ async function proxyCivitaiVideo(target, request) {
       logger.warn(`civimg 视频上游响应异常（HTTP ${upstream.status}）: ${target.slice(0, 200)}`)
       return new Response('Upstream Error', { status: 502 })
     }
-    const headers = new Headers(upstream.headers)
+    // 流式响应保留上游 Content-Length/Content-Range（拖动播放语义所需），
+    // 其余响应头同样按白名单重建
+    const headers = proxyMediaHeaders(upstream, ['Content-Length'])
     headers.set('Cache-Control', 'public, max-age=86400')
     return new Response(upstream.body, {
       status: upstream.status,

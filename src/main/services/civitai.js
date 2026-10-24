@@ -459,10 +459,16 @@ export async function fetchCivitaiImage(url) {
 }
 
 /**
+ * 合法 Range 头格式（单区间、字节数 ≤16 位）：
+ * 渲染进程可控入参的透传白名单，覆盖开区间（bytes=10-）与后缀区间（bytes=-500）。
+ */
+const RANGE_HEADER_RE = /^bytes=\d{0,16}-\d{0,16}$/
+
+/**
  * 发起 Civitai 示例视频请求（FN-02）：透传 Range 以支持拖动播放，
  * 不设置整体超时（视频可能较大且持续播放），域名白名单与图片一致。
  * @param {string} url 已通过 isAllowedCivitaiImageUrl 校验的视频地址
- * @param {string} [range] 原始 Range 请求头
+ * @param {string} [range] 原始 Range 请求头（须过白名单格式校验才透传）
  * @returns {Promise<Response>}
  */
 export async function fetchCivitaiVideo(url, range = '') {
@@ -470,7 +476,17 @@ export async function fetchCivitaiVideo(url, range = '') {
     Accept: 'video/mp4,video/webm,video/*;q=0.9,*/*;q=0.5',
     Referer: 'https://civitai.com/'
   }
-  if (typeof range === 'string' && range.trim()) headers.Range = range.trim()
+  if (typeof range === 'string' && range.trim()) {
+    const value = range.trim()
+    // Range 值完全来自渲染进程请求头，须过白名单格式校验后再透传上游，
+    // 不依赖网络栈对非法头字符的兜底拦截（与重定向逐跳校验同一原则）；
+    // 非法值按无 Range 处理（上游返回完整内容，播放仍可用）
+    if (RANGE_HEADER_RE.test(value)) {
+      headers.Range = value
+    } else {
+      logger.warn(`已丢弃非法 Range 请求头（按无 Range 回源）: ${value.slice(0, 60)}`)
+    }
+  }
   return fetchWithAllowedRedirects(
     url,
     { headers },
