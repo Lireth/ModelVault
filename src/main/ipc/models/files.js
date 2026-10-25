@@ -8,7 +8,7 @@ import { getCurrentRoot, renameModelMeta, toRelKey } from '../../services/store'
 import { sidecarFilesFor } from './misc'
 import { LORA_TAG_DEFS, LORA_TAG_KEYS } from '../../../shared/model-categories'
 import { MODEL_EXTENSION_NAMES, MODEL_EXTENSION_SET } from '../../../shared/model-extensions'
-import { SIDECAR_PREVIEW_EXTS } from '../../services/scanner'
+import { SIDECAR_PREVIEW_EXTS, sidecarBaseOf } from '../../services/scanner'
 import {
   maintenanceBusyMessage,
   releaseMaintenance,
@@ -88,6 +88,8 @@ const IMPORT_SIDECAR_SUFFIXES = ['.txt', '.civitai.info', ...SIDECAR_PREVIEW_EXT
 
 /**
  * 拆分模型文件名（兼容 WebUI 的 `.disabled` 双重后缀）。
+ * base 统一委托 scanner.sidecarBaseOf（单一来源），保证导入搬运的
+ * sidecar 命名与展示/清理/迁移侧集合一致。
  * @param {string} fileName 文件名
  * @returns {{base: string, ext: string, disabled: boolean}}
  */
@@ -99,7 +101,7 @@ export function splitModelFileName(fileName) {
     name = name.slice(0, -'.disabled'.length)
   }
   const ext = path.extname(name)
-  return { base: path.basename(name, ext), ext, disabled }
+  return { base: sidecarBaseOf(name), ext, disabled }
 }
 
 /**

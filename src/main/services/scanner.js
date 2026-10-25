@@ -323,16 +323,39 @@ export const SIDECAR_PREVIEW_EXTS = [
 ]
 
 /**
- * 模型同名的 sidecar 文件清单（SD WebUI 惯例：同名预览图 + 说明文本）。
- * 图片候选与展示侧共用 SIDECAR_PREVIEW_EXTS，保证清理集与展示集一致（B17）。
- * 删除清理（ipc/models/misc.js）与跨库传输（library-transfer.js）共用本函数。
+ * 模型文件名 → sidecar 基名（单一来源）：
+ * 先剥 WebUI 的 `.disabled` 双重后缀，再剥模型扩展名——禁用模型
+ * `x.safetensors.disabled` 的 sidecar 惯例仍为 `x.txt` / `x.png`
+ * （WebUI 禁用仅改模型文件名，sidecar 不跟随改名）。导入搬运侧
+ * （ipc/models/files.js 的 splitModelFileName）委托本函数，保证
+ * 「导入的 sidecar、展示命中的 sidecar、清理/迁移的 sidecar」三处集合一致。
+ * @param {string} fileName 模型文件名或绝对路径
+ * @returns {string} sidecar 基名（不含目录与扩展名）
+ */
+export function sidecarBaseOf(fileName) {
+  let name = String(fileName || '')
+  if (name.toLowerCase().endsWith(DISABLED_SUFFIX)) {
+    name = name.slice(0, -DISABLED_SUFFIX.length)
+  }
+  return path.basename(name, path.extname(name))
+}
+
+/**
+ * 模型同名的 sidecar 文件清单（SD WebUI 惯例：同名预览图 + 说明文本 +
+ * Civitai 下载器元数据）。图片候选与展示侧共用 SIDECAR_PREVIEW_EXTS，
+ * `.txt`/`.civitai.info` 与 findSidecarText/findSidecarCivitaiInfo 对应，
+ * 保证清理集与展示集一致（B17）。删除清理（ipc/models/misc.js）与
+ * 跨库传输（library-transfer.js）共用本函数。
  * @param {string} absModelPath 模型文件绝对路径
  * @returns {string[]} sidecar 文件绝对路径候选
  */
 export function sidecarFilesFor(absModelPath) {
   const dir = path.dirname(absModelPath)
-  const base = path.basename(absModelPath, path.extname(absModelPath))
-  const files = [path.join(dir, `${base}.txt`)]
+  const base = sidecarBaseOf(absModelPath)
+  const files = [
+    path.join(dir, `${base}.txt`),
+    path.join(dir, `${base}.civitai.info`)
+  ]
   for (const ext of SIDECAR_PREVIEW_EXTS) {
     files.push(path.join(dir, `${base}${ext}`))
   }
@@ -347,7 +370,7 @@ export function sidecarFilesFor(absModelPath) {
  */
 export async function findSidecarPreview(modelPath) {
   const dir = path.dirname(modelPath)
-  const base = path.basename(modelPath, path.extname(modelPath))
+  const base = sidecarBaseOf(modelPath)
   const candidates = SIDECAR_PREVIEW_EXTS.map((ext) => path.join(dir, `${base}${ext}`))
   for (const candidate of candidates) {
     try {
@@ -372,7 +395,7 @@ const SIDECAR_TEXT_MAX_BYTES = 256 * 1024
 export async function findSidecarText(modelPath) {
   const txtPath = path.join(
     path.dirname(modelPath),
-    `${path.basename(modelPath, path.extname(modelPath))}.txt`
+    `${sidecarBaseOf(modelPath)}.txt`
   )
   try {
     const stat = await fs.stat(txtPath)
@@ -421,7 +444,7 @@ const CIVITAI_INFO_MAX_BYTES = 1024 * 1024
 export async function findSidecarCivitaiInfo(modelPath) {
   const infoPath = path.join(
     path.dirname(modelPath),
-    `${path.basename(modelPath, path.extname(modelPath))}.civitai.info`
+    `${sidecarBaseOf(modelPath)}.civitai.info`
   )
   try {
     const stat = await fs.stat(infoPath)

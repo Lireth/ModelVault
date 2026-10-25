@@ -12,6 +12,8 @@ import {
   isExcludedScanName,
   isVisibleScanEntry,
   scanModels,
+  sidecarBaseOf,
+  sidecarFilesFor,
   sidecarImportPatch
 } from '../src/main/services/scanner'
 
@@ -393,6 +395,40 @@ describe('findSidecarText', () => {
     await fs.writeFile(bigPath, 'x')
     await fs.writeFile(path.join(dir, 'm3.txt'), 'a'.repeat(300 * 1024))
     expect(await findSidecarText(bigPath)).toBe('')
+  })
+})
+
+describe('sidecarBaseOf / sidecarFilesFor（.disabled 基名单一来源）', () => {
+  it('先剥 .disabled 再剥模型扩展名：x.safetensors.disabled → x', () => {
+    expect(sidecarBaseOf('x.safetensors.disabled')).toBe('x')
+    expect(sidecarBaseOf('X.CKPT.DISABLED')).toBe('X')
+    // 非禁用模型行为不变
+    expect(sidecarBaseOf('x.safetensors')).toBe('x')
+    expect(sidecarBaseOf('my.model.v2.safetensors')).toBe('my.model.v2')
+    // 完整路径输入（sidecar 函数内部以模型绝对路径调用）
+    expect(sidecarBaseOf(path.join('D:', 'loras', 'x.safetensors.disabled'))).toBe('x')
+  })
+
+  it('禁用模型的 sidecar 清单与展示/清理查找全部命中（修复前基名为 x.safetensors，全部落空）', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-sidebase-'))
+    try {
+      const disabledModel = path.join(dir, 'hero.safetensors.disabled')
+      await fs.writeFile(disabledModel, 'x')
+      await fs.writeFile(path.join(dir, 'hero.txt'), 'trigger words\nnote')
+      await fs.writeFile(path.join(dir, 'hero.png'), 'x')
+      await fs.writeFile(path.join(dir, 'hero.civitai.info'), '{"trainedWords":["a"]}')
+
+      // 清单（删除清理 misc.js 与跨库迁移 library-transfer.js 共用）
+      const files = sidecarFilesFor(disabledModel)
+      expect(files[0]).toBe(path.join(dir, 'hero.txt'))
+      expect(files).toContain(path.join(dir, 'hero.png'))
+      // 展示侧三个查找函数同样命中
+      expect(await findSidecarPreview(disabledModel)).toBe(path.join(dir, 'hero.png'))
+      expect(await findSidecarText(disabledModel)).toBe('trigger words\nnote')
+      expect(await findSidecarCivitaiInfo(disabledModel)).toEqual({ trainedWords: ['a'] })
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true })
+    }
   })
 })
 

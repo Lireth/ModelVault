@@ -33,6 +33,7 @@ import {
 } from '../src/main/ipc/models/files'
 import { getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
 import { getModelMeta, loadData, setDataRoot, setModelMeta } from '../src/main/services/store'
+import { sidecarFilesFor } from '../src/main/services/scanner'
 import { dialog } from 'electron'
 
 /** 本文件创建的全部临时目录（afterAll 只清理这些，不动系统临时目录） */
@@ -311,6 +312,20 @@ describe('F2 模型导入（复制/移动入台）', () => {
     await fs.writeFile(path.join(dir, 'm.safetensors'), 'x')
     const plan = await planImportTarget(dir, 'm.safetensors')
     expect(plan.fileName).toBe('m (1).safetensors')
+  })
+
+  it('禁用模型导入的 sidecar 命名与 scanner 侧查找集合一致（.disabled 基名回归）', async () => {
+    const dir = path.join(root, 'sidecar-agree')
+    await fs.mkdir(dir, { recursive: true })
+    const plan = await planImportTarget(dir, 'hero.safetensors.disabled')
+    expect(plan.base).toBe('hero')
+    // 导入链路搬运的 sidecar 目标名（`${plan.base}${suffix}` = hero.txt）必须
+    // 落在扫描/展示/清理侧 sidecarFilesFor 的候选集合内——修复前 scanner 侧
+    // 基名为 hero.safetensors，导入的 hero.txt 既不展示也清不掉
+    const scannerSidecars = sidecarFilesFor(path.join(dir, plan.fileName))
+    for (const suffix of ['.txt', '.civitai.info', '.png', '.preview.png']) {
+      expect(scannerSidecars).toContain(path.join(dir, `${plan.base}${suffix}`))
+    }
   })
 
   it('取消任一对话框返回 canceled 且不写文件', async () => {

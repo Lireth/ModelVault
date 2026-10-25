@@ -56,12 +56,13 @@ import { getCurrentRoot, loadSettings } from '../src/main/services/store'
 import { getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
 
 describe('sidecarFilesFor', () => {
-  it('返回同名 .txt 与全部预览图候选（与展示侧 SIDECAR_PREVIEW_EXTS 一致，B17）', () => {
+  it('返回同名 .txt/.civitai.info 与全部预览图候选（与展示侧一致，B17）', () => {
     const dir = path.join('D:', 'models', 'loras')
     const files = sidecarFilesFor(path.join(dir, 'style-a.safetensors'))
     expect(files[0]).toBe(path.join(dir, 'style-a.txt'))
-    // .txt 之后逐个列出预览图候选（.png/.preview.png/.jpg/.jpeg/.webp/.gif/.bmp，共 7 个）
-    expect(files.length).toBe(1 + 7)
+    expect(files[1]).toBe(path.join(dir, 'style-a.civitai.info'))
+    // .txt/.civitai.info 之后逐个列出预览图候选（.png/.preview.png/.jpg/.jpeg/.webp/.gif/.bmp，共 7 个）
+    expect(files.length).toBe(2 + 7)
     expect(files).toContain(path.join(dir, 'style-a.preview.png'))
     expect(files).toContain(path.join(dir, 'style-a.bmp'))
   })
