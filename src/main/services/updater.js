@@ -17,11 +17,22 @@ import {
  * 附加的 ModelVault-<version>.exe 与 .sha256 资产（命名约定精确匹配 +
  * github.com 白名单），供「下载更新 → 运行更新程序」闭环使用（资产信息
  * 保存于 update-download 模块态，渲染层不可注入 URL）。
+ * 版本号只认 v 前缀纯数字三段（V-06 安全设计，发布约定见 README 发版流程）；
+ * 仓库 Latest 为遗留非语义化标签（历史 Beta-0.x）时回查 Release 列表取
+ * 最新合规版本（A2 迁移兜底），列表内也无合规版本则视为暂无更新。
  * 网络请求走 Electron net.fetch（Chromium 网络栈，继承系统代理，项目约定）。
  */
 
 /** 更新检查的仓库标识（发布流水线以 v* 标签触发，tag 即版本号） */
 const UPDATE_REPO = 'Lireth/ModelVault'
+
+/** 最新 Release 查询（主路径，命中仓库标记为 Latest 的 Release） */
+const RELEASES_LATEST_URL = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`
+/**
+ * Release 列表查询（A2 迁移兜底）：仓库 Latest 仍是遗留非语义化标签
+ * （历史 Beta-0.x）时，按创建时间倒序回看近期 Release，取最新一个合规版本。
+ */
+const RELEASES_LIST_URL = `https://api.github.com/repos/${UPDATE_REPO}/releases?per_page=10`
 
 // 请求超时统一走 net-fetch.js 的 REQUEST_TIMEOUT_MS（原本地 10s，随全网
 // 络层收敛放宽为 15s，与 Civitai/更新下载链路一致）
@@ -53,6 +64,71 @@ export function compareVersions(a, b) {
   return 0
 }
 
+/** 更新检查请求选项（UA 标识 + GitHub API Accept；超时统一 15s） */
+function updateRequestOptions(current) {
+  return {
+    headers: {
+      'User-Agent': `ModelVault/${current}`,
+      Accept: 'application/vnd.github+json',
+    },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  }
+}
+
+/**
+ * 发起一次更新检查请求并解析 JSON 响应（V-06：2MB 上限内读取）。
+ * 网络层异常向上抛出（调用方统一映射超时/失败文案）；HTTP 非 2xx 与
+ * JSON 读取/解析失败以 { error, status? } 返回，不抛出。
+ * @param {string} url API 地址（fetchAllowedUpdateUrl 主机白名单校验）
+ * @param {string} current 当前版本号（UA 标识）
+ * @returns {Promise<{error?: string, status?: number, data?: any}>}
+ */
+async function fetchReleaseJson(url, current) {
+  const response = await fetchAllowedUpdateUrl(
+    url,
+    updateRequestOptions(current),
+  )
+  if (!response.ok) {
+    return {
+      error: `更新检查失败（HTTP ${response.status}）`,
+      status: response.status,
+    }
+  }
+  try {
+    const data = JSON.parse(
+      await readResponseTextLimited(
+        response,
+        MAX_UPDATE_JSON_BYTES,
+        '更新信息',
+      ),
+    )
+    return { data }
+  } catch (err) {
+    return { error: `更新信息解析失败: ${err.message}` }
+  }
+}
+
+/**
+ * A2 迁移兜底：在 Release 列表（创建时间倒序）中查找第一个（即最新的）
+ * 语义化版本 Release。仅「跳过」不合规标签，绝不放宽 V-06 校验——被采纳
+ * 的 tag 仍须完整通过 isSafeUpdateVersion，后续资产匹配/域名白名单照常生效。
+ * @param {string} current 当前版本号（UA 标识）
+ * @returns {Promise<{error?: string, data?: object, latest?: string} | null>}
+ *   null 表示窗口内没有任何合规 Release（调用方视为暂无可用更新）
+ */
+async function findNewestConformingRelease(current) {
+  const result = await fetchReleaseJson(RELEASES_LIST_URL, current)
+  if (result.error) return result
+  const list = Array.isArray(result.data) ? result.data : []
+  for (const rel of list) {
+    const tag =
+      typeof rel?.tag_name === 'string' ? rel.tag_name.replace(/^v/, '') : ''
+    if (!tag || !isSafeUpdateVersion(tag)) continue
+    return { data: rel, latest: tag }
+  }
+  return null
+}
+
 /**
  * 检查更新。任何失败都以 { error } 返回（不抛出），调用方直接展示。
  * @returns {Promise<{error: string} |
@@ -62,46 +138,37 @@ export function compareVersions(a, b) {
 export async function checkForUpdate() {
   const current = app.getVersion()
   try {
-    const response = await fetchAllowedUpdateUrl(
-      `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`,
-      {
-        headers: {
-          'User-Agent': `ModelVault/${current}`,
-          Accept: 'application/vnd.github+json',
-        },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      },
-    )
-    if (response.status === 404) {
-      // 仓库尚无任何 release：视为已是最新
-      return { current, hasUpdate: false }
+    const primary = await fetchReleaseJson(RELEASES_LATEST_URL, current)
+    if (primary.error) {
+      if (primary.status === 404) {
+        // 仓库尚无任何 release：视为已是最新
+        return { current, hasUpdate: false }
+      }
+      return { error: primary.error, current }
     }
-    if (!response.ok) {
-      return { error: `更新检查失败（HTTP ${response.status}）`, current }
-    }
-    let data
-    try {
-      data = JSON.parse(
-        await readResponseTextLimited(
-          response,
-          MAX_UPDATE_JSON_BYTES,
-          '更新信息',
-        ),
-      )
-    } catch (err) {
-      return { error: `更新信息解析失败: ${err.message}`, current }
-    }
-    const latest =
+    let data = primary.data
+    let latest =
       typeof data?.tag_name === 'string' ? data.tag_name.replace(/^v/, '') : ''
     if (!latest) {
       return { error: '更新信息格式异常（缺少版本号）', current }
     }
-    // V-06：版本号参与更新包文件名，必须限定纯数字三段
+    // V-06：版本号参与更新包文件名，必须限定纯数字三段。
+    // Latest Release 为遗留非语义化标签（历史 Beta-0.x，A2 迁移期）时不在此
+    // 终止报错，而是回查 Release 列表取最新合规版本；列表内也无合规版本时
+    // 静默视为暂无更新（不打扰用户），发布 v* 版本后主路径自动恢复。
     if (!isSafeUpdateVersion(latest)) {
       logger.warn(
-        `更新信息版本号非法，已忽略: ${String(data?.tag_name).slice(0, 80)}`,
+        `最新 Release 标签非语义化版本，回查 Release 列表: ${String(data?.tag_name).slice(0, 80)}`,
       )
-      return { error: '更新信息格式异常（版本号非法）', current }
+      const fallback = await findNewestConformingRelease(current)
+      if (fallback?.error) {
+        return { error: fallback.error, current }
+      }
+      if (!fallback || !fallback.data) {
+        return { current, hasUpdate: false }
+      }
+      data = fallback.data
+      latest = fallback.latest
     }
     // 下载页地址必须命中外链白名单（B3）：API 响应不可信时不得把用户
     // 引向白名单外站点（渲染层据空串隐藏「前往下载」入口）

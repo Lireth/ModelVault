@@ -224,6 +224,7 @@ wrapHandler('my:channel', async (event, payload) => {
 
 - `ci.yml`：push 到 main / PR 时运行质量门禁（Node 22/24 矩阵：ESLint → 类型检查 → 单元测试 → 三端编译 → 产物完整性校验 → 覆盖率归档）
 - `release.yml`：推送 `v*` 标签触发 Windows 打包，自动创建 GitHub Release 并附加 EXE 与 SHA256 校验和
+- **发版流程与版本号约定（A2）**：版本标签统一采用 `v{major}.{minor}.{patch}` 语义化格式（如 `v0.6.0`），且必须与 `package.json` 的 `version` 一致（workflow 内置校验，不一致即失败）。发版步骤：更新 `package.json` 版本号并提交 → `git tag v0.6.0` → 推送标签即自动构建并创建 Release（新 Release 默认标记为 Latest）；打包流程可在 Actions 页用 `workflow_dispatch` 输入版本号做不建 Release 的演练。历史 `Beta-0.x` 标签为遗留格式：应用内更新只识别 v 前缀纯数字三段版本（V-06 安全设计），Latest 为遗留标签时会自动回查 Release 列表取最新合规版本，列表内也无合规版本则视为暂无更新
 - **代码签名（E1）**：配置仓库 Secrets `CSC_LINK`（base64 PFX）与 `CSC_KEY_PASSWORD` 后，electron-builder 自动为 EXE 做 SHA256 Authenticode 签名；`MODELVAULT_SIGNER_THUMBPRINT`（证书 SHA1 指纹）会在构建期注入主进程，应用内更新下载复用与安装前均强制「签名有效 + 指纹一致」。未配置证书时构建继续，应用内更新退化为仅 SHA256 校验
 
 ## 安全要点
