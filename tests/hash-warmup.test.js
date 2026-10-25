@@ -102,12 +102,19 @@ describe('computeAndCacheHash', () => {
 
   it('mtime 变化（文件更新后）重新计算', async () => {
     const id = await makeModel('c.safetensors')
+    const t1 = (await fs.stat(id)).mtimeMs
     computeFileHash.mockResolvedValueOnce(fakeHash(1))
-    await computeAndCacheHash(id, 1000)
+    await computeAndCacheHash(id, t1)
+    // 文件被覆盖更新：显式前移 mtime（NTFS 对快速连续写入的 mtime 更新
+    // 是惰性的，utimes 保证确定性）
+    await fs.writeFile(id, 'z'.repeat(2048))
+    await fs.utimes(id, new Date(), new Date(Date.now() + 8000))
+    const t2 = (await fs.stat(id)).mtimeMs
+    expect(t2).not.toBe(t1)
     computeFileHash.mockResolvedValueOnce(fakeHash(2))
-    await computeAndCacheHash(id, 2000)
+    await computeAndCacheHash(id, t2)
     expect(computeFileHash).toHaveBeenCalledTimes(2)
-    expect(getModelMeta(id).hashMtime).toBe(2000)
+    expect(getModelMeta(id).hashMtime).toBe(t2)
   })
 
   it('计算失败时拒绝且不写缓存', async () => {
@@ -119,8 +126,9 @@ describe('computeAndCacheHash', () => {
 
   it('priority 透传到线程池前台通道', async () => {
     const id = await makeModel('priority.safetensors')
+    const { mtimeMs } = await fs.stat(id)
     computeFileHash.mockResolvedValue(fakeHash(30))
-    await computeAndCacheHash(id, 1000, { priority: true })
+    await computeAndCacheHash(id, mtimeMs, { priority: true })
     expect(computeFileHash).toHaveBeenCalledWith(
       id,
       undefined,
@@ -159,6 +167,44 @@ describe('computeAndCacheHash', () => {
     })
     // 初始 1 次 + 重试 2 次
     expect(computeFileHash).toHaveBeenCalledTimes(3)
+    expect(getModelMeta(id)?.hash).toBeUndefined()
+  })
+
+  it('版本竞态：计算期间文件被覆盖（mtime 前移）时抛错且不写缓存', async () => {
+    const id = await makeModel('race-overwrite.safetensors')
+    const { mtimeMs } = await fs.stat(id)
+    // 在「哈希计算」内部模拟同名覆盖写入——此时算得的哈希对应旧版本或
+    // 新旧混合内容，写入缓存会让识别链路反查到错误的模型版本。
+    // utimes 显式前移 mtime（NTFS 快速连续写入的 mtime 更新是惰性的）
+    computeFileHash.mockImplementation(async () => {
+      await fs.writeFile(id, 'y'.repeat(4096))
+      await fs.utimes(id, new Date(), new Date(Date.now() + 10000))
+      return fakeHash(50)
+    })
+
+    await expect(computeAndCacheHash(id, mtimeMs)).rejects.toThrow('文件被修改')
+    expect(getModelMeta(id)?.hash).toBeUndefined()
+    expect(getModelMeta(id)?.hashMtime).toBeUndefined()
+  })
+
+  it('版本竞态：计算期间文件被删除时同样丢弃结果不写缓存', async () => {
+    const id = await makeModel('race-delete.safetensors')
+    const { mtimeMs } = await fs.stat(id)
+    computeFileHash.mockImplementation(async () => {
+      await fs.rm(id)
+      return fakeHash(51)
+    })
+
+    await expect(computeAndCacheHash(id, mtimeMs)).rejects.toThrow('移动或删除')
+    expect(getModelMeta(id)?.hash).toBeUndefined()
+  })
+
+  it('版本竞态：调用方传入的 mtime 已过期时拒绝写缓存（修复前会落盘旧版本哈希）', async () => {
+    const id = await makeModel('race-stale.safetensors')
+    const { mtimeMs } = await fs.stat(id)
+    computeFileHash.mockResolvedValue(fakeHash(52))
+
+    await expect(computeAndCacheHash(id, mtimeMs + 5000)).rejects.toThrow('文件被修改')
     expect(getModelMeta(id)?.hash).toBeUndefined()
   })
 })
@@ -202,8 +248,10 @@ describe('requestHashWarmup（队列消费）', () => {
       await whenWarmupIdle()
       expect(computeFileHash).toHaveBeenCalledTimes(1)
       expect(computeFileHash.mock.calls[0][0]).toBe(b)
-      // 缓存有效的 a 在入队侧被过滤：drain 不再为其发起 stat 复核
-      expect(statSpy.mock.calls.map((c) => c[0])).toEqual([b])
+      // 缓存有效的 a 在入队侧被过滤：drain 不再为其发起 stat 复核；
+      // b 的两次 stat 分别来自 drain 出队复核与 computeAndCacheHash
+      // 完成后的版本竞态复查（mtime 未变 → 缓存写入）
+      expect(statSpy.mock.calls.map((c) => c[0])).toEqual([b, b])
     } finally {
       statSpy.mockRestore()
     }
@@ -490,12 +538,13 @@ describe('进度事件推送', () => {
   it('computeAndCacheHash 推送开始/进度/完成事件（含百分比与字节数）', async () => {
     const events = collectEvents()
     const id = await makeModel('e1.safetensors')
+    const { mtimeMs } = await fs.stat(id)
     computeFileHash.mockImplementation(async (_p, _s, onProgress) => {
       onProgress(100, 200) // 50% 时刻（首个 tick 不节流，必达）
       onProgress(200, 200) // 该 tick 被节流吞掉（间隔 < 300ms）
       return fakeHash(8)
     })
-    await computeAndCacheHash(id, 1000)
+    await computeAndCacheHash(id, mtimeMs)
     // 事件序列：开始（active）→ 进度 tick → 完成（inactive）
     expect(events.length).toBe(3)
     expect(events[0]).toMatchObject({ active: true, id, percent: 0, hash: '' })

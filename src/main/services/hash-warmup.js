@@ -25,6 +25,9 @@ import { isRetryableHashPoolError } from './hash-worker-pool'
  *   绝不重复读盘计算；
  * - 写盘前重读最新元数据：哈希计算期间用户可能已并发保存其他字段
  *   （与 ipc/models/civitai.js ensureHash 的既有约定一致）；
+ * - 版本竞态防护：计算完成后复查文件 mtime，期间被覆盖/删除则丢弃结果
+ *   并抛错——「哈希 ↔ 文件版本」的对应关系绝不被污染（识别链路据此反查
+ *   模型版本，宁可重算也绝不绑定旧哈希）；
  * - 扫描让路：全量/局部扫描期间暂停取队（正在计算的单个文件不中断），
  *   扫描结束后自动恢复，避免预热拖慢扫描；
  * - 容错：文件已删除/移动（stat 失败）静默跳过，不中断队列；
@@ -218,11 +221,14 @@ async function computeHashWithRetry(id, priority, snap) {
  * 计算并缓存模型哈希（预热与识别链路共用的单一入口）：
  * 同一模型同 mtime 已在计算中时复用同一 Promise；完成后重读最新元数据
  * 回写 hash/hashMtime。线程池临时故障自动重试（OPT-05）。
+ * 计算完成后复查文件 mtime：期间被同名覆盖/移动/删除时抛错且不写缓存
+ * （此时哈希对应旧版本或混合内容，写入会让识别链路反查到错误的模型版本）。
  * @param {string} id 模型绝对路径
  * @param {number} mtimeMs 调用方 stat 到的文件 mtime（保证缓存与文件版本对应）
  * @param {{priority?: boolean}} [options] priority=true 为前台任务（详情页/识别），
  *   线程池会优先执行并让在途后台任务让路（OPT-08）
  * @returns {Promise<string>} 64 位十六进制 SHA256
+ * @throws 计算期间文件版本变化（mtime 不一致/已删除）或底层哈希错误
  */
 export function computeAndCacheHash(id, mtimeMs, options = {}) {
   const priority = options.priority === true
@@ -235,6 +241,20 @@ export function computeAndCacheHash(id, mtimeMs, options = {}) {
     try {
       emitProgress(snap, true)
       const hash = await computeHashWithRetry(id, priority, snap)
+      // 竞态防护：大文件哈希耗时数十秒，期间文件可能被同名覆盖（重新下载/
+      // 同步工具写入）。此时哈希对应旧版本或新旧混合内容，若仍以计算前的
+      // mtime 落盘，缓存会与 knownInfo 的旧 mtime 判定为有效（hasValidCachedHash），
+      // 识别链路据被污染的哈希反查到错误的模型版本。完成后复查 mtime：
+      // 不一致（或文件已消失/不再是普通文件）即丢弃结果，绝不写缓存
+      let after
+      try {
+        after = await fs.stat(id)
+      } catch {
+        throw new Error('哈希计算期间文件被移动或删除，本次结果已丢弃')
+      }
+      if (!after.isFile() || after.mtimeMs !== mtimeMs) {
+        throw new Error('哈希计算期间文件被修改，本次结果已丢弃，请重试')
+      }
       snap.hash = hash
       // 写盘前重读最新元数据：哈希计算期间用户可能已并发保存其他字段
       const latest = getModelMeta(id) || {}
