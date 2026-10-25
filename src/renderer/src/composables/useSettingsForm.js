@@ -34,6 +34,7 @@ export function useSettingsForm() {
     civitaiEnabled: true,
     nsfwBlur: true,
     hashWarmup: 'candidates',
+    autoBackup: true,
   })
 
   let savedTheme = 'dark'
@@ -59,6 +60,7 @@ export function useSettingsForm() {
     form.civitaiEnabled = state.settings.civitaiEnabled !== false
     form.nsfwBlur = state.settings.nsfwBlur !== false
     form.hashWarmup = state.settings.hashWarmup || 'candidates'
+    form.autoBackup = state.settings.autoBackup !== false
     // 填充完成后建立脏检测基线（A9）：此后表单值与快照不一致即为脏
     savedSnapshot = formSnapshotValue()
   }

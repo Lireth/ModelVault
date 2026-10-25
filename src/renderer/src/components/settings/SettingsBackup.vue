@@ -23,6 +23,11 @@ import {
 
 const emit = defineEmits(['restored'])
 
+defineProps({
+  /** 设置表单本地副本（SettingsPage 的 useSettingsForm 产物，reactive 对象） */
+  form: { type: Object, required: true },
+})
+
 const backupBusy = ref(false)
 
 /** 模型清单导出进行中标记（FN-04，自结果栏移入设置页） */
@@ -283,6 +288,18 @@ async function onImportBackup() {
   <!-- 数据管理：备份恢复 + 危险数据操作集中一区 -->
   <h3>数据管理</h3>
   <div class="settings-group">
+    <label class="setting-row switch-row">
+      <div class="setting-info">
+        <span class="setting-title">自动每日备份标注</span>
+        <span class="setting-desc">
+          每天对当前模型库做一次「仅标注」自动备份，保存在库内
+          .modelvault/backups/（滚动保留最近 5 份，不含封面、体积很小）；
+          误删库或磁盘故障时可从中恢复最近的标注，与手动导出互不影响
+        </span>
+      </div>
+      <input v-model="form.autoBackup" type="checkbox" class="switch" />
+    </label>
+
     <div class="setting-row">
       <div class="setting-info">
         <span class="setting-title">备份与恢复</span>

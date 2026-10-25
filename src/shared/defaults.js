@@ -36,6 +36,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // 后台哈希预热策略（O1）：candidates 仅对同尺寸模型计算（默认，最省磁盘）；
   // full 全库预热；off 关闭后台预热（详情页/识别仍可按需计算）
   hashWarmup: 'candidates',
+  // 自动定期元数据备份（OPT-07）：每日对当前库做一次「仅标注」备份写入
+  // .modelvault/backups/（KB 级小文件，滚动保留最近 5 份），误删库/磁盘
+  // 故障时有最近的标注兜底可恢复；关闭后仍可手动导出
+  autoBackup: true,
   // 智能视图（组合筛选收藏）：{id, name, search, typeFilter, subFilter,
   //   showFavoritesOnly, sortBy, sortAsc} 快照数组，侧栏一键切换
   savedViews: [],

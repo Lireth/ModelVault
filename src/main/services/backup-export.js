@@ -55,15 +55,15 @@ async function mapLimit(items, limit, task) {
 }
 
 /**
- * 导出备份：弹保存对话框，将设置与当前库关联存储打包为 zip。
- * @param {import('electron').BrowserWindow} win 父窗口
+ * 组装备份 zip 的各部件（无对话框核心，OPT-07 自动备份复用）：
+ * 静止写盘链 → 读库设置与关联存储 → 按范围裁剪，返回 zip 部件与统计。
  * @param {{mode?: 'full'|'selected'|'metadata', ids?: string[]}} [options]
- *   full（默认）：完整库备份；selected：仅当前筛选的模型标注与封面；
- *   metadata：全库标注但不含封面（体积小，用于快速迁移/审阅）
- * @returns {Promise<any>} 成功 {path,sizeBytes,library,models,covers,mode,partial}；
- *   取消 {canceled:true}；失败 {error}（handler 逐字段消费）
+ *   full（默认）：完整库备份；selected：仅选中模型；metadata：全库标注
+ *   但不含封面（体积小，用于快速迁移/审阅与自动备份）
+ * @returns {Promise<any>} 成功 {parts, models, covers, mode, partial}；
+ *   失败 {error}（无可备份标注等）
  */
-export async function exportBackup(win, options = {}) {
+export async function buildBackupParts(options = {}) {
   // B-02：先静止两路写盘链再读磁盘——标注为 500ms 防抖落盘，
   // 刚修改的备注/标签若不 flush 不会进入备份（用户以为已备份）。
   await Promise.all([flushStoreSave(), flushSettingsSave()])
@@ -180,7 +180,33 @@ export async function exportBackup(win, options = {}) {
       manifest.library = { root, models, covers }
     }
   }
-  const manifestText = JSON.stringify(manifest, null, 2)
+  return {
+    parts: {
+      settingsText,
+      storeText,
+      manifestText: JSON.stringify(manifest, null, 2),
+      covers: coverFiles,
+    },
+    models,
+    covers,
+    mode,
+    partial,
+  }
+}
+
+/**
+ * 导出备份：弹保存对话框，将设置与当前库关联存储打包为 zip。
+ * @param {import('electron').BrowserWindow} win 父窗口
+ * @param {{mode?: 'full'|'selected'|'metadata', ids?: string[]}} [options]
+ *   full（默认）：完整库备份；selected：仅当前筛选的模型标注与封面；
+ *   metadata：全库标注但不含封面（体积小，用于快速迁移/审阅）
+ * @returns {Promise<any>} 成功 {path,sizeBytes,library,models,covers,mode,partial}；
+ *   取消 {canceled:true}；失败 {error}（handler 逐字段消费）
+ */
+export async function exportBackup(win, options = {}) {
+  const built = await buildBackupParts(options)
+  if (built.error) return { error: built.error }
+  const { parts, models, covers, mode, partial } = built
 
   const date = new Date().toISOString().slice(0, 10)
   const result = await dialog.showSaveDialog(win, {
@@ -192,12 +218,7 @@ export async function exportBackup(win, options = {}) {
   try {
     // OPT-10：封面逐个读入压缩流，不再把所有封面缓冲进内存。
     // 压缩期间主进程仅保留当前读块，内存峰值与封面总量解耦。
-    await writeBackupZipToFile(result.filePath, {
-      settingsText,
-      storeText,
-      manifestText,
-      covers: coverFiles,
-    })
+    await writeBackupZipToFile(result.filePath, parts)
     const outStat = await fs.stat(result.filePath)
     logger.info(
       `备份已导出: ${result.filePath}（${models} 模型 / ${covers} 封面）`,
@@ -205,7 +226,7 @@ export async function exportBackup(win, options = {}) {
     return {
       path: result.filePath,
       sizeBytes: outStat.size,
-      library: Boolean(manifest.library),
+      library: Boolean(parts.storeText),
       models,
       covers,
       mode,

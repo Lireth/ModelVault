@@ -205,6 +205,7 @@ describe('shared/defaults', () => {
       'autoRescan',
       'autoCheckUpdate',
       'hashWarmup',
+      'autoBackup',
       'savedViews',
     ].sort()
     expect(Object.keys(DEFAULT_SETTINGS).sort()).toEqual(expectedKeys)

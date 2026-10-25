@@ -99,6 +99,7 @@ function defaultLibrarySettings() {
     autoRescan: base.autoRescan,
     autoCheckUpdate: base.autoCheckUpdate,
     hashWarmup: base.hashWarmup,
+    autoBackup: base.autoBackup,
     savedViews: [...base.savedViews],
   }
 }
@@ -230,6 +231,8 @@ export function normalizeLibrarySettings(raw) {
     hashWarmup: HASH_WARMUP_KEYS.has(raw.hashWarmup)
       ? raw.hashWarmup
       : base.hashWarmup,
+    // 自动定期元数据备份（OPT-07）：缺省视为开启（默认真语义）
+    autoBackup: raw.autoBackup !== false,
     savedViews: normalizeSavedViews(raw.savedViews),
   }
 }

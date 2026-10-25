@@ -9,6 +9,7 @@ import { registerIpcHandlers } from './ipc'
 import { registerImageScheme, registerImageProtocolHandler } from './protocol'
 import { loadSettings } from './services/store'
 import { scheduleStartupUpdateCheck } from './services/updater'
+import { scheduleAutoBackupCheck } from './services/auto-backup'
 import { quitAfterFlush } from './quit'
 import { handleUncaughtException } from './fatal-error'
 import { runStartupSmoke } from './smoke'
@@ -153,6 +154,11 @@ async function startApp() {
       // 启动自动检查更新（O-3）：延迟静默执行，仅在发现新版本时推送渲染层提示；
       // 开发环境/冒烟模式内部跳过，是否检查由触发时刻的设置值决定
       scheduleStartupUpdateCheck()
+
+      // 自动定期元数据备份（OPT-07）：每日对当前库做一次「仅标注」备份
+      // 写入 .modelvault/backups/（滚动保留），误删库/磁盘故障时有标注兜底；
+      // 开发环境/冒烟模式内部跳过，是否执行由触发时刻的设置值决定
+      scheduleAutoBackupCheck()
 
       // 冒烟模式：完成启动链路检查后自行退出（仅 CI/手工 smoke 设置该环境变量）
       if (process.env.MODELVAULT_SMOKE === '1') {

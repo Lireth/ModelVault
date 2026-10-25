@@ -758,6 +758,19 @@ describe('切换根目录与落盘链（A6）', () => {
 })
 
 describe('应用设置规范化', () => {
+  it('autoBackup 默认开启，显式关闭保留，非法值回退开启（OPT-07）', async () => {
+    let s = await loadSettings()
+    expect(s.autoBackup).toBe(true)
+    await updateSettings({ autoBackup: false })
+    s = await loadSettings()
+    expect(s.autoBackup).toBe(false)
+    await updateSettings({ autoBackup: 'no' })
+    s = await loadSettings()
+    expect(s.autoBackup).toBe(true)
+    // 恢复默认，避免影响后续用例
+    await updateSettings({ autoBackup: true })
+  })
+
   it('excludeDirs 统一小写并大小写不敏感去重（与 scanner 匹配约定一致）', async () => {
     await updateSettings({
       excludeDirs: ['Loras', '  LORAS ', 'Embeds', '', '.modelvault'],

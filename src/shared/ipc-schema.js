@@ -352,6 +352,7 @@ export const IPC_PAYLOAD_SCHEMAS = {
       autoRescan: vBool(),
       autoCheckUpdate: vBool(),
       hashWarmup: vStr({ max: 16 }),
+      autoBackup: vBool(),
       // 智能视图：字段与 store-settings.normalizeSavedViews 对齐；
       // 文案/枚举回退仍在 normalize（这里只挡类型与未知字段）
       savedViews: vArr({

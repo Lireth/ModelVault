@@ -84,6 +84,7 @@ async function onSave() {
       showParams: form.showParams,
       civitaiEnabled: form.civitaiEnabled,
       nsfwBlur: form.nsfwBlur,
+      autoBackup: form.autoBackup,
     })
     if (!ok) return
     // 默认排序方式立即生效
@@ -148,7 +149,7 @@ async function onSave() {
       <SettingsTags />
 
       <!-- 数据管理（O-4 拆分：settings/SettingsBackup.vue，含备份恢复与全库示例图清理） -->
-      <SettingsBackup @restored="fillForm" />
+      <SettingsBackup :form="form" @restored="fillForm" />
 
       <!-- 关于（O-4 拆分：settings/SettingsAbout.vue，含检查更新/日志诊断） -->
       <SettingsAbout />
