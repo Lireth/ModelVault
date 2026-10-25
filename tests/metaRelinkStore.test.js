@@ -12,7 +12,7 @@ import { fakeUserData } from './setup'
  */
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => fakeUserData), isPackaged: true }
+  app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
 }))
 
 import {
@@ -22,7 +22,7 @@ import {
   relinkScannedMeta,
   saveStoreNow,
   setDataRoot,
-  setModelMeta
+  setModelMeta,
 } from '../src/main/services/store'
 import { DATA_DIR } from '../src/main/services/store'
 
@@ -53,7 +53,7 @@ function scanned(rel, { size = 1024, mtimeMs = 1000 } = {}) {
     relDir: path.dirname(rel) === '.' ? '' : path.dirname(rel),
     folder: path.dirname(abs),
     size,
-    mtimeMs
+    mtimeMs,
   }
 }
 
@@ -65,7 +65,7 @@ describe('relinkScannedMeta 库内移动/重命名重关联', () => {
       note: '重要备注',
       favorite: true,
       cover: `${DATA_DIR}/covers/keep.png`,
-      covers: [`${DATA_DIR}/covers/keep.png`]
+      covers: [`${DATA_DIR}/covers/keep.png`],
     })
 
     const result = relinkScannedMeta([scanned('lora/a.safetensors')])
@@ -96,12 +96,14 @@ describe('relinkScannedMeta 库内移动/重命名重关联', () => {
 
     const result = relinkScannedMeta([
       scanned('x/a.safetensors'),
-      scanned('y/a.safetensors')
+      scanned('y/a.safetensors'),
     ])
 
     expect(result.relinked).toBe(0)
     expect(result.retainedOrphans).toBe(1)
-    expect(getModelMeta(path.join(root, 'd1', 'a.safetensors')).note).toBe('别绑错')
+    expect(getModelMeta(path.join(root, 'd1', 'a.safetensors')).note).toBe(
+      '别绑错',
+    )
   })
 
   it('无任何用户数据的空孤儿自动清理；有数据的孤儿保留', async () => {
@@ -116,7 +118,9 @@ describe('relinkScannedMeta 库内移动/重命名重关联', () => {
     expect(result.prunedEmpty).toBe(1)
     expect(result.retainedOrphans).toBe(1)
     expect(getModelMeta(path.join(root, 'empty.safetensors'))).toBeNull()
-    expect(getModelMeta(path.join(root, 'kept.safetensors')).note).toBe('保留我')
+    expect(getModelMeta(path.join(root, 'kept.safetensors')).note).toBe(
+      '保留我',
+    )
   })
 
   it('键仍存在于扫描结果的模型既不算孤儿也不算新模型（保持原样）', async () => {
@@ -134,7 +138,9 @@ describe('relinkScannedMeta 库内移动/重命名重关联', () => {
     relinkScannedMeta([scanned('sub/a.safetensors')])
     await flushStoreSave()
 
-    const raw = JSON.parse(await fs.readFile(path.join(root, DATA_DIR, 'store.json'), 'utf-8'))
+    const raw = JSON.parse(
+      await fs.readFile(path.join(root, DATA_DIR, 'store.json'), 'utf-8'),
+    )
     expect(raw.models['sub/a.safetensors'].alias).toBe('迁移后可见')
     expect(raw.models['a.safetensors']).toBeUndefined()
   })
@@ -143,19 +149,27 @@ describe('relinkScannedMeta 库内移动/重命名重关联', () => {
 describe('relinkScannedMeta 受影响范围（A-03 局部重扫）', () => {
   it('只重关联受影响子树：子树外消失/未扫到的键既不迁移也不被当孤儿', async () => {
     // lora/old.safetensors 在 lora 子树内改名；checkpoint/keep.safetensors 未被本次扫描覆盖
-    setModelMeta(path.join(root, 'lora', 'old.safetensors'), { note: '局部迁移' })
-    setModelMeta(path.join(root, 'checkpoint', 'keep.safetensors'), { note: '我在扫描范围外' })
+    setModelMeta(path.join(root, 'lora', 'old.safetensors'), {
+      note: '局部迁移',
+    })
+    setModelMeta(path.join(root, 'checkpoint', 'keep.safetensors'), {
+      note: '我在扫描范围外',
+    })
 
     const result = relinkScannedMeta([scanned('lora/new.safetensors')], {
-      affectedDirs: ['lora']
+      affectedDirs: ['lora'],
     })
 
     expect(result.relinked).toBe(1)
     expect(result.retainedOrphans).toBe(0)
-    expect(getModelMeta(path.join(root, 'lora', 'new.safetensors')).note).toBe('局部迁移')
+    expect(getModelMeta(path.join(root, 'lora', 'new.safetensors')).note).toBe(
+      '局部迁移',
+    )
     expect(getModelMeta(path.join(root, 'lora', 'old.safetensors'))).toBeNull()
     // 范围外键原样保留：未迁移、未清理、未计数
-    expect(getModelMeta(path.join(root, 'checkpoint', 'keep.safetensors')).note).toBe('我在扫描范围外')
+    expect(
+      getModelMeta(path.join(root, 'checkpoint', 'keep.safetensors')).note,
+    ).toBe('我在扫描范围外')
   })
 
   it("affectedDirs=[''] 只处理根目录直属文件，子目录键不受影响", async () => {
@@ -163,43 +177,57 @@ describe('relinkScannedMeta 受影响范围（A-03 局部重扫）', () => {
     setModelMeta(path.join(root, 'lora', 'x.safetensors'), { rating: 4 })
 
     const result = relinkScannedMeta([scanned('new-root.safetensors')], {
-      affectedDirs: ['']
+      affectedDirs: [''],
     })
 
     expect(result.relinked).toBe(1)
     expect(getModelMeta(path.join(root, 'new-root.safetensors')).rating).toBe(5)
-    expect(getModelMeta(path.join(root, 'lora', 'x.safetensors')).rating).toBe(4)
+    expect(getModelMeta(path.join(root, 'lora', 'x.safetensors')).rating).toBe(
+      4,
+    )
   })
 
   it('受影响子树内的空孤儿被清理；子树外的空孤儿保留（局部扫描看不见不代表删除）', async () => {
-    setModelMeta(path.join(root, 'lora', 'empty-in.safetensors'), { favorite: false })
-    setModelMeta(path.join(root, 'vae', 'empty-out.safetensors'), { favorite: false })
+    setModelMeta(path.join(root, 'lora', 'empty-in.safetensors'), {
+      favorite: false,
+    })
+    setModelMeta(path.join(root, 'vae', 'empty-out.safetensors'), {
+      favorite: false,
+    })
 
     // lora 子树扫描后该键消失（空孤儿清理）；vae 未扫描，其空骨架保留
     const result = relinkScannedMeta([], { affectedDirs: ['lora'] })
 
     expect(result.prunedEmpty).toBe(1)
     expect(result.retainedOrphans).toBe(0)
-    expect(getModelMeta(path.join(root, 'lora', 'empty-in.safetensors'))).toBeNull()
-    expect(getModelMeta(path.join(root, 'vae', 'empty-out.safetensors'))).not.toBeNull()
+    expect(
+      getModelMeta(path.join(root, 'lora', 'empty-in.safetensors')),
+    ).toBeNull()
+    expect(
+      getModelMeta(path.join(root, 'vae', 'empty-out.safetensors')),
+    ).not.toBeNull()
   })
 
   it('受影响子树内含数据的孤儿保守保留（歧义不绑，等同全量语义）', async () => {
     setModelMeta(path.join(root, 'lora', 'a.safetensors'), { note: '保留' })
     const result = relinkScannedMeta(
       [scanned('lora/x.safetensors'), scanned('lora/y.safetensors')],
-      { affectedDirs: ['lora'] }
+      { affectedDirs: ['lora'] },
     )
     expect(result.relinked).toBe(0)
     expect(result.retainedOrphans).toBe(1)
-    expect(getModelMeta(path.join(root, 'lora', 'a.safetensors')).note).toBe('保留')
+    expect(getModelMeta(path.join(root, 'lora', 'a.safetensors')).note).toBe(
+      '保留',
+    )
   })
 
   it('不传 affectedDirs 时维持全量语义（全部键参与判定）', async () => {
     setModelMeta(path.join(root, 'a.safetensors'), { alias: '全量迁移' })
     const result = relinkScannedMeta([scanned('sub/a.safetensors')])
     expect(result.relinked).toBe(1)
-    expect(getModelMeta(path.join(root, 'sub', 'a.safetensors')).alias).toBe('全量迁移')
+    expect(getModelMeta(path.join(root, 'sub', 'a.safetensors')).alias).toBe(
+      '全量迁移',
+    )
   })
 })
 
@@ -217,7 +245,9 @@ describe('relinkScannedMeta 边界', () => {
     // 新模型本就无元数据：不应凭空创建条目
     expect(getModelMeta(path.join(root, 'a.safetensors'))).toBeNull()
     await saveStoreNow()
-    const raw = JSON.parse(await fs.readFile(path.join(root, DATA_DIR, 'store.json'), 'utf-8'))
+    const raw = JSON.parse(
+      await fs.readFile(path.join(root, DATA_DIR, 'store.json'), 'utf-8'),
+    )
     expect(raw.models).toEqual({})
   })
 })

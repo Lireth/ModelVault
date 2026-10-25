@@ -19,7 +19,7 @@ import {
   computeFileHashOffThread,
   crashHashWorkerForTests,
   isRetryableHashPoolError,
-  resetHashPoolForTests
+  resetHashPoolForTests,
 } from '../src/main/services/hash-worker-pool'
 
 let dir
@@ -42,11 +42,14 @@ async function writeFixture(name, content) {
 }
 
 it('后台线程计算的哈希与 node crypto 结果一致，进度可达终值', async () => {
-  const { abs, expected } = await writeFixture('a.bin', Buffer.from('modelvault-hash-worker'))
+  const { abs, expected } = await writeFixture(
+    'a.bin',
+    Buffer.from('modelvault-hash-worker'),
+  )
 
   const progress = []
   const hash = await computeFileHashOffThread(abs, undefined, (hashed, total) =>
-    progress.push([hashed, total])
+    progress.push([hashed, total]),
   )
 
   expect(hash).toBe(expected)
@@ -82,12 +85,22 @@ it('前台优先级任务先于已排队的后台任务执行', async () => {
   const order = []
   // a 先占用 current（前台）；b 为后台排队；c 为前台插队。
   // a 完成前 b/c 已同步入队，故 c 必须越过 b 先执行。
-  const pa = computeFileHashOffThread(a.abs, undefined, undefined, { priority: true })
-    .then((h) => { order.push('a'); return h })
-  const pb = computeFileHashOffThread(b.abs)
-    .then((h) => { order.push('b'); return h })
-  const pc = computeFileHashOffThread(c.abs, undefined, undefined, { priority: true })
-    .then((h) => { order.push('c'); return h })
+  const pa = computeFileHashOffThread(a.abs, undefined, undefined, {
+    priority: true,
+  }).then((h) => {
+    order.push('a')
+    return h
+  })
+  const pb = computeFileHashOffThread(b.abs).then((h) => {
+    order.push('b')
+    return h
+  })
+  const pc = computeFileHashOffThread(c.abs, undefined, undefined, {
+    priority: true,
+  }).then((h) => {
+    order.push('c')
+    return h
+  })
 
   const [ha, hb, hc] = await Promise.all([pa, pb, pc])
   expect(ha).toBe(a.expected)
@@ -99,20 +112,23 @@ it('前台优先级任务先于已排队的后台任务执行', async () => {
 it('前台任务抢占在途后台任务：后台任务以 PreemptedError 让路', async () => {
   // 64MB 大文件包含多个 8MB 读块，worker 会在块边界检查 abort：
   // 前台任务入队后后台任务必须中止并让出唯一执行位。
-  const big = await writeFixture('preempt-big.bin', Buffer.alloc(64 * 1024 * 1024, 1))
-  const small = await writeFixture('preempt-small.bin', Buffer.from('front-task'))
+  const big = await writeFixture(
+    'preempt-big.bin',
+    Buffer.alloc(64 * 1024 * 1024, 1),
+  )
+  const small = await writeFixture(
+    'preempt-small.bin',
+    Buffer.from('front-task'),
+  )
 
   const background = computeFileHashOffThread(big.abs)
   const backgroundOutcome = background.then(
     () => 'resolved',
-    (err) => err
+    (err) => err,
   )
-  const foreground = computeFileHashOffThread(
-    small.abs,
-    undefined,
-    undefined,
-    { priority: true }
-  )
+  const foreground = computeFileHashOffThread(small.abs, undefined, undefined, {
+    priority: true,
+  })
 
   await expect(foreground).resolves.toBe(small.expected)
   expect(await backgroundOutcome).toMatchObject({ name: 'PreemptedError' })
@@ -131,8 +147,10 @@ it('调用前 signal 已取消：直接 AbortError，不派发任务', async () 
   const { abs } = await writeFixture('e.bin', Buffer.from('never-read'))
   const controller = new AbortController()
   controller.abort()
-  await expect(computeFileHashOffThread(abs, controller.signal)).rejects.toMatchObject({
-    name: 'AbortError'
+  await expect(
+    computeFileHashOffThread(abs, controller.signal),
+  ).rejects.toMatchObject({
+    name: 'AbortError',
   })
 })
 
@@ -148,7 +166,7 @@ it('队列中任务取消：reject AbortError 且不影响队头任务完成', a
   // 处理器必须先于 pa 完成前挂上，避免 unhandledRejection
   const pbOutcome = pb.then(
     () => 'resolved',
-    (err) => err
+    (err) => err,
   )
   controller.abort()
 
@@ -159,13 +177,18 @@ it('队列中任务取消：reject AbortError 且不影响队头任务完成', a
 it('文件不存在：reject 且不中断后续任务', async () => {
   const missing = path.join(dir, 'missing.bin')
   await expect(computeFileHashOffThread(missing)).rejects.toThrow()
-  const { abs, expected } = await writeFixture('h.bin', Buffer.from('after-crash'))
+  const { abs, expected } = await writeFixture(
+    'h.bin',
+    Buffer.from('after-crash'),
+  )
   await expect(computeFileHashOffThread(abs)).resolves.toBe(expected)
 })
 
 it('可重试错误识别：仅 worker 崩溃/不可用与临时文件错误', () => {
   expect(isRetryableHashPoolError({ name: 'WorkerCrashError' })).toBe(true)
-  expect(isRetryableHashPoolError({ name: 'WorkerUnavailableError' })).toBe(true)
+  expect(isRetryableHashPoolError({ name: 'WorkerUnavailableError' })).toBe(
+    true,
+  )
   expect(isRetryableHashPoolError({ code: 'EBUSY' })).toBe(true)
   expect(isRetryableHashPoolError({ code: 'ENOENT' })).toBe(false)
   expect(isRetryableHashPoolError({ name: 'AbortError' })).toBe(false)
@@ -174,8 +197,14 @@ it('可重试错误识别：仅 worker 崩溃/不可用与临时文件错误', (
 
 it('worker 崩溃：当前任务以 WorkerCrashError 拒绝，排队任务重建后继续完成', async () => {
   // 64MB 多读块文件确保崩溃发生在任务执行中，而不是恰好已完成
-  const big = await writeFixture('crash-big.bin', Buffer.alloc(64 * 1024 * 1024, 5))
-  const small = await writeFixture('crash-small.bin', Buffer.from('after-worker-crash'))
+  const big = await writeFixture(
+    'crash-big.bin',
+    Buffer.alloc(64 * 1024 * 1024, 5),
+  )
+  const small = await writeFixture(
+    'crash-small.bin',
+    Buffer.from('after-worker-crash'),
+  )
 
   let progressStarted = false
   const first = computeFileHashOffThread(big.abs, undefined, () => {
@@ -183,7 +212,7 @@ it('worker 崩溃：当前任务以 WorkerCrashError 拒绝，排队任务重建
   })
   const firstOutcome = first.then(
     () => 'resolved',
-    (err) => err
+    (err) => err,
   )
   // 第二个任务进入队列；崩溃后必须保留并在新 worker 中完成
   const second = computeFileHashOffThread(small.abs)

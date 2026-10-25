@@ -5,7 +5,7 @@ import ResultBar from '../src/renderer/src/components/ResultBar.vue'
 import {
   filteredModels,
   replaceModels,
-  state
+  state,
 } from '../src/renderer/src/store/appStore'
 import { setupComponentTest } from './helpers/componentTest'
 
@@ -34,7 +34,7 @@ function model(name, tags) {
     subCategory: '',
     triggerWords: '',
     coverUrl: '',
-    covers: []
+    covers: [],
   }
 }
 
@@ -42,13 +42,15 @@ beforeEach(() => {
   replaceModels([
     model('a', ['赛博朋克', '服装']),
     model('b', ['赛博朋克']),
-    model('c', ['服装'])
+    model('c', ['服装']),
   ])
 })
 
 /** 勾选指定标签的复选框 */
 async function toggleTag(wrapper, tag) {
-  const option = wrapper.findAll('.tag-option').find((w) => w.text().includes(tag))
+  const option = wrapper
+    .findAll('.tag-option')
+    .find((w) => w.text().includes(tag))
   const checkbox = option.find('input')
   checkbox.element.checked = !checkbox.element.checked
   await checkbox.trigger('change')

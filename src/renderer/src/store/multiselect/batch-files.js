@@ -35,7 +35,7 @@ export async function batchOrganizeByTags() {
   }
   if (
     !(await confirmDialog(
-      `将在模型库根目录创建 LoRA 文件夹及其下 7 个分类子文件夹（已有的不动），并把 ${moves.length} 个 LoRA 模型移入对应分类子文件夹（未标注的移入 LoRA 根目录，元数据自动迁移）。继续吗？`
+      `将在模型库根目录创建 LoRA 文件夹及其下 7 个分类子文件夹（已有的不动），并把 ${moves.length} 个 LoRA 模型移入对应分类子文件夹（未标注的移入 LoRA 根目录，元数据自动迁移）。继续吗？`,
     ))
   ) {
     return
@@ -53,7 +53,11 @@ export async function batchOrganizeByTags() {
     const parts = []
     if (res.failed?.length > 0) parts.push(`失败 ${res.failed.length} 个`)
     if (res.skipped?.length > 0) parts.push(`跳过 ${res.skipped.length} 个`)
-    if (res.moved > 0) toast(res.failed?.length > 0 ? 'warn' : 'success', `已移动 ${res.moved} 个 LoRA 模型到分类文件夹${parts.length ? `（${parts.join('，')}）` : ''}`)
+    if (res.moved > 0)
+      toast(
+        res.failed?.length > 0 ? 'warn' : 'success',
+        `已移动 ${res.moved} 个 LoRA 模型到分类文件夹${parts.length ? `（${parts.join('，')}）` : ''}`,
+      )
     else toast('info', `未移动任何模型：${parts.join('，') || '无需移动'}`)
   } finally {
     state.multiSelect.busy = false
@@ -75,7 +79,9 @@ export async function batchApplyTriggers() {
   const targets = []
   for (const id of ids) {
     const m = byId.get(id)
-    const candidates = Array.isArray(m?.autoInfo?.triggerCandidates) ? m.autoInfo.triggerCandidates : []
+    const candidates = Array.isArray(m?.autoInfo?.triggerCandidates)
+      ? m.autoInfo.triggerCandidates
+      : []
     if (!m || m.triggerWords || candidates.length === 0) continue
     targets.push({ id, triggerWords: candidates.join(', ') })
   }
@@ -87,23 +93,27 @@ export async function batchApplyTriggers() {
   try {
     const results = await mapWithConcurrency(
       targets,
-      ({ id, triggerWords }) => window.api.models.saveModelData({ id, triggerWords }),
-      16
+      ({ id, triggerWords }) =>
+        window.api.models.saveModelData({ id, triggerWords }),
+      16,
     )
     const metaMap = new Map()
     let fail = 0
     results.forEach((r, i) => {
-      if (r.status === 'fulfilled' && r.value?.meta) metaMap.set(targets[i].id, r.value.meta)
+      if (r.status === 'fulfilled' && r.value?.meta)
+        metaMap.set(targets[i].id, r.value.meta)
       else fail += 1
     })
     const ok = applyMetaUpdates(metaMap, (meta) => ({
       triggerWords: meta.triggerWords || '',
-      triggerWordsSource: meta.triggerWordsSource || ''
+      triggerWordsSource: meta.triggerWordsSource || '',
     }))
     const skipped = ids.length - targets.length
-    const suffix = skipped > 0 ? `（${skipped} 个已有触发词或无候选，未改动）` : ''
+    const suffix =
+      skipped > 0 ? `（${skipped} 个已有触发词或无候选，未改动）` : ''
     if (fail === 0) toast('success', `已为 ${ok} 个模型填入触发词${suffix}`)
-    else toast('warn', `触发词填入完成：成功 ${ok} 个，失败 ${fail} 个${suffix}`)
+    else
+      toast('warn', `触发词填入完成：成功 ${ok} 个，失败 ${fail} 个${suffix}`)
   } finally {
     state.multiSelect.busy = false
   }
@@ -124,7 +134,9 @@ export async function batchToggleDisabled(disabled) {
   try {
     for (const id of ids) {
       if (state.multiSelect.cancelRequested) break
-      const res = await window.api.models.toggleDisabled(id, disabled).catch(() => null)
+      const res = await window.api.models
+        .toggleDisabled(id, disabled)
+        .catch(() => null)
       if (res && !res.error) ok += 1
       else fail += 1
     }
@@ -137,7 +149,10 @@ export async function batchToggleDisabled(disabled) {
     const label = disabled ? '禁用' : '启用'
     const done = ok + fail
     if (done < ids.length) {
-      toast('warn', `${label}已取消（完成 ${done}/${ids.length}）：已完成部分保留`)
+      toast(
+        'warn',
+        `${label}已取消（完成 ${done}/${ids.length}）：已完成部分保留`,
+      )
       return
     }
     if (fail === 0) toast('success', `已${label} ${ok} 个模型`)
@@ -160,7 +175,7 @@ export async function batchDeleteModels() {
   try {
     if (
       !(await confirmDialog(
-        `确定将选中的 ${ids.length} 个模型移入系统回收站吗？`
+        `确定将选中的 ${ids.length} 个模型移入系统回收站吗？`,
       ))
     ) {
       return
@@ -169,7 +184,7 @@ export async function batchDeleteModels() {
     const results = await mapWithConcurrency(
       ids,
       (id) => window.api.models.deleteModel(id),
-      8
+      8,
     )
     const deletedIds = new Set()
     results.forEach((r, i) => {
@@ -179,11 +194,14 @@ export async function batchDeleteModels() {
       // 单趟移除：整体替换数组（须经 replaceModels 保持数组代理），selectedId 与多选选区同步按 Set 清理
       replaceModels(state.models.filter((m) => !deletedIds.has(m.id)))
       if (deletedIds.has(state.selectedId)) state.selectedId = null
-      state.multiSelect.ids = state.multiSelect.ids.filter((id) => !deletedIds.has(id))
+      state.multiSelect.ids = state.multiSelect.ids.filter(
+        (id) => !deletedIds.has(id),
+      )
     }
     const ok = deletedIds.size
     const fail = ids.length - ok
-    if (fail === 0) toast('success', `已将 ${ok} 个模型移入回收站，可在系统回收站恢复`)
+    if (fail === 0)
+      toast('success', `已将 ${ok} 个模型移入回收站，可在系统回收站恢复`)
     else toast('warn', `删除完成：成功 ${ok} 个，失败 ${fail} 个`)
   } finally {
     state.multiSelect.busy = false

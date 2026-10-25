@@ -6,7 +6,7 @@ import {
   compareState,
   openCompare,
   replaceModels,
-  state
+  state,
 } from '../src/renderer/src/store/appStore'
 import { setupComponentTest } from './helpers/componentTest'
 
@@ -37,7 +37,7 @@ function model(id, overrides = {}) {
     note: '',
     params: null,
     coverUrl: '',
-    ...overrides
+    ...overrides,
   }
 }
 
@@ -48,7 +48,7 @@ function mountCompare() {
 beforeEach(() => {
   replaceModels([
     model('a', { baseModel: 'Pony V6', rating: 4 }),
-    model('b', { baseModel: 'SDXL 1.0', rating: 2, tags: ['风格'] })
+    model('b', { baseModel: 'SDXL 1.0', rating: 2, tags: ['风格'] }),
   ])
 })
 
@@ -56,12 +56,16 @@ describe('openCompare 限制', () => {
   it('少于 2 个不打开并提示', () => {
     expect(openCompare(['a'])).toBe(false)
     expect(compareState.open).toBe(false)
-    expect(state.toasts.some((t) => t.text.includes('至少选择 2 个'))).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('至少选择 2 个'))).toBe(
+      true,
+    )
   })
 
   it('超过 6 个不打开并提示', () => {
     expect(openCompare(['a', 'b', 'c', 'd', 'e', 'f', 'g'])).toBe(false)
-    expect(state.toasts.some((t) => t.text.includes('最多同时对比 6 个'))).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('最多同时对比 6 个'))).toBe(
+      true,
+    )
   })
 
   it('2 个合法时打开并保存 id 快照', () => {
@@ -82,12 +86,16 @@ describe('ModelCompare 渲染', () => {
     // 13 个字段行
     expect(wrapper.findAll('.compare-table tbody tr')).toHaveLength(13)
 
-    const baseRow = wrapper.findAll('.compare-table tbody tr').find((tr) => tr.text().includes('基底模型'))
+    const baseRow = wrapper
+      .findAll('.compare-table tbody tr')
+      .find((tr) => tr.text().includes('基底模型'))
     expect(baseRow.exists()).toBe(true)
     // 基底不同：两个值单元格都标记 diff
     expect(baseRow.findAll('td.diff')).toHaveLength(2)
 
-    const favRow = wrapper.findAll('.compare-table tbody tr').find((tr) => tr.text().includes('收藏'))
+    const favRow = wrapper
+      .findAll('.compare-table tbody tr')
+      .find((tr) => tr.text().includes('收藏'))
     expect(favRow.findAll('td.diff')).toHaveLength(0)
     expect(wrapper.text()).toContain('Pony V6')
     expect(wrapper.text()).toContain('SDXL 1.0')

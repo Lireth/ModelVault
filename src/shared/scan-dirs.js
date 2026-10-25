@@ -41,7 +41,11 @@ export function dedupeAndPruneDescendants(dirs) {
   const kept = new Set()
   let lastAncestor = ''
   for (const item of [...unique].sort()) {
-    if (lastAncestor && item !== lastAncestor && item.startsWith(`${lastAncestor}/`)) {
+    if (
+      lastAncestor &&
+      item !== lastAncestor &&
+      item.startsWith(`${lastAncestor}/`)
+    ) {
       continue
     }
     kept.add(item)
@@ -89,7 +93,7 @@ export function collapseDirsToTopLevel(dirs) {
 export function isRelDirInScope(relDir, dirs) {
   if (!Array.isArray(dirs)) return true
   return dirs.some((d) =>
-    d === '' ? relDir === '' : relDir === d || relDir.startsWith(`${d}/`)
+    d === '' ? relDir === '' : relDir === d || relDir.startsWith(`${d}/`),
   )
 }
 

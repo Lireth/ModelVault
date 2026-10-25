@@ -3,7 +3,13 @@ import { computed } from 'vue'
 import SidebarRoots from './sidebar/SidebarRoots.vue'
 import SidebarTypes from './sidebar/SidebarTypes.vue'
 import SidebarViews from './sidebar/SidebarViews.vue'
-import { chooseFolder, openSettings, openStats, scanModels, state } from '../store/appStore'
+import {
+  chooseFolder,
+  openSettings,
+  openStats,
+  scanModels,
+  state,
+} from '../store/appStore'
 
 /**
  * 侧栏编排壳（OPT-01 拆分）：
@@ -33,7 +39,8 @@ function onScanClick() {
       <div class="folder-box" :title="state.folder || '点击顶栏「选择文件夹」'">
         <span class="folder-name">{{ folderName }}</span>
         <span v-if="state.lastScan" class="folder-stat">
-          {{ state.lastScan.count }} 个模型 · {{ (state.lastScan.durationMs / 1000).toFixed(1) }}s
+          {{ state.lastScan.count }} 个模型 ·
+          {{ (state.lastScan.durationMs / 1000).toFixed(1) }}s
         </span>
       </div>
     </div>
@@ -41,10 +48,21 @@ function onScanClick() {
     <!-- 操作按钮区：位于「模型文件夹」与「分类」之间；常用操作两两并排 -->
     <div class="side-section action-section">
       <div class="action-grid">
-        <button class="btn action-btn" title="重新扫描当前模型文件夹" :disabled="state.scanning || !state.folder" @click="onScanClick">
+        <button
+          class="btn action-btn"
+          title="重新扫描当前模型文件夹"
+          :disabled="state.scanning || !state.folder"
+          @click="onScanClick"
+        >
           {{ state.scanning ? '扫描中…' : '重新扫描' }}
         </button>
-        <button class="btn action-btn" title="选择模型文件夹" @click="chooseFolder">选择文件夹</button>
+        <button
+          class="btn action-btn"
+          title="选择模型文件夹"
+          @click="chooseFolder"
+        >
+          选择文件夹
+        </button>
       </div>
     </div>
 

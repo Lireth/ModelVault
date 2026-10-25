@@ -11,7 +11,7 @@ import {
   parseHeaderBuffer,
   parseResolution,
   readHeaderLength,
-  readSafetensorsInfo
+  readSafetensorsInfo,
 } from '../src/main/services/safetensors'
 
 /**
@@ -56,8 +56,8 @@ describe('parseResolution', () => {
 
 describe('extractTagCandidates', () => {
   const table = {
-    'dataset_a': { '1girl': 120, 'solo': 80, 'hatsune miku': 60 },
-    'dataset_b': { '1girl': 30, 'twintails': 45 }
+    dataset_a: { '1girl': 120, solo: 80, 'hatsune miku': 60 },
+    dataset_b: { '1girl': 30, twintails: 45 },
   }
 
   it('跨数据集聚合频次并降序排列', () => {
@@ -74,7 +74,9 @@ describe('extractTagCandidates', () => {
   })
 
   it('JSON 字符串自动解析', () => {
-    expect(extractTagCandidates(JSON.stringify(table))).toContain('hatsune miku')
+    expect(extractTagCandidates(JSON.stringify(table))).toContain(
+      'hatsune miku',
+    )
   })
 
   it('坏数据容错返回空数组', () => {
@@ -95,7 +97,7 @@ describe('extractSafetensorsInfo / hasUsefulInfo', () => {
       ss_mixed_precision: 'fp16',
       'modelspec.title': 'My LoRA',
       'modelspec.author': 'someone',
-      ss_tag_frequency: JSON.stringify({ d: { miku: 10 } })
+      ss_tag_frequency: JSON.stringify({ d: { miku: 10 } }),
     })
     expect(info).toEqual({
       title: 'My LoRA',
@@ -106,13 +108,15 @@ describe('extractSafetensorsInfo / hasUsefulInfo', () => {
       precision: 'fp16',
       resMin: 1024,
       resMax: 1024,
-      triggerCandidates: ['miku']
+      triggerCandidates: ['miku'],
     })
     expect(hasUsefulInfo(info)).toBe(true)
   })
 
   it('modelspec.architecture 作为基底模型兜底', () => {
-    const info = extractSafetensorsInfo({ 'modelspec.architecture': 'StableDiffusionXL' })
+    const info = extractSafetensorsInfo({
+      'modelspec.architecture': 'StableDiffusionXL',
+    })
     expect(info.baseModel).toBe('StableDiffusionXL')
   })
 
@@ -133,24 +137,35 @@ describe('parseHeaderBuffer / readSafetensorsInfo', () => {
   function buildFile(metadata, tensors) {
     const header = JSON.stringify({
       ...(tensors || {
-        'weight': { dtype: 'F16', shape: [1], data_offsets: [0, 2] }
+        weight: { dtype: 'F16', shape: [1], data_offsets: [0, 2] },
       }),
-      ...(metadata ? { __metadata__: metadata } : {})
+      ...(metadata ? { __metadata__: metadata } : {}),
     })
     const lenBuf = Buffer.alloc(8)
     lenBuf.writeUInt32LE(Buffer.byteLength(header), 0)
-    return Buffer.concat([lenBuf, Buffer.from(header, 'utf8'), Buffer.from([1, 2])])
+    return Buffer.concat([
+      lenBuf,
+      Buffer.from(header, 'utf8'),
+      Buffer.from([1, 2]),
+    ])
   }
 
   it('合法头部解析出元信息与张量统计', () => {
-    const bytes = buildFile({ ss_resolution: '512x768', ss_base_model_version: 'SD 1.5' })
+    const bytes = buildFile({
+      ss_resolution: '512x768',
+      ss_base_model_version: 'SD 1.5',
+    })
     expect(readHeaderLength(bytes.subarray(0, 8))).toBe(bytes.readUInt32LE(0))
     const info = parseHeaderBuffer(bytes.subarray(8, 8 + bytes.readUInt32LE(0)))
     expect(info.baseModel).toBe('SD 1.5')
     expect(info.resMin).toBe(512)
     expect(info.resMax).toBe(768)
     // F-1：元信息之外附带张量统计
-    expect(info.tensorStats).toMatchObject({ tensorCount: 1, paramCount: 1, dtypeMain: 'F16' })
+    expect(info.tensorStats).toMatchObject({
+      tensorCount: 1,
+      paramCount: 1,
+      dtypeMain: 'F16',
+    })
   })
 
   it('JSON 损坏或空张量表返回 null', () => {
@@ -166,14 +181,24 @@ describe('parseHeaderBuffer / readSafetensorsInfo', () => {
     expect(info).not.toBeNull()
     expect(info.title).toBe('')
     expect(info.triggerCandidates).toEqual([])
-    expect(info.tensorStats).toMatchObject({ tensorCount: 1, paramCount: 1, dtypeMain: 'F16' })
+    expect(info.tensorStats).toMatchObject({
+      tensorCount: 1,
+      paramCount: 1,
+      dtypeMain: 'F16',
+    })
   })
 
   it('真实文件读取：合法文件返回信息，损坏文件与短文件静默返回 null', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-st-'))
     try {
       const good = path.join(dir, 'good.safetensors')
-      await fs.writeFile(good, buildFile({ ss_base_model_version: 'Flux.1', ss_resolution: '1024x1024' }))
+      await fs.writeFile(
+        good,
+        buildFile({
+          ss_base_model_version: 'Flux.1',
+          ss_resolution: '1024x1024',
+        }),
+      )
       const info = await readSafetensorsInfo(good)
       expect(info.baseModel).toBe('Flux.1')
       expect(info.resMin).toBe(1024)
@@ -200,61 +225,90 @@ describe('analyzeTensorIndex（F-1 张量索引统计）', () => {
       'a.weight': { dtype: 'F16', shape: [2, 3] }, // 6
       'b.weight': { dtype: 'F32', shape: [4] }, // 4
       'c.weight': { dtype: 'F16', shape: [1, 1, 2] }, // 2
-      '__metadata__': { ss_resolution: '512x512' } // 张量键之外跳过
+      __metadata__: { ss_resolution: '512x512' }, // 张量键之外跳过
     })
     expect(stats.tensorCount).toBe(3)
     expect(stats.paramCount).toBe(12)
     expect(stats.dtypeMain).toBe('F16')
     expect(stats.dtypes).toEqual([
       { dtype: 'F16', params: 8, tensors: 2 },
-      { dtype: 'F32', params: 4, tensors: 1 }
+      { dtype: 'F32', params: 4, tensors: 1 },
     ])
   })
 
   it('Checkpoint 架构推导：SDXL 双文本编码器 / SD1.5 单文本编码器', () => {
     const sdxl = analyzeTensorIndex({
-      'model.diffusion_model.input_blocks.0.weight': { dtype: 'F16', shape: [1] },
+      'model.diffusion_model.input_blocks.0.weight': {
+        dtype: 'F16',
+        shape: [1],
+      },
       'conditioner.embedders.0.transformer.w': { dtype: 'F16', shape: [1] },
       'conditioner.embedders.1.transformer.w': { dtype: 'F16', shape: [1] },
-      'first_stage_model.decoder.conv_in.weight': { dtype: 'F16', shape: [1] }
+      'first_stage_model.decoder.conv_in.weight': { dtype: 'F16', shape: [1] },
     })
     expect(sdxl.architecture).toBe('SDXL')
     const sd15 = analyzeTensorIndex({
-      'model.diffusion_model.input_blocks.0.weight': { dtype: 'F16', shape: [1] },
-      'conditioner.embedders.0.transformer.text_model.w': { dtype: 'F16', shape: [1] }
+      'model.diffusion_model.input_blocks.0.weight': {
+        dtype: 'F16',
+        shape: [1],
+      },
+      'conditioner.embedders.0.transformer.text_model.w': {
+        dtype: 'F16',
+        shape: [1],
+      },
     })
     expect(sd15.architecture).toBe('SD1.5')
   })
 
   it('Checkpoint 架构推导：Flux（text_encoders + double_blocks）与 SD3.5（joint_blocks）', () => {
     const flux = analyzeTensorIndex({
-      'model.diffusion_model.double_blocks.0.img_attn.qkv.weight': { dtype: 'BF16', shape: [1] },
+      'model.diffusion_model.double_blocks.0.img_attn.qkv.weight': {
+        dtype: 'BF16',
+        shape: [1],
+      },
       'text_encoders.clip_l.transformer.w': { dtype: 'BF16', shape: [1] },
-      'vae.encoder.w': { dtype: 'F16', shape: [1] }
+      'vae.encoder.w': { dtype: 'F16', shape: [1] },
     })
     expect(flux.architecture).toBe('Flux')
     const sd3 = analyzeTensorIndex({
-      'model.diffusion_model.joint_blocks.0.x_emb.linear.weight': { dtype: 'BF16', shape: [1] },
-      'text_encoders.t5.encoder.w': { dtype: 'BF16', shape: [1] }
+      'model.diffusion_model.joint_blocks.0.x_emb.linear.weight': {
+        dtype: 'BF16',
+        shape: [1],
+      },
+      'text_encoders.t5.encoder.w': { dtype: 'BF16', shape: [1] },
     })
     expect(sd3.architecture).toBe('SD3.5')
   })
 
   it('LoRA 架构推导：Flux blocks / SDXL lora_te2_ / SD1.5 经典 blocks', () => {
     const fluxLora = analyzeTensorIndex({
-      'lora_unet_double_blocks_0_img_attn_qkv.lora_down.weight': { dtype: 'F16', shape: [1] },
-      'lora_te_text_model.encoder.layers.0.mlp.fc1.lora_down.weight': { dtype: 'F16', shape: [1] }
+      'lora_unet_double_blocks_0_img_attn_qkv.lora_down.weight': {
+        dtype: 'F16',
+        shape: [1],
+      },
+      'lora_te_text_model.encoder.layers.0.mlp.fc1.lora_down.weight': {
+        dtype: 'F16',
+        shape: [1],
+      },
     })
     expect(fluxLora.architecture).toBe('Flux')
     const sdxlLora = analyzeTensorIndex({
-      'lora_te2_text_projection.linear.lora_down.weight': { dtype: 'F16', shape: [1] },
-      'lora_unet_output_blocks_0.lora_down.weight': { dtype: 'F16', shape: [1] }
+      'lora_te2_text_projection.linear.lora_down.weight': {
+        dtype: 'F16',
+        shape: [1],
+      },
+      'lora_unet_output_blocks_0.lora_down.weight': {
+        dtype: 'F16',
+        shape: [1],
+      },
     })
     expect(sdxlLora.architecture).toBe('SDXL')
     const sd15Lora = analyzeTensorIndex({
-      'lora_unet_input_blocks_1_1_transformer_blocks_0_attn1.to_q.lora_down.weight': {
-        dtype: 'F16', shape: [1]
-      }
+      'lora_unet_input_blocks_1_1_transformer_blocks_0_attn1.to_q.lora_down.weight':
+        {
+          dtype: 'F16',
+          shape: [1],
+        },
     })
     expect(sd15Lora.architecture).toBe('SD1.5')
   })
@@ -262,13 +316,22 @@ describe('analyzeTensorIndex（F-1 张量索引统计）', () => {
   it('组件字节占比：文本编码器/UNet/VAE 三分类，未分类不计入分母', () => {
     const stats = analyzeTensorIndex({
       // textEncoder: 768*768*2 = 1179648
-      'conditioner.embedders.0.transformer.text_model.w': { dtype: 'F16', shape: [768, 768] },
+      'conditioner.embedders.0.transformer.text_model.w': {
+        dtype: 'F16',
+        shape: [768, 768],
+      },
       // unet: 320 * 4 = 1280 bytes
-      'model.diffusion_model.input_blocks.0.weight': { dtype: 'F32', shape: [320] },
+      'model.diffusion_model.input_blocks.0.weight': {
+        dtype: 'F32',
+        shape: [320],
+      },
       // vae: 4*4*1 = 16 bytes
-      'first_stage_model.decoder.conv_in.weight': { dtype: 'U8', shape: [4, 4] },
+      'first_stage_model.decoder.conv_in.weight': {
+        dtype: 'U8',
+        shape: [4, 4],
+      },
       // 未分类：不计入占比分母
-      'misc.weight': { dtype: 'F16', shape: [100] }
+      'misc.weight': { dtype: 'F16', shape: [100] },
     })
     const total = 1179648 + 1280 + 16
     expect(stats.componentRatios.textEncoder).toBeCloseTo(1179648 / total, 6)
@@ -278,13 +341,13 @@ describe('analyzeTensorIndex（F-1 张量索引统计）', () => {
 
   it('无法识别架构与组件时留空/归零（不误判）', () => {
     const stats = analyzeTensorIndex({
-      'weight': { dtype: 'F16', shape: [1] }
+      weight: { dtype: 'F16', shape: [1] },
     })
     expect(stats.architecture).toBe('')
     expect(stats.componentRatios).toEqual({ textEncoder: 0, unet: 0, vae: 0 })
     const vaeOnly = analyzeTensorIndex({
       'decoder.conv_in.weight': { dtype: 'F32', shape: [4] },
-      'encoder.conv_out.weight': { dtype: 'F32', shape: [4] }
+      'encoder.conv_out.weight': { dtype: 'F32', shape: [4] },
     })
     expect(vaeOnly.architecture).toBe('')
   })
@@ -300,7 +363,7 @@ describe('analyzeTensorIndex（F-1 张量索引统计）', () => {
       'empty-shape': { dtype: 'F16', shape: [] },
       'bad-dim': { dtype: 'F16', shape: [2, -1] },
       'bad-entry': 42,
-      'unknown-dtype': { dtype: 'XX9', shape: [4] }
+      'unknown-dtype': { dtype: 'XX9', shape: [4] },
     })
     // 缺 dtype/缺 shape/空 shape/非对象条目均被跳过；bad-dim（负维度）计入张量数
     // 但参数量为 0；unknown-dtype 计入张量数与参数量（字节数按 0 计）
@@ -319,20 +382,29 @@ describe('checkSafetensorsHealthy（F6 健康检查）', () => {
   /** 构造 safetensors 文件字节（同上 describe 的 buildFile，局部副本） */
   function buildFile(metadata) {
     const header = JSON.stringify({
-      'weight': { dtype: 'F16', shape: [1], data_offsets: [0, 2] },
-      ...(metadata ? { __metadata__: metadata } : {})
+      weight: { dtype: 'F16', shape: [1], data_offsets: [0, 2] },
+      ...(metadata ? { __metadata__: metadata } : {}),
     })
     const lenBuf = Buffer.alloc(8)
     lenBuf.writeUInt32LE(Buffer.byteLength(header), 0)
-    return Buffer.concat([lenBuf, Buffer.from(header, 'utf8'), Buffer.from([1, 2])])
+    return Buffer.concat([
+      lenBuf,
+      Buffer.from(header, 'utf8'),
+      Buffer.from([1, 2]),
+    ])
   }
 
   it('合法文件（含/不含元信息）均健康；两者均产出 autoInfo（F-1 张量统计）', async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-st-health-'))
+    const dir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-st-health-'),
+    )
     try {
       // 含元信息
       const withMeta = path.join(dir, 'with-meta.safetensors')
-      await fs.writeFile(withMeta, buildFile({ ss_base_model_version: 'SD 1.5' }))
+      await fs.writeFile(
+        withMeta,
+        buildFile({ ss_base_model_version: 'SD 1.5' }),
+      )
       expect(await checkSafetensorsHealthy(withMeta)).toBe(true)
       // 无 __metadata__ 的合法文件：F-1 起返回仅含张量统计的 info（装饰层免健康补检）
       const noMeta = path.join(dir, 'no-meta.safetensors')
@@ -347,10 +419,15 @@ describe('checkSafetensorsHealthy（F6 健康检查）', () => {
   })
 
   it('损坏文件识别为不健康：垃圾字节、截断、声称头部长度越界、不存在', async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-st-broken-'))
+    const dir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-st-broken-'),
+    )
     try {
       const garbage = path.join(dir, 'garbage.safetensors')
-      await fs.writeFile(garbage, Buffer.from('this is not a safetensors file at all!!!'))
+      await fs.writeFile(
+        garbage,
+        Buffer.from('this is not a safetensors file at all!!!'),
+      )
       expect(await checkSafetensorsHealthy(garbage)).toBe(false)
 
       const truncated = path.join(dir, 'truncated.safetensors')
@@ -363,7 +440,9 @@ describe('checkSafetensorsHealthy（F6 健康检查）', () => {
       await fs.writeFile(lying, Buffer.concat([lenBuf, Buffer.from('{}')]))
       expect(await checkSafetensorsHealthy(lying)).toBe(false)
 
-      expect(await checkSafetensorsHealthy(path.join(dir, 'missing.safetensors'))).toBe(false)
+      expect(
+        await checkSafetensorsHealthy(path.join(dir, 'missing.safetensors')),
+      ).toBe(false)
     } finally {
       await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
     }

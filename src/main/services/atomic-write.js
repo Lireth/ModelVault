@@ -31,14 +31,19 @@ async function renameReplacing(tmp, file) {
       await fs.rename(tmp, file)
       return
     } catch (err) {
-      const retriable = err.code === 'EPERM' || err.code === 'EEXIST' || err.code === 'EBUSY'
+      const retriable =
+        err.code === 'EPERM' || err.code === 'EEXIST' || err.code === 'EBUSY'
       if (!retriable || attempt >= RENAME_MAX_ATTEMPTS) throw err
       await new Promise((resolve) => setTimeout(resolve, 20 * attempt))
     }
   }
 }
 
-export async function atomicWriteFile(file, content, { createDirs = true } = {}) {
+export async function atomicWriteFile(
+  file,
+  content,
+  { createDirs = true } = {},
+) {
   // 临时名带进程内单调序号（A1）：同一文件的并发写入（如 settings:update 与
   // 扫描完成回写）各自使用不同临时文件，避免后写方截断前写方内容、
   // 或先行方 rename 移走临时文件致后行方 ENOENT

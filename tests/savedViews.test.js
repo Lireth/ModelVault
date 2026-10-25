@@ -9,7 +9,7 @@ import {
   saveCurrentAsView,
   savedViews,
   state,
-  viewSummary
+  viewSummary,
 } from '../src/renderer/src/store/appStore'
 
 /**
@@ -24,9 +24,11 @@ import {
 function makeApiMock() {
   return {
     settings: {
-      update: vi.fn((patch) => Promise.resolve({ settings: { ...state.settings, ...patch } }))
+      update: vi.fn((patch) =>
+        Promise.resolve({ settings: { ...state.settings, ...patch } }),
+      ),
     },
-    window: { setTheme: vi.fn(() => Promise.resolve()) }
+    window: { setTheme: vi.fn(() => Promise.resolve()) },
   }
 }
 
@@ -59,7 +61,7 @@ function seedView(overrides = {}) {
     showFavoritesOnly: true,
     sortBy: 'name',
     sortAsc: true,
-    ...overrides
+    ...overrides,
   }
   state.settings.savedViews = [view]
   return view
@@ -87,7 +89,7 @@ describe('智能视图：保存当前筛选', () => {
       subFilter: 'role',
       showFavoritesOnly: true,
       sortBy: 'mtime',
-      sortAsc: false
+      sortAsc: false,
     })
     expect(call.savedViews[0].id).toBeTruthy()
     // 设置镜像已同步（侧栏列表立即可见）
@@ -120,7 +122,7 @@ describe('智能视图：保存当前筛选', () => {
       subFilter: '',
       showFavoritesOnly: false,
       sortBy: 'name',
-      sortAsc: true
+      sortAsc: true,
     }))
     expect(await saveCurrentAsView('第21个')).toBe(false)
     expect(window.api.settings.update).not.toHaveBeenCalled()
@@ -134,7 +136,7 @@ describe('智能视图：应用', () => {
       typeFilter: 'checkpoint',
       showFavoritesOnly: false,
       sortBy: 'size',
-      sortAsc: false
+      sortAsc: false,
     })
 
     await applySavedView(view.id)
@@ -145,7 +147,10 @@ describe('智能视图：应用', () => {
     expect(state.sortBy).toBe('size')
     expect(state.sortAsc).toBe(false)
     // 排序持久化（与手动改排序的既有行为一致）
-    expect(window.api.settings.update).toHaveBeenCalledWith({ sortBy: 'size', sortAsc: false })
+    expect(window.api.settings.update).toHaveBeenCalledWith({
+      sortBy: 'size',
+      sortAsc: false,
+    })
   })
 
   it('多标签筛选随视图保存/恢复，旧单标签字段迁移为数组（FEAT-01）', async () => {
@@ -161,11 +166,11 @@ describe('智能视图：应用', () => {
 
     // 摘要按顿号拼接多标签
     expect(
-      viewSummary({ ...state.settings.savedViews[0], tagFilters: ['a', 'b'] })
+      viewSummary({ ...state.settings.savedViews[0], tagFilters: ['a', 'b'] }),
     ).toContain('标签：a、b')
     // 命中判定与标签选择顺序无关
     state.settings.savedViews = [
-      { ...legacy, id: 'v-order', name: '顺序无关', tagFilters: ['b', 'a'] }
+      { ...legacy, id: 'v-order', name: '顺序无关', tagFilters: ['b', 'a'] },
     ]
     state.tagFilters = ['a', 'b']
     expect(activeSavedViewId.value).toBe('v-order')
@@ -225,7 +230,7 @@ describe('智能视图：摘要', () => {
       subFilter: 'role',
       showFavoritesOnly: true,
       sortBy: 'favorite',
-      sortAsc: false
+      sortAsc: false,
     }
     const summary = viewSummary(v)
     expect(summary).toContain('LoRA')
@@ -244,8 +249,8 @@ describe('智能视图：摘要', () => {
         subFilter: '',
         showFavoritesOnly: false,
         sortBy: 'name',
-        sortAsc: true
-      })
+        sortAsc: true,
+      }),
     ).toBe('全部模型 · 按名称↑')
   })
 })

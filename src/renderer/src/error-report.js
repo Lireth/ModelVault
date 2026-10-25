@@ -80,14 +80,24 @@ export function createErrorReporter(api) {
       const node = event?.target
       if (node && node.tagName) {
         const src = node.src || node.href || ''
-        report('resource', `资源加载失败 <${String(node.tagName).toLowerCase()}> ${src || '(未知地址)'}`, '')
+        report(
+          'resource',
+          `资源加载失败 <${String(node.tagName).toLowerCase()}> ${src || '(未知地址)'}`,
+          '',
+        )
         return
       }
       const err = event?.error
       const stack =
         err?.stack ||
-        (event?.filename ? `at ${event.filename}:${event.lineno}:${event.colno}` : '')
-      report('window', event?.message || String(err?.message || '未知的窗口错误'), stack)
+        (event?.filename
+          ? `at ${event.filename}:${event.lineno}:${event.colno}`
+          : '')
+      report(
+        'window',
+        event?.message || String(err?.message || '未知的窗口错误'),
+        stack,
+      )
     },
 
     /**
@@ -99,8 +109,10 @@ export function createErrorReporter(api) {
       const isError = reason instanceof Error
       report(
         'promise',
-        isError ? String(reason.message) : String(reason ?? '未知的 Promise 拒绝'),
-        isError ? reason.stack : ''
+        isError
+          ? String(reason.message)
+          : String(reason ?? '未知的 Promise 拒绝'),
+        isError ? reason.stack : '',
       )
     },
 
@@ -108,6 +120,6 @@ export function createErrorReporter(api) {
     vueWarn(msg, _instance, trace) {
       console.warn('[Vue warn]', msg, trace || '')
       report('vue-warn', String(msg), trace || '')
-    }
+    },
   }
 }

@@ -1,6 +1,11 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { saveSettings, state, toast, updateAvailable } from '../../store/appStore'
+import {
+  saveSettings,
+  state,
+  toast,
+  updateAvailable,
+} from '../../store/appStore'
 
 /**
  * 设置页「关于」板块（O-4 自 SettingsPage.vue 按域拆出）：
@@ -65,7 +70,7 @@ async function onCopyDiagnostics() {
     `Electron ${info.electron}`,
     `Node ${info.node}`,
     `Platform ${info.platform || 'unknown'}`,
-    `UserAgent ${navigator.userAgent}`
+    `UserAgent ${navigator.userAgent}`,
   ]
   try {
     await navigator.clipboard.writeText(lines.join('\n'))
@@ -109,14 +114,18 @@ const downloadError = ref('')
 const percentText = computed(() => {
   const p = downloadProgress.value
   if (!p) return ''
-  if (p.total > 0) return `下载中 ${Math.min(100, Math.round((p.received / p.total) * 100))}%`
+  if (p.total > 0)
+    return `下载中 ${Math.min(100, Math.round((p.received / p.total) * 100))}%`
   return `已下载 ${(p.received / 1024 / 1024).toFixed(1)} MB`
 })
 
 /** 进度条填充宽度（total 未知时保持 0，仅靠文本提示） */
 const progressStyle = computed(() => {
   const p = downloadProgress.value
-  const pct = p && p.total > 0 ? Math.min(100, Math.round((p.received / p.total) * 100)) : 0
+  const pct =
+    p && p.total > 0
+      ? Math.min(100, Math.round((p.received / p.total) * 100))
+      : 0
   return { width: `${pct}%` }
 })
 
@@ -218,12 +227,21 @@ async function onInstallUpdate() {
       <button class="btn" :disabled="checkingUpdate" @click="onCheckUpdate">
         {{ checkingUpdate ? '检查中…' : '检查更新' }}
       </button>
-      <span v-if="updateInfo?.error" class="update-msg error">{{ updateInfo.error }}</span>
+      <span v-if="updateInfo?.error" class="update-msg error">{{
+        updateInfo.error
+      }}</span>
       <span v-else-if="updateInfo?.hasUpdate" class="update-msg has-update">
         发现新版本 v{{ updateInfo.latest }}（当前 v{{ updateInfo.current }}）
-        <a v-if="updateInfo.releaseUrl" :href="updateInfo.releaseUrl" target="_blank">前往下载页 ↗</a>
+        <a
+          v-if="updateInfo.releaseUrl"
+          :href="updateInfo.releaseUrl"
+          target="_blank"
+          >前往下载页 ↗</a
+        >
       </span>
-      <span v-else-if="updateInfo" class="update-msg">已是最新版本（v{{ updateInfo.current }}）</span>
+      <span v-else-if="updateInfo" class="update-msg"
+        >已是最新版本（v{{ updateInfo.current }}）</span
+      >
     </div>
 
     <!-- 应用内更新下载与安装（F-6）：Release 附加 EXE + SHA256 校验 -->
@@ -242,27 +260,40 @@ async function onInstallUpdate() {
           v-if="downloadProgress !== null"
           class="btn"
           @click="onCancelDownload"
-        >取消</button>
+        >
+          取消
+        </button>
         <template v-if="downloadProgress !== null">
           <div class="update-progress" aria-hidden="true">
             <div class="update-progress-fill" :style="progressStyle"></div>
           </div>
           <span class="update-msg">{{ percentText }}</span>
         </template>
-        <span v-else-if="downloadError" class="update-msg error">{{ downloadError }}</span>
+        <span v-else-if="downloadError" class="update-msg error">{{
+          downloadError
+        }}</span>
         <span v-else-if="!updateInfo.canDownload" class="update-msg">
           当前 Release 未提供可校验的安装包，请前往下载页手动下载。
         </span>
       </template>
       <!-- 下载完成：一键安装（延迟拉起新版本并退出当前应用） -->
       <template v-else>
-        <button class="btn btn-primary" @click="onInstallUpdate">运行更新程序</button>
-        <span class="update-msg">更新包已通过校验，点击后当前应用将退出并启动新版本</span>
+        <button class="btn btn-primary" @click="onInstallUpdate">
+          运行更新程序
+        </button>
+        <span class="update-msg"
+          >更新包已通过校验，点击后当前应用将退出并启动新版本</span
+        >
       </template>
     </div>
     <!-- 更新说明（A-15）：来自 GitHub Release body，主进程已截断 500 字符；
          文本插值渲染，远程内容中的 HTML 原样显示不被解析 -->
-    <p v-if="updateInfo?.hasUpdate && updateInfo.releaseNotes" class="update-notes">{{ updateInfo.releaseNotes }}</p>
+    <p
+      v-if="updateInfo?.hasUpdate && updateInfo.releaseNotes"
+      class="update-notes"
+    >
+      {{ updateInfo.releaseNotes }}
+    </p>
 
     <!-- 启动自动检查更新（O-3）：延迟静默查询，仅在有更新时提示；变更即保存 -->
     <div class="update-row">
@@ -276,15 +307,26 @@ async function onInstallUpdate() {
         />
         <span>启动时自动检查更新</span>
       </label>
-      <span class="update-msg">启动完成后静默查询一次新版本，仅在有更新时提示</span>
+      <span class="update-msg"
+        >启动完成后静默查询一次新版本，仅在有更新时提示</span
+      >
     </div>
 
     <!-- 日志与诊断（B-04）：反馈问题时可直接打开日志目录或复制版本环境信息 -->
     <div class="update-row">
-      <span class="update-msg">日志按天保留 14 天（位于 %APPDATA%\modelvault\logs），反馈问题时可附上。</span>
+      <span class="update-msg"
+        >日志按天保留 14 天（位于
+        %APPDATA%\modelvault\logs），反馈问题时可附上。</span
+      >
       <button class="btn" @click="onOpenLogs">打开日志目录</button>
-      <button class="btn" :disabled="!appInfo" @click="onCopyDiagnostics">复制诊断信息</button>
-      <button class="btn" :disabled="exportingDiagnostics" @click="onExportDiagnostics">
+      <button class="btn" :disabled="!appInfo" @click="onCopyDiagnostics">
+        复制诊断信息
+      </button>
+      <button
+        class="btn"
+        :disabled="exportingDiagnostics"
+        @click="onExportDiagnostics"
+      >
         {{ exportingDiagnostics ? '导出中…' : '导出诊断包' }}
       </button>
     </div>

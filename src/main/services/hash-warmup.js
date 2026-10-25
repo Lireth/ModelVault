@@ -56,7 +56,8 @@ let transientRetryDelayMs = TRANSIENT_RETRY_DELAY_MS
  * @param {number} ms 毫秒数
  */
 export function setHashRetryDelayForTests(ms) {
-  transientRetryDelayMs = Number.isFinite(ms) && ms >= 0 ? ms : TRANSIENT_RETRY_DELAY_MS
+  transientRetryDelayMs =
+    Number.isFinite(ms) && ms >= 0 ? ms : TRANSIENT_RETRY_DELAY_MS
 }
 
 /**
@@ -138,7 +139,7 @@ function emitProgress(snap, force = false) {
       totalBytes: snap.totalBytes,
       done: doneCount,
       remaining: queue.length,
-      hash: snap.hash || ''
+      hash: snap.hash || '',
     })
   } catch {
     // 进度推送失败不影响预热本身
@@ -196,16 +197,19 @@ async function computeHashWithRetry(id, priority, snap) {
           snap.hashedBytes = hashedBytes
           snap.totalBytes = totalBytes
           snap.percent =
-            totalBytes > 0 ? Math.min(100, Math.round((hashedBytes / totalBytes) * 100)) : 0
+            totalBytes > 0
+              ? Math.min(100, Math.round((hashedBytes / totalBytes) * 100))
+              : 0
           emitProgress(snap)
         },
-        { priority }
+        { priority },
       )
     } catch (err) {
-      if (attempt >= TRANSIENT_RETRY_MAX || !isRetryableHashPoolError(err)) throw err
+      if (attempt >= TRANSIENT_RETRY_MAX || !isRetryableHashPoolError(err))
+        throw err
       logger.warn(
         `哈希计算临时失败，${transientRetryDelayMs}ms 后重试` +
-          `（第 ${attempt + 1}/${TRANSIENT_RETRY_MAX} 次）: ${id} ${err.message}`
+          `（第 ${attempt + 1}/${TRANSIENT_RETRY_MAX} 次）: ${id} ${err.message}`,
       )
       // 上一次尝试可能已推送过部分进度：重试前复位，避免界面停在旧百分比
       snap.percent = 0
@@ -237,7 +241,14 @@ export function computeAndCacheHash(id, mtimeMs, options = {}) {
   const promise = (async () => {
     // 本次计算的进度快照（识别与预热链路共用，事件按 id 供渲染层匹配；
     // hash 完成后回填，随完成事件送达渲染层——FEAT-1 重复检测数据源）
-    const snap = { active: true, id, percent: 0, hashedBytes: 0, totalBytes: 0, hash: '' }
+    const snap = {
+      active: true,
+      id,
+      percent: 0,
+      hashedBytes: 0,
+      totalBytes: 0,
+      hash: '',
+    }
     try {
       emitProgress(snap, true)
       const hash = await computeHashWithRetry(id, priority, snap)
@@ -285,11 +296,16 @@ function normalizeRequestItems(items) {
   for (const item of Array.isArray(items) ? items : []) {
     if (typeof item === 'string' && item) {
       out.push({ id: item, size: null, mtimeMs: null })
-    } else if (item && typeof item === 'object' && typeof item.id === 'string' && item.id) {
+    } else if (
+      item &&
+      typeof item === 'object' &&
+      typeof item.id === 'string' &&
+      item.id
+    ) {
       out.push({
         id: item.id,
         size: Number.isFinite(item.size) ? item.size : null,
-        mtimeMs: Number.isFinite(item.mtimeMs) ? item.mtimeMs : null
+        mtimeMs: Number.isFinite(item.mtimeMs) ? item.mtimeMs : null,
       })
     }
   }
@@ -330,7 +346,7 @@ function rememberInfo(id, size, mtimeMs) {
       ? mtimeMs
       : prev && Number.isFinite(prev.mtimeMs)
         ? prev.mtimeMs
-        : null
+        : null,
   }
   knownInfo.set(id, next)
   if (Number.isFinite(next.size)) {
@@ -349,9 +365,9 @@ function hasValidCachedHash(id) {
   const meta = getModelMeta(id)
   return Boolean(
     meta?.hash &&
-      info &&
-      Number.isFinite(info.mtimeMs) &&
-      meta.hashMtime === info.mtimeMs
+    info &&
+    Number.isFinite(info.mtimeMs) &&
+    meta.hashMtime === info.mtimeMs,
   )
 }
 
@@ -444,7 +460,8 @@ export function requestHashWarmup(items, opts = {}) {
       // 扫描快照）；mtime 未知的裸 id 保守入队（hasValidCachedHash 为 false），
       // 行为与旧实现一致。识别链路 ensureHash 以实时 stat 复核缓存，跳过方
       // 不引入陈旧哈希风险
-      if (!hasValidCachedHash(item.id) && pushQueue(item.id, false, 'full')) added = true
+      if (!hasValidCachedHash(item.id) && pushQueue(item.id, false, 'full'))
+        added = true
       continue
     }
     // candidates：体积已知则先记录分组，待全部条目登记后统一判定；
@@ -463,13 +480,19 @@ export function requestHashWarmup(items, opts = {}) {
     // 全量快照可能刚丢弃了旧排队项（如切换到关闭策略）：广播一次以清除
     // 渲染层残留的「排队中」计数，避免界面显示已不存在的任务
     if (opts.full === true) {
-      emitProgress({ active: false, id: '', percent: 0, hashedBytes: 0, totalBytes: 0 }, true)
+      emitProgress(
+        { active: false, id: '', percent: 0, hashedBytes: 0, totalBytes: 0 },
+        true,
+      )
     }
     return
   }
   // 队列计数变化立即广播（渲染层可显示排队数）
-  emitProgress({ active: false, id: '', percent: 0, hashedBytes: 0, totalBytes: 0 }, true)
-  scheduleDrain(priority ? 0 : opts.delayMs ?? WARMUP_DELAY_MS)
+  emitProgress(
+    { active: false, id: '', percent: 0, hashedBytes: 0, totalBytes: 0 },
+    true,
+  )
+  scheduleDrain(priority ? 0 : (opts.delayMs ?? WARMUP_DELAY_MS))
 }
 
 /** 扫描开始：暂停 drain 取队（正在计算的单个文件不中断，处理完当前即停） */
@@ -557,7 +580,10 @@ async function drain() {
     }
     if (queue.length === 0 && doneCount > 0) {
       // 本轮批量清空：先广播最终计数，再归零供下一轮从 0 计数
-      emitProgress({ active: false, id: '', percent: 0, hashedBytes: 0, totalBytes: 0 }, true)
+      emitProgress(
+        { active: false, id: '', percent: 0, hashedBytes: 0, totalBytes: 0 },
+        true,
+      )
       doneCount = 0
       consumedIds.clear()
     }

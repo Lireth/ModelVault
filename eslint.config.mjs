@@ -11,7 +11,7 @@ import globals from 'globals'
  */
 export default [
   {
-    ignores: ['out/**', 'dist/**', 'node_modules/**', 'image/**', 'build/**']
+    ignores: ['out/**', 'dist/**', 'node_modules/**', 'image/**', 'build/**'],
   },
   js.configs.recommended,
   ...pluginVue.configs['flat/essential'],
@@ -19,22 +19,27 @@ export default [
   {
     files: ['src/renderer/**/*.{js,vue}'],
     languageOptions: {
-      globals: { ...globals.browser }
-    }
+      globals: { ...globals.browser },
+    },
   },
   {
-    files: ['src/main/**/*.js', 'src/preload/**/*.js', 'scripts/**/*.mjs', '*.mjs'],
+    files: [
+      'src/main/**/*.js',
+      'src/preload/**/*.js',
+      'scripts/**/*.mjs',
+      '*.mjs',
+    ],
     languageOptions: {
-      globals: { ...globals.node }
-    }
+      globals: { ...globals.node },
+    },
   },
   {
     // 组件测试（OPT-16）运行于 jsdom 环境（文件头 @vitest-environment jsdom），
     // 需要 window/document/事件构造器等浏览器全局；Node 全局仍然可用
     files: ['tests/**/*.js'],
     languageOptions: {
-      globals: { ...globals.node, ...globals.browser }
-    }
+      globals: { ...globals.node, ...globals.browser },
+    },
   },
   {
     rules: {
@@ -46,7 +51,10 @@ export default [
       // 深层字段写入——这是本项目设置页/详情表单拆分的既定数据流约定
       'vue/no-mutating-props': ['error', { shallowOnly: true }],
       // 下划线开头参数/变量视为有意忽略
-      'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }]
-    }
-  }
+      'no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+    },
+  },
 ]

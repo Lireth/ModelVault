@@ -26,7 +26,18 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     <header class="stats-header">
       <h2>库统计</h2>
       <button class="wc-btn" title="关闭统计页" @click="closeStats">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+        <svg
+          viewBox="0 0 16 16"
+          width="12"
+          height="12"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <path d="M4 4l8 8M12 4l-8 8" />
+        </svg>
       </button>
     </header>
 

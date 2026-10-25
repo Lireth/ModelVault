@@ -6,7 +6,7 @@ import {
   civitaiImportImages,
   formatSize,
   selectedModel,
-  state
+  state,
 } from '../../store/appStore'
 
 /**
@@ -43,7 +43,10 @@ const modelWarmup = computed(() => {
 const hashProgressText = computed(() => {
   const w = modelWarmup.value
   if (!w) return ''
-  const size = w.totalBytes > 0 ? `（${formatSize(w.hashedBytes)} / ${formatSize(w.totalBytes)}）` : ''
+  const size =
+    w.totalBytes > 0
+      ? `（${formatSize(w.hashedBytes)} / ${formatSize(w.totalBytes)}）`
+      : ''
   return `正在计算文件哈希 ${w.percent}%${size}`
 })
 
@@ -95,8 +98,12 @@ function onVideoKeydown(e) {
   }
 }
 
-onMounted(() => window.addEventListener('keydown', onVideoKeydown, { capture: true }))
-onBeforeUnmount(() => window.removeEventListener('keydown', onVideoKeydown, { capture: true }))
+onMounted(() =>
+  window.addEventListener('keydown', onVideoKeydown, { capture: true }),
+)
+onBeforeUnmount(() =>
+  window.removeEventListener('keydown', onVideoKeydown, { capture: true }),
+)
 
 // 切换模型时清空上次识别结论与示例图状态（URL 本身随模型对象走，无需清理）
 watch(
@@ -109,12 +116,13 @@ watch(
     imagesLoaded.value = false
     showImages.value = false
     selectedUrls.clear()
-  }
+  },
 )
 
 /** 点击识别：大文件哈希计算可能耗时数十秒，期间禁用按钮并提示 */
 async function onIdentify() {
-  if (!model.value || identifying.value || completing.value || importing.value) return
+  if (!model.value || identifying.value || completing.value || importing.value)
+    return
   identifying.value = true
   lastResult.value = ''
   try {
@@ -141,7 +149,8 @@ async function loadImages() {
 
 /** 点击一键补全（仅填充空缺字段，结果提示由 store 层 toast） */
 async function onComplete() {
-  if (!model.value || identifying.value || completing.value || importing.value) return
+  if (!model.value || identifying.value || completing.value || importing.value)
+    return
   completing.value = true
   try {
     await civitaiComplete(model.value.id)
@@ -198,26 +207,37 @@ async function importSelected() {
         target="_blank"
         rel="noopener noreferrer"
         :title="`${model.civitaiUrl}（点击在浏览器打开）`"
-      >在 Civitai 打开模型页 ↗</a>
+        >在 Civitai 打开模型页 ↗</a
+      >
       <div class="civitai-actions">
         <button
           class="btn btn-primary"
           type="button"
           :disabled="completing || identifying || importing"
-          :title="model.triggerWords || model.note ? '仅填充空缺的触发词与备注，不覆盖已有内容' : '从 Civitai 拉取触发词与描述填充空缺字段'"
+          :title="
+            model.triggerWords || model.note
+              ? '仅填充空缺的触发词与备注，不覆盖已有内容'
+              : '从 Civitai 拉取触发词与描述填充空缺字段'
+          "
           @click="onComplete"
-        >{{ completing ? '补全中…' : '一键补全' }}</button>
+        >
+          {{ completing ? '补全中…' : '一键补全' }}
+        </button>
         <button
           class="btn"
           type="button"
           :disabled="identifying || importing"
           @click="showImages ? (showImages = false) : loadImages()"
-        >{{ showImages ? '收起示例图' : '示例图采集' }}</button>
+        >
+          {{ showImages ? '收起示例图' : '示例图采集' }}
+        </button>
       </div>
 
       <!-- 示例图采集：勾选后一键导入为模型封面 -->
       <template v-if="showImages">
-        <div v-if="identifying && !imagesLoaded" class="civitai-hint">正在获取示例媒体列表…</div>
+        <div v-if="identifying && !imagesLoaded" class="civitai-hint">
+          正在获取示例媒体列表…
+        </div>
         <template v-else-if="images.length > 0 || videos.length > 0">
           <div v-if="images.length > 0" class="civitai-img-grid">
             <label
@@ -232,7 +252,12 @@ async function importSelected() {
                 :checked="selectedUrls.has(img.url)"
                 @change="toggleImage(img.url)"
               />
-              <img :src="thumbSrc(img.url)" loading="lazy" :class="{ nsfw: img.nsfw }" alt="" />
+              <img
+                :src="thumbSrc(img.url)"
+                loading="lazy"
+                :class="{ nsfw: img.nsfw }"
+                alt=""
+              />
               <span v-if="img.nsfw" class="civitai-nsfw-badge">NSFW</span>
             </label>
           </div>
@@ -256,22 +281,42 @@ async function importSelected() {
                   alt=""
                 />
                 <span v-else class="civitai-video-play">▶</span>
-                <span class="civitai-video-size">{{ video.width }} × {{ video.height }}</span>
+                <span class="civitai-video-size"
+                  >{{ video.width }} × {{ video.height }}</span
+                >
               </button>
             </div>
           </div>
           <div v-if="images.length > 0" class="civitai-actions">
-            <button class="btn" type="button" :disabled="importing" @click="selectAll">全选</button>
-            <button class="btn" type="button" :disabled="importing || selectedCount === 0" @click="clearSelection">清空</button>
+            <button
+              class="btn"
+              type="button"
+              :disabled="importing"
+              @click="selectAll"
+            >
+              全选
+            </button>
+            <button
+              class="btn"
+              type="button"
+              :disabled="importing || selectedCount === 0"
+              @click="clearSelection"
+            >
+              清空
+            </button>
             <button
               class="btn btn-primary"
               type="button"
               :disabled="importing || selectedCount === 0"
               :title="`下载勾选的 ${selectedCount} 张图片并添加为模型示例图`"
               @click="importSelected"
-            >{{ importing ? '导入中…' : `添加所选示例图（${selectedCount}）` }}</button>
+            >
+              {{ importing ? '导入中…' : `添加所选示例图（${selectedCount}）` }}
+            </button>
           </div>
-          <span v-if="images.length > 0" class="civitai-hint">导入的图片会追加到模型封面列表（单次最多 20 张）</span>
+          <span v-if="images.length > 0" class="civitai-hint"
+            >导入的图片会追加到模型封面列表（单次最多 20 张）</span
+          >
         </template>
         <div v-else class="civitai-hint">该模型版本暂无示例图或视频</div>
       </template>
@@ -286,16 +331,26 @@ async function importSelected() {
           :disabled="identifying"
           title="计算文件 SHA256 并在 Civitai 查询匹配的模型版本"
           @click="onIdentify"
-        >{{ identifying ? '识别中…' : '识别 Civitai 模型' }}</button>
+        >
+          {{ identifying ? '识别中…' : '识别 Civitai 模型' }}
+        </button>
       </div>
       <span v-if="identifying" class="civitai-hint">
-        {{ hashProgressText || '正在计算文件哈希并查询 Civitai，大文件可能耗时较长…' }}
+        {{
+          hashProgressText ||
+          '正在计算文件哈希并查询 Civitai，大文件可能耗时较长…'
+        }}
       </span>
       <template v-else-if="modelWarmup">
         <div class="civitai-warmup">
-          <span class="civitai-hint">{{ hashProgressText }}，后台预热中，识别时将直接复用</span>
+          <span class="civitai-hint"
+            >{{ hashProgressText }}，后台预热中，识别时将直接复用</span
+          >
           <div class="civitai-warmup-bar">
-            <div class="civitai-warmup-fill" :style="{ width: `${modelWarmup.percent}%` }"></div>
+            <div
+              class="civitai-warmup-fill"
+              :style="{ width: `${modelWarmup.percent}%` }"
+            ></div>
           </div>
         </div>
       </template>
@@ -309,9 +364,24 @@ async function importSelected() {
 
     <!-- 示例视频播放器（FN-02）：叠加层 + 原生 video 控件 -->
     <Teleport to="body">
-      <div v-if="activeVideo" class="civitai-video-mask" @click.self="closeVideo">
-        <div class="civitai-video-box" role="dialog" aria-modal="true" aria-label="示例视频">
-          <button class="civitai-video-close" title="关闭播放器" @click="closeVideo">✕</button>
+      <div
+        v-if="activeVideo"
+        class="civitai-video-mask"
+        @click.self="closeVideo"
+      >
+        <div
+          class="civitai-video-box"
+          role="dialog"
+          aria-modal="true"
+          aria-label="示例视频"
+        >
+          <button
+            class="civitai-video-close"
+            title="关闭播放器"
+            @click="closeVideo"
+          >
+            ✕
+          </button>
           <video
             class="civitai-video-player"
             :src="videoSrc(activeVideo.url)"

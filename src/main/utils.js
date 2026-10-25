@@ -30,13 +30,19 @@ import path from 'node:path'
  * @returns {string|null} 相对路径；越界返回 null
  */
 export function relativeWithin(absPath, baseDir) {
-  if (typeof absPath !== 'string' || typeof baseDir !== 'string' || !absPath || !baseDir) {
+  if (
+    typeof absPath !== 'string' ||
+    typeof baseDir !== 'string' ||
+    !absPath ||
+    !baseDir
+  ) {
     return null
   }
   const rel = path.relative(baseDir, absPath)
   if (rel === '') return ''
   // '..' 与其后的分隔符分开判断：名为 '..foo' 的合法目录不应被误判为越界
-  const outside = rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)
+  const outside =
+    rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)
   if (!outside) return rel
   // 兜底：Windows 下按小写前缀再判一次（path.win32.relative 本身已按大小写
   // 不敏感比较，此处覆盖相对基准解析与传入形态不一致的残余场景）。
@@ -44,7 +50,10 @@ export function relativeWithin(absPath, baseDir) {
   // 长度，不可用转换后的长度计算偏移。
   if (process.platform !== 'win32') return null
   const base = baseDir.endsWith(path.sep) ? baseDir.slice(0, -1) : baseDir
-  if (!base || !absPath.toLowerCase().startsWith(`${base.toLowerCase()}${path.sep}`)) {
+  if (
+    !base ||
+    !absPath.toLowerCase().startsWith(`${base.toLowerCase()}${path.sep}`)
+  ) {
     return null
   }
   return absPath.slice(base.length + 1)
@@ -117,7 +126,11 @@ export function boundedMapSet(map, key, value, max) {
  * （用户信息段伪装 github.com@evil.com 与外形相似域名
  * github.com.evil.com 均会因真实主机不匹配而被拒绝）。
  */
-const ALLOWED_EXTERNAL_HOSTS = new Set(['github.com', 'civitai.com', 'civitai.red'])
+const ALLOWED_EXTERNAL_HOSTS = new Set([
+  'github.com',
+  'civitai.com',
+  'civitai.red',
+])
 
 /**
  * 校验外部 URL 是否允许经 shell.openExternal 拉起（B3）：
@@ -132,7 +145,9 @@ export function isAllowedExternalUrl(url) {
   if (typeof url !== 'string') return false
   try {
     const parsed = new URL(url)
-    return parsed.protocol === 'https:' && ALLOWED_EXTERNAL_HOSTS.has(parsed.host)
+    return (
+      parsed.protocol === 'https:' && ALLOWED_EXTERNAL_HOSTS.has(parsed.host)
+    )
   } catch {
     return false
   }
@@ -178,7 +193,11 @@ function formatByteLimit(bytes) {
  * @param {string} [label] 错误文案中的资源名
  * @returns {Promise<Buffer>} 不超过上限的响应内容
  */
-export async function readResponseBytesLimited(response, maxBytes, label = '响应') {
+export async function readResponseBytesLimited(
+  response,
+  maxBytes,
+  label = '响应',
+) {
   const declared = Number(response.headers?.get?.('content-length'))
   if (Number.isFinite(declared) && declared > maxBytes) {
     throw new Error(`${label}过大（上限 ${formatByteLimit(maxBytes)}）`)
@@ -221,8 +240,14 @@ export async function readResponseBytesLimited(response, maxBytes, label = '响�
  * @param {string} [label] 错误文案中的资源名
  * @returns {Promise<string>} UTF-8 文本
  */
-export async function readResponseTextLimited(response, maxBytes, label = '响应') {
-  return (await readResponseBytesLimited(response, maxBytes, label)).toString('utf8')
+export async function readResponseTextLimited(
+  response,
+  maxBytes,
+  label = '响应',
+) {
+  return (await readResponseBytesLimited(response, maxBytes, label)).toString(
+    'utf8',
+  )
 }
 
 /**
@@ -237,7 +262,9 @@ export function parseWaitForPid(argv) {
     const m = /^--wait-for-pid=(\d{1,10})$/.exec(String(arg))
     if (m) {
       const pid = Number(m[1])
-      return Number.isSafeInteger(pid) && pid > 0 && pid !== process.pid ? pid : 0
+      return Number.isSafeInteger(pid) && pid > 0 && pid !== process.pid
+        ? pid
+        : 0
     }
   }
   return 0
@@ -261,14 +288,21 @@ function isProcessAlive(pid) {
  * @returns {Promise<boolean>} 已退出返回 true；超时仍存活返回 false
  */
 export async function waitForProcessExit(pid, options = {}) {
-  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : 15000
-  const intervalMs = Number.isFinite(options.intervalMs) ? options.intervalMs : 200
-  const alive = typeof options.isAlive === 'function' ? options.isAlive : isProcessAlive
+  const timeoutMs = Number.isFinite(options.timeoutMs)
+    ? options.timeoutMs
+    : 15000
+  const intervalMs = Number.isFinite(options.intervalMs)
+    ? options.intervalMs
+    : 200
+  const alive =
+    typeof options.isAlive === 'function' ? options.isAlive : isProcessAlive
   const deadline = Date.now() + Math.max(0, timeoutMs)
   for (;;) {
     if (!alive(pid)) return true
     if (Date.now() >= deadline) return false
-    await new Promise((resolve) => setTimeout(resolve, Math.max(10, intervalMs)))
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.max(10, intervalMs)),
+    )
   }
 }
 
@@ -287,7 +321,12 @@ export async function preserveCorruptedFile(file, keep = 3) {
   const base = path.basename(file)
   let stamp = Date.now()
   let backup = `${file}.bak-${stamp}`
-  while (await fs.access(backup).then(() => true, () => false)) {
+  while (
+    await fs.access(backup).then(
+      () => true,
+      () => false,
+    )
+  ) {
     stamp += 1
     backup = `${file}.bak-${stamp}`
   }

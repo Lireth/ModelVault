@@ -35,28 +35,34 @@ describe('Sidebar 模型库移除键盘可达（OPT-2 回归）', () => {
   it('Enter 键触发移除（经 saveSettings 持久化，仅移出列表不删数据）', async () => {
     setupTwoRoots()
     window.api.settings.update.mockResolvedValue({
-      settings: { ...state.settings, modelsFolders: ['D:\\libA'] }
+      settings: { ...state.settings, modelsFolders: ['D:\\libA'] },
     })
     const wrapper = mount(Sidebar)
     await wrapper.find('.root-remove').trigger('keydown', { key: 'Enter' })
     await flushPromises()
-    expect(window.api.settings.update).toHaveBeenCalledWith({ modelsFolders: ['D:\\libA'] })
+    expect(window.api.settings.update).toHaveBeenCalledWith({
+      modelsFolders: ['D:\\libA'],
+    })
   })
 
   it('Space 键同样触发移除', async () => {
     setupTwoRoots()
     window.api.settings.update.mockResolvedValue({
-      settings: { ...state.settings, modelsFolders: ['D:\\libA'] }
+      settings: { ...state.settings, modelsFolders: ['D:\\libA'] },
     })
     const wrapper = mount(Sidebar)
     await wrapper.find('.root-remove').trigger('keydown', { key: ' ' })
     await flushPromises()
-    expect(window.api.settings.update).toHaveBeenCalledWith({ modelsFolders: ['D:\\libA'] })
+    expect(window.api.settings.update).toHaveBeenCalledWith({
+      modelsFolders: ['D:\\libA'],
+    })
   })
 
   it('点击移除不触发父级「切换模型库」（事件阻断）', async () => {
     setupTwoRoots()
-    window.api.settings.update.mockResolvedValue({ settings: { ...state.settings } })
+    window.api.settings.update.mockResolvedValue({
+      settings: { ...state.settings },
+    })
     const wrapper = mount(Sidebar)
     await wrapper.find('.root-remove').trigger('click')
     await flushPromises()
@@ -94,7 +100,7 @@ describe('Sidebar 智能视图（组合筛选收藏）', () => {
   /** settings.update 回显合并结果（与主进程返回完整设置一致） */
   function echoSettingsUpdate() {
     window.api.settings.update.mockImplementation((patch) =>
-      Promise.resolve({ settings: { ...state.settings, ...patch } })
+      Promise.resolve({ settings: { ...state.settings, ...patch } }),
     )
   }
 
@@ -108,7 +114,7 @@ describe('Sidebar 智能视图（组合筛选收藏）', () => {
       showFavoritesOnly: true,
       sortBy: 'name',
       sortAsc: true,
-      ...overrides
+      ...overrides,
     }
     state.settings.savedViews = [view]
     return view
@@ -139,7 +145,10 @@ describe('Sidebar 智能视图（组合筛选收藏）', () => {
     expect(state.typeFilter).toBe('lora')
     expect(state.showFavoritesOnly).toBe(true)
     expect(state.sortBy).toBe('size')
-    expect(window.api.settings.update).toHaveBeenCalledWith({ sortBy: 'size', sortAsc: false })
+    expect(window.api.settings.update).toHaveBeenCalledWith({
+      sortBy: 'size',
+      sortAsc: false,
+    })
     wrapper.unmount()
   })
 
@@ -172,7 +181,10 @@ describe('Sidebar 智能视图（组合筛选收藏）', () => {
     await flushPromises()
     const call = window.api.settings.update.mock.calls[0][0]
     expect(call.savedViews).toHaveLength(1)
-    expect(call.savedViews[0]).toMatchObject({ name: '我的视图', typeFilter: 'lora' })
+    expect(call.savedViews[0]).toMatchObject({
+      name: '我的视图',
+      typeFilter: 'lora',
+    })
     // 保存成功后表单收起
     expect(wrapper.find('.view-save-form').exists()).toBe(false)
     wrapper.unmount()
@@ -182,7 +194,9 @@ describe('Sidebar 智能视图（组合筛选收藏）', () => {
     state.folder = 'D:\\libA'
     const wrapper = mount(Sidebar)
     await wrapper.find('.view-save-btn').trigger('click')
-    await wrapper.find('.view-save-form input').trigger('keydown', { key: 'Escape' })
+    await wrapper
+      .find('.view-save-form input')
+      .trigger('keydown', { key: 'Escape' })
     expect(wrapper.find('.view-save-form').exists()).toBe(false)
     expect(window.api.settings.update).not.toHaveBeenCalled()
     wrapper.unmount()
@@ -195,4 +209,3 @@ describe('Sidebar 智能视图（组合筛选收藏）', () => {
     wrapper.unmount()
   })
 })
-

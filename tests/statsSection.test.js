@@ -28,7 +28,7 @@ function makeModel(id, overrides = {}) {
     note: '',
     baseModel: '',
     autoInfo: null,
-    ...overrides
+    ...overrides,
   }
 }
 
@@ -40,11 +40,13 @@ describe('StatsSection 分类容量堆叠条（F-3）', () => {
   it('按分类渲染堆叠段，数量与分类数一致', () => {
     replaceModels([
       makeModel('a', { type: 'lora', size: 1000 }),
-      makeModel('b', { type: 'checkpoint', size: 3000 })
+      makeModel('b', { type: 'checkpoint', size: 3000 }),
     ])
     const wrapper = mountStats()
     // 分类占比块内的堆叠段数与分类数一致（格式分布块另有独立堆叠条）
-    const typeBlock = wrapper.findAll('.stats-block').find((b) => b.text().includes('分类占比'))
+    const typeBlock = wrapper
+      .findAll('.stats-block')
+      .find((b) => b.text().includes('分类占比'))
     expect(typeBlock.findAll('.stack-seg').length).toBe(2)
   })
 
@@ -62,7 +64,7 @@ describe('StatsSection 总览健康与热度指标', () => {
     replaceModels([
       makeModel('a', { suspect: true, mtimeMs: recentMs }),
       makeModel('b', { nsfw: true, mtimeMs: recentMs }),
-      makeModel('c', { mtimeMs: oldMs })
+      makeModel('c', { mtimeMs: oldMs }),
     ])
     const wrapper = mountStats()
     const overview = wrapper.find('.stats-overview')
@@ -80,10 +82,12 @@ describe('StatsSection 格式分布', () => {
     replaceModels([
       makeModel('a.safetensors', { size: 3000 }),
       makeModel('b.safetensors', { size: 1000 }),
-      makeModel('c.ckpt', { size: 2000 })
+      makeModel('c.ckpt', { size: 2000 }),
     ])
     const wrapper = mountStats()
-    const block = wrapper.findAll('.stats-block').find((b) => b.text().includes('格式分布'))
+    const block = wrapper
+      .findAll('.stats-block')
+      .find((b) => b.text().includes('格式分布'))
     expect(block).toBeTruthy()
     const rows = block.findAll('.type-stats li')
     expect(rows.length).toBe(2)
@@ -99,12 +103,18 @@ describe('StatsSection 格式分布', () => {
 
   it('按扫描 ext 字段聚合，.disabled 文件仍计入真实格式', () => {
     replaceModels([
-      makeModel('a.safetensors.disabled', { ext: '.safetensors', disabled: true, size: 3000 }),
+      makeModel('a.safetensors.disabled', {
+        ext: '.safetensors',
+        disabled: true,
+        size: 3000,
+      }),
       makeModel('b.safetensors', { ext: '.safetensors', size: 1000 }),
-      makeModel('c.ckpt', { ext: '.ckpt', size: 2000 })
+      makeModel('c.ckpt', { ext: '.ckpt', size: 2000 }),
     ])
     const wrapper = mountStats()
-    const block = wrapper.findAll('.stats-block').find((b) => b.text().includes('格式分布'))
+    const block = wrapper
+      .findAll('.stats-block')
+      .find((b) => b.text().includes('格式分布'))
     const rows = block.findAll('.type-stats li')
     // 两个 .safetensors（含禁用文件）与一个 .ckpt，不应出现 disabled 格式
     expect(rows.length).toBe(2)
@@ -121,10 +131,12 @@ describe('StatsSection 评分分布', () => {
       makeModel('a', { rating: 5 }),
       makeModel('b', { rating: 5 }),
       makeModel('c', { rating: 3 }),
-      makeModel('d', { rating: 0 })
+      makeModel('d', { rating: 0 }),
     ])
     const wrapper = mountStats()
-    const block = wrapper.findAll('.stats-block').find((b) => b.text().includes('评分分布'))
+    const block = wrapper
+      .findAll('.stats-block')
+      .find((b) => b.text().includes('评分分布'))
     expect(block).toBeTruthy()
     const rows = block.findAll('.cov-row')
     expect(rows.length).toBe(6) // 5★ → 1★ + 未评分
@@ -136,7 +148,9 @@ describe('StatsSection 评分分布', () => {
   it('空库时不渲染评分分布行', () => {
     replaceModels([])
     const wrapper = mountStats()
-    const block = wrapper.findAll('.stats-block').find((b) => b.text().includes('评分分布'))
+    const block = wrapper
+      .findAll('.stats-block')
+      .find((b) => b.text().includes('评分分布'))
     expect(block.find('.cov-row').exists()).toBe(false)
     wrapper.unmount()
   })
@@ -148,10 +162,12 @@ describe('StatsSection 基底模型分布（F-3 × F-2）', () => {
       makeModel('a', { size: 1000, baseModel: 'SDXL 1.0' }),
       makeModel('b', { size: 1000, baseModel: 'Pony Diffusion V6 XL' }),
       makeModel('c', { size: 1000, baseModel: 'pony' }),
-      makeModel('d', { size: 1000, baseModel: '' })
+      makeModel('d', { size: 1000, baseModel: '' }),
     ])
     const wrapper = mountStats()
-    const block = wrapper.findAll('.stats-block').find((b) => b.text().includes('基底模型分布'))
+    const block = wrapper
+      .findAll('.stats-block')
+      .find((b) => b.text().includes('基底模型分布'))
     expect(block).toBeTruthy()
     const rows = block.findAll('.cov-row')
     // 仅 SDXL 与 Pony 两个家族（Pony 两条合并；未解析的 d 不计入）
@@ -164,7 +180,9 @@ describe('StatsSection 基底模型分布（F-3 × F-2）', () => {
   it('全部模型无基底信息时隐藏该区块', () => {
     replaceModels([makeModel('a', { baseModel: '' })])
     const wrapper = mountStats()
-    const block = wrapper.findAll('.stats-block').find((b) => b.text().includes('基底模型分布'))
+    const block = wrapper
+      .findAll('.stats-block')
+      .find((b) => b.text().includes('基底模型分布'))
     expect(block).toBeUndefined()
   })
 })
@@ -175,10 +193,12 @@ describe('StatsSection 重复占用（F-3 × FEAT-1）', () => {
     replaceModels([
       makeModel('a', { size: 2000, hash: 'aa' }),
       makeModel('b', { size: 2000, hash: 'aa' }),
-      makeModel('c', { size: 2000, hash: 'bb' })
+      makeModel('c', { size: 2000, hash: 'bb' }),
     ])
     let wrapper = mountStats()
-    let block = wrapper.findAll('.stats-block').find((b) => b.text().includes('重复占用'))
+    let block = wrapper
+      .findAll('.stats-block')
+      .find((b) => b.text().includes('重复占用'))
     expect(block).toBeTruthy()
     expect(block.text()).toContain('1 组重复内容、1 个冗余副本')
     // 可释放 2000 / 总 6000 ≈ 33%
@@ -187,7 +207,9 @@ describe('StatsSection 重复占用（F-3 × FEAT-1）', () => {
     // 消除重复后区块隐藏
     replaceModels([makeModel('a', { size: 2000, hash: 'aa' })])
     wrapper = mountStats()
-    block = wrapper.findAll('.stats-block').find((b) => b.text().includes('重复占用'))
+    block = wrapper
+      .findAll('.stats-block')
+      .find((b) => b.text().includes('重复占用'))
     expect(block).toBeUndefined()
   })
 })

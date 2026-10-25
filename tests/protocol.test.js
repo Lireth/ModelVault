@@ -18,22 +18,24 @@ vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
   protocol: {
     registerSchemesAsPrivileged: vi.fn(),
-    handle: vi.fn()
+    handle: vi.fn(),
   },
-  net: { fetch: vi.fn() }
+  net: { fetch: vi.fn() },
 }))
 
 import { net, protocol } from 'electron'
 import {
   isCivitaiVideoUrl,
   registerImageProtocolHandler,
-  toImageUrl
+  toImageUrl,
 } from '../src/main/protocol'
 import { setDataRoot, updateSettings } from '../src/main/services/store'
 import { getCivImageCachePath } from '../src/main/services/civ-cache'
 
 /** 最小 PNG 文件头（mvimg 魔数校验所需字节均在文件头 12 字节内） */
-const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
+const PNG_MAGIC = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13,
+])
 /** 最小 JPEG 文件头（缩略图 .jpg 场景） */
 const JPEG_MAGIC = Buffer.from([0xff, 0xd8, 0xff, 0xe0])
 
@@ -80,7 +82,9 @@ describe('mvimg 协议路径白名单', () => {
   })
 
   it('根目录外的真实文件返回 403（越界拒绝）', async () => {
-    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-outside-'))
+    const outsideDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-outside-'),
+    )
     roots.push(outsideDir)
     const outsideFile = path.join(outsideDir, 'secret.png')
     await fs.writeFile(outsideFile, 'x')
@@ -142,7 +146,10 @@ describe('mvimg 协议路径白名单', () => {
     await fs.mkdir(path.dirname(cover), { recursive: true })
     await fs.writeFile(cover, PNG_MAGIC)
     vi.mocked(net.fetch).mockResolvedValue(
-      new Response('img', { status: 200, headers: { 'Content-Type': 'image/png' } })
+      new Response('img', {
+        status: 200,
+        headers: { 'Content-Type': 'image/png' },
+      }),
     )
 
     const res = await handler(makeRequest(cover))
@@ -156,10 +163,17 @@ describe('mvimg 协议路径白名单', () => {
   })
 
   it('缩略图缓存（.modelvault/thumbs，文件名含源图 mtime）返回 immutable 长缓存', async () => {
-    const thumb = path.join(root, '.modelvault', 'thumbs', 'abc123-1700000000000.jpg')
+    const thumb = path.join(
+      root,
+      '.modelvault',
+      'thumbs',
+      'abc123-1700000000000.jpg',
+    )
     await fs.mkdir(path.dirname(thumb), { recursive: true })
     await fs.writeFile(thumb, JPEG_MAGIC)
-    vi.mocked(net.fetch).mockResolvedValue(new Response('thumb', { status: 200 }))
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response('thumb', { status: 200 }),
+    )
 
     const res = await handler(makeRequest(thumb))
 
@@ -204,7 +218,9 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
   })
 
   /** 构造 civimg 请求（与渲染进程 civimg://remote/<encodeURIComponent(url)> 格式一致） */
-  const makeCivRequest = (url) => ({ url: `civimg://remote/${encodeURIComponent(url)}` })
+  const makeCivRequest = (url) => ({
+    url: `civimg://remote/${encodeURIComponent(url)}`,
+  })
 
   it('非 remote host 的请求返回 400', async () => {
     const res = await civHandler({ url: 'civimg://evil/some-url' })
@@ -221,10 +237,13 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
     await updateSettings({ civitaiEnabled: false })
     try {
       vi.mocked(net.fetch).mockResolvedValue(
-        new Response('img-bytes', { status: 200, headers: { 'Content-Type': 'image/jpeg' } })
+        new Response('img-bytes', {
+          status: 200,
+          headers: { 'Content-Type': 'image/jpeg' },
+        }),
       )
       const res = await civHandler(
-        makeCivRequest('https://image.civitai.com/a/1.jpeg')
+        makeCivRequest('https://image.civitai.com/a/1.jpeg'),
       )
       expect(res.status).toBe(403)
       expect(net.fetch).not.toHaveBeenCalled()
@@ -235,21 +254,29 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
 
   it('白名单 CDN 图片经 net.fetch 代理放行，附加按天缓存头', async () => {
     vi.mocked(net.fetch).mockResolvedValue(
-      new Response('img-bytes', { status: 200, headers: { 'Content-Type': 'image/jpeg' } })
+      new Response('img-bytes', {
+        status: 200,
+        headers: { 'Content-Type': 'image/jpeg' },
+      }),
     )
-    const target = 'https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/uuid/original=true/1.jpeg'
+    const target =
+      'https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/uuid/original=true/1.jpeg'
     const res = await civHandler(makeCivRequest(target))
     expect(res.status).toBe(200)
     expect(vi.mocked(net.fetch)).toHaveBeenCalledWith(
       target,
-      expect.objectContaining({ headers: expect.objectContaining({ Referer: 'https://civitai.red/' }) })
+      expect.objectContaining({
+        headers: expect.objectContaining({ Referer: 'https://civitai.red/' }),
+      }),
     )
     expect(res.headers.get('Cache-Control')).toContain('max-age=86400')
   })
 
   it('上游响应失败返回 502', async () => {
     vi.mocked(net.fetch).mockResolvedValue(new Response('', { status: 403 }))
-    const res = await civHandler(makeCivRequest('https://image.civitai.com/a.jpeg'))
+    const res = await civHandler(
+      makeCivRequest('https://image.civitai.com/a.jpeg'),
+    )
     expect(res.status).toBe(502)
   })
 
@@ -261,9 +288,9 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
         headers: {
           'Content-Range': 'bytes 10-12/100',
           'Accept-Ranges': 'bytes',
-          'Content-Length': '3'
-        }
-      })
+          'Content-Length': '3',
+        },
+      }),
     )
     const request = makeCivRequest(target)
     request.headers = new Headers({ range: 'bytes=10-' })
@@ -272,8 +299,8 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
     expect(vi.mocked(net.fetch)).toHaveBeenCalledWith(
       target,
       expect.objectContaining({
-        headers: expect.objectContaining({ Range: 'bytes=10-' })
-      })
+        headers: expect.objectContaining({ Range: 'bytes=10-' }),
+      }),
     )
     expect(res.headers.get('content-range')).toBe('bytes 10-12/100')
     // 视频不进入图片缓存路径（仅一次网络请求）
@@ -282,7 +309,9 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
 
   it('isCivitaiVideoUrl：识别常见视频扩展名', () => {
     expect(isCivitaiVideoUrl('https://image.civitai.com/a/b.mp4')).toBe(true)
-    expect(isCivitaiVideoUrl('https://image.civitai.com/a/b.webm?x=1')).toBe(true)
+    expect(isCivitaiVideoUrl('https://image.civitai.com/a/b.webm?x=1')).toBe(
+      true,
+    )
     expect(isCivitaiVideoUrl('https://image.civitai.com/a/b.jpeg')).toBe(false)
     expect(isCivitaiVideoUrl(null)).toBe(false)
   })
@@ -296,11 +325,13 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
           'Set-Cookie': 'session=secret; Path=/',
           'Content-Disposition': 'attachment; filename="x.png"',
           'X-Custom-Header': 'leak',
-          ETag: '"etag-1"'
-        }
-      })
+          ETag: '"etag-1"',
+        },
+      }),
     )
-    const res = await civHandler(makeCivRequest('https://image.civitai.com/h/5.png'))
+    const res = await civHandler(
+      makeCivRequest('https://image.civitai.com/h/5.png'),
+    )
     expect(res.status).toBe(200)
     // 上游附带头一律不透传（cookie 注入通道切断），白名单子集保留
     expect(res.headers.get('Set-Cookie')).toBeNull()
@@ -313,7 +344,12 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
   it('视频代理：非法 Range 头丢弃后按无 Range 回源，合法单区间照常透传', async () => {
     // 每次回源生成新 Response（body 一次性，不可复用同一实例）
     vi.mocked(net.fetch).mockImplementation(() =>
-      Promise.resolve(new Response('vid', { status: 200, headers: { 'Content-Type': 'video/mp4' } }))
+      Promise.resolve(
+        new Response('vid', {
+          status: 200,
+          headers: { 'Content-Type': 'video/mp4' },
+        }),
+      ),
     )
     const target = 'https://image.civitai.com/x/evil.mp4'
 
@@ -333,11 +369,15 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
     const closed = makeCivRequest(target)
     closed.headers = new Headers({ range: 'bytes=100-200' })
     await civHandler(closed)
-    expect(vi.mocked(net.fetch).mock.calls[2][1].headers.Range).toBe('bytes=100-200')
+    expect(vi.mocked(net.fetch).mock.calls[2][1].headers.Range).toBe(
+      'bytes=100-200',
+    )
     const open = makeCivRequest(target)
     open.headers = new Headers({ range: 'bytes=10-' })
     await civHandler(open)
-    expect(vi.mocked(net.fetch).mock.calls[3][1].headers.Range).toBe('bytes=10-')
+    expect(vi.mocked(net.fetch).mock.calls[3][1].headers.Range).toBe(
+      'bytes=10-',
+    )
   })
 
   it('视频代理响应头按白名单重建：Set-Cookie 不透传，Content-Range/Content-Length 保留', async () => {
@@ -349,9 +389,9 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
           'Content-Range': 'bytes 0-2/100',
           'Content-Length': '3',
           'Set-Cookie': 'track=1',
-          'X-Upstream': 'leak'
-        }
-      })
+          'X-Upstream': 'leak',
+        },
+      }),
     )
     const request = makeCivRequest('https://image.civitai.com/x/v.mp4')
     request.headers = new Headers({ range: 'bytes=0-2' })
@@ -365,13 +405,19 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
   })
 
   /** 最小 PNG 文件头（通过魔数校验，可入缓存） */
-  const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
+  const PNG_BYTES = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13,
+  ])
 
   it('首次请求回源并写入磁盘缓存，二次请求由缓存服务（不再发起网络请求，O-5）', async () => {
     vi.mocked(net.fetch).mockResolvedValue(
-      new Response(PNG_BYTES, { status: 200, headers: { 'Content-Type': 'image/png' } })
+      new Response(PNG_BYTES, {
+        status: 200,
+        headers: { 'Content-Type': 'image/png' },
+      }),
     )
-    const target = 'https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/uuid/original=true/1.png'
+    const target =
+      'https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/uuid/original=true/1.png'
 
     const res1 = await civHandler(makeCivRequest(target))
     expect(res1.status).toBe(200)
@@ -392,7 +438,10 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
 
   it('非图片内容（魔数不符）不放行入缓存', async () => {
     vi.mocked(net.fetch).mockResolvedValue(
-      new Response('upstream-error-page', { status: 200, headers: { 'Content-Type': 'text/html' } })
+      new Response('upstream-error-page', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+      }),
     )
     const target = 'https://image.civitai.com/b/2.png'
     const res = await civHandler(makeCivRequest(target))
@@ -403,7 +452,9 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
   it('缓存条目损坏（魔数不符）时删除自愈并重新回源', async () => {
     // 每次回源生成新 Response（Response body 一次性，mockResolvedValue 复用
     // 同一实例会在二次消费时抛 Body is unusable）
-    vi.mocked(net.fetch).mockImplementation(() => Promise.resolve(new Response(PNG_BYTES, { status: 200 })))
+    vi.mocked(net.fetch).mockImplementation(() =>
+      Promise.resolve(new Response(PNG_BYTES, { status: 200 })),
+    )
     const target = 'https://image.civitai.com/c/3.png'
     expect((await civHandler(makeCivRequest(target))).status).toBe(200)
     expect(vi.mocked(net.fetch)).toHaveBeenCalledTimes(1)

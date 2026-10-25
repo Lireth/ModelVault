@@ -37,7 +37,7 @@ export default defineConfig({
         'src/main/services/store.js',
         'src/main/services/backup.js',
         'src/renderer/src/store/appStore.js',
-        'src/renderer/src/store/multiselect.js'
+        'src/renderer/src/store/multiselect.js',
       ],
       thresholds: {
         statements: 80,
@@ -55,40 +55,64 @@ export default defineConfig({
         // 位于 store-meta（核心+门面）与 store-meta-normalize/state/journal/
         // persist 四个子模块，glob 键对匹配文件取聚合值判定）
         '**/src/main/services/store-meta*.js': {
-          statements: 88, branches: 82.5, functions: 92, lines: 94
+          statements: 88,
+          branches: 82.5,
+          functions: 92,
+          lines: 94,
         },
         // 应用设置双层存储（引导层 + 随库 settings.json）
         '**/src/main/services/store-settings.js': {
-          statements: 89, branches: 84.5, functions: 93, lines: 90
+          statements: 89,
+          branches: 84.5,
+          functions: 93,
+          lines: 90,
         },
         // 目录监控（轮询快照比对 + 增量扫描触发）
         '**/src/main/services/watcher.js': {
-          statements: 90, branches: 78, functions: 96, lines: 93.5
+          statements: 90,
+          branches: 78,
+          functions: 96,
+          lines: 93.5,
         },
         // 备份恢复（zip 流式编解码/导出/恢复/.bak 留存；O2 拆分后逻辑位于
         // backup-format/backup-zip/backup-export/backup-restore 四个子模块，
         // 门面 backup.js 已排除；glob 键对匹配文件取聚合值判定，
         // 地板 = 拆分后实际聚合基线 91.7/86.7/88.3/93.3 下浮 ~4pt）
         '**/src/main/services/backup-*.js': {
-          statements: 87, branches: 82, functions: 84, lines: 89
+          statements: 87,
+          branches: 82,
+          functions: 84,
+          lines: 89,
         },
         // 元数据重关联（库内移动/重命名后「宁可不绑也绝不绑错」）
         '**/src/main/services/meta-relink.js': {
-          statements: 97, branches: 95, functions: 97, lines: 97
+          statements: 97,
+          branches: 95,
+          functions: 97,
+          lines: 97,
         },
         // safetensors 头部解析与健康检查
         '**/src/main/services/safetensors.js': {
-          statements: 94, branches: 93.5, functions: 80, lines: 95
+          statements: 94,
+          branches: 93.5,
+          functions: 80,
+          lines: 95,
         },
         // 扫描分类（扩展名过滤/自动分类/禁用后缀）
         '**/src/main/services/scanner.js': {
-          statements: 92, branches: 84, functions: 96, lines: 95
+          statements: 92,
+          branches: 84,
+          functions: 96,
+          lines: 95,
         },
         // 后台哈希预热（重复检测与 Civitai 识别的缓存基座）
         '**/src/main/services/hash-warmup.js': {
-          statements: 89, branches: 85, functions: 96, lines: 92.5
-        }
-      }
-    }
-  }
+          statements: 89,
+          branches: 85,
+          functions: 96,
+          lines: 92.5,
+        },
+      },
+    },
+  },
 })

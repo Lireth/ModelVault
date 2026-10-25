@@ -17,7 +17,7 @@ describe('createErrorReporter（OPT-10）', () => {
     // 伪造计时器：Date.now 受其控制，用于节流窗口断言
     vi.useFakeTimers()
     reporter = createErrorReporter({
-      report: (message, stack) => reports.push({ message, stack })
+      report: (message, stack) => reports.push({ message, stack }),
     })
   })
 
@@ -41,24 +41,43 @@ describe('createErrorReporter（OPT-10）', () => {
 
   it('windowError：区分资源加载失败与脚本错误', () => {
     // 资源错误：target 带 tagName（img/script/link）
-    reporter.windowError({ target: { tagName: 'IMG', src: 'mvimg://local/x.png' } })
-    expect(reports[0].message).toBe('[resource] 资源加载失败 <img> mvimg://local/x.png')
+    reporter.windowError({
+      target: { tagName: 'IMG', src: 'mvimg://local/x.png' },
+    })
+    expect(reports[0].message).toBe(
+      '[resource] 资源加载失败 <img> mvimg://local/x.png',
+    )
     expect(reports[0].stack).toBe('')
     // 脚本错误：target 无 tagName，取 message 与 filename 位置
-    reporter.windowError({ message: 'boom', filename: 'app.js', lineno: 10, colno: 2 })
+    reporter.windowError({
+      message: 'boom',
+      filename: 'app.js',
+      lineno: 10,
+      colno: 2,
+    })
     expect(reports[1].message).toBe('[window] boom')
     expect(reports[1].stack).toBe('at app.js:10:2')
   })
 
   it('windowError：有 error 对象时优先用其堆栈', () => {
     const err = new Error('x')
-    reporter.windowError({ message: 'x', error: err, filename: 'a.js', lineno: 1, colno: 1 })
+    reporter.windowError({
+      message: 'x',
+      error: err,
+      filename: 'a.js',
+      lineno: 1,
+      colno: 1,
+    })
     expect(reports[0].stack).toBe(err.stack)
   })
 
   it('windowError：链接类资源取 href', () => {
-    reporter.windowError({ target: { tagName: 'LINK', href: 'http://localhost/x.css' } })
-    expect(reports[0].message).toBe('[resource] 资源加载失败 <link> http://localhost/x.css')
+    reporter.windowError({
+      target: { tagName: 'LINK', href: 'http://localhost/x.css' },
+    })
+    expect(reports[0].message).toBe(
+      '[resource] 资源加载失败 <link> http://localhost/x.css',
+    )
   })
 
   it('rejection：兼容 Error 与非 Error 原因', () => {
@@ -112,7 +131,7 @@ describe('createErrorReporter（OPT-10）', () => {
     const broken = createErrorReporter({
       report: () => {
         throw new Error('ipc dead')
-      }
+      },
     })
     expect(() => broken.rejection(new Error('x'))).not.toThrow()
     expect(consoleSpy).toHaveBeenCalledWith('错误上报失败:', 'x')

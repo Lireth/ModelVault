@@ -17,7 +17,7 @@ import { useVirtualScroll } from '../composables/useVirtualScroll'
  */
 
 const props = defineProps({
-  models: { type: Array, required: true }
+  models: { type: Array, required: true },
 })
 
 /** 上下各多渲染的缓冲行数，保证快速滚动时不露白 */
@@ -32,12 +32,15 @@ const containerWidth = ref(0)
  */
 const CARD_INFO_HEIGHT = 72
 function estimateRowPitch() {
-  const p = CARD_SIZE_PRESETS[state.settings.cardSize] || CARD_SIZE_PRESETS.normal
+  const p =
+    CARD_SIZE_PRESETS[state.settings.cardSize] || CARD_SIZE_PRESETS.normal
   return Math.round(p.min * 1.5 + CARD_INFO_HEIGHT + p.gap)
 }
 const rowPitch = ref(estimateRowPitch())
 
-const preset = computed(() => CARD_SIZE_PRESETS[state.settings.cardSize] || CARD_SIZE_PRESETS.normal)
+const preset = computed(
+  () => CARD_SIZE_PRESETS[state.settings.cardSize] || CARD_SIZE_PRESETS.normal,
+)
 const gapCss = computed(() => `${preset.value.gap}px`)
 
 const columns = computed(() => {
@@ -48,7 +51,7 @@ const columns = computed(() => {
 
 const rowCount = computed(() => Math.ceil(props.models.length / columns.value))
 const totalHeight = computed(() =>
-  rowCount.value > 0 ? rowCount.value * rowPitch.value - preset.value.gap : 0
+  rowCount.value > 0 ? rowCount.value * rowPitch.value - preset.value.gap : 0,
 )
 
 const scroll = useVirtualScroll({
@@ -61,15 +64,25 @@ const scroll = useVirtualScroll({
   rowOfIndex: (index) => Math.floor(index / columns.value),
   onMeasure: () => {
     containerWidth.value = scroll.rootEl.value?.clientWidth || 0
-  }
+  },
 })
-const { rootEl, startIndex: startRow, endIndex: endRow, indexById, scrollToRow, focusModel } = scroll
+const {
+  rootEl,
+  startIndex: startRow,
+  endIndex: endRow,
+  indexById,
+  scrollToRow,
+  focusModel,
+} = scroll
 
 const visibleRows = computed(() => {
   const rows = []
   const cols = columns.value
   for (let r = startRow.value; r < endRow.value; r++) {
-    rows.push({ index: r, models: props.models.slice(r * cols, (r + 1) * cols) })
+    rows.push({
+      index: r,
+      models: props.models.slice(r * cols, (r + 1) * cols),
+    })
   }
   return rows
 })
@@ -82,7 +95,14 @@ const visibleRows = computed(() => {
  * 数千模型时键盘浏览形同虚设；方向键导航 + 滚动联动解决该问题。
  */
 function onGridKeydown(e) {
-  const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
+  const keys = [
+    'ArrowLeft',
+    'ArrowRight',
+    'ArrowUp',
+    'ArrowDown',
+    'Home',
+    'End',
+  ]
   if (!keys.includes(e.key)) {
     onCardActionKey(e)
     return
@@ -96,12 +116,24 @@ function onGridKeydown(e) {
     idx = 0
   } else {
     switch (e.key) {
-      case 'ArrowLeft': idx = Math.max(0, idx - 1); break
-      case 'ArrowRight': idx = Math.min(total - 1, idx + 1); break
-      case 'ArrowUp': idx = Math.max(0, idx - cols); break
-      case 'ArrowDown': idx = Math.min(total - 1, idx + cols); break
-      case 'Home': idx = idx - (idx % cols); break
-      case 'End': idx = Math.min(total - 1, idx - (idx % cols) + cols - 1); break
+      case 'ArrowLeft':
+        idx = Math.max(0, idx - 1)
+        break
+      case 'ArrowRight':
+        idx = Math.min(total - 1, idx + 1)
+        break
+      case 'ArrowUp':
+        idx = Math.max(0, idx - cols)
+        break
+      case 'ArrowDown':
+        idx = Math.min(total - 1, idx + cols)
+        break
+      case 'Home':
+        idx = idx - (idx % cols)
+        break
+      case 'End':
+        idx = Math.min(total - 1, idx - (idx % cols) + cols - 1)
+        break
     }
   }
   const id = props.models[idx]?.id
@@ -120,7 +152,7 @@ function onCardActionKey(e) {
   handleModelActionKey(e, {
     models: props.models,
     indexById: indexById.value,
-    focusModel
+    focusModel,
   })
 }
 
@@ -145,7 +177,7 @@ function calibrateRowPitch() {
       console.warn(
         '[VirtualModelGrid] 同行卡片高度不一致，虚拟滚动行定位将失准:',
         h,
-        last
+        last,
       )
     }
   }
@@ -163,9 +195,9 @@ watch(
     () => state.settings.cardSize,
     () => state.settings.showSize,
     () => state.settings.showMtime,
-    () => state.settings.showParams
+    () => state.settings.showParams,
   ],
-  scheduleCalibrate
+  scheduleCalibrate,
 )
 
 // 内核 onMounted 完成滚动挂载与测量后，按真实卡片高度校准初始行距
@@ -173,7 +205,12 @@ onMounted(scheduleCalibrate)
 </script>
 
 <template>
-  <div ref="rootEl" class="virtual-grid" :style="{ height: `${totalHeight}px` }" @keydown="onGridKeydown">
+  <div
+    ref="rootEl"
+    class="virtual-grid"
+    :style="{ height: `${totalHeight}px` }"
+    @keydown="onGridKeydown"
+  >
     <div
       v-for="row in visibleRows"
       :key="row.index"
@@ -181,10 +218,15 @@ onMounted(scheduleCalibrate)
       :style="{
         transform: `translateY(${row.index * rowPitch}px)`,
         gridTemplateColumns: `repeat(${columns}, 1fr)`,
-        gap: gapCss
+        gap: gapCss,
       }"
     >
-      <ModelCard v-for="m in row.models" :key="m.id" :model="m" :data-model-id="m.id" />
+      <ModelCard
+        v-for="m in row.models"
+        :key="m.id"
+        :model="m"
+        :data-model-id="m.id"
+      />
     </div>
   </div>
 </template>

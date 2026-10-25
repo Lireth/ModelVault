@@ -39,9 +39,7 @@ export async function loadJournal(snapshotSeq) {
     if (err.code !== 'ENOENT') logger.warn(`增量日志读取失败: ${err.message}`)
     return
   }
-  const batches = files
-    .filter((name) => /^delta-\d+\.json$/.test(name))
-    .sort()
+  const batches = files.filter((name) => /^delta-\d+\.json$/.test(name)).sort()
   for (const name of batches) {
     const file = path.join(getJournalDir(), name)
     let parsed
@@ -58,7 +56,11 @@ export async function loadJournal(snapshotSeq) {
       }
       continue
     }
-    if (!parsed || !Number.isFinite(parsed.seq) || !Array.isArray(parsed.entries)) {
+    if (
+      !parsed ||
+      !Number.isFinite(parsed.seq) ||
+      !Array.isArray(parsed.entries)
+    ) {
       logger.warn(`增量日志批次格式异常，已隔离（${name}）`)
       try {
         await fs.rm(file, { force: true })
@@ -69,7 +71,12 @@ export async function loadJournal(snapshotSeq) {
     }
     if (parsed.seq <= snapshotSeq) continue // 快照已包含
     for (const entry of parsed.entries) {
-      if (!entry || typeof entry.key !== 'string' || isUnsafeModelKey(entry.key)) continue
+      if (
+        !entry ||
+        typeof entry.key !== 'string' ||
+        isUnsafeModelKey(entry.key)
+      )
+        continue
       if (entry.op === 'set') {
         const normalized = normalizeModelMeta(entry.meta)
         if (normalized) metaState.data.models[entry.key] = normalized

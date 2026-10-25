@@ -11,7 +11,7 @@ import { toast } from './toast'
 /** 补全字段名 → 提示文案映射 */
 const APPLIED_LABELS = {
   triggerWords: '触发词',
-  note: '备注'
+  note: '备注',
 }
 
 /** 将主进程返回的元数据同步到本地模型列表对应条目 */
@@ -26,7 +26,7 @@ function applyModelMeta(id, meta) {
       // 此处仅在本地无解析值时应用，避免覆盖已有的 autoInfo.baseModel
       baseModel: state.models[idx].baseModel || meta.baseModel || '',
       triggerWords: meta.triggerWords || '',
-      note: meta.note || ''
+      note: meta.note || '',
     }
   }
 }
@@ -73,7 +73,10 @@ export async function civitaiComplete(id) {
   if (res.found) {
     applyModelMeta(id, res.meta)
     if (res.applied?.length) {
-      toast('success', `已补全：${res.applied.map((k) => APPLIED_LABELS[k] || k).join('、')}`)
+      toast(
+        'success',
+        `已补全：${res.applied.map((k) => APPLIED_LABELS[k] || k).join('、')}`,
+      )
     }
   }
   return res
@@ -88,7 +91,7 @@ function applyCoverResult(id, res) {
       cover: res.cover,
       coverUrl: res.coverUrl,
       covers: res.covers || [],
-      hasManualCover: (res.covers || []).length > 0
+      hasManualCover: (res.covers || []).length > 0,
     }
     setModelCoverUrl(id, res.coverUrl)
   }
@@ -115,7 +118,9 @@ export async function civitaiImportImages(id, images) {
   applyCoverResult(id, res)
   toast(
     'success',
-    res.failed?.length ? `已添加 ${res.added} 张示例图（${res.failed.length} 张失败）` : `已添加 ${res.added} 张示例图`
+    res.failed?.length
+      ? `已添加 ${res.added} 张示例图（${res.failed.length} 张失败）`
+      : `已添加 ${res.added} 张示例图`,
   )
   return res
 }

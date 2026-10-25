@@ -38,5 +38,5 @@ export const DEFAULT_SETTINGS = Object.freeze({
   hashWarmup: 'candidates',
   // 智能视图（组合筛选收藏）：{id, name, search, typeFilter, subFilter,
   //   showFavoritesOnly, sortBy, sortAsc} 快照数组，侧栏一键切换
-  savedViews: []
+  savedViews: [],
 })

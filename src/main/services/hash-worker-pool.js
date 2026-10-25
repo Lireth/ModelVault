@@ -121,7 +121,14 @@ function workerUnavailableError(message) {
 }
 
 /** 可重试的临时文件错误码（文件被占用/句柄耗尽等，稍后重试可能成功） */
-const RETRYABLE_FILE_CODES = new Set(['EBUSY', 'EAGAIN', 'EMFILE', 'ENFILE', 'EOF', 'EPIPE'])
+const RETRYABLE_FILE_CODES = new Set([
+  'EBUSY',
+  'EAGAIN',
+  'EMFILE',
+  'ENFILE',
+  'EOF',
+  'EPIPE',
+])
 
 /**
  * 是否属于可重试的线程池/临时文件错误（OPT-05）：
@@ -132,7 +139,8 @@ const RETRYABLE_FILE_CODES = new Set(['EBUSY', 'EAGAIN', 'EMFILE', 'ENFILE', 'EO
  */
 export function isRetryableHashPoolError(err) {
   if (!err) return false
-  if (err.name === 'WorkerCrashError' || err.name === 'WorkerUnavailableError') return true
+  if (err.name === 'WorkerCrashError' || err.name === 'WorkerUnavailableError')
+    return true
   return typeof err.code === 'string' && RETRYABLE_FILE_CODES.has(err.code)
 }
 
@@ -200,7 +208,9 @@ function ensureWorker() {
       if (preempted) {
         task.reject(preemptedError())
       } else if (msg.error !== undefined) {
-        const err = /** @type {Error & {code?: string}} */ (new Error(msg.error))
+        const err = /** @type {Error & {code?: string}} */ (
+          new Error(msg.error)
+        )
         if (msg.name) err.name = msg.name
         if (msg.code) err.code = msg.code
         task.reject(err)
@@ -241,7 +251,8 @@ function rejectQueued(err) {
       const task = queue.shift()
       if (task.settled) continue
       task.settled = true
-      if (task.abortListener) task.signal?.removeEventListener('abort', task.abortListener)
+      if (task.abortListener)
+        task.signal?.removeEventListener('abort', task.abortListener)
       task.reject(err)
     }
   }
@@ -266,7 +277,7 @@ function recordCrash() {
   }
   const delay = Math.min(
     RESTART_BASE_DELAY_MS * 2 ** Math.max(0, crashStreak - 1),
-    RESTART_MAX_DELAY_MS
+    RESTART_MAX_DELAY_MS,
   )
   if (restartTimer) return
   restartTimer = setTimeout(() => {
@@ -326,7 +337,12 @@ function enqueueTask(task) {
   clearRestartTimer()
   if (task.priority) {
     foregroundQueue.push(task)
-    if (currentTask && !currentTask.priority && !currentTask.preempting && worker) {
+    if (
+      currentTask &&
+      !currentTask.priority &&
+      !currentTask.preempting &&
+      worker
+    ) {
       currentTask.preempting = true
       worker.postMessage({ type: 'abort', id: currentTask.id })
     }
@@ -405,7 +421,12 @@ function failAll(err) {
  *   优先于排队中的后台任务，并可在块边界抢占在途后台任务（OPT-08）
  * @returns {Promise<string>} 64 位十六进制哈希
  */
-export function computeFileHashOffThread(filePath, signal, onProgress, options = {}) {
+export function computeFileHashOffThread(
+  filePath,
+  signal,
+  onProgress,
+  options = {},
+) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(abortError())
@@ -427,7 +448,7 @@ export function computeFileHashOffThread(filePath, signal, onProgress, options =
       reject: (err) => {
         task.settled = true
         reject(err)
-      }
+      },
     }
     task.abortListener = () => {
       if (task.settled) return

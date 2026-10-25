@@ -7,7 +7,13 @@ import SettingsGeneral from './settings/SettingsGeneral.vue'
 import SettingsScan from './settings/SettingsScan.vue'
 import SettingsTags from './settings/SettingsTags.vue'
 import { useSettingsForm } from '../composables/useSettingsForm'
-import { closeSettings, saveSettings, scanModels, state, toast } from '../store/appStore'
+import {
+  closeSettings,
+  saveSettings,
+  scanModels,
+  state,
+  toast,
+} from '../store/appStore'
 
 /**
  * 设置页编排壳（O-4 拆分；OPT-01 板块组件化）：
@@ -38,7 +44,7 @@ watch(
   () => state.settingsOpen,
   (open) => {
     if (open) fillForm()
-  }
+  },
 )
 
 /** ESC 键关闭设置页面（与关闭按钮走同一脏保护入口，A9）。
@@ -57,7 +63,8 @@ async function onSave() {
   try {
     const excludeDirs = parseExcludeDirs()
     const excludeChanged =
-      JSON.stringify(excludeDirs) !== JSON.stringify(state.settings.excludeDirs || [])
+      JSON.stringify(excludeDirs) !==
+      JSON.stringify(state.settings.excludeDirs || [])
     const scanChanged =
       JSON.stringify([...form.scanExtensions].sort()) !==
       JSON.stringify([...(state.settings.scanExtensions || [])].sort())
@@ -76,7 +83,7 @@ async function onSave() {
       showMtime: form.showMtime,
       showParams: form.showParams,
       civitaiEnabled: form.civitaiEnabled,
-      nsfwBlur: form.nsfwBlur
+      nsfwBlur: form.nsfwBlur,
     })
     if (!ok) return
     // 默认排序方式立即生效
@@ -89,7 +96,9 @@ async function onSave() {
         : '哈希预热策略已更新'
     toast(
       'success',
-      rescanNeeded ? `设置已保存（${rescanReason}），正在重新扫描` : '设置已保存'
+      rescanNeeded
+        ? `设置已保存（${rescanReason}），正在重新扫描`
+        : '设置已保存',
     )
     // 扫描规则（排除目录/文件类型）或哈希策略变化且已设置模型文件夹时，
     // 自动重新扫描：使规则/预热策略立即生效（哈希策略依赖本次扫描的模型体积）
@@ -110,7 +119,18 @@ async function onSave() {
     <header class="settings-header">
       <h2>设置</h2>
       <button class="wc-btn" title="关闭设置页面" @click="onCancel">
-        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+        <svg
+          viewBox="0 0 16 16"
+          width="12"
+          height="12"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <path d="M4 4l8 8M12 4l-8 8" />
+        </svg>
       </button>
     </header>
 
@@ -136,7 +156,9 @@ async function onSave() {
 
     <!-- 关闭入口统一为右上角「×」（与 ESC 同一脏保护入口），底部仅保留保存 -->
     <footer class="settings-footer">
-      <button class="btn btn-primary" :disabled="saving" @click="onSave">保存</button>
+      <button class="btn btn-primary" :disabled="saving" @click="onSave">
+        保存
+      </button>
     </footer>
   </div>
 </template>

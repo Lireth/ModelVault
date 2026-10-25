@@ -7,7 +7,7 @@
 
 defineProps({
   /** 评分行（StatsSection 的 ratingRows computed；空库为空数组） */
-  rows: { type: Array, required: true }
+  rows: { type: Array, required: true },
 })
 </script>
 

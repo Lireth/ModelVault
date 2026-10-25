@@ -19,14 +19,16 @@ const { win, sentEvents } = vi.hoisted(() => {
   const sentEvents = []
   const win = {
     isDestroyed: () => false,
-    webContents: { send: (channel, payload) => sentEvents.push({ channel, payload }) }
+    webContents: {
+      send: (channel, payload) => sentEvents.push({ channel, payload }),
+    },
   }
   return { win, sentEvents }
 })
 
 vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
-  BrowserWindow: { getAllWindows: vi.fn(() => [win]) }
+  BrowserWindow: { getAllWindows: vi.fn(() => [win]) },
 }))
 
 import {
@@ -37,7 +39,7 @@ import {
   setWatcherScanning,
   snapshotsEqual,
   stopWatcher,
-  syncWatcher
+  syncWatcher,
 } from '../src/main/services/watcher'
 import logger from '../src/main/logger'
 
@@ -65,7 +67,9 @@ const bundles = []
 
 /** 构造一个含单个模型文件的临时文件包，返回其路径 */
 async function makeBundle(name) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), `modelvault-bundle-${name}-`))
+  const dir = await fs.mkdtemp(
+    path.join(os.tmpdir(), `modelvault-bundle-${name}-`),
+  )
   await fs.writeFile(path.join(dir, `${name}.safetensors`), 'x')
   bundles.push(dir)
   return dir
@@ -101,7 +105,7 @@ describe('OP-05 原生事件监听（加速触发，轮询兜底）', () => {
       broadcastDebounce: 30,
       contentCheckInterval: 0,
       isVisible: () => true,
-      onPollScheduled: () => {}
+      onPollScheduled: () => {},
     })
     await sleep(50)
 
@@ -113,8 +117,13 @@ describe('OP-05 原生事件监听（加速触发，轮询兜底）', () => {
     expect(sentEvents[0].payload.dirs).toContain('')
 
     const before = sentEvents.length
-    await fs.mkdir(path.join(root, '.modelvault', 'thumbs'), { recursive: true })
-    await fs.writeFile(path.join(root, '.modelvault', 'thumbs', 'noise.jpg'), 'x')
+    await fs.mkdir(path.join(root, '.modelvault', 'thumbs'), {
+      recursive: true,
+    })
+    await fs.writeFile(
+      path.join(root, '.modelvault', 'thumbs', 'noise.jpg'),
+      'x',
+    )
     await sleep(300)
     // 关联存储目录的写入不触发广播（与轮询排除策略一致）
     expect(sentEvents.length).toBe(before)
@@ -149,7 +158,7 @@ describe('OP-05 原生监听降级与重建', () => {
       broadcastDebounce: 20,
       contentCheckInterval: 0,
       isVisible: () => true,
-      onPollScheduled: (d) => delays.push(d)
+      onPollScheduled: (d) => delays.push(d),
     }
     syncWatcher(root, true, [], timing)
     expect(watchCalls).toBe(1)
@@ -174,7 +183,7 @@ describe('OP-05 原生监听降级与重建', () => {
       broadcastDebounce: 20,
       contentCheckInterval: 0,
       isVisible: () => true,
-      onPollScheduled: (d) => delays.push(d)
+      onPollScheduled: (d) => delays.push(d),
     })
     await waitFor(() => delays.includes(2000), '初始化失败回落 2s 轮询', 2000)
   })
@@ -184,7 +193,9 @@ describe('collectDirSnapshot / snapshotsEqual', () => {
   it('整条剔除 .modelvault 与排除目录；识别条目增减', async () => {
     await fs.mkdir(path.join(root, 'sub'), { recursive: true })
     await fs.writeFile(path.join(root, 'a.safetensors'), 'x')
-    await fs.mkdir(path.join(root, '.modelvault', 'thumbs'), { recursive: true })
+    await fs.mkdir(path.join(root, '.modelvault', 'thumbs'), {
+      recursive: true,
+    })
     await fs.writeFile(path.join(root, '.modelvault', 'thumbs', 't.jpg'), 'x')
     await fs.mkdir(path.join(root, 'temp'), { recursive: true })
     await fs.writeFile(path.join(root, 'temp', 'junk.tmp'), 'x')
@@ -202,21 +213,37 @@ describe('collectDirSnapshot / snapshotsEqual', () => {
     expect(snapshot.has(path.join(root, 'sub'))).toBe(true)
     expect(snapshot.get(root)).toContain('a.safetensors')
     // 一致判定：同一基线相等，增删条目后不等
-    expect(snapshotsEqual(snapshot, await collectDirSnapshot(root, new Set(['temp'])))).toBe(true)
+    expect(
+      snapshotsEqual(
+        snapshot,
+        await collectDirSnapshot(root, new Set(['temp'])),
+      ),
+    ).toBe(true)
     await fs.writeFile(path.join(root, 'b.safetensors'), 'x')
-    expect(snapshotsEqual(snapshot, await collectDirSnapshot(root, new Set(['temp'])))).toBe(false)
+    expect(
+      snapshotsEqual(
+        snapshot,
+        await collectDirSnapshot(root, new Set(['temp'])),
+      ),
+    ).toBe(false)
   })
 
   it('根目录不可读时抛出（由监控方决定停止）', async () => {
     await fs.mkdir(path.join(root, 'sub'))
-    await expect(collectDirSnapshot(path.join(root, 'missing'), new Set())).rejects.toThrow()
+    await expect(
+      collectDirSnapshot(path.join(root, 'missing'), new Set()),
+    ).rejects.toThrow()
   })
 
   it('O4：withStats 采集文件 size/mtime，同名覆盖写入产生目录差异', async () => {
     const file = path.join(root, 'overwrite.safetensors')
     await fs.writeFile(file, 'small')
-    const before = await collectDirSnapshot(root, new Set(), { withStats: true })
-    const entry = before.get(root).find((e) => e.name === 'overwrite.safetensors')
+    const before = await collectDirSnapshot(root, new Set(), {
+      withStats: true,
+    })
+    const entry = before
+      .get(root)
+      .find((e) => e.name === 'overwrite.safetensors')
     expect(entry).toMatchObject({ size: 5 })
     expect(Number.isFinite(entry.mtimeMs)).toBe(true)
 
@@ -225,7 +252,9 @@ describe('collectDirSnapshot / snapshotsEqual', () => {
     const after = await collectDirSnapshot(root, new Set(), { withStats: true })
 
     // 条目名完全一致（名称快照不会发现变化），内容快照必须命中
-    expect(before.get(root).map((e) => e.name)).toEqual(after.get(root).map((e) => e.name))
+    expect(before.get(root).map((e) => e.name)).toEqual(
+      after.get(root).map((e) => e.name),
+    )
     expect(computeStatSnapshotDiff(root, before, after)).toEqual([''])
   })
 
@@ -237,7 +266,7 @@ describe('collectDirSnapshot / snapshotsEqual', () => {
     }
     const snapshot = await collectDirSnapshot(root, new Set(), {
       withStats: true,
-      concurrency: 1
+      concurrency: 1,
     })
     // 根 + 12 个一级目录 + 12 个 nested 目录
     expect(snapshot.size).toBe(25)
@@ -252,13 +281,21 @@ describe('collectDirSnapshot / snapshotsEqual', () => {
     await fs.mkdir(path.join(root, '$RECYCLE.BIN'), { recursive: true })
     await fs.writeFile(path.join(root, '$RECYCLE.BIN', 'old.safetensors'), 'x')
     // 大小写变体：共享排除集按小写比较
-    await fs.mkdir(path.join(root, 'System volume information'), { recursive: true })
-    await fs.writeFile(path.join(root, 'System volume information', 'sys.safetensors'), 'x')
+    await fs.mkdir(path.join(root, 'System volume information'), {
+      recursive: true,
+    })
+    await fs.writeFile(
+      path.join(root, 'System volume information', 'sys.safetensors'),
+      'x',
+    )
     await fs.writeFile(path.join(root, 'put_temp.safetensors'), 'x')
     await fs.writeFile(path.join(root, '.hidden.safetensors'), 'x')
 
     // MAX_SCAN_DEPTH=8：8 段目录在快照内，9 段目录及其文件不进入
-    const depth8 = path.join(root, ...Array.from({ length: 8 }, (_, i) => `d${i}`))
+    const depth8 = path.join(
+      root,
+      ...Array.from({ length: 8 }, (_, i) => `d${i}`),
+    )
     const depth9 = path.join(depth8, 'd8')
     await fs.mkdir(depth9, { recursive: true })
     await fs.writeFile(path.join(depth8, 'm8.safetensors'), 'x')
@@ -280,7 +317,10 @@ describe('collectDirSnapshot / snapshotsEqual', () => {
   })
 
   it('OPT-02：startDepth 让子树回填保持全库深度上限语义', async () => {
-    const depth7 = path.join(root, ...Array.from({ length: 7 }, (_, i) => `s${i}`))
+    const depth7 = path.join(
+      root,
+      ...Array.from({ length: 7 }, (_, i) => `s${i}`),
+    )
     const depth8 = path.join(depth7, 's7')
     const depth9 = path.join(depth8, 's8')
     await fs.mkdir(depth9, { recursive: true })
@@ -288,7 +328,9 @@ describe('collectDirSnapshot / snapshotsEqual', () => {
     await fs.writeFile(path.join(depth9, 'm9.safetensors'), 'x')
 
     // 从第 7 层子树开始回填：第 8 层仍应采集，第 9 层与全库快照一致地忽略
-    const snapshot = await collectDirSnapshot(depth7, new Set(), { startDepth: 7 })
+    const snapshot = await collectDirSnapshot(depth7, new Set(), {
+      startDepth: 7,
+    })
     expect(snapshot.has(depth8)).toBe(true)
     expect(snapshot.has(depth9)).toBe(false)
   })
@@ -311,14 +353,23 @@ describe('computeSnapshotDiff（A-03 增量扫描的变更子树定位）', () =
   })
 
   it('条目增删定位到所在目录（根目录用空串表示）', () => {
-    const before = snap(root, { '': ['a.safetensors'], lora: ['x.safetensors'] })
-    const after = snap(root, { '': ['a.safetensors', 'b.safetensors'], lora: ['x.safetensors'] })
+    const before = snap(root, {
+      '': ['a.safetensors'],
+      lora: ['x.safetensors'],
+    })
+    const after = snap(root, {
+      '': ['a.safetensors', 'b.safetensors'],
+      lora: ['x.safetensors'],
+    })
     expect(computeSnapshotDiff(root, before, after)).toEqual([''])
   })
 
   it('子目录条目变化定位到该子目录（POSIX 相对路径）', () => {
     const before = snap(root, { '': [], lora: ['x.safetensors'] })
-    const after = snap(root, { '': [], lora: ['x.safetensors', 'y.safetensors'] })
+    const after = snap(root, {
+      '': [],
+      lora: ['x.safetensors', 'y.safetensors'],
+    })
     expect(computeSnapshotDiff(root, before, after)).toEqual(['lora'])
   })
 
@@ -343,11 +394,18 @@ describe('computeSnapshotDiff（A-03 增量扫描的变更子树定位）', () =
     const before = await collectDirSnapshot(root, new Set())
 
     await fs.mkdir(newDir, { recursive: true })
-    await fs.rename(path.join(oldDir, 'm.safetensors'), path.join(newDir, 'm.safetensors'))
+    await fs.rename(
+      path.join(oldDir, 'm.safetensors'),
+      path.join(newDir, 'm.safetensors'),
+    )
     const after = await collectDirSnapshot(root, new Set())
 
     // old/new 目录在根层增删，故根目录（''）与其自身同时进入变更集合
-    expect(computeSnapshotDiff(root, before, after).sort()).toEqual(['', 'new', 'old'])
+    expect(computeSnapshotDiff(root, before, after).sort()).toEqual([
+      '',
+      'new',
+      'old',
+    ])
   })
 })
 
@@ -385,7 +443,7 @@ describe('syncWatcher 目录监控（A8）', () => {
     syncWatcher(root, true, [], {
       pollInterval: 20,
       broadcastDebounce: 40,
-      contentCheckInterval: 30
+      contentCheckInterval: 30,
     })
     await sleep(80) // 等基准内容快照建立
     sentEvents.length = 0
@@ -471,7 +529,9 @@ describe('syncWatcher 目录监控（A8）', () => {
 
   it('切根后旧根的变更零广播、新根监控不受旧根状态影响（B2 代际防护）', async () => {
     const rootA = root
-    const rootB = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-watcher-'))
+    const rootB = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-watcher-'),
+    )
     roots.push(rootB)
     syncWatcher(rootA, true, [], timing)
     await sleep(60)
@@ -489,7 +549,7 @@ describe('syncWatcher 目录监控（A8）', () => {
     await fs.writeFile(path.join(rootB, 'fresh.safetensors'), 'x')
     await waitFor(
       () => sentEvents.some((e) => e.payload.root === rootB),
-      '切根后新根的变更未广播（新 watcher 被误停？）'
+      '切根后新根的变更未广播（新 watcher 被误停？）',
     )
   })
 })
@@ -503,7 +563,7 @@ describe('OPT-02 扫描/监控基线协同', () => {
       pollInterval: 20,
       broadcastDebounce: 20,
       contentCheckInterval: 0,
-      baseline: new Map([[root, []]])
+      baseline: new Map([[root, []]]),
     })
     await waitFor(() => sentEvents.length >= 1, '复用基线后未检出差异')
     expect(sentEvents[0].payload.dirs).toEqual([''])
@@ -515,7 +575,7 @@ describe('OPT-02 扫描/监控基线协同', () => {
       pollInterval: 20,
       broadcastDebounce: 20,
       contentCheckInterval: 0,
-      baseline
+      baseline,
     })
     await sleep(120)
     expect(sentEvents).toHaveLength(0)
@@ -530,7 +590,7 @@ describe('OPT-02 扫描/监控基线协同', () => {
     syncWatcher(root, true, [], {
       pollInterval: 200,
       broadcastDebounce: 20,
-      contentCheckInterval: 0
+      contentCheckInterval: 0,
     })
     await sleep(40)
     sentEvents.length = 0
@@ -549,7 +609,7 @@ describe('OPT-02 扫描/监控基线协同', () => {
       broadcastDebounce: 20,
       contentCheckInterval: 0,
       isVisible: () => true,
-      onPollScheduled: () => {}
+      onPollScheduled: () => {},
     })
     await sleep(80)
     sentEvents.length = 0
@@ -565,7 +625,7 @@ describe('OPT-02 扫描/监控基线协同', () => {
     syncWatcher(root, true, [], {
       pollInterval: 30,
       broadcastDebounce: 20,
-      contentCheckInterval: 0
+      contentCheckInterval: 0,
     })
     await sleep(60)
     sentEvents.length = 0
@@ -585,7 +645,7 @@ describe('OPT-02 扫描/监控基线协同', () => {
     syncWatcher(root, true, [], {
       pollInterval: 30,
       broadcastDebounce: 20,
-      contentCheckInterval: 0
+      contentCheckInterval: 0,
     })
     await sleep(60)
     sentEvents.length = 0
@@ -609,13 +669,13 @@ describe('OPT-02 扫描/监控基线协同', () => {
       [path.join(root, 'temp'), ['x']],
       [path.join(root, '..', 'outside'), ['x']],
       [path.join(root, 'lora'), 'not-array'],
-      [root, ['a.safetensors', '.hidden', 'put_tmp']]
+      [root, ['a.safetensors', '.hidden', 'put_tmp']],
     ])
     syncWatcher(root, true, ['temp'], {
       pollInterval: 100000,
       broadcastDebounce: 20,
       contentCheckInterval: 0,
-      baseline: badBaseline
+      baseline: badBaseline,
     })
     await sleep(100)
     expect(sentEvents).toHaveLength(0)
@@ -627,7 +687,7 @@ describe('OPT-02 扫描/监控基线协同', () => {
       pollInterval: 100000,
       broadcastDebounce: 20,
       contentCheckInterval: 0,
-      baseline: new Map([[123, ['x']]])
+      baseline: new Map([[123, ['x']]]),
     })
     await sleep(80)
     expect(sentEvents).toHaveLength(0)
@@ -638,7 +698,7 @@ describe('OPT-02 扫描/监控基线协同', () => {
     await fs.writeFile(path.join(root, 'lora', 'sub', 'a.safetensors'), 'x')
     syncWatcher(root, true, [], {
       pollInterval: 100000,
-      contentCheckInterval: 0
+      contentCheckInterval: 0,
     })
     await sleep(40)
     sentEvents.length = 0
@@ -647,9 +707,11 @@ describe('OPT-02 扫描/监控基线协同', () => {
     const snapshot = new Map([
       ...loraSnapshot,
       [root, ['ignored-out-of-scope']],
-      [123, ['bad-key']]
+      [123, ['bad-key']],
     ])
-    expect(refreshWatcherBaseline(path.join(root, '..'), ['lora'], snapshot)).toBe(false)
+    expect(
+      refreshWatcherBaseline(path.join(root, '..'), ['lora'], snapshot),
+    ).toBe(false)
     expect(refreshWatcherBaseline(root, [], snapshot)).toBe(false)
     expect(refreshWatcherBaseline(root, ['lora'], null)).toBe(false)
     expect(refreshWatcherBaseline(root, ['lora'], snapshot)).toBe(true)
@@ -667,7 +729,7 @@ describe('OPT-02 扫描/监控基线协同', () => {
     await fs.writeFile(path.join(root, 'root-file.safetensors'), 'x')
     syncWatcher(root, true, [], {
       pollInterval: 100000,
-      contentCheckInterval: 30
+      contentCheckInterval: 30,
     })
     await sleep(120)
     sentEvents.length = 0
@@ -682,7 +744,7 @@ describe('OPT-02 扫描/监控基线协同', () => {
     syncWatcher(root, true, [], {
       pollInterval: 20,
       broadcastDebounce: 200,
-      contentCheckInterval: 0
+      contentCheckInterval: 0,
     })
     await sleep(60)
     sentEvents.length = 0
@@ -713,7 +775,7 @@ describe('OPT-02 扫描/监控基线协同', () => {
         broadcastDebounce: 20,
         contentCheckInterval: 30,
         isVisible: () => true,
-        onPollScheduled: () => {}
+        onPollScheduled: () => {},
       })
       await sleep(120)
       sentEvents.length = 0
@@ -756,7 +818,7 @@ describe('OPT-02 扫描/监控基线协同', () => {
         broadcastDebounce: 100,
         contentCheckInterval: 0,
         isVisible: () => true,
-        onPollScheduled: () => {}
+        onPollScheduled: () => {},
       })
       await sleep(60)
       sentEvents.length = 0
@@ -790,7 +852,7 @@ describe('A-07b 自适应轮询', () => {
       pollInterval: 20,
       backoff: [20, 50, 100],
       broadcastDebounce: 30,
-      onPollScheduled: (delay) => scheduled.push(delay)
+      onPollScheduled: (delay) => scheduled.push(delay),
     })
     await waitFor(() => scheduled.length >= 1, '基准轮后未安排巡检')
     expect(scheduled[0]).toBe(20) // 基准轮后的首次调度即基础间隔
@@ -817,7 +879,7 @@ describe('A-07b 自适应轮询', () => {
     syncWatcher(root, true, [], {
       ...timing,
       backoff: [20, 50, 100],
-      isVisible: () => visible
+      isVisible: () => visible,
     })
     await sleep(60)
 
@@ -837,7 +899,10 @@ describe('A-07b 自适应轮询', () => {
 
   it('无 backoff 配置时维持固定基础间隔（旧行为兼容）', async () => {
     const scheduled = []
-    syncWatcher(root, true, [], { ...timing, onPollScheduled: (d) => scheduled.push(d) })
+    syncWatcher(root, true, [], {
+      ...timing,
+      onPollScheduled: (d) => scheduled.push(d),
+    })
     await sleep(120)
     expect(scheduled.length).toBeGreaterThan(1)
     expect(scheduled.every((d) => d === timing.pollInterval)).toBe(true)
@@ -853,20 +918,24 @@ describe('A-07b 自适应轮询', () => {
       ...timing,
       backoff: [20, 50, 100],
       isVisible: () => visible,
-      onPollScheduled: (d) => scheduled.push(d)
+      onPollScheduled: (d) => scheduled.push(d),
     })
     await waitFor(() => scheduled.at(-1) === 100, '空闲退避未爬到封顶档 100')
 
     const hideAt = scheduled.length
     visible = false
     await waitFor(() => scheduled.length > hideAt + 1, '隐藏期未继续安排探测轮')
-    expect(scheduled.slice(hideAt).every((d) => d === timing.pollInterval)).toBe(true)
+    expect(
+      scheduled.slice(hideAt).every((d) => d === timing.pollInterval),
+    ).toBe(true)
   })
 
   it('O8：生产默认阶梯封顶 30s（可见空闲全树巡检频率较 10s 降 67%）', async () => {
     const infoSpy = vi.spyOn(logger, 'info')
     syncWatcher(root, true, [])
-    const started = infoSpy.mock.calls.map((c) => c.join(' ')).find((t) => t.includes('目录监控已启动'))
+    const started = infoSpy.mock.calls
+      .map((c) => c.join(' '))
+      .find((t) => t.includes('目录监控已启动'))
     expect(started).toContain('基础轮询 2000ms')
     expect(started).toContain('空闲退避至 30000ms')
   })

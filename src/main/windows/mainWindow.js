@@ -62,12 +62,19 @@ export async function loadWindowState() {
     const { x, y, width, height } = raw || {}
     if (![x, y, width, height].every((n) => Number.isFinite(n))) return null
     if (!isPlausibleGeometry(x, y, width, height)) {
-      logger.warn(`窗口状态几何数值超出合理范围，回退默认窗口状态: ${JSON.stringify({ x, y, width, height })}`)
+      logger.warn(
+        `窗口状态几何数值超出合理范围，回退默认窗口状态: ${JSON.stringify({ x, y, width, height })}`,
+      )
       return null
     }
     const visible = screen.getAllDisplays().some((d) => {
       const a = d.workArea
-      return x + width > a.x && y + height > a.y && x < a.x + a.width && y < a.y + a.height
+      return (
+        x + width > a.x &&
+        y + height > a.y &&
+        x < a.x + a.width &&
+        y < a.y + a.height
+      )
     })
     if (!visible) return null
     return { x, y, width, height, maximized: raw.maximized === true }
@@ -98,7 +105,9 @@ export async function createMainWindow(windowStateOverride = undefined) {
   // 启动链路并行化（OP-01）：窗口状态由调用方与 loadSettings 并行预读，
   // 此处仅在该参数缺省时自行读取（测试/独立调用路径保持原行为）
   const state =
-    windowStateOverride === undefined ? await loadWindowState() : windowStateOverride
+    windowStateOverride === undefined
+      ? await loadWindowState()
+      : windowStateOverride
 
   /** @type {import('electron').BrowserWindowConstructorOptions} */
   const options = {
@@ -115,7 +124,7 @@ export async function createMainWindow(windowStateOverride = undefined) {
     titleBarOverlay: {
       color: colors.overlayColor,
       symbolColor: colors.symbolColor,
-      height: 40
+      height: 40,
     },
     backgroundColor: colors.backgroundColor,
     webPreferences: {
@@ -125,8 +134,8 @@ export async function createMainWindow(windowStateOverride = undefined) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      spellcheck: false
-    }
+      spellcheck: false,
+    },
   }
   // 恢复上次的窗口位置（无有效记录时居中显示）
   if (state) {
@@ -149,7 +158,9 @@ export async function createMainWindow(windowStateOverride = undefined) {
   })
 
   if (process.env['ELECTRON_RENDERER_URL']) {
-    logger.info(`开发模式：加载开发服务器 ${process.env['ELECTRON_RENDERER_URL']}`)
+    logger.info(
+      `开发模式：加载开发服务器 ${process.env['ELECTRON_RENDERER_URL']}`,
+    )
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
@@ -179,13 +190,18 @@ export async function createMainWindow(windowStateOverride = undefined) {
 
   // 渲染进程异常退出时的错误处理
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
-    logger.error(`渲染进程异常退出: ${details.reason} (exitCode=${details.exitCode})`)
+    logger.error(
+      `渲染进程异常退出: ${details.reason} (exitCode=${details.exitCode})`,
+    )
   })
 
   // 渲染进程加载失败时的错误处理
-  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
-    logger.error(`页面加载失败: [${errorCode}] ${errorDescription}`)
-  })
+  mainWindow.webContents.on(
+    'did-fail-load',
+    (_event, errorCode, errorDescription) => {
+      logger.error(`页面加载失败: [${errorCode}] ${errorDescription}`)
+    },
+  )
 
   return mainWindow
 }

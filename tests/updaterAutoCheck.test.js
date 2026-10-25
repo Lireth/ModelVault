@@ -16,25 +16,32 @@ const { electronMock, getSettingsMock } = vi.hoisted(() => ({
     app: {
       getPath: vi.fn(() => '/tmp/modelvault-updater-ud'),
       getVersion: vi.fn(() => '0.4.0'),
-      isPackaged: true
+      isPackaged: true,
     },
-    BrowserWindow: { getAllWindows: vi.fn(() => []) }
+    BrowserWindow: { getAllWindows: vi.fn(() => []) },
   },
-  getSettingsMock: vi.fn()
+  getSettingsMock: vi.fn(),
 }))
 
 vi.mock('electron', () => electronMock)
 vi.mock('../src/main/services/store-settings', () => ({
-  getSettings: getSettingsMock
+  getSettings: getSettingsMock,
 }))
 
-import { runStartupUpdateCheck, scheduleStartupUpdateCheck } from '../src/main/services/updater'
+import {
+  runStartupUpdateCheck,
+  scheduleStartupUpdateCheck,
+} from '../src/main/services/updater'
 
 describe('runStartupUpdateCheck（启动检查决策逻辑）', () => {
   it('设置关闭时直接跳过，不发起任何检查', async () => {
     const check = vi.fn()
     const notify = vi.fn()
-    const pushed = await runStartupUpdateCheck({ autoCheckUpdate: false }, check, notify)
+    const pushed = await runStartupUpdateCheck(
+      { autoCheckUpdate: false },
+      check,
+      notify,
+    )
     expect(pushed).toBe(false)
     expect(check).not.toHaveBeenCalled()
     expect(notify).not.toHaveBeenCalled()
@@ -52,7 +59,7 @@ describe('runStartupUpdateCheck（启动检查决策逻辑）', () => {
     const pushed = await runStartupUpdateCheck(
       { autoCheckUpdate: true },
       vi.fn(async () => ({ error: '更新检查超时', current: '0.4.0' })),
-      notify
+      notify,
     )
     expect(pushed).toBe(false)
     expect(notify).not.toHaveBeenCalled()
@@ -63,7 +70,7 @@ describe('runStartupUpdateCheck（启动检查决策逻辑）', () => {
     const pushed = await runStartupUpdateCheck(
       { autoCheckUpdate: true },
       vi.fn(async () => ({ current: '0.4.0', hasUpdate: false })),
-      notify
+      notify,
     )
     expect(pushed).toBe(false)
     expect(notify).not.toHaveBeenCalled()
@@ -82,9 +89,9 @@ describe('runStartupUpdateCheck（启动检查决策逻辑）', () => {
         canDownload: true,
         downloadSize: 123,
         // 渲染层不需要的内部字段应被丢弃
-        releaseNotesHtml: '<script>'
+        releaseNotesHtml: '<script>',
       })),
-      notify
+      notify,
     )
     expect(pushed).toBe(true)
     expect(notify).toHaveBeenCalledWith({
@@ -93,7 +100,7 @@ describe('runStartupUpdateCheck（启动检查决策逻辑）', () => {
       releaseUrl: 'https://github.com/Lireth/ModelVault/releases/tag/v0.5.0',
       releaseNotes: '新功能',
       canDownload: true,
-      downloadSize: 123
+      downloadSize: 123,
     })
   })
 
@@ -101,8 +108,12 @@ describe('runStartupUpdateCheck（启动检查决策逻辑）', () => {
     const notify = vi.fn()
     await runStartupUpdateCheck(
       { autoCheckUpdate: true },
-      vi.fn(async () => ({ current: '0.4.0', latest: '0.5.0', hasUpdate: true })),
-      notify
+      vi.fn(async () => ({
+        current: '0.4.0',
+        latest: '0.5.0',
+        hasUpdate: true,
+      })),
+      notify,
     )
     expect(notify).toHaveBeenCalledWith({
       current: '0.4.0',
@@ -110,7 +121,7 @@ describe('runStartupUpdateCheck（启动检查决策逻辑）', () => {
       releaseUrl: '',
       releaseNotes: '',
       canDownload: false,
-      downloadSize: 0
+      downloadSize: 0,
     })
   })
 
@@ -121,8 +132,8 @@ describe('runStartupUpdateCheck（启动检查决策逻辑）', () => {
         vi.fn(async () => {
           throw new Error('network down')
         }),
-        vi.fn()
-      )
+        vi.fn(),
+      ),
     ).rejects.toThrow('network down')
   })
 })

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   resetJsonSerializerForTests,
-  serializeJsonOffThread
+  serializeJsonOffThread,
 } from '../src/main/services/json-serializer'
 
 /**
@@ -20,7 +20,7 @@ describe('json-serializer', () => {
     const value = { 名称: '模型', list: [1, 2, 3], nested: { ok: true } }
     const result = await serializeJsonOffThread(value, {
       hash: true,
-      hashPrefix: 'index\u0000'
+      hashPrefix: 'index\u0000',
     })
     expect(JSON.parse(result.text)).toEqual(value)
     expect(result.bytes).toBeGreaterThan(0)

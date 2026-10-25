@@ -63,7 +63,9 @@ function getThumbPreloadPath() {
  * @returns {boolean}
  */
 export function isThumbRendererContents(contents) {
-  return Boolean(win && !win.isDestroyed() && contents && win.webContents === contents)
+  return Boolean(
+    win && !win.isDestroyed() && contents && win.webContents === contents,
+  )
 }
 
 /** 取消空闲回收（有新任务派发/窗口销毁时调用） */
@@ -163,8 +165,8 @@ function ensureWindowReady() {
       contextIsolation: true,
       sandbox: true,
       backgroundThrottling: false,
-      spellcheck: false
-    }
+      spellcheck: false,
+    },
   })
   win = w
 
@@ -177,7 +179,8 @@ function ensureWindowReady() {
 
   // preload 回传结果（ipcRenderer.send -> ipc-message 通道）
   w.webContents.on('ipc-message', (_event, channel, payload) => {
-    if (channel !== 'thumb:done' || !payload || typeof payload.id !== 'number') return
+    if (channel !== 'thumb:done' || !payload || typeof payload.id !== 'number')
+      return
     if (payload.error) {
       settleTask(payload.id, { error: new Error(payload.error) })
     } else if (payload.small) {

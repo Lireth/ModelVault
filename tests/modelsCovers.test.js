@@ -5,7 +5,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { BrowserWindow, clipboard, dialog } from 'electron'
 import { fakeUserData } from './setup'
-import { PNG_MAGIC, getRegisteredHandler, makeEvent, makeWindow } from './helpers/modelsIpc'
+import {
+  PNG_MAGIC,
+  getRegisteredHandler,
+  makeEvent,
+  makeWindow,
+} from './helpers/modelsIpc'
 
 /**
  * 封面域 5 个 handler 特征测试（D1，先测后拆基线）：
@@ -21,7 +26,7 @@ vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
   BrowserWindow: Object.assign(vi.fn(), {
     fromWebContents: vi.fn(),
-    getAllWindows: vi.fn(() => [])
+    getAllWindows: vi.fn(() => []),
   }),
   clipboard: { read: vi.fn(), writeText: vi.fn() },
   dialog: { showOpenDialog: vi.fn() },
@@ -30,7 +35,7 @@ vi.mock('electron', () => ({
   shell: { trashItem: vi.fn(), showItemInFolder: vi.fn() },
   net: { fetch: vi.fn() },
   nativeImage: { createFromPath: vi.fn() },
-  protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() }
+  protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
 }))
 
 // A-09：缩略图查询可控（命中/未命中），其余 thumbs 行为保留真实实现
@@ -41,7 +46,12 @@ vi.mock('../src/main/services/thumbs.js', async (importOriginal) => {
 
 import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
 import * as decorate from '../src/main/ipc/models/decorate'
-import { getModelMeta, loadData, setModelMeta, setDataRoot } from '../src/main/services/store'
+import {
+  getModelMeta,
+  loadData,
+  setModelMeta,
+  setDataRoot,
+} from '../src/main/services/store'
 import { getThumbPathDeferred } from '../src/main/services/thumbs'
 
 const roots = []
@@ -56,7 +66,9 @@ async function touchModel(rel = 'm.safetensors') {
 
 /** 在根目录外创建真实 PNG 源文件（模拟用户拖入/选择的外部图片） */
 async function createSourcePng() {
-  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-cover-src-'))
+  const outside = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'modelvault-cover-src-'),
+  )
   roots.push(outside)
   const src = path.join(outside, 'pic.png')
   await fs.writeFile(src, PNG_MAGIC)
@@ -88,54 +100,68 @@ describe('封面响应结构锚点（项目约定：{cover,coverUrl,covers,meta}
     {
       channel: 'models:uploadCover',
       invoke: async (handler, id, png) => {
-        vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [png] })
+        vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+          canceled: false,
+          filePaths: [png],
+        })
         return handler(makeEvent(), { id })
-      }
+      },
     },
     {
       channel: 'models:pasteCover',
       invoke: async (handler, id) => {
         vi.mocked(clipboard.read).mockResolvedValue([
-          { types: ['image/png'], getType: async () => new Blob([PNG_MAGIC]) }
+          { types: ['image/png'], getType: async () => new Blob([PNG_MAGIC]) },
         ])
         return handler(makeEvent(), { id })
-      }
+      },
     },
     {
       channel: 'models:setDefaultCover',
-      invoke: async (handler, id, _png, meta) => handler(makeEvent(), { id, cover: meta.covers[1] })
+      invoke: async (handler, id, _png, meta) =>
+        handler(makeEvent(), { id, cover: meta.covers[1] }),
     },
     {
       channel: 'models:deleteCover',
-      invoke: async (handler, id, _png, meta) => handler(makeEvent(), { id, cover: meta.covers[0] })
+      invoke: async (handler, id, _png, meta) =>
+        handler(makeEvent(), { id, cover: meta.covers[0] }),
     },
     {
       channel: 'models:importCover',
-      invoke: async (handler, id, png) => handler(makeEvent(), { id, path: png })
-    }
+      invoke: async (handler, id, png) =>
+        handler(makeEvent(), { id, path: png }),
+    },
   ]
 
-  it.each(scenarios)('$channel 成功路径返回四键结构', async ({ channel, invoke }) => {
-    const id = await touchModel()
-    const png = await createSourcePng()
-    let meta
-    if (channel === 'models:setDefaultCover' || channel === 'models:deleteCover') {
-      meta = presetCovers(id)
-    }
-    const handler = getRegisteredHandler(channel)
-    const res = await invoke(handler, id, png, meta)
-    expect(res.error).toBeUndefined()
-    expect(typeof res.cover).toBe('string')
-    expect(typeof res.coverUrl).toBe('string')
-    expect(Array.isArray(res.covers)).toBe(true)
-    expect(res.meta && typeof res.meta).toBe('object')
-  })
+  it.each(scenarios)(
+    '$channel 成功路径返回四键结构',
+    async ({ channel, invoke }) => {
+      const id = await touchModel()
+      const png = await createSourcePng()
+      let meta
+      if (
+        channel === 'models:setDefaultCover' ||
+        channel === 'models:deleteCover'
+      ) {
+        meta = presetCovers(id)
+      }
+      const handler = getRegisteredHandler(channel)
+      const res = await invoke(handler, id, png, meta)
+      expect(res.error).toBeUndefined()
+      expect(typeof res.cover).toBe('string')
+      expect(typeof res.coverUrl).toBe('string')
+      expect(Array.isArray(res.covers)).toBe(true)
+      expect(res.meta && typeof res.meta).toBe('object')
+    },
+  )
 })
 
 describe('A-09 封面变更后即时生成缩略图', () => {
   it('缩略图未生成时：封面设置成功即触发后台缩略图 drain', async () => {
     vi.mocked(getThumbPathDeferred).mockResolvedValue('')
-    const drainSpy = vi.spyOn(decorate, 'startThumbDrain').mockImplementation(() => {})
+    const drainSpy = vi
+      .spyOn(decorate, 'startThumbDrain')
+      .mockImplementation(() => {})
     const id = await touchModel()
     presetCovers(id, 1)
     const handler = getRegisteredHandler('models:setDefaultCover')
@@ -148,8 +174,12 @@ describe('A-09 封面变更后即时生成缩略图', () => {
   })
 
   it('缩略图已缓存时：不 drain，直接向窗口推送 thumbsReady 切换卡片图', async () => {
-    vi.mocked(getThumbPathDeferred).mockResolvedValue(path.join(root, '.modelvault', 'thumbs', 't.jpg'))
-    const drainSpy = vi.spyOn(decorate, 'startThumbDrain').mockImplementation(() => {})
+    vi.mocked(getThumbPathDeferred).mockResolvedValue(
+      path.join(root, '.modelvault', 'thumbs', 't.jpg'),
+    )
+    const drainSpy = vi
+      .spyOn(decorate, 'startThumbDrain')
+      .mockImplementation(() => {})
     const id = await touchModel()
     presetCovers(id, 1)
     const win = makeWindow()
@@ -163,7 +193,9 @@ describe('A-09 封面变更后即时生成缩略图', () => {
     await handler(makeEvent(win), { id, cover: 'covers/a0.png' })
 
     expect(drainSpy).not.toHaveBeenCalled()
-    const readyCalls = win.webContents.send.mock.calls.filter((c) => c[0] === 'models:thumbsReady')
+    const readyCalls = win.webContents.send.mock.calls.filter(
+      (c) => c[0] === 'models:thumbsReady',
+    )
     expect(readyCalls).toHaveLength(1)
     expect(readyCalls[0][1].updates).toHaveLength(1)
     expect(readyCalls[0][1].updates[0].id).toBe(id)
@@ -175,12 +207,17 @@ describe('A-09 封面变更后即时生成缩略图', () => {
 describe('models:uploadCover', () => {
   it('无效模型标识拒绝', async () => {
     const handler = getRegisteredHandler('models:uploadCover')
-    expect(await handler(makeEvent(), { id: '' })).toEqual({ error: '无效的模型标识' })
+    expect(await handler(makeEvent(), { id: '' })).toEqual({
+      error: '无效的模型标识',
+    })
   })
 
   it('对话框取消返回 { canceled: true }', async () => {
     const id = await touchModel()
-    vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: true, filePaths: [] })
+    vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+      canceled: true,
+      filePaths: [],
+    })
     const handler = getRegisteredHandler('models:uploadCover')
     expect(await handler(makeEvent(), { id })).toEqual({ canceled: true })
   })
@@ -188,7 +225,10 @@ describe('models:uploadCover', () => {
   it('上传成功后追加封面并在无默认时设为默认', async () => {
     const id = await touchModel()
     const png = await createSourcePng()
-    vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [png] })
+    vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+      canceled: false,
+      filePaths: [png],
+    })
     const handler = getRegisteredHandler('models:uploadCover')
     const res = await handler(makeEvent(), { id })
     expect(res.error).toBeUndefined()
@@ -212,7 +252,7 @@ describe('models:pasteCover', () => {
   it('粘贴成功后写入封面目录并关联元数据', async () => {
     const id = await touchModel()
     vi.mocked(clipboard.read).mockResolvedValue([
-      { types: ['image/png'], getType: async () => new Blob([PNG_MAGIC]) }
+      { types: ['image/png'], getType: async () => new Blob([PNG_MAGIC]) },
     ])
     const handler = getRegisteredHandler('models:pasteCover')
     const res = await handler(makeEvent(), { id })
@@ -227,8 +267,10 @@ describe('models:setDefaultCover', () => {
     const id = await touchModel()
     presetCovers(id)
     const handler = getRegisteredHandler('models:setDefaultCover')
-    expect(await handler(makeEvent(), { id, cover: 'covers/missing.png' })).toEqual({
-      error: '封面不存在，无法设为默认'
+    expect(
+      await handler(makeEvent(), { id, cover: 'covers/missing.png' }),
+    ).toEqual({
+      error: '封面不存在，无法设为默认',
     })
   })
 
@@ -280,7 +322,9 @@ describe('models:deleteCover 三态（项目约定：删默认自动回退）', 
 describe('models:importCover', () => {
   it('伪装图片扩展名的文件拒绝导入（B7 外泄链）', async () => {
     const id = await touchModel()
-    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-cover-src-'))
+    const outside = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-cover-src-'),
+    )
     roots.push(outside)
     const fake = path.join(outside, 'secret.png')
     await fs.writeFile(fake, '敏感文本内容')
@@ -292,7 +336,10 @@ describe('models:importCover', () => {
 
   it('模型不在当前根目录内时拒绝关联', async () => {
     const png = await createSourcePng()
-    const outsideId = path.join(os.tmpdir(), 'modelvault-outside-model.safetensors')
+    const outsideId = path.join(
+      os.tmpdir(),
+      'modelvault-outside-model.safetensors',
+    )
     const handler = getRegisteredHandler('models:importCover')
     const res = await handler(makeEvent(), { id: outsideId, path: png })
     expect(res.error).toBe('封面关联失败（模型需位于当前模型根目录内）')
@@ -307,7 +354,11 @@ describe('models:clearAllCovers', () => {
     await fs.mkdir(thumbsDir, { recursive: true })
     // 按thumbs 命名规则（路径哈希-mtime.jpg）构造：同源图两个 mtime 变体 + 一个无关缩略图
     const absCover = path.join(root, meta.covers[0])
-    const hash = crypto.createHash('md5').update(absCover.toLowerCase()).digest('hex').slice(0, 16)
+    const hash = crypto
+      .createHash('md5')
+      .update(absCover.toLowerCase())
+      .digest('hex')
+      .slice(0, 16)
     const thumbA = path.join(thumbsDir, `${hash}-111.jpg`)
     const thumbB = path.join(thumbsDir, `${hash}-222.jpg`)
     const unrelated = path.join(thumbsDir, 'aaaaaaaaaaaaaaaa-333.jpg')

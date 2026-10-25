@@ -32,7 +32,13 @@ import { normalizeBaseModel } from '../../../shared/model-categories'
 const TOKEN_RE = /([A-Za-z_][\w-]*)\s*:\s*("([^"]*)"|[^\s]+)/g
 
 /** 大小单位 → 字节倍率（二进制口径，与展示层 formatSize 一致） */
-const SIZE_UNITS = { b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3, tb: 1024 ** 4 }
+const SIZE_UNITS = {
+  b: 1,
+  kb: 1024,
+  mb: 1024 ** 2,
+  gb: 1024 ** 3,
+  tb: 1024 ** 4,
+}
 
 /** 时间单位 → 毫秒倍率（mtime token 使用） */
 const TIME_UNITS = {
@@ -40,7 +46,7 @@ const TIME_UNITS = {
   h: 60 * 60 * 1000,
   d: 24 * 60 * 60 * 1000,
   w: 7 * 24 * 60 * 60 * 1000,
-  y: 365 * 24 * 60 * 60 * 1000
+  y: 365 * 24 * 60 * 60 * 1000,
 }
 
 /** 布尔值写法归一（fav/nsfw 共用） */
@@ -52,11 +58,16 @@ const BOOL_VALUES = new Set(['yes', 'no', 'true', 'false', '1', '0'])
 function compareOp(v, op, n) {
   if (typeof v !== 'number') return false
   switch (op) {
-    case '>': return v > n
-    case '>=': return v >= n
-    case '<': return v < n
-    case '<=': return v <= n
-    default: return v === n
+    case '>':
+      return v > n
+    case '>=':
+      return v >= n
+    case '<':
+      return v < n
+    case '<=':
+      return v <= n
+    default:
+      return v === n
   }
 }
 
@@ -81,7 +92,11 @@ function parseFilter(prefix, value) {
       const m = /^(>=|<=|>|<)?\s*([\d.]+)\s*(b|kb|mb|gb|tb)?$/i.exec(value)
       if (!m || !Number.isFinite(parseFloat(m[2]))) return null
       const unit = (m[3] || 'mb').toLowerCase()
-      return { kind: 'size', op: m[1] || '=', bytes: parseFloat(m[2]) * SIZE_UNITS[unit] }
+      return {
+        kind: 'size',
+        op: m[1] || '=',
+        bytes: parseFloat(m[2]) * SIZE_UNITS[unit],
+      }
     }
     case 'score': {
       const m = /^(>=|<=|>|<)?\s*=?\s*(\d+)$/.exec(value)
@@ -103,7 +118,7 @@ function parseFilter(prefix, value) {
       return {
         kind: 'mtime',
         op: m[1] || '=',
-        ms: parseFloat(m[2]) * TIME_UNITS[unit]
+        ms: parseFloat(m[2]) * TIME_UNITS[unit],
       }
     }
     case 'author':
@@ -130,7 +145,9 @@ function matchFilter(m, f, resolveHash) {
       return base.toLowerCase().includes(f.text)
     }
     case 'tag':
-      return (m.tags || []).some((t) => typeof t === 'string' && t.toLowerCase().includes(f.text))
+      return (m.tags || []).some(
+        (t) => typeof t === 'string' && t.toLowerCase().includes(f.text),
+      )
     case 'type':
       return m.type === f.text
     case 'size':
@@ -148,7 +165,9 @@ function matchFilter(m, f, resolveHash) {
       return compareOp(Date.now() - t, f.op, f.ms)
     }
     case 'author':
-      return String(m.autoInfo?.author || '').toLowerCase().includes(f.text)
+      return String(m.autoInfo?.author || '')
+        .toLowerCase()
+        .includes(f.text)
     case 'trigger': {
       const parts = [m.triggerWords]
       if (Array.isArray(m.autoInfo?.triggerCandidates)) {
@@ -161,7 +180,9 @@ function matchFilter(m, f, resolveHash) {
         .includes(f.text)
     }
     case 'hash':
-      return String(resolveHash(m) || '').toLowerCase().startsWith(f.text)
+      return String(resolveHash(m) || '')
+        .toLowerCase()
+        .startsWith(f.text)
     default:
       return true
   }
@@ -199,7 +220,11 @@ export function parseSearchQuery(raw) {
  *   （默认读取模型自带 hash；渲染层传入覆盖映射解析器，O7）
  * @returns {boolean}
  */
-export function matchSearchFilters(m, filters, resolveHash = (model) => model.hash || '') {
+export function matchSearchFilters(
+  m,
+  filters,
+  resolveHash = (model) => model.hash || '',
+) {
   for (const f of filters) {
     if (!matchFilter(m, f, resolveHash)) return false
   }

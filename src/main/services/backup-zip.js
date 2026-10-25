@@ -7,7 +7,7 @@ import {
   zip,
   Zip,
   ZipDeflate,
-  ZipPassThrough
+  ZipPassThrough,
 } from 'fflate'
 import { DATA_FILE } from './store'
 import { LIB_COVERS_PREFIX, LIB_PREFIX, safeCoverName } from './backup-format'
@@ -133,9 +133,13 @@ export function writeBackupZipToFile(filePath, contents) {
       new Promise((resolveCover, rejectCover) => {
         const file = new ZipPassThrough(`${LIB_COVERS_PREFIX}${cover.name}`)
         archive.add(file)
-        const stream = createReadStream(cover.path, { highWaterMark: UNZIP_CHUNK_SIZE })
+        const stream = createReadStream(cover.path, {
+          highWaterMark: UNZIP_CHUNK_SIZE,
+        })
         // 读块为 Buffer（未设编码）；显式收窄以满足 fflate push 的 Uint8Array 形参
-        stream.on('data', (chunk) => file.push(new Uint8Array(/** @type {Buffer} */ (chunk))))
+        stream.on('data', (chunk) =>
+          file.push(new Uint8Array(/** @type {Buffer} */ (chunk))),
+        )
         stream.on('end', () => {
           file.push(new Uint8Array(0), true)
           resolveCover()
@@ -145,7 +149,8 @@ export function writeBackupZipToFile(filePath, contents) {
 
     try {
       addText('settings.json', contents.settingsText)
-      if (contents.storeText) addText(`${LIB_PREFIX}${DATA_FILE}`, contents.storeText)
+      if (contents.storeText)
+        addText(`${LIB_PREFIX}${DATA_FILE}`, contents.storeText)
       ;(async () => {
         for (const cover of contents.covers || []) await addCover(cover)
         // manifest 放在最后：前面的条目均已成功加入后，清单才声明完整内容
@@ -208,7 +213,12 @@ function concatBytes(chunks, size) {
  */
 export async function streamBackupZip(
   filePath,
-  { manifestOnly = false, stats = null, coverWriter = null, skipCovers = false } = {}
+  {
+    manifestOnly = false,
+    stats = null,
+    coverWriter = null,
+    skipCovers = false,
+  } = {},
 ) {
   // 无原型对象：条目名来自不可信 zip，避免任何特殊键影响查找语义
   const entries = Object.create(null)
@@ -254,7 +264,11 @@ export async function streamBackupZip(
     seen.add(file.name)
     // 头部声明大小可提前拒绝明显的压缩炸弹（缺失时由实际字节上限兜底）
     if (typeof file.originalSize === 'number' && file.originalSize > limit) {
-      fail(new Error(`备份条目 ${file.name} 解压后超过 ${formatLimit(limit)} 上限`))
+      fail(
+        new Error(
+          `备份条目 ${file.name} 解压后超过 ${formatLimit(limit)} 上限`,
+        ),
+      )
       return
     }
 
@@ -270,12 +284,18 @@ export async function streamBackupZip(
         received += chunk.length
         totalBytes += chunk.length
         if (received > limit) {
-          fail(new Error(`备份条目 ${file.name} 解压后超过 ${formatLimit(limit)} 上限`))
+          fail(
+            new Error(
+              `备份条目 ${file.name} 解压后超过 ${formatLimit(limit)} 上限`,
+            ),
+          )
           file.terminate?.()
           return
         }
         if (totalBytes > MAX_UNZIP_BYTES) {
-          fail(new Error(`备份解压总量超过 ${formatLimit(MAX_UNZIP_BYTES)} 上限`))
+          fail(
+            new Error(`备份解压总量超过 ${formatLimit(MAX_UNZIP_BYTES)} 上限`),
+          )
           file.terminate?.()
           return
         }
@@ -292,7 +312,7 @@ export async function streamBackupZip(
             .then(() => coverWriter(name, data))
             .catch((writeErr) => {
               fail(writeErr)
-            })
+            }),
         )
         return
       }
@@ -349,7 +369,7 @@ export async function unzipBackupEntries(filePath, options = {}) {
   const files = await streamBackupZip(filePath, {
     stats,
     coverWriter: options.coverWriter || null,
-    skipCovers: options.skipCovers === true
+    skipCovers: options.skipCovers === true,
   })
   return { files, skippedCovers: stats.skippedCovers }
 }

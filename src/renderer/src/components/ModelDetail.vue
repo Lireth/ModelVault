@@ -10,7 +10,7 @@ import {
   revealModel,
   selectedModel,
   showContextMenu,
-  state
+  state,
 } from '../store/appStore'
 
 /**
@@ -37,9 +37,11 @@ let restoreFocusEl = null
 /** 面板内 Tab 序列中的可聚焦元素 */
 function focusablesInPanel() {
   if (!panelEl.value) return []
-  return [...panelEl.value.querySelectorAll(
-    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-  )].filter((el) => !el.disabled && el.offsetParent !== null)
+  return [
+    ...panelEl.value.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    ),
+  ].filter((el) => !el.disabled && el.offsetParent !== null)
 }
 
 // 打开时焦点入面板、关闭时归还触发元素（与确认层同款可达性标准）；
@@ -49,7 +51,8 @@ watch(selectedModel, (m, old) => {
     restoreFocusEl = document.activeElement
     nextTick(() => panelEl.value?.focus())
   } else if (!m && old) {
-    if (restoreFocusEl && typeof restoreFocusEl.focus === 'function') restoreFocusEl.focus()
+    if (restoreFocusEl && typeof restoreFocusEl.focus === 'function')
+      restoreFocusEl.focus()
     restoreFocusEl = null
   }
 })
@@ -147,7 +150,7 @@ watch(
   () => selectedModel.value?.id,
   () => {
     renameOpen.value = false
-  }
+  },
 )
 </script>
 
@@ -165,17 +168,34 @@ watch(
         @keydown="onPanelTab"
       >
         <header class="detail-header">
-          <h2 :title="selectedModel.name">{{ selectedModel.alias || selectedModel.name }}</h2>
+          <h2 :title="selectedModel.name">
+            {{ selectedModel.alias || selectedModel.name }}
+          </h2>
           <div class="detail-header-actions">
             <button
               class="btn"
               :disabled="selectedModel.disabled"
               title="重命名模型文件（扩展名保持不变）"
               @click="openRename"
-            >重命名</button>
-            <button class="btn" @click="revealModel(selectedModel.id)">打开所在文件夹</button>
+            >
+              重命名
+            </button>
+            <button class="btn" @click="revealModel(selectedModel.id)">
+              打开所在文件夹
+            </button>
             <button class="wc-btn" title="关闭" @click="closeDetail">
-              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+              <svg
+                viewBox="0 0 16 16"
+                width="12"
+                height="12"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                aria-hidden="true"
+              >
+                <path d="M4 4l8 8M12 4l-8 8" />
+              </svg>
             </button>
           </div>
         </header>
@@ -199,8 +219,12 @@ watch(
             class="btn btn-primary"
             :disabled="renameBusy || !renameValue.trim()"
             @click="submitRename"
-          >{{ renameBusy ? '重命名中…' : '确认' }}</button>
-          <button class="btn" :disabled="renameBusy" @click="cancelRename">取消</button>
+          >
+            {{ renameBusy ? '重命名中…' : '确认' }}
+          </button>
+          <button class="btn" :disabled="renameBusy" @click="cancelRename">
+            取消
+          </button>
         </div>
 
         <div class="detail-body">
@@ -213,8 +237,13 @@ watch(
           <!-- 右侧：识别信息列（文件元数据自动解析 + Civitai 在线识别） -->
           <div class="detail-info-col">
             <AutoInfoPanel
-              @apply-resolution="(resMin, resMax) => metaFormRef?.onAutoApplyResolution(resMin, resMax)"
-              @apply-triggers="(words) => metaFormRef?.onAutoApplyTriggers(words)"
+              @apply-resolution="
+                (resMin, resMax) =>
+                  metaFormRef?.onAutoApplyResolution(resMin, resMax)
+              "
+              @apply-triggers="
+                (words) => metaFormRef?.onAutoApplyTriggers(words)
+              "
             />
             <CivitaiPanel />
           </div>
@@ -255,7 +284,9 @@ watch(
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: var(--shadow-lg), 0 0 60px color-mix(in srgb, var(--accent) 6%, transparent);
+  box-shadow:
+    var(--shadow-lg),
+    0 0 60px color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .detail-header {

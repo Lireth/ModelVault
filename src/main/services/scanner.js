@@ -17,7 +17,14 @@ import { folderNameToTag } from '../../shared/model-categories'
 export const MODEL_EXTENSIONS = MODEL_EXTENSION_SET
 
 /** 支持的图片扩展名（用于封面/预览图识别） */
-export const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'])
+export const IMAGE_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
+  '.bmp',
+])
 
 /** 禁用后缀（F10）：加在完整文件名之后，WebUI/ComfyUI 生态不再加载该文件 */
 const DISABLED_SUFFIX = '.disabled'
@@ -44,7 +51,7 @@ const SCAN_EXCLUDED_DIRS = new Set([
   '.git',
   '.modelvault',
   '$recycle.bin',
-  'system volume information'
+  'system volume information',
 ])
 
 /**
@@ -90,7 +97,8 @@ export function isExcludedScanName(name, userExclude = new Set()) {
 export function isVisibleScanEntry(entry, userExclude = new Set()) {
   if (!entry || isExcludedScanEntryName(entry.name)) return false
   if (entry.isSymbolicLink()) return false
-  if (entry.isDirectory() && isExcludedScanName(entry.name, userExclude)) return false
+  if (entry.isDirectory() && isExcludedScanName(entry.name, userExclude))
+    return false
   return true
 }
 
@@ -103,7 +111,18 @@ const FOLDER_RULES = [
   { type: 'lora', folders: ['lora', 'loras'] },
   { type: 'vae', folders: ['vae', 'vae_models'] },
   { type: 'text_encoder', folders: ['text_encoders', 'text_encoder', 'clip'] },
-  { type: 'checkpoint', folders: ['stable-diffusion', 'stable_diffusion', 'checkpoints', 'checkpoint', 'diffusion_models', 'diffusers', 'unet'] }
+  {
+    type: 'checkpoint',
+    folders: [
+      'stable-diffusion',
+      'stable_diffusion',
+      'checkpoints',
+      'checkpoint',
+      'diffusion_models',
+      'diffusers',
+      'unet',
+    ],
+  },
 ]
 
 /** 文件名关键词兜底分类（仅当文件夹名未命中时使用） */
@@ -111,7 +130,10 @@ const FILE_KEYWORD_RULES = [
   { type: 'lora', re: /[-_. ]lora([-. _]|\d|$)/i },
   { type: 'vae', re: /[-_. ]vae/i },
   { type: 'text_encoder', re: /text[-_. ]?encoder|\bt5[-_. ]|\bclip[-_. ]/i },
-  { type: 'checkpoint', re: /(checkpoint|sd15|sdxl|sd3|flux|pony|illustrious)/i }
+  {
+    type: 'checkpoint',
+    re: /(checkpoint|sd15|sdxl|sd3|flux|pony|illustrious)/i,
+  },
 ]
 
 /**
@@ -125,7 +147,8 @@ export function classifyModel(relSegments, fileName) {
   // 先遍历规则、再遍历路径段：保证 FOLDER_RULES 的声明顺序（lora > vae > text_encoder > checkpoint）
   // 作为优先级生效，与注释「顺序即优先级」一致；否则优先级会取决于路径段出现的先后
   for (const rule of FOLDER_RULES) {
-    if (lowerSegments.some((seg) => rule.folders.includes(seg))) return rule.type
+    if (lowerSegments.some((seg) => rule.folders.includes(seg)))
+      return rule.type
   }
   for (const rule of FILE_KEYWORD_RULES) {
     if (rule.re.test(fileName)) return rule.type
@@ -165,12 +188,14 @@ export function classifySubCategory(relSegments) {
  * @throws {Error} name 为 'AbortError' 表示扫描被取消
  */
 export async function scanModels(root, onProgress, options = {}) {
-  const userExclude = options.excludeDirs instanceof Set
-    ? options.excludeDirs
-    : new Set(options.excludeDirs || [])
-  const extensions = options.extensions instanceof Set
-    ? options.extensions
-    : new Set(options.extensions || MODEL_EXTENSIONS)
+  const userExclude =
+    options.excludeDirs instanceof Set
+      ? options.excludeDirs
+      : new Set(options.excludeDirs || [])
+  const extensions =
+    options.extensions instanceof Set
+      ? options.extensions
+      : new Set(options.extensions || MODEL_EXTENSIONS)
   const signal = options.signal
   const models = []
   const errors = []
@@ -188,22 +213,26 @@ export async function scanModels(root, onProgress, options = {}) {
   // 根层新增/删除的目录必以其自身路径另行出现在子树集合中，'' 只需采集直属文件
   const scoped = Array.isArray(options.subDirs) && options.subDirs.length > 0
   const rootResolved = path.resolve(root)
-  const isInsideRoot = (abs) => relativeWithin(path.resolve(abs), rootResolved) !== null
+  const isInsideRoot = (abs) =>
+    relativeWithin(path.resolve(abs), rootResolved) !== null
   const initialDirs = scoped
     ? options.subDirs
         .map((item) => {
           const normalized = typeof item === 'string' ? item.trim() : ''
-          if (normalized === '') return { dir: root, depth: 0, rel: '', descend: false }
+          if (normalized === '')
+            return { dir: root, depth: 0, rel: '', descend: false }
           const segs = normalized.split('/').filter(Boolean)
           return {
             dir: path.join(root, ...segs),
             depth: segs.length,
             rel: segs.join('/'),
-            descend: true
+            descend: true,
           }
         })
         // 越界（含 .. 逃逸/绝对路径）与超深子树不入栈
-        .filter((item) => item.depth <= MAX_SCAN_DEPTH && isInsideRoot(item.dir))
+        .filter(
+          (item) => item.depth <= MAX_SCAN_DEPTH && isInsideRoot(item.dir),
+        )
     : [{ dir: root, depth: 0, rel: '', descend: true }]
   const stack = initialDirs
 
@@ -239,7 +268,12 @@ export async function scanModels(root, onProgress, options = {}) {
       if (entry.isDirectory()) {
         // descend=false 仅用于子树集合中的根节点（''）：不递归后代
         if (descend) {
-          stack.push({ dir: fullPath, depth: depth + 1, rel: relChild, descend: true })
+          stack.push({
+            dir: fullPath,
+            depth: depth + 1,
+            rel: relChild,
+            descend: true,
+          })
         }
         continue
       }
@@ -251,7 +285,13 @@ export async function scanModels(root, onProgress, options = {}) {
         const stem = name.slice(0, -DISABLED_SUFFIX.length)
         const baseExt = path.extname(stem).toLowerCase()
         if (!extensions.has(baseExt)) continue
-        fileEntries.push({ fullPath, name, relChild, ext: baseExt, disabled: true })
+        fileEntries.push({
+          fullPath,
+          name,
+          relChild,
+          ext: baseExt,
+          disabled: true,
+        })
         continue
       }
       if (!extensions.has(path.extname(name).toLowerCase())) continue
@@ -275,7 +315,7 @@ export async function scanModels(root, onProgress, options = {}) {
           stats[index] = { err: err?.message || String(err) }
         }
       },
-      STAT_CONCURRENCY
+      STAT_CONCURRENCY,
     )
     fileEntries.forEach((f, index) => {
       const { stat, err } = stats[index]
@@ -298,9 +338,13 @@ export async function scanModels(root, onProgress, options = {}) {
         folder: dir,
         relDir: rel,
         size: stat.size,
-        mtimeMs: stat.mtimeMs
+        mtimeMs: stat.mtimeMs,
       })
-      onProgress?.({ dirs: dirCount, found: models.length, current: f.relChild })
+      onProgress?.({
+        dirs: dirCount,
+        found: models.length,
+        current: f.relChild,
+      })
     })
   }
 
@@ -319,7 +363,7 @@ export const SIDECAR_PREVIEW_EXTS = [
   '.jpeg',
   '.webp',
   '.gif',
-  '.bmp'
+  '.bmp',
 ]
 
 /**
@@ -354,7 +398,7 @@ export function sidecarFilesFor(absModelPath) {
   const base = sidecarBaseOf(absModelPath)
   const files = [
     path.join(dir, `${base}.txt`),
-    path.join(dir, `${base}.civitai.info`)
+    path.join(dir, `${base}.civitai.info`),
   ]
   for (const ext of SIDECAR_PREVIEW_EXTS) {
     files.push(path.join(dir, `${base}${ext}`))
@@ -371,7 +415,9 @@ export function sidecarFilesFor(absModelPath) {
 export async function findSidecarPreview(modelPath) {
   const dir = path.dirname(modelPath)
   const base = sidecarBaseOf(modelPath)
-  const candidates = SIDECAR_PREVIEW_EXTS.map((ext) => path.join(dir, `${base}${ext}`))
+  const candidates = SIDECAR_PREVIEW_EXTS.map((ext) =>
+    path.join(dir, `${base}${ext}`),
+  )
   for (const candidate of candidates) {
     try {
       const stat = await fs.stat(candidate)
@@ -395,11 +441,12 @@ const SIDECAR_TEXT_MAX_BYTES = 256 * 1024
 export async function findSidecarText(modelPath) {
   const txtPath = path.join(
     path.dirname(modelPath),
-    `${sidecarBaseOf(modelPath)}.txt`
+    `${sidecarBaseOf(modelPath)}.txt`,
   )
   try {
     const stat = await fs.stat(txtPath)
-    if (!stat.isFile() || stat.size === 0 || stat.size > SIDECAR_TEXT_MAX_BYTES) return ''
+    if (!stat.isFile() || stat.size === 0 || stat.size > SIDECAR_TEXT_MAX_BYTES)
+      return ''
     const text = await fs.readFile(txtPath, 'utf8')
     return text.trim()
   } catch {
@@ -444,11 +491,12 @@ const CIVITAI_INFO_MAX_BYTES = 1024 * 1024
 export async function findSidecarCivitaiInfo(modelPath) {
   const infoPath = path.join(
     path.dirname(modelPath),
-    `${sidecarBaseOf(modelPath)}.civitai.info`
+    `${sidecarBaseOf(modelPath)}.civitai.info`,
   )
   try {
     const stat = await fs.stat(infoPath)
-    if (!stat.isFile() || stat.size === 0 || stat.size > CIVITAI_INFO_MAX_BYTES) return null
+    if (!stat.isFile() || stat.size === 0 || stat.size > CIVITAI_INFO_MAX_BYTES)
+      return null
     const text = await fs.readFile(infoPath, 'utf8')
     const parsed = JSON.parse(text)
     return parsed && typeof parsed === 'object' ? parsed : null

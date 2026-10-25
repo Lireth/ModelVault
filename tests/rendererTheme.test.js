@@ -6,7 +6,7 @@ import {
   defaultSettings,
   initApp,
   resolveTheme,
-  state
+  state,
 } from '../src/renderer/src/store/appStore'
 
 /**
@@ -30,7 +30,7 @@ function stubMatchMedia(initialMatches) {
     fireChange(next) {
       query.matches = next
       for (const cb of listeners) cb({ matches: next })
-    }
+    },
   }
   window.matchMedia = vi.fn(() => query)
   return query
@@ -48,7 +48,7 @@ beforeEach(() => {
   window.api = {
     models: { loadStore: vi.fn() },
     settings: { update: vi.fn() },
-    window: { setTheme: vi.fn(() => Promise.resolve()) }
+    window: { setTheme: vi.fn(() => Promise.resolve()) },
   }
   Object.assign(state.settings, defaultSettings())
   resetDom()
@@ -90,39 +90,63 @@ describe('applyTheme', () => {
   it('切换主题时按有效主题重应用强调色变体', () => {
     state.settings.accentColor = 'violet'
     applyTheme('dark')
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#a78bfa')
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe(
+      '#a78bfa',
+    )
     applyTheme('light')
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#7c3aed')
-    expect(document.documentElement.style.getPropertyValue('--accent-2')).toBe('#2f7fe0')
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe(
+      '#7c3aed',
+    )
+    expect(document.documentElement.style.getPropertyValue('--accent-2')).toBe(
+      '#2f7fe0',
+    )
   })
 })
 
 describe('applyAccent', () => {
   it('预设按有效主题取变体', () => {
     applyAccent('green', 'dark')
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#3ddc97')
-    expect(document.documentElement.style.getPropertyValue('--accent-2')).toBe('#4dd0e1')
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe(
+      '#3ddc97',
+    )
+    expect(document.documentElement.style.getPropertyValue('--accent-2')).toBe(
+      '#4dd0e1',
+    )
     applyAccent('green', 'light')
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#1a8f5e')
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe(
+      '#1a8f5e',
+    )
   })
 
   it('自定义 hex：accent2 同色（渐变退化为纯色）', () => {
     applyAccent('#ff8800', 'dark')
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#ff8800')
-    expect(document.documentElement.style.getPropertyValue('--accent-2')).toBe('#ff8800')
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe(
+      '#ff8800',
+    )
+    expect(document.documentElement.style.getPropertyValue('--accent-2')).toBe(
+      '#ff8800',
+    )
   })
 
   it('未知值回退默认预设（blue）', () => {
     applyAccent('no-such-key', 'dark')
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#5aa3fa')
-    expect(document.documentElement.style.getPropertyValue('--accent-2')).toBe('#b18cff')
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe(
+      '#5aa3fa',
+    )
+    expect(document.documentElement.style.getPropertyValue('--accent-2')).toBe(
+      '#b18cff',
+    )
   })
 
   it('默认预设与内置配色严格一致（老用户零视觉变化）', () => {
     applyAccent('blue', 'dark')
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#5aa3fa')
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe(
+      '#5aa3fa',
+    )
     applyAccent('blue', 'light')
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#2f7fe0')
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe(
+      '#2f7fe0',
+    )
   })
 })
 
@@ -130,7 +154,7 @@ describe('主题跟随系统（matchMedia change 驱动）', () => {
   it('system 模式下系统亮暗变化即时重应用；非 system 模式不响应', async () => {
     const query = stubMatchMedia(false)
     window.api.models.loadStore.mockResolvedValue({
-      settings: { ...defaultSettings(), theme: 'system' }
+      settings: { ...defaultSettings(), theme: 'system' },
     })
     await initApp()
     // 初始：系统深色

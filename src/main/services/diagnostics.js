@@ -11,7 +11,7 @@ import {
   getCurrentRoot,
   getDataDir,
   getDataFilePath,
-  getIndexFilePath
+  getIndexFilePath,
 } from './store-paths'
 import { getMetaMapByAbsPath } from './store-meta'
 import { getSettings } from './store-settings'
@@ -53,7 +53,11 @@ async function readTail(file, maxBytes) {
     const length = Math.min(size, maxBytes)
     const buffer = Buffer.alloc(length)
     await fh.read(buffer, 0, length, size - length)
-    return { text: buffer.toString('utf-8'), bytes: size, truncated: size > maxBytes }
+    return {
+      text: buffer.toString('utf-8'),
+      bytes: size,
+      truncated: size > maxBytes,
+    }
   } finally {
     await fh.close()
   }
@@ -64,7 +68,7 @@ async function collectLogs() {
   let names
   try {
     names = (await fs.readdir(getLogDir())).filter((name) =>
-      /^modelvault-\d{4}-\d{2}-\d{2}\.log$/.test(name)
+      /^modelvault-\d{4}-\d{2}-\d{2}\.log$/.test(name),
     )
   } catch {
     return []
@@ -74,7 +78,10 @@ async function collectLogs() {
   const logs = []
   for (const name of picked) {
     try {
-      const tail = await readTail(path.join(getLogDir(), name), MAX_LOG_TAIL_BYTES)
+      const tail = await readTail(
+        path.join(getLogDir(), name),
+        MAX_LOG_TAIL_BYTES,
+      )
       logs.push({ name, ...tail })
     } catch {
       /* 单个日志不可读不影响其余诊断信息 */
@@ -99,7 +106,8 @@ async function listFiles(dir, maxFiles, maxDepth) {
       if (files.length >= maxFiles) break
       const fullPath = path.join(current.dir, entry.name)
       if (entry.isDirectory()) {
-        if (current.depth < maxDepth) queue.push({ dir: fullPath, depth: current.depth + 1 })
+        if (current.depth < maxDepth)
+          queue.push({ dir: fullPath, depth: current.depth + 1 })
       } else if (entry.isFile()) {
         files.push(fullPath)
       }
@@ -110,7 +118,10 @@ async function listFiles(dir, maxFiles, maxDepth) {
 
 /** 目录体积统计（文件数/字节数；目录不存在时 exists=false） */
 async function measureDir(dir) {
-  const exists = await fs.stat(dir).then((s) => s.isDirectory()).catch(() => false)
+  const exists = await fs
+    .stat(dir)
+    .then((s) => s.isDirectory())
+    .catch(() => false)
   if (!exists) return { exists: false, files: 0, bytes: 0, truncated: false }
   const listed = await listFiles(dir, MAX_CACHE_FILES, MAX_CACHE_DEPTH)
   let bytes = 0
@@ -120,9 +131,14 @@ async function measureDir(dir) {
       const stat = await fs.stat(file).catch(() => null)
       if (stat?.isFile()) bytes += stat.size
     },
-    CACHE_STAT_CONCURRENCY
+    CACHE_STAT_CONCURRENCY,
   )
-  return { exists: true, files: listed.files.length, bytes, truncated: listed.truncated }
+  return {
+    exists: true,
+    files: listed.files.length,
+    bytes,
+    truncated: listed.truncated,
+  }
 }
 
 /** 单个文件信息（不存在或无权限时 exists=false） */
@@ -148,12 +164,13 @@ export function summarizeMetadata(metaMap) {
     withTags: 0,
     withParams: 0,
     withNote: 0,
-    withHash: 0
+    withHash: 0,
   }
   for (const meta of Object.values(metaMap || {})) {
     if (!meta || typeof meta !== 'object') continue
     summary.models += 1
-    if (Array.isArray(meta.covers) && meta.covers.length > 0) summary.withCovers += 1
+    if (Array.isArray(meta.covers) && meta.covers.length > 0)
+      summary.withCovers += 1
     if (Array.isArray(meta.tags) && meta.tags.length > 0) summary.withTags += 1
     if (meta.params && typeof meta.params === 'object') summary.withParams += 1
     if (typeof meta.note === 'string' && meta.note.trim()) summary.withNote += 1
@@ -168,9 +185,12 @@ async function collectLibraryInfo(root) {
   const store = await fileInfo(getDataFilePath(root))
   return {
     root,
-    exists: await fs.stat(root).then((s) => s.isDirectory()).catch(() => false),
+    exists: await fs
+      .stat(root)
+      .then((s) => s.isDirectory())
+      .catch(() => false),
     index,
-    store
+    store,
   }
 }
 
@@ -183,9 +203,11 @@ async function collectDiagnosticsReport() {
   const activeRoot = getCurrentRoot()
   const roots = normalizeLibraryRoots([
     ...(Array.isArray(settings.modelsFolders) ? settings.modelsFolders : []),
-    ...(activeRoot ? [activeRoot] : [])
+    ...(activeRoot ? [activeRoot] : []),
   ])
-  const libraries = await Promise.all(roots.map((root) => collectLibraryInfo(root)))
+  const libraries = await Promise.all(
+    roots.map((root) => collectLibraryInfo(root)),
+  )
   const metaMap = getMetaMapByAbsPath()
 
   // 缓存目录仅统计当前激活库（诊断目标通常就是当前库）
@@ -213,7 +235,7 @@ async function collectDiagnosticsReport() {
       platform: process.platform,
       arch: process.arch,
       osRelease: os.release(),
-      locale: app.getLocale?.() || 'unknown'
+      locale: app.getLocale?.() || 'unknown',
     },
     activeLibrary: activeRoot || '',
     libraries,
@@ -224,8 +246,8 @@ async function collectDiagnosticsReport() {
     privacy: {
       note:
         '诊断包含本机路径、模型数量/体积与最近日志；分享前请确认接受范围。' +
-        '不包含模型文件内容与封面图片。'
-    }
+        '不包含模型文件内容与封面图片。',
+    },
   }
 }
 
@@ -260,12 +282,12 @@ export async function exportDiagnostics(win) {
   const result = await dialog.showSaveDialog(win, {
     title: '导出诊断包',
     defaultPath: `modelvault-diagnostics-${date}.zip`,
-    filters: [{ name: '诊断包', extensions: ['zip'] }]
+    filters: [{ name: '诊断包', extensions: ['zip'] }],
   })
   if (result.canceled || !result.filePath) return { canceled: true }
 
   const files = {
-    [DIAGNOSTICS_JSON_ENTRY]: strToU8(JSON.stringify(report, null, 2))
+    [DIAGNOSTICS_JSON_ENTRY]: strToU8(JSON.stringify(report, null, 2)),
   }
   for (const log of logs) {
     files[`logs/${log.name}`] = strToU8(log.text)
@@ -279,7 +301,9 @@ export async function exportDiagnostics(win) {
     await fs.rm(target, { force: true }).catch(() => {})
     await fs.rename(tmp, target)
     const stat = await fs.stat(target)
-    logger.info(`诊断包已导出: ${target}（${logs.length} 个日志 / ${stat.size} 字节）`)
+    logger.info(
+      `诊断包已导出: ${target}（${logs.length} 个日志 / ${stat.size} 字节）`,
+    )
     return { ok: true, path: target, sizeBytes: stat.size, logs: logs.length }
   } catch (err) {
     await fs.rm(tmp, { force: true }).catch(() => {})

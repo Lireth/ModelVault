@@ -10,7 +10,7 @@ const props = defineProps({
   /** 覆盖率行（StatsSection 的 coverageRows computed） */
   rows: { type: Array, required: true },
   /** 全库模型总数（空库时渲染占位） */
-  total: { type: Number, default: 0 }
+  total: { type: Number, default: 0 },
 })
 
 /** 占比（0-100 整数；空库返回 0） */
@@ -26,9 +26,14 @@ function pctOf(n) {
       <div v-for="row in rows" :key="row.key" class="cov-row">
         <span class="cov-label">{{ row.label }}</span>
         <div class="cov-bar">
-          <div class="cov-fill" :style="{ width: `${pctOf(row.value)}%` }"></div>
+          <div
+            class="cov-fill"
+            :style="{ width: `${pctOf(row.value)}%` }"
+          ></div>
         </div>
-        <span class="cov-value cov-wide">{{ row.value }} 项 · {{ pctOf(row.value) }}%</span>
+        <span class="cov-value cov-wide"
+          >{{ row.value }} 项 · {{ pctOf(row.value) }}%</span
+        >
       </div>
     </div>
     <p v-else class="stats-empty">尚未扫描模型</p>

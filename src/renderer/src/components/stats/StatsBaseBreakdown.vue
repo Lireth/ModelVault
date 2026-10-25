@@ -10,7 +10,7 @@ import { formatSize } from '../../store/appStore'
 
 defineProps({
   /** 基底分布（StatsSection 的 baseRows computed：{ total, rows }） */
-  data: { type: Object, required: true }
+  data: { type: Object, required: true },
 })
 </script>
 
@@ -18,17 +18,23 @@ defineProps({
   <div class="stats-block">
     <h4>基底模型分布</h4>
     <p class="base-note">
-      已识别 {{ data.total }} 个模型的基底（safetensors 头部解析 / Civitai 识别）
+      已识别 {{ data.total }} 个模型的基底（safetensors 头部解析 / Civitai
+      识别）
     </p>
     <div class="coverage">
       <div v-for="row in data.rows" :key="row.key" class="cov-row">
-        <span class="cov-label base-label" :title="`${row.label}：${formatSize(row.bytes)}`">
+        <span
+          class="cov-label base-label"
+          :title="`${row.label}：${formatSize(row.bytes)}`"
+        >
           {{ row.label }}
         </span>
         <div class="cov-bar">
           <div class="cov-fill" :style="{ width: `${row.pct}%` }"></div>
         </div>
-        <span class="cov-value cov-wide">{{ row.count }} 个 · {{ row.pct }}%</span>
+        <span class="cov-value cov-wide"
+          >{{ row.count }} 个 · {{ row.pct }}%</span
+        >
       </div>
     </div>
   </div>

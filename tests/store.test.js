@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -25,7 +33,7 @@ import {
   setModelMeta,
   setStoreSaveErrorListener,
   switchDataRoot,
-  updateSettings
+  updateSettings,
 } from '../src/main/services/store'
 import { setSnapshotWorkerThresholdForTests } from '../src/main/services/store-meta-persist'
 import { fakeUserData } from './setup'
@@ -72,7 +80,7 @@ describe('元数据规范化', () => {
       alias: '  我的大模型  ',
       note: 'x'.repeat(3000),
       unknownField: 'should be dropped',
-      params: { steps: 20 }
+      params: { steps: 20 },
     })
     expect(meta.alias).toBe('我的大模型')
     expect(meta.note).toHaveLength(2000)
@@ -92,7 +100,7 @@ describe('元数据规范化', () => {
   it('旧版参数迁移：cfg 单值 -> 区间，resMinW/resMinH -> 单值区间', async () => {
     const abs = await touchModel('d.safetensors')
     const meta = setModelMeta(abs, {
-      params: { cfg: 7, resMinW: 512, resMinH: 768, steps: 25 }
+      params: { cfg: 7, resMinW: 512, resMinH: 768, steps: 25 },
     })
     expect(meta.params.cfgMin).toBe(7)
     expect(meta.params.cfgMax).toBe(7)
@@ -113,11 +121,14 @@ describe('元数据规范化', () => {
       note: 'n',
       noteSource: 'sidecar',
       triggerWords: 't',
-      triggerWordsSource: 'sidecar'
+      triggerWordsSource: 'sidecar',
     })
     expect(meta.noteSource).toBe('sidecar')
     expect(meta.triggerWordsSource).toBe('sidecar')
-    const bad = setModelMeta(abs, { noteSource: 'other', triggerWordsSource: 1 })
+    const bad = setModelMeta(abs, {
+      noteSource: 'other',
+      triggerWordsSource: 1,
+    })
     expect(bad.noteSource).toBe('')
     expect(bad.triggerWordsSource).toBe('')
   })
@@ -127,7 +138,7 @@ describe('不可信 store.json 清洗（B-04）', () => {
   it('normalizeStoreData 剔除 __proto__/constructor/prototype 键', () => {
     const parsed = JSON.parse(
       '{"models":{"__proto__":{"alias":"pwn"},"constructor":{"alias":"c"},' +
-        '"prototype":{"alias":"p"},"ok.safetensors":{"note":"ok"}}}'
+        '"prototype":{"alias":"p"},"ok.safetensors":{"note":"ok"}}}',
     )
     const data = normalizeStoreData(parsed)
     expect(Object.keys(data.models)).toEqual(['ok.safetensors'])
@@ -143,9 +154,9 @@ describe('不可信 store.json 清洗（B-04）', () => {
         version: 1,
         models: {
           ['__proto__']: { alias: 'pwn' },
-          'ok.safetensors': { note: 'ok' }
-        }
-      })
+          'ok.safetensors': { note: 'ok' },
+        },
+      }),
     )
 
     await loadData()
@@ -156,9 +167,11 @@ describe('不可信 store.json 清洗（B-04）', () => {
     setModelMeta(path.join(root, 'ok.safetensors'), { note: 'ok2' })
     await flushStoreSave()
     const disk = JSON.parse(
-      await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
+      await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8'),
     )
-    expect(Object.prototype.hasOwnProperty.call(disk.models, '__proto__')).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(disk.models, '__proto__')).toBe(
+      false,
+    )
     expect(disk.models['ok.safetensors'].note).toBe('ok2')
   })
 })
@@ -199,7 +212,12 @@ describe('路径关联', () => {
 
   it('改名/移动后元数据键整体迁移：标注与哈希履历无缝跟随（F10/F11）', async () => {
     const oldAbs = await touchModel('move-old.safetensors')
-    setModelMeta(oldAbs, { alias: '跟着走', rating: 5, hash: 'f'.repeat(64), hashMtime: 123 })
+    setModelMeta(oldAbs, {
+      alias: '跟着走',
+      rating: 5,
+      hash: 'f'.repeat(64),
+      hashMtime: 123,
+    })
     const newAbs = path.join(root, 'move-new.safetensors.disabled')
     expect(renameModelMeta(oldAbs, newAbs)).toBe(true)
     // 旧键消失，新键携带全部标注（含哈希履历）
@@ -209,7 +227,12 @@ describe('路径关联', () => {
     expect(moved?.rating).toBe(5)
     expect(moved?.hash).toBe('f'.repeat(64))
     // 无旧数据/越界目标返回 false
-    expect(renameModelMeta(path.join(root, 'none.safetensors'), path.join(root, 'x.safetensors'))).toBe(false)
+    expect(
+      renameModelMeta(
+        path.join(root, 'none.safetensors'),
+        path.join(root, 'x.safetensors'),
+      ),
+    ).toBe(false)
     expect(renameModelMeta(newAbs, 'D:\\库外\\x.safetensors')).toBe(false)
   })
 })
@@ -234,7 +257,7 @@ describe('atomicWriteFile', () => {
     try {
       await Promise.all([
         atomicWriteFile(file, '{"who":"first"}'),
-        atomicWriteFile(file, '{"who":"second"}')
+        atomicWriteFile(file, '{"who":"second"}'),
       ])
     } finally {
       vi.restoreAllMocks()
@@ -336,7 +359,10 @@ describe('退出落盘 flushStoreSave', () => {
     setModelMeta(abs, { alias: '防抖中' })
     // saveTimer 尚未触发（SAVE_DELAY 500ms）：flush 应取消定时器并发起写入
     await flushStoreSave()
-    const text = await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
+    const text = await fs.readFile(
+      path.join(root, '.modelvault', 'store.json'),
+      'utf-8',
+    )
     const key = path.relative(root, abs).split(path.sep).join('/')
     expect(JSON.parse(text).models[key].alias).toBe('防抖中')
   })
@@ -349,7 +375,10 @@ describe('退出落盘 flushStoreSave', () => {
     // 无论首次写入是否已结束（在途则 flush 登记补写并等待），
     // flush 返回后磁盘都必须包含最后一次修改——退出路径不丢数据的语义保证
     await Promise.all([first, flushStoreSave()])
-    const text = await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
+    const text = await fs.readFile(
+      path.join(root, '.modelvault', 'store.json'),
+      'utf-8',
+    )
     const key = path.relative(root, abs).split(path.sep).join('/')
     expect(JSON.parse(text).models[key].alias).toBe('第二版')
   })
@@ -373,10 +402,10 @@ describe('O5 增量落盘与快照合并', () => {
     await saveStoreDeltaNow()
     const batches = await fs.readdir(journalDir())
     expect(batches).toHaveLength(1)
-    const batch = JSON.parse(await fs.readFile(path.join(journalDir(), batches[0]), 'utf-8'))
-    expect(batch.entries).toEqual([
-      expect.objectContaining({ op: 'set', key })
-    ])
+    const batch = JSON.parse(
+      await fs.readFile(path.join(journalDir(), batches[0]), 'utf-8'),
+    )
+    expect(batch.entries).toEqual([expect.objectContaining({ op: 'set', key })])
     // 未合并前 store.json 仍是旧值
     const diskBefore = JSON.parse(await fs.readFile(storeFile(), 'utf-8'))
     expect(diskBefore.models[key].alias).toBe('v1')
@@ -415,9 +444,11 @@ describe('O5 增量落盘与快照合并', () => {
     removeModelMeta(abs)
     await saveStoreDeltaNow()
     const batches = await fs.readdir(journalDir())
-    const batch = JSON.parse(await fs.readFile(path.join(journalDir(), batches[0]), 'utf-8'))
+    const batch = JSON.parse(
+      await fs.readFile(path.join(journalDir(), batches[0]), 'utf-8'),
+    )
     expect(batch.entries).toEqual([
-      { op: 'del', key: path.relative(root, abs).split(path.sep).join('/') }
+      { op: 'del', key: path.relative(root, abs).split(path.sep).join('/') },
     ])
 
     await loadData()
@@ -427,36 +458,45 @@ describe('O5 增量落盘与快照合并', () => {
   it('损坏的日志批次被隔离，后续批次仍正常回放', async () => {
     await saveStoreNow()
     await fs.mkdir(journalDir(), { recursive: true })
-    await fs.writeFile(path.join(journalDir(), 'delta-000000000001.json'), '{broken!!')
+    await fs.writeFile(
+      path.join(journalDir(), 'delta-000000000001.json'),
+      '{broken!!',
+    )
     await fs.writeFile(
       path.join(journalDir(), 'delta-000000000002.json'),
       JSON.stringify({
         seq: 2,
-        entries: [{ op: 'set', key: 'b.safetensors', meta: { alias: '后续批次' } }]
-      })
+        entries: [
+          { op: 'set', key: 'b.safetensors', meta: { alias: '后续批次' } },
+        ],
+      }),
     )
     // 合法 JSON 但缺少 entries：同样隔离并继续后续批次
     await fs.writeFile(
       path.join(journalDir(), 'delta-000000000003.json'),
-      JSON.stringify({ seq: 3 })
+      JSON.stringify({ seq: 3 }),
     )
     await fs.writeFile(
       path.join(journalDir(), 'delta-000000000004.json'),
       JSON.stringify({
         seq: 4,
-        entries: [{ op: 'set', key: 'c.safetensors', meta: { alias: '再后续' } }]
-      })
+        entries: [
+          { op: 'set', key: 'c.safetensors', meta: { alias: '再后续' } },
+        ],
+      }),
     )
 
     await loadData()
 
-    expect(getModelMeta(path.join(root, 'b.safetensors')).alias).toBe('后续批次')
+    expect(getModelMeta(path.join(root, 'b.safetensors')).alias).toBe(
+      '后续批次',
+    )
     expect(getModelMeta(path.join(root, 'c.safetensors')).alias).toBe('再后续')
     await expect(
-      fs.access(path.join(journalDir(), 'delta-000000000001.json'))
+      fs.access(path.join(journalDir(), 'delta-000000000001.json')),
     ).rejects.toThrow()
     await expect(
-      fs.access(path.join(journalDir(), 'delta-000000000003.json'))
+      fs.access(path.join(journalDir(), 'delta-000000000003.json')),
     ).rejects.toThrow()
   })
 
@@ -503,8 +543,8 @@ describe('O5 增量落盘与快照合并', () => {
       JSON.stringify({
         version: 1,
         journalSeq: 2,
-        models: { 'a.safetensors': { alias: 'snapshot' } }
-      })
+        models: { 'a.safetensors': { alias: 'snapshot' } },
+      }),
     )
     await fs.mkdir(journalDir(), { recursive: true })
     const writeBatch = (seq, alias) =>
@@ -512,8 +552,8 @@ describe('O5 增量落盘与快照合并', () => {
         path.join(journalDir(), `delta-${String(seq).padStart(12, '0')}.json`),
         JSON.stringify({
           seq,
-          entries: [{ op: 'set', key: 'a.safetensors', meta: { alias } }]
-        })
+          entries: [{ op: 'set', key: 'a.safetensors', meta: { alias } }],
+        }),
       )
     await writeBatch(1, 'stale-1')
     await writeBatch(2, 'stale-2')
@@ -531,7 +571,7 @@ describe('reloadCurrentRootData（备份恢复到当前根后的内存重载，B
     await fs.mkdir(path.join(root, '.modelvault'), { recursive: true })
     await fs.writeFile(
       path.join(root, '.modelvault', 'store.json'),
-      JSON.stringify({ version: 1, models })
+      JSON.stringify({ version: 1, models }),
     )
   }
 
@@ -545,7 +585,9 @@ describe('reloadCurrentRootData（备份恢复到当前根后的内存重载，B
     // 旧内存条目被磁盘上的替换内容取代：没有它，下一次 setModelMeta →
     // saveStoreNow 会用旧内存原子覆盖刚恢复的文件（恢复被静默回滚）
     expect(getModelMeta(abs)).toBeNull()
-    expect(getModelMeta(path.join(root, 'restored.safetensors'))?.note).toBe('恢复数据')
+    expect(getModelMeta(path.join(root, 'restored.safetensors'))?.note).toBe(
+      '恢复数据',
+    )
   })
 
   it('重载丢弃的在途防抖定时器不再落盘：磁盘保持恢复内容', async () => {
@@ -564,10 +606,15 @@ describe('reloadCurrentRootData（备份恢复到当前根后的内存重载，B
     } finally {
       vi.useRealTimers()
     }
-    const text = await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
+    const text = await fs.readFile(
+      path.join(root, '.modelvault', 'store.json'),
+      'utf-8',
+    )
     const disk = JSON.parse(text)
     expect(disk.models['restored.safetensors']?.note).toBe('恢复数据')
-    expect(disk.models[path.relative(root, abs).split(path.sep).join('/')]).toBeUndefined()
+    expect(
+      disk.models[path.relative(root, abs).split(path.sep).join('/')],
+    ).toBeUndefined()
   })
 
   it('等待在途原子写结束后再读取磁盘，避免重载与 rename 交错（B-02）', async () => {
@@ -612,7 +659,9 @@ describe('reloadCurrentRootData（备份恢复到当前根后的内存重载，B
 describe('切换根目录与落盘链（A6）', () => {
   /** 另建一个临时根目录（切库目标） */
   async function makeOtherRoot() {
-    const other = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-otherroot-'))
+    const other = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-otherroot-'),
+    )
     roots.push(other)
     return other
   }
@@ -625,12 +674,17 @@ describe('切换根目录与落盘链（A6）', () => {
     await switchDataRoot(other)
 
     // 旧根数据已立即落盘（不必等防抖定时器）
-    const text = await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
+    const text = await fs.readFile(
+      path.join(root, '.modelvault', 'store.json'),
+      'utf-8',
+    )
     const key = path.relative(root, abs).split(path.sep).join('/')
     expect(JSON.parse(text).models[key].alias).toBe('切库前抢救')
     // 新根已生效且未发生写盘（无迟到定时器把旧数据写进新目录）
     expect(getCurrentRoot()).toBe(other)
-    await expect(fs.access(path.join(other, '.modelvault', 'store.json'))).rejects.toThrow()
+    await expect(
+      fs.access(path.join(other, '.modelvault', 'store.json')),
+    ).rejects.toThrow()
   })
 
   it('切库后迟到的防抖保存被丢弃：不把旧根数据写进新根目录', async () => {
@@ -653,7 +707,8 @@ describe('切换根目录与落盘链（A6）', () => {
     let polluted = false
     while (Date.now() < deadline && !polluted) {
       try {
-        if ((await fs.readFile(otherStoreFile, 'utf-8')).includes('旧根的修改')) polluted = true
+        if ((await fs.readFile(otherStoreFile, 'utf-8')).includes('旧根的修改'))
+          polluted = true
       } catch {
         await new Promise((resolve) => setTimeout(resolve, 25))
       }
@@ -667,7 +722,9 @@ describe('切换根目录与落盘链（A6）', () => {
     // 对话框与设置文件对同一根目录可能给出不同拼写）
     const letterIndex = [...root].findIndex((ch) => /[a-z]/.test(ch))
     const variant =
-      root.slice(0, letterIndex) + root[letterIndex].toUpperCase() + root.slice(letterIndex + 1)
+      root.slice(0, letterIndex) +
+      root[letterIndex].toUpperCase() +
+      root.slice(letterIndex + 1)
     expect(variant).not.toBe(root)
     expect(variant.toLowerCase()).toBe(root.toLowerCase())
 
@@ -688,7 +745,10 @@ describe('切换根目录与落盘链（A6）', () => {
     let saved = false
     while (Date.now() < deadline && !saved) {
       try {
-        if ((await fs.readFile(storeFile, 'utf-8')).includes('大小写变体根的修改')) saved = true
+        if (
+          (await fs.readFile(storeFile, 'utf-8')).includes('大小写变体根的修改')
+        )
+          saved = true
       } catch {
         await new Promise((resolve) => setTimeout(resolve, 25))
       }
@@ -699,7 +759,9 @@ describe('切换根目录与落盘链（A6）', () => {
 
 describe('应用设置规范化', () => {
   it('excludeDirs 统一小写并大小写不敏感去重（与 scanner 匹配约定一致）', async () => {
-    await updateSettings({ excludeDirs: ['Loras', '  LORAS ', 'Embeds', '', '.modelvault'] })
+    await updateSettings({
+      excludeDirs: ['Loras', '  LORAS ', 'Embeds', '', '.modelvault'],
+    })
     const { excludeDirs } = await loadSettings()
     expect(excludeDirs).toEqual(['loras', 'embeds', '.modelvault'])
   })
@@ -785,15 +847,21 @@ describe('应用设置规范化', () => {
           showFavoritesOnly: true,
           showDuplicatesOnly: true,
           sortBy: 'mtime',
-          sortAsc: false
+          sortAsc: false,
         },
         { id: '', name: '无id' }, // 缺 id：剔除
         { id: 'v2', name: '  ' }, // 空白名称：剔除
         { id: 'v1', name: '重复id' }, // id 去重（首条保留）
         { id: 'v3', name: '缺省字段' }, // 其余字段回退默认
-        { id: 'v4', name: '未知排序', tagFilter: '旧标签', sortBy: 'xxx', sortAsc: 'yes' },
-        'not-an-object' // 非对象：剔除
-      ]
+        {
+          id: 'v4',
+          name: '未知排序',
+          tagFilter: '旧标签',
+          sortBy: 'xxx',
+          sortAsc: 'yes',
+        },
+        'not-an-object', // 非对象：剔除
+      ],
     })
     const s = await loadSettings()
     expect(s.savedViews).toHaveLength(3)
@@ -808,7 +876,7 @@ describe('应用设置规范化', () => {
       showFavoritesOnly: true,
       showDuplicatesOnly: true,
       sortBy: 'mtime',
-      sortAsc: false
+      sortAsc: false,
     })
     expect(s.savedViews[1]).toEqual({
       id: 'v3',
@@ -821,7 +889,7 @@ describe('应用设置规范化', () => {
       showFavoritesOnly: false,
       showDuplicatesOnly: false,
       sortBy: 'name',
-      sortAsc: true
+      sortAsc: true,
     })
     // 未知排序/非布尔方向回退默认
     expect(s.savedViews[2].sortBy).toBe('name')
@@ -835,7 +903,10 @@ describe('应用设置规范化', () => {
     let s = await loadSettings()
     expect(s.savedViews).toEqual([])
 
-    const many = Array.from({ length: 25 }, (_, i) => ({ id: `v${i}`, name: `视图${i}` }))
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      id: `v${i}`,
+      name: `视图${i}`,
+    }))
     await updateSettings({ savedViews: many })
     s = await loadSettings()
     expect(s.savedViews).toHaveLength(20)
@@ -860,7 +931,9 @@ describe('应用设置文件损坏恢复（B2）', () => {
   afterEach(async () => {
     await fs.rm(settingsFile, { force: true }).catch(() => {})
     for (const name of await listBaks()) {
-      await fs.rm(path.join(fakeUserData, name), { force: true }).catch(() => {})
+      await fs
+        .rm(path.join(fakeUserData, name), { force: true })
+        .catch(() => {})
     }
   })
 
@@ -873,7 +946,9 @@ describe('应用设置文件损坏恢复（B2）', () => {
     // 原文件被备份，损坏内容原样保留，供用户手动抢救
     const baks = await listBaks()
     expect(baks.length).toBe(1)
-    expect(await fs.readFile(path.join(fakeUserData, baks[0]), 'utf-8')).toBe('{corrupted!!')
+    expect(await fs.readFile(path.join(fakeUserData, baks[0]), 'utf-8')).toBe(
+      '{corrupted!!',
+    )
     // settings.json 已被 rename 移走，待下次 updateSettings 重写新文件
     await expect(fs.access(settingsFile)).rejects.toThrow()
   })
@@ -885,7 +960,9 @@ describe('应用设置文件损坏恢复（B2）', () => {
     expect(s.theme).toBe('dark')
     const baks = await listBaks()
     expect(baks.length).toBe(1)
-    expect(await fs.readFile(path.join(fakeUserData, baks[0]), 'utf-8')).toBe('123')
+    expect(await fs.readFile(path.join(fakeUserData, baks[0]), 'utf-8')).toBe(
+      '123',
+    )
     await expect(fs.access(settingsFile)).rejects.toThrow()
   })
 
@@ -986,7 +1063,9 @@ describe('库设置并发落盘串行化（A1）', () => {
 
   it('排队中的库设置写入使用调度时快照与根目录：切根后不会把新库补丁写进旧库（B-02）', async () => {
     const libA = path.join(root, '.modelvault', 'settings.json')
-    const other = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-snapshot-'))
+    const other = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-snapshot-'),
+    )
     roots.push(other)
     const libB = path.join(other, '.modelvault', 'settings.json')
 
@@ -1116,15 +1195,18 @@ describe('库设置随模型库存储（双层设置）', () => {
         modelsFolder: root,
         modelsFolders: [root],
         theme: 'light',
-        cardSize: 'large'
-      })
+        cardSize: 'large',
+      }),
     )
     const s = await loadSettings()
     expect(s.theme).toBe('light')
     expect(s.modelsFolder).toBe(root)
     // 库设置文件已生成并携带迁移的库字段（引导字段不入库文件）
     const libOnDisk = JSON.parse(
-      await fs.readFile(path.join(root, '.modelvault', 'settings.json'), 'utf-8')
+      await fs.readFile(
+        path.join(root, '.modelvault', 'settings.json'),
+        'utf-8',
+      ),
     )
     expect(libOnDisk.theme).toBe('light')
     expect(libOnDisk.cardSize).toBe('large')
@@ -1139,19 +1221,27 @@ describe('库设置随模型库存储（双层设置）', () => {
   it('切库后库设置随目标库切换（reloadLibrarySettings）', async () => {
     const libFile = path.join(root, '.modelvault', 'settings.json')
     await fs.mkdir(path.dirname(libFile), { recursive: true })
-    await fs.writeFile(libFile, JSON.stringify({ theme: 'light', viewMode: 'list' }))
+    await fs.writeFile(
+      libFile,
+      JSON.stringify({ theme: 'light', viewMode: 'list' }),
+    )
 
     await reloadLibrarySettings(root)
     expect(getSettings().theme).toBe('light')
     expect(getSettings().viewMode).toBe('list')
 
     // 切到无库设置文件的另一个库：以默认值初始化并落盘
-    const other = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-libswitch-'))
+    const other = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-libswitch-'),
+    )
     roots.push(other)
     await reloadLibrarySettings(other)
     expect(getSettings().theme).toBe('dark')
     const otherOnDisk = JSON.parse(
-      await fs.readFile(path.join(other, '.modelvault', 'settings.json'), 'utf-8')
+      await fs.readFile(
+        path.join(other, '.modelvault', 'settings.json'),
+        'utf-8',
+      ),
     )
     expect(otherOnDisk.theme).toBe('dark')
   })
@@ -1163,9 +1253,13 @@ describe('库设置随模型库存储（双层设置）', () => {
     await reloadLibrarySettings(root)
     expect(getSettings().theme).toBe('dark')
     const dir = path.dirname(libFile)
-    const baks = (await fs.readdir(dir)).filter((n) => n.startsWith('settings.json.bak-')).sort()
+    const baks = (await fs.readdir(dir))
+      .filter((n) => n.startsWith('settings.json.bak-'))
+      .sort()
     expect(baks.length).toBe(1)
-    expect(await fs.readFile(path.join(dir, baks[0]), 'utf-8')).toBe('{broken!!')
+    expect(await fs.readFile(path.join(dir, baks[0]), 'utf-8')).toBe(
+      '{broken!!',
+    )
     await expect(fs.access(libFile)).rejects.toThrow()
   })
 
@@ -1189,7 +1283,9 @@ describe('旧版存储迁移', () => {
     const legacyFile = path.join(fakeUserData, 'store.json')
     try {
       // 伪造两个同名但内容不同的旧版封面（分属不同目录）
-      const oldDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-oldcovers-'))
+      const oldDir = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'modelvault-oldcovers-'),
+      )
       const coverA = path.join(oldDir, 'a', 'preview.png')
       const coverB = path.join(oldDir, 'b', 'preview.png')
       await fs.mkdir(path.dirname(coverA), { recursive: true })
@@ -1206,9 +1302,9 @@ describe('旧版存储迁移', () => {
         JSON.stringify({
           models: {
             [m1]: { cover: coverA, alias: 'A' },
-            [m2]: { cover: coverB, alias: 'B' }
-          }
-        })
+            [m2]: { cover: coverB, alias: 'B' },
+          },
+        }),
       )
 
       // 重新加载：新 store.json 不存在时触发旧版迁移
@@ -1221,8 +1317,12 @@ describe('旧版存储迁移', () => {
       // 同名源文件必须迁移为不同目标名
       expect(metaA.cover).not.toBe(metaB.cover)
       // 内容未互换
-      expect(await fs.readFile(resolveCover(metaA.cover), 'utf-8')).toBe('CONTENT-A')
-      expect(await fs.readFile(resolveCover(metaB.cover), 'utf-8')).toBe('CONTENT-B')
+      expect(await fs.readFile(resolveCover(metaA.cover), 'utf-8')).toBe(
+        'CONTENT-A',
+      )
+      expect(await fs.readFile(resolveCover(metaB.cover), 'utf-8')).toBe(
+        'CONTENT-B',
+      )
     } finally {
       // 清理 legacy 文件，避免污染其他用例的 loadData
       await fs.rm(legacyFile, { force: true })
@@ -1247,7 +1347,7 @@ describe('库离线写入防护（O5）', () => {
     await fs.mkdir(root)
     await saveStoreNow()
     const parsed = JSON.parse(
-      await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
+      await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8'),
     )
     expect(parsed.models['offline.safetensors'].note).toBe('离线修改')
   })
@@ -1271,14 +1371,16 @@ describe('库离线写入防护（O5）', () => {
     await saveStoreNow()
 
     const parsed = JSON.parse(
-      await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
+      await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8'),
     )
     expect(parsed.models['cached.safetensors'].note).toBe('v2')
   })
 
   it('atomicWriteFile createDirs:false 不创建缺失目录', async () => {
     const target = path.join(root, 'missing', 'x.json')
-    await expect(atomicWriteFile(target, 'x', { createDirs: false })).rejects.toThrow()
+    await expect(
+      atomicWriteFile(target, 'x', { createDirs: false }),
+    ).rejects.toThrow()
     await expect(fs.access(path.join(root, 'missing'))).rejects.toThrow()
   })
 
@@ -1302,10 +1404,16 @@ describe('OPT-03 元数据快照序列化降载', () => {
     } finally {
       setSnapshotWorkerThresholdForTests(2000)
     }
-    const text = await fs.readFile(path.join(root, '.modelvault', 'store.json'), 'utf-8')
+    const text = await fs.readFile(
+      path.join(root, '.modelvault', 'store.json'),
+      'utf-8',
+    )
     expect(text).toContain('线程序列化')
     const parsed = JSON.parse(text)
     expect(parsed.version).toBe(1)
-    expect(parsed.models['worker-snapshot.safetensors'].tags).toEqual(['a', 'b'])
+    expect(parsed.models['worker-snapshot.safetensors'].tags).toEqual([
+      'a',
+      'b',
+    ])
   })
 })

@@ -21,22 +21,26 @@ export {
   selectRangeTo,
   invertSelectionFiltered,
   selectRedundantDuplicates,
-  requestBatchCancel
+  requestBatchCancel,
 } from './multiselect/selection'
 
-export { batchFavorite, batchNsfw, batchRating } from './multiselect/batch-flags'
+export {
+  batchFavorite,
+  batchNsfw,
+  batchRating,
+} from './multiselect/batch-flags'
 
 export { batchEditTags, normalizeBatchTags } from './multiselect/batch-tags'
 
 export {
   batchAssignCivitaiTags,
   batchCivitaiIdentify,
-  batchCivitaiImages
+  batchCivitaiImages,
 } from './multiselect/batch-civitai'
 
 export {
   batchOrganizeByTags,
   batchApplyTriggers,
   batchToggleDisabled,
-  batchDeleteModels
+  batchDeleteModels,
 } from './multiselect/batch-files'

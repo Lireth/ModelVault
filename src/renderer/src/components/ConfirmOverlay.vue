@@ -40,7 +40,7 @@ watch(
       await nextTick()
       confirmCancelBtn.value?.focus()
     }
-  }
+  },
 )
 </script>
 
@@ -52,11 +52,24 @@ watch(
       @click.self="rejectConfirm"
       @keydown="onConfirmKeydown"
     >
-      <div class="confirm-dialog" role="dialog" aria-modal="true" aria-label="操作确认">
+      <div
+        class="confirm-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="操作确认"
+      >
         <p class="confirm-text">{{ state.confirm.text }}</p>
         <div class="confirm-actions">
-          <button ref="confirmCancelBtn" class="btn" @click="rejectConfirm">取消</button>
-          <button ref="confirmOkBtn" class="btn btn-primary confirm-ok" @click="acceptConfirm">确定</button>
+          <button ref="confirmCancelBtn" class="btn" @click="rejectConfirm">
+            取消
+          </button>
+          <button
+            ref="confirmOkBtn"
+            class="btn btn-primary confirm-ok"
+            @click="acceptConfirm"
+          >
+            确定
+          </button>
         </div>
       </div>
     </div>

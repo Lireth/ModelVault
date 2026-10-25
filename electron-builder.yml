@@ -11,8 +11,8 @@ directories:
 files:
   - out/**
   - package.json
-  - "!**/*.map"
-  - "!node_modules/**"
+  - '!**/*.map'
+  - '!node_modules/**'
 
 asar: true
 

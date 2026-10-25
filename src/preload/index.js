@@ -49,7 +49,8 @@ const api = {
     /** 应用与运行时版本信息 */
     getInfo: () => invokeValidated('app:getInfo'),
     /** 上报渲染进程异常（写入主进程日志） */
-    reportError: (message, stack) => invokeValidated('app:reportError', { message, stack }),
+    reportError: (message, stack) =>
+      invokeValidated('app:reportError', { message, stack }),
     /** 应用内检查更新（E1）：返回 { current, latest?, hasUpdate, releaseUrl?, canDownload?, downloadSize? } 或 { error } */
     checkUpdate: () => invokeValidated('app:checkUpdate'),
     /** 下载更新包（F-6，URL 由主进程检查结果提供），进度经 onUpdateProgress 推送 */
@@ -72,19 +73,19 @@ const api = {
      * 导出诊断包（FN-05）：版本环境 + 设置 + 库状态 + 缓存体积 + 最近日志 → zip。
      * 返回 { ok, path, sizeBytes, logs } / { canceled: true } / { error }
      */
-    exportDiagnostics: () => invokeValidated('app:exportDiagnostics')
+    exportDiagnostics: () => invokeValidated('app:exportDiagnostics'),
   },
 
   /** 窗口相关（最小化/最大化/关闭由原生标题栏叠加层控件处理） */
   window: {
     /** 切换主题（同步原生标题栏颜色） */
-    setTheme: (theme) => invokeValidated('window:setTheme', { theme })
+    setTheme: (theme) => invokeValidated('window:setTheme', { theme }),
   },
 
   /** 应用设置 */
   settings: {
     /** 更新设置，返回 { settings }（规范化后的完整设置） */
-    update: (patch) => invokeValidated('settings:update', patch)
+    update: (patch) => invokeValidated('settings:update', patch),
   },
 
   /** 模型管理 */
@@ -123,15 +124,18 @@ const api = {
      */
     partialScan: (payload) => invokeValidated('models:partialScan', payload),
     /** 保存模型推荐参数与备注 */
-    saveModelData: (payload) => invokeValidated('models:saveModelData', payload),
+    saveModelData: (payload) =>
+      invokeValidated('models:saveModelData', payload),
     /** 上传模型封面，返回 { cover, coverUrl, covers, meta } 或 { canceled } / { error } */
     uploadCover: (id) => invokeValidated('models:uploadCover', { id }),
     /** 将剪贴板图片添加为模型预览图，返回 { cover, coverUrl, covers, meta } 或 { error } */
     pasteCover: (id) => invokeValidated('models:pasteCover', { id }),
     /** 设置默认封面（cover 为封面相对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */
-    setDefaultCover: (id, cover) => invokeValidated('models:setDefaultCover', { id, cover }),
+    setDefaultCover: (id, cover) =>
+      invokeValidated('models:setDefaultCover', { id, cover }),
     /** 删除单张封面（cover 为封面相对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */
-    deleteCover: (id, cover) => invokeValidated('models:deleteCover', { id, cover }),
+    deleteCover: (id, cover) =>
+      invokeValidated('models:deleteCover', { id, cover }),
     /** 一键移除全部示例图（清空封面列表并删除物理文件），返回 { cover, coverUrl, covers, meta } 或 { error } */
     clearCovers: (id) => invokeValidated('models:clearCovers', { id }),
     /** 一键清空当前库全部模型的示例图（设置页数据清理），返回 { cleared, images } 或 { error } */
@@ -151,7 +155,8 @@ const api = {
      * 导出模型清单（FN-04）：渲染层按当前筛选结果生成 csv/markdown/json 文本，
      * 主进程弹保存对话框并原子写入；返回 { ok, path, sizeBytes } / { canceled } / { error }
      */
-    exportModelList: (payload) => invokeValidated('models:exportModelList', payload),
+    exportModelList: (payload) =>
+      invokeValidated('models:exportModelList', payload),
     /**
      * 导出备份（FEAT-3/FN-08）：设置 + 当前库标注/封面 → zip。
      * options: { mode: 'full'|'selected'|'metadata', ids?: string[] }；
@@ -165,7 +170,8 @@ const api = {
     /** 更新快捷标记（收藏/NSFW/评分，仅传需更新的字段），返回 { meta } 或 { error } */
     setMetaFlags: (payload) => invokeValidated('models:setMetaFlags', payload),
     /** 整体覆写模型自由标签（F-5，tags 为全量字符串数组），返回 { meta } 或 { error } */
-    setModelTags: (id, tags) => invokeValidated('models:setModelTags', { id, tags }),
+    setModelTags: (id, tags) =>
+      invokeValidated('models:setModelTags', { id, tags }),
     /** 全库重命名自由标签（F4，to 已存在时合并），返回 { changed } 或 { error } */
     renameTag: (from, to) => invokeValidated('models:renameTag', { from, to }),
     /** 全库移除自由标签（F4），返回 { changed } 或 { error } */
@@ -173,14 +179,16 @@ const api = {
     /** 弹出模型右键菜单（原生菜单），动作经 onMenuAction 事件回传 */
     popupMenu: (id) => invokeValidated('models:popupMenu', { id }),
     /** 拖拽导入封面（sourcePath 为外部图片绝对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */
-    importCover: (id, sourcePath) => invokeValidated('models:importCover', { id, path: sourcePath }),
+    importCover: (id, sourcePath) =>
+      invokeValidated('models:importCover', { id, path: sourcePath }),
     /**
      * 跨库移动/复制模型（F-3）：ids 为当前库内模型路径，targetRoot 为已保存的
      * 其他模型库，mode 为 'copy'|'move'；保持相对路径与元数据关联（封面/标注
      * 随条目迁移），返回 { transferred, mode, targetRoot, failed, skipped }
      * 或 { error }
      */
-    transferToLibrary: (payload) => invokeValidated('models:transferToLibrary', payload),
+    transferToLibrary: (payload) =>
+      invokeValidated('models:transferToLibrary', payload),
     /** 在资源管理器中显示文件 */
     reveal: (path) => invokeValidated('models:reveal', { path }),
     /** 订阅扫描进度，返回取消监听函数 */
@@ -193,17 +201,20 @@ const api = {
      * coverThumb 为轮播封面条目缩略图更新 { path, thumbUrl }），返回取消监听函数 */
     onThumbsReady: (listener) => subscribe('models:thumbsReady', listener),
     /** 订阅后台哈希预热进度事件（快照: { active, id, percent, hashedBytes, totalBytes, done, remaining }） */
-    onWarmupProgress: (listener) => subscribe('models:warmupProgress', listener),
+    onWarmupProgress: (listener) =>
+      subscribe('models:warmupProgress', listener),
     /** 订阅右键菜单动作事件，返回取消监听函数 */
     onMenuAction: (listener) => subscribe('models:menuAction', listener),
     /** 加/去 .disabled 后缀（F10），返回 { path } 或 { error } */
-    toggleDisabled: (id, disabled) => invokeValidated('models:toggleDisabled', { id, disabled }),
+    toggleDisabled: (id, disabled) =>
+      invokeValidated('models:toggleDisabled', { id, disabled }),
     /**
      * 重命名模型文件（N1）：name 为不含扩展名的新文件名，扩展名保持不变；
      * 同名 sidecar 一并改名，元数据键即时迁移。
      * 返回 { path, renamedSidecars, sidecarWarnings } / { error }
      */
-    renameModel: (id, name) => invokeValidated('models:renameModel', { id, name }),
+    renameModel: (id, name) =>
+      invokeValidated('models:renameModel', { id, name }),
     /** 库内移动模型（F11，目标目录经原生对话框选择），返回 { path } / { canceled } / { error } */
     moveModelTo: (id) => invokeValidated('models:moveModelTo', { id }),
     /**
@@ -211,7 +222,8 @@ const api = {
      * 模型库根目录创建 7 个分类文件夹并移动已分配标签的模型（元数据键同步
      * 迁移），返回 { moved, failed: [{id, error}], skipped: [{id, reason}] } 或 { error }
      */
-    organizeByTags: (moves) => invokeValidated('models:organizeByTags', { moves }),
+    organizeByTags: (moves) =>
+      invokeValidated('models:organizeByTags', { moves }),
     /**
      * Civitai 在线识别（按文件 SHA256 反查），返回
      * { found: true, url, info, meta } / { found: false } / { error }。
@@ -241,8 +253,8 @@ const api = {
      * 预热模型哈希（Civitai 识别加速）：详情页打开时调用，后台计算该模型
      * 的 SHA256 并写入元数据缓存，入队即返回 { ok }，不等待计算完成
      */
-    warmupHash: (id) => invokeValidated('models:warmupHash', { id })
-  }
+    warmupHash: (id) => invokeValidated('models:warmupHash', { id }),
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

@@ -8,7 +8,7 @@ import { exportDiagnostics } from './services/diagnostics'
 import {
   cancelUpdateDownload,
   downloadUpdatePackage,
-  installUpdatePackage
+  installUpdatePackage,
 } from './services/update-download'
 
 /**
@@ -23,8 +23,10 @@ export function registerIpcHandlers() {
   // 渲染进程异常上报（Vue errorHandler / unhandledrejection），写入主进程日志。
   // schema 宽松门禁（字段可选），handler 内保留类型归一化与长度截断兜底
   wrapHandler('app:reportError', (event, { message, stack } = {}) => {
-    const msg = typeof message === 'string' ? message.slice(0, 2000) : '未知渲染进程错误'
-    const stackText = typeof stack === 'string' ? `\n${stack.slice(0, 4000)}` : ''
+    const msg =
+      typeof message === 'string' ? message.slice(0, 2000) : '未知渲染进程错误'
+    const stackText =
+      typeof stack === 'string' ? `\n${stack.slice(0, 4000)}` : ''
     logger.error(`[渲染进程] ${msg}${stackText}`)
     return { ok: true }
   })
@@ -36,7 +38,7 @@ export function registerIpcHandlers() {
     electron: process.versions.electron,
     chrome: process.versions.chrome,
     node: process.versions.node,
-    platform: process.platform
+    platform: process.platform,
   }))
 
   // 应用内检查更新（E1）：查询 GitHub Releases 最新版本并与当前版本比对
@@ -50,7 +52,7 @@ export function registerIpcHandlers() {
       if (win && !win.isDestroyed()) {
         win.webContents.send('app:updateProgress', p)
       }
-    })
+    }),
   )
   wrapHandler('app:cancelUpdateDownload', () => cancelUpdateDownload())
   wrapHandler('app:installUpdate', () => installUpdatePackage())
@@ -72,7 +74,7 @@ export function registerIpcHandlers() {
   wrapHandler(
     'app:exportDiagnostics',
     (event) => exportDiagnostics(BrowserWindow.fromWebContents(event.sender)),
-    { errorPrefix: '导出诊断包失败' }
+    { errorPrefix: '导出诊断包失败' },
   )
 
   // 主题切换时同步原生窗口颜色（标题栏叠加层 + 窗口背景）。
@@ -90,7 +92,10 @@ export function registerIpcHandlers() {
     }
     if (win && typeof win.setTitleBarOverlay === 'function') {
       try {
-        win.setTitleBarOverlay({ color: colors.overlayColor, symbolColor: colors.symbolColor })
+        win.setTitleBarOverlay({
+          color: colors.overlayColor,
+          symbolColor: colors.symbolColor,
+        })
       } catch (err) {
         logger.warn(`标题栏主题更新失败: ${err.message}`)
       }

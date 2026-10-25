@@ -20,7 +20,7 @@ vi.mock('electron', () => ({
   clipboard: { readImage: vi.fn() },
   net: { fetch: vi.fn() },
   nativeImage: { createFromPath: vi.fn() },
-  protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() }
+  protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
 }))
 
 import {
@@ -29,10 +29,15 @@ import {
   planOrganizeMoves,
   planRenameTarget,
   registerFilesHandlers,
-  splitModelFileName
+  splitModelFileName,
 } from '../src/main/ipc/models/files'
 import { getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
-import { getModelMeta, loadData, setDataRoot, setModelMeta } from '../src/main/services/store'
+import {
+  getModelMeta,
+  loadData,
+  setDataRoot,
+  setModelMeta,
+} from '../src/main/services/store'
 import { sidecarFilesFor } from '../src/main/services/scanner'
 import { dialog } from 'electron'
 
@@ -45,18 +50,28 @@ describe('planOrganizeMoves', () => {
   it('按标签 label 生成「根目录/LoRA/标签文件夹/原文件名」目标路径', () => {
     const { planned, skipped } = planOrganizeMoves(
       [{ id: path.join(root, 'lora', 'a.safetensors'), subCategory: 'role' }],
-      root
+      root,
     )
-    expect(planned).toEqual([{ id: path.join(root, 'lora', 'a.safetensors'), newPath: path.join(root, 'LoRA', '角色', 'a.safetensors') }])
+    expect(planned).toEqual([
+      {
+        id: path.join(root, 'lora', 'a.safetensors'),
+        newPath: path.join(root, 'LoRA', '角色', 'a.safetensors'),
+      },
+    ])
     expect(skipped).toEqual([])
   })
 
   it('未标注模型（subCategory 为空）目标为 LoRA 根目录', () => {
     const { planned, skipped } = planOrganizeMoves(
       [{ id: path.join(root, 'misc', 'c.safetensors'), subCategory: '' }],
-      root
+      root,
     )
-    expect(planned).toEqual([{ id: path.join(root, 'misc', 'c.safetensors'), newPath: path.join(root, 'LoRA', 'c.safetensors') }])
+    expect(planned).toEqual([
+      {
+        id: path.join(root, 'misc', 'c.safetensors'),
+        newPath: path.join(root, 'LoRA', 'c.safetensors'),
+      },
+    ])
     expect(skipped).toEqual([])
   })
 
@@ -66,12 +81,16 @@ describe('planOrganizeMoves', () => {
       [
         { id: path.join(root, 'x.safetensors'), subCategory: 'embedding' },
         { id: inPlace, subCategory: 'role' },
-        { id: path.join(root, 'y.safetensors'), subCategory: 'base' }
+        { id: path.join(root, 'y.safetensors'), subCategory: 'base' },
       ],
-      root
+      root,
     )
     expect(planned).toEqual([])
-    expect(skipped.map((s) => s.reason)).toEqual(['invalid-tag', 'same-dir', 'invalid-tag'])
+    expect(skipped.map((s) => s.reason)).toEqual([
+      'invalid-tag',
+      'same-dir',
+      'invalid-tag',
+    ])
   })
 
   it('moves 为空时返回空计划', () => {
@@ -111,14 +130,24 @@ describe('models:organizeByTags handler', () => {
   it('创建 LoRA 及 7 个标签子文件夹并把已标注模型移入对应子文件夹，元数据键随迁', async () => {
     const id = await makeModel(path.join('lora', 'a.safetensors'), 'role')
 
-    const res = await handler(makeEvent(), { moves: [{ id, subCategory: 'role' }] })
+    const res = await handler(makeEvent(), {
+      moves: [{ id, subCategory: 'role' }],
+    })
     expect(res.error).toBeUndefined()
     expect(res.moved).toBe(1)
     expect(res.failed).toEqual([])
     expect(res.skipped).toEqual([])
 
     // LoRA 目录及其下 7 个标签子文件夹全部创建
-    for (const folder of ['角色', '风格', '概念', '服饰', '背景', '姿势', '工具']) {
+    for (const folder of [
+      '角色',
+      '风格',
+      '概念',
+      '服饰',
+      '背景',
+      '姿势',
+      '工具',
+    ]) {
       const stat = await fs.stat(path.join(root, 'LoRA', folder))
       expect(stat.isDirectory()).toBe(true)
     }
@@ -127,7 +156,10 @@ describe('models:organizeByTags handler', () => {
     await expect(fs.readFile(newPath, 'utf-8')).resolves.toBe('model-data')
     await expect(fs.access(id)).rejects.toThrow()
     // 元数据键迁移：标注与封面等用户数据完整保留
-    expect(getModelMeta(newPath)).toMatchObject({ subCategory: 'role', note: '标注' })
+    expect(getModelMeta(newPath)).toMatchObject({
+      subCategory: 'role',
+      note: '标注',
+    })
     expect(getModelMeta(id)).toBeNull()
   })
 
@@ -146,11 +178,17 @@ describe('models:organizeByTags handler', () => {
     await fs.writeFile(path.join(root, 'b.txt'), '说明文本')
     await fs.writeFile(path.join(root, 'b.preview.png'), 'png')
 
-    const res = await handler(makeEvent(), { moves: [{ id, subCategory: 'style' }] })
+    const res = await handler(makeEvent(), {
+      moves: [{ id, subCategory: 'style' }],
+    })
     expect(res.moved).toBe(1)
     const newPath = path.join(root, 'LoRA', '风格', 'b.safetensors')
-    await expect(fs.readFile(path.join(root, 'LoRA', '风格', 'b.txt'), 'utf-8')).resolves.toBe('说明文本')
-    await expect(fs.readFile(path.join(root, 'LoRA', '风格', 'b.preview.png'), 'utf-8')).resolves.toBe('png')
+    await expect(
+      fs.readFile(path.join(root, 'LoRA', '风格', 'b.txt'), 'utf-8'),
+    ).resolves.toBe('说明文本')
+    await expect(
+      fs.readFile(path.join(root, 'LoRA', '风格', 'b.preview.png'), 'utf-8'),
+    ).resolves.toBe('png')
     await expect(fs.access(newPath)).resolves.toBeUndefined()
   })
 
@@ -159,32 +197,46 @@ describe('models:organizeByTags handler', () => {
     const b = await makeModel(path.join('sub', 'c.safetensors'), 'concept')
     // 预占目标位置（与 a 同名）
     await fs.mkdir(path.join(root, 'LoRA', '概念'), { recursive: true })
-    await fs.writeFile(path.join(root, 'LoRA', '概念', 'a.safetensors'), 'occupied')
+    await fs.writeFile(
+      path.join(root, 'LoRA', '概念', 'a.safetensors'),
+      'occupied',
+    )
 
     const res = await handler(makeEvent(), {
       moves: [
         { id: a, subCategory: 'concept' },
-        { id: b, subCategory: 'concept' }
-      ]
+        { id: b, subCategory: 'concept' },
+      ],
     })
     expect(res.error).toBeUndefined()
     expect(res.moved).toBe(1)
     expect(res.failed).toEqual([{ id: a, error: '目标位置已存在同名文件' }])
     await expect(fs.access(a)).resolves.toBeUndefined()
-    await expect(fs.access(path.join(root, 'LoRA', '概念', 'c.safetensors'))).resolves.toBeUndefined()
+    await expect(
+      fs.access(path.join(root, 'LoRA', '概念', 'c.safetensors')),
+    ).resolves.toBeUndefined()
   })
 
   it('已在目标位置的模型跳过', async () => {
-    const id = await makeModel(path.join('LoRA', '背景', 'd.safetensors'), 'background')
-    const res = await handler(makeEvent(), { moves: [{ id, subCategory: 'background' }] })
+    const id = await makeModel(
+      path.join('LoRA', '背景', 'd.safetensors'),
+      'background',
+    )
+    const res = await handler(makeEvent(), {
+      moves: [{ id, subCategory: 'background' }],
+    })
     expect(res.moved).toBe(0)
     expect(res.skipped).toEqual([{ id, reason: 'same-dir' }])
     await expect(fs.access(id)).resolves.toBeUndefined()
   })
 
   it('空 moves 拒绝执行', async () => {
-    expect(await handler(makeEvent(), {})).toEqual({ error: '没有需要移动的模型' })
-    expect(await handler(makeEvent(), { moves: [] })).toEqual({ error: '没有需要移动的模型' })
+    expect(await handler(makeEvent(), {})).toEqual({
+      error: '没有需要移动的模型',
+    })
+    expect(await handler(makeEvent(), { moves: [] })).toEqual({
+      error: '没有需要移动的模型',
+    })
   })
 })
 
@@ -219,7 +271,10 @@ describe('F2 模型导入（复制/移动入台）', () => {
   it('复制导入：模型与 .txt/.civitai.info/预览图 sidecar 一并复制，源文件保留', async () => {
     const source = await makeSource()
     await fs.writeFile(path.join(srcDir, 'a.txt'), 'note')
-    await fs.writeFile(path.join(srcDir, 'a.civitai.info'), '{"trainedWords":["x"]}')
+    await fs.writeFile(
+      path.join(srcDir, 'a.civitai.info'),
+      '{"trainedWords":["x"]}',
+    )
     await fs.writeFile(path.join(srcDir, 'a.preview.png'), 'png')
     const target = path.join(root, 'lora')
     await fs.mkdir(target, { recursive: true })
@@ -230,10 +285,18 @@ describe('F2 模型导入（复制/移动入台）', () => {
     expect(res.error).toBeUndefined()
     expect(res.imported).toBe(1)
     expect(res.targetRelDir).toBe('lora')
-    await expect(fs.readFile(path.join(target, 'a.safetensors'), 'utf-8')).resolves.toBe('model-data')
-    await expect(fs.readFile(path.join(target, 'a.txt'), 'utf-8')).resolves.toBe('note')
-    await expect(fs.readFile(path.join(target, 'a.civitai.info'), 'utf-8')).resolves.toContain('trainedWords')
-    await expect(fs.readFile(path.join(target, 'a.preview.png'), 'utf-8')).resolves.toBe('png')
+    await expect(
+      fs.readFile(path.join(target, 'a.safetensors'), 'utf-8'),
+    ).resolves.toBe('model-data')
+    await expect(
+      fs.readFile(path.join(target, 'a.txt'), 'utf-8'),
+    ).resolves.toBe('note')
+    await expect(
+      fs.readFile(path.join(target, 'a.civitai.info'), 'utf-8'),
+    ).resolves.toContain('trainedWords')
+    await expect(
+      fs.readFile(path.join(target, 'a.preview.png'), 'utf-8'),
+    ).resolves.toBe('png')
     await expect(fs.access(source)).resolves.toBeUndefined()
   })
 
@@ -249,7 +312,9 @@ describe('F2 模型导入（复制/移动入台）', () => {
     expect(res.imported).toBe(1)
     await expect(fs.access(source)).rejects.toThrow()
     await expect(fs.access(path.join(srcDir, 'b.txt'))).rejects.toThrow()
-    await expect(fs.access(path.join(target, 'b.safetensors'))).resolves.toBeUndefined()
+    await expect(
+      fs.access(path.join(target, 'b.safetensors')),
+    ).resolves.toBeUndefined()
     await expect(fs.access(path.join(target, 'b.txt'))).resolves.toBeUndefined()
   })
 
@@ -264,8 +329,12 @@ describe('F2 模型导入（复制/移动入台）', () => {
 
     expect(res.imported).toBe(1)
     expect(res.renamed).toBe(1)
-    await expect(fs.readFile(path.join(target, 'a.safetensors'), 'utf-8')).resolves.toBe('existing')
-    await expect(fs.readFile(path.join(target, 'a (1).safetensors'), 'utf-8')).resolves.toBe('model-data')
+    await expect(
+      fs.readFile(path.join(target, 'a.safetensors'), 'utf-8'),
+    ).resolves.toBe('existing')
+    await expect(
+      fs.readFile(path.join(target, 'a (1).safetensors'), 'utf-8'),
+    ).resolves.toBe('model-data')
   })
 
   it('源文件已在库内 / 扩展名不支持 / 目标目录越界时拒绝', async () => {
@@ -283,7 +352,9 @@ describe('F2 模型导入（复制/移动入台）', () => {
     const badRes = await handler(makeEvent(), { mode: 'copy' })
     expect(badRes.failed[0].error).toContain('不支持')
 
-    const outsideTarget = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-import-out-'))
+    const outsideTarget = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-import-out-'),
+    )
     roots.push(outsideTarget)
     const good = await makeSource('c.safetensors')
     mockDialogs([good], outsideTarget)
@@ -301,7 +372,7 @@ describe('F2 模型导入（复制/移动入台）', () => {
     expect(splitModelFileName('a.safetensors.disabled')).toEqual({
       base: 'a',
       ext: '.safetensors',
-      disabled: true
+      disabled: true,
     })
     expect(isImportableModelFile('a.safetensors')).toBe(true)
     expect(isImportableModelFile('a.safetensors.disabled')).toBe(true)
@@ -329,9 +400,16 @@ describe('F2 模型导入（复制/移动入台）', () => {
   })
 
   it('取消任一对话框返回 canceled 且不写文件', async () => {
-    vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({ canceled: true, filePaths: [] })
-    expect(await handler(makeEvent(), { mode: 'copy' })).toEqual({ canceled: true })
-    expect(await handler(makeEvent(), { mode: 'bad' })).toEqual({ error: '无效的导入方式' })
+    vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({
+      canceled: true,
+      filePaths: [],
+    })
+    expect(await handler(makeEvent(), { mode: 'copy' })).toEqual({
+      canceled: true,
+    })
+    expect(await handler(makeEvent(), { mode: 'bad' })).toEqual({
+      error: '无效的导入方式',
+    })
   })
 })
 
@@ -340,19 +418,21 @@ describe('planRenameTarget（N1 重命名目标计算）', () => {
 
   it('同目录改名并保留扩展名', () => {
     expect(planRenameTarget(path.join(dir, 'a.safetensors'), 'b')).toEqual({
-      path: path.join(dir, 'b.safetensors')
+      path: path.join(dir, 'b.safetensors'),
     })
   })
 
   it('粘贴完整文件名时剥离原扩展名，避免双重扩展名', () => {
-    expect(planRenameTarget(path.join(dir, 'a.safetensors'), ' b.SAFETENSORS ')).toEqual({
-      path: path.join(dir, 'b.safetensors')
+    expect(
+      planRenameTarget(path.join(dir, 'a.safetensors'), ' b.SAFETENSORS '),
+    ).toEqual({
+      path: path.join(dir, 'b.safetensors'),
     })
   })
 
   it('名称未变化返回原路径', () => {
     expect(planRenameTarget(path.join(dir, 'a.safetensors'), 'a')).toEqual({
-      path: path.join(dir, 'a.safetensors')
+      path: path.join(dir, 'a.safetensors'),
     })
   })
 
@@ -361,9 +441,9 @@ describe('planRenameTarget（N1 重命名目标计算）', () => {
     expect(planRenameTarget(id, '   ').error).toContain('不能为空')
     expect(planRenameTarget(id, 'bad/name').error).toContain('非法字符')
     expect(planRenameTarget(id, 'x'.repeat(121)).error).toContain('过长')
-    expect(planRenameTarget(path.join(dir, 'x.safetensors.disabled'), 'y').error).toContain(
-      '先启用'
-    )
+    expect(
+      planRenameTarget(path.join(dir, 'x.safetensors.disabled'), 'y').error,
+    ).toContain('先启用')
   })
 })
 
@@ -402,11 +482,19 @@ describe('models:renameModel handler（N1）', () => {
     const res = await handler(makeEvent(), { id, name: 'b' })
 
     const newPath = path.join(root, 'lora', 'b.safetensors')
-    expect(res).toMatchObject({ path: newPath, renamedSidecars: 2, sidecarWarnings: [] })
+    expect(res).toMatchObject({
+      path: newPath,
+      renamedSidecars: 2,
+      sidecarWarnings: [],
+    })
     await expect(fs.access(id)).rejects.toThrow()
     await expect(fs.readFile(newPath, 'utf8')).resolves.toBe('model-data')
-    await expect(fs.readFile(path.join(root, 'lora', 'b.txt'), 'utf8')).resolves.toBe('说明文本')
-    await expect(fs.readFile(path.join(root, 'lora', 'b.preview.png'), 'utf8')).resolves.toBe('预览图')
+    await expect(
+      fs.readFile(path.join(root, 'lora', 'b.txt'), 'utf8'),
+    ).resolves.toBe('说明文本')
+    await expect(
+      fs.readFile(path.join(root, 'lora', 'b.preview.png'), 'utf8'),
+    ).resolves.toBe('预览图')
     // 标注随相对键迁移
     expect(getModelMeta(newPath)?.note).toBe('标注')
     expect(getModelMeta(id)).toBeNull()
@@ -420,7 +508,9 @@ describe('models:renameModel handler（N1）', () => {
 
     expect(res.error).toBe('目标文件名已存在')
     await expect(fs.readFile(id, 'utf8')).resolves.toBe('model-data')
-    await expect(fs.readFile(path.join(root, 'lora', 'b.safetensors'), 'utf8')).resolves.toBe('other')
+    await expect(
+      fs.readFile(path.join(root, 'lora', 'b.safetensors'), 'utf8'),
+    ).resolves.toBe('other')
   })
 
   it('sidecar 目标已存在时跳过且不覆盖，主文件改名成功并返回警告', async () => {
@@ -433,23 +523,36 @@ describe('models:renameModel handler（N1）', () => {
     expect(res.path).toBe(path.join(root, 'lora', 'b.safetensors'))
     expect(res.sidecarWarnings.length).toBeGreaterThan(0)
     // 已有目标 sidecar 内容不被覆盖，源 sidecar 保留
-    await expect(fs.readFile(path.join(root, 'lora', 'b.txt'), 'utf8')).resolves.toBe('已存在的说明')
-    await expect(fs.readFile(path.join(root, 'lora', 'a.txt'), 'utf8')).resolves.toBe('旧说明')
+    await expect(
+      fs.readFile(path.join(root, 'lora', 'b.txt'), 'utf8'),
+    ).resolves.toBe('已存在的说明')
+    await expect(
+      fs.readFile(path.join(root, 'lora', 'a.txt'), 'utf8'),
+    ).resolves.toBe('旧说明')
   })
 
   it('空名/非法字符/禁用模型/库外路径拒绝', async () => {
     const id = await makeModel()
-    expect((await handler(makeEvent(), { id, name: '   ' })).error).toContain('不能为空')
-    expect((await handler(makeEvent(), { id, name: 'bad/name' })).error).toContain('非法字符')
+    expect((await handler(makeEvent(), { id, name: '   ' })).error).toContain(
+      '不能为空',
+    )
+    expect(
+      (await handler(makeEvent(), { id, name: 'bad/name' })).error,
+    ).toContain('非法字符')
 
     const disabled = path.join(root, 'lora', 'd.safetensors.disabled')
     await fs.writeFile(disabled, 'model-data')
-    expect((await handler(makeEvent(), { id: disabled, name: 'e' })).error).toContain('先启用')
+    expect(
+      (await handler(makeEvent(), { id: disabled, name: 'e' })).error,
+    ).toContain('先启用')
 
-    const outside = path.join(os.tmpdir(), 'modelvault-rename-outside.safetensors')
-    expect((await handler(makeEvent(), { id: outside, name: 'x' })).error).toContain(
-      '不在当前根目录'
+    const outside = path.join(
+      os.tmpdir(),
+      'modelvault-rename-outside.safetensors',
     )
+    expect(
+      (await handler(makeEvent(), { id: outside, name: 'x' })).error,
+    ).toContain('不在当前根目录')
   })
 })
 
@@ -472,7 +575,9 @@ describe('破坏性文件操作的 realpath 归属（O6）', () => {
 
   /** 在库内创建指向库外的 junction，返回 { outsideDir, link, outsideFile } */
   async function makeOutsideLink(ctx, fileName = 'secret.safetensors') {
-    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-outside-'))
+    const outsideDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-outside-'),
+    )
     roots.push(outsideDir)
     const outsideFile = path.join(outsideDir, fileName)
     await fs.writeFile(outsideFile, 'outside-data')
@@ -489,10 +594,13 @@ describe('破坏性文件操作的 realpath 归属（O6）', () => {
     const { link, outsideFile } = await makeOutsideLink(ctx)
     const id = path.join(link, 'secret.safetensors')
 
-    const res = await getRegisteredHandler('models:toggleDisabled')(makeEvent(), {
-      id,
-      disabled: true
-    })
+    const res = await getRegisteredHandler('models:toggleDisabled')(
+      makeEvent(),
+      {
+        id,
+        disabled: true,
+      },
+    )
 
     expect(res.error).toBe('模型不在当前根目录内')
     await expect(fs.readFile(outsideFile, 'utf8')).resolves.toBe('outside-data')
@@ -505,12 +613,14 @@ describe('破坏性文件操作的 realpath 归属（O6）', () => {
 
     const res = await getRegisteredHandler('models:renameModel')(makeEvent(), {
       id,
-      name: 'renamed'
+      name: 'renamed',
     })
 
     expect(res.error).toBe('模型不在当前根目录内')
     await expect(fs.readFile(outsideFile, 'utf8')).resolves.toBe('outside-data')
-    await expect(fs.access(path.join(path.dirname(outsideFile), 'renamed.safetensors'))).rejects.toThrow()
+    await expect(
+      fs.access(path.join(path.dirname(outsideFile), 'renamed.safetensors')),
+    ).rejects.toThrow()
   })
 
   it('库内移动：目标目录为指向库外的 junction 时拒绝', async (ctx) => {
@@ -519,10 +629,12 @@ describe('破坏性文件操作的 realpath 归属（O6）', () => {
     const { link } = await makeOutsideLink(ctx)
     vi.mocked(dialog.showOpenDialog).mockResolvedValue({
       canceled: false,
-      filePaths: [link]
+      filePaths: [link],
     })
 
-    const res = await getRegisteredHandler('models:moveModelTo')(makeEvent(), { id: source })
+    const res = await getRegisteredHandler('models:moveModelTo')(makeEvent(), {
+      id: source,
+    })
 
     expect(res.error).toBe('目标文件夹真实路径不在当前模型库内')
     await expect(fs.readFile(source, 'utf8')).resolves.toBe('model-data')
@@ -532,9 +644,12 @@ describe('破坏性文件操作的 realpath 归属（O6）', () => {
     const { link, outsideFile } = await makeOutsideLink(ctx)
     const id = path.join(link, 'secret.safetensors')
 
-    const res = await getRegisteredHandler('models:organizeByTags')(makeEvent(), {
-      moves: [{ id, subCategory: 'role' }]
-    })
+    const res = await getRegisteredHandler('models:organizeByTags')(
+      makeEvent(),
+      {
+        moves: [{ id, subCategory: 'role' }],
+      },
+    )
 
     expect(res.moved).toBe(0)
     expect(res.skipped).toContainEqual({ id, reason: 'out-of-root' })

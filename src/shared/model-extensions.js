@@ -11,7 +11,7 @@ export const MODEL_EXTENSIONS = [
   { ext: '.ckpt', label: 'ckpt' },
   { ext: '.pt', label: 'pt' },
   { ext: '.pth', label: 'pth' },
-  { ext: '.bin', label: 'bin' }
+  { ext: '.bin', label: 'bin' },
 ]
 
 /** 扩展名（带点、小写）列表 */

@@ -29,7 +29,7 @@ function makeModel(id, overrides = {}) {
     note: '',
     subCategory: '',
     triggerWords: '',
-    ...overrides
+    ...overrides,
   }
 }
 
@@ -106,7 +106,9 @@ describe('ModelCard 修饰键点击（多选交互增强）', () => {
 
 describe('ModelCard NSFW 模糊开关', () => {
   it('nsfw 模型默认模糊（设置 nsfwBlur 默认开启）且显示红色 NSFW 角标', () => {
-    const wrapper = mountCard(makeModel('m1', { nsfw: true, coverUrl: 'mvimg://thumb/a.png' }))
+    const wrapper = mountCard(
+      makeModel('m1', { nsfw: true, coverUrl: 'mvimg://thumb/a.png' }),
+    )
     expect(wrapper.find('.cover img').classes()).toContain('blurred')
     expect(wrapper.find('.nsfw-badge').exists()).toBe(true)
     wrapper.unmount()
@@ -114,7 +116,9 @@ describe('ModelCard NSFW 模糊开关', () => {
 
   it('设置关闭模糊后 nsfw 模型封面不再模糊，红色 NSFW 角标保留', () => {
     state.settings.nsfwBlur = false
-    const wrapper = mountCard(makeModel('m1', { nsfw: true, coverUrl: 'mvimg://thumb/a.png' }))
+    const wrapper = mountCard(
+      makeModel('m1', { nsfw: true, coverUrl: 'mvimg://thumb/a.png' }),
+    )
     expect(wrapper.find('.cover img').classes()).not.toContain('blurred')
     expect(wrapper.find('.nsfw-badge').exists()).toBe(true)
     wrapper.unmount()
@@ -122,7 +126,9 @@ describe('ModelCard NSFW 模糊开关', () => {
 
   it('非 nsfw 模型不受开关影响，始终不模糊', () => {
     state.settings.nsfwBlur = true
-    const wrapper = mountCard(makeModel('m1', { nsfw: false, coverUrl: 'mvimg://thumb/a.png' }))
+    const wrapper = mountCard(
+      makeModel('m1', { nsfw: false, coverUrl: 'mvimg://thumb/a.png' }),
+    )
     expect(wrapper.find('.cover img').classes()).not.toContain('blurred')
     wrapper.unmount()
   })
@@ -137,7 +143,7 @@ describe('ModelCard 收藏按钮键盘行为（OPT-3 回归）', () => {
 
   it('Enter：仅切换收藏，不冒泡打开详情', async () => {
     window.api.models.setMetaFlags.mockResolvedValue({
-      meta: { favorite: true, nsfw: false, rating: 0 }
+      meta: { favorite: true, nsfw: false, rating: 0 },
     })
     const wrapper = mountCard(makeModel('m1'))
     const btn = wrapper.find('.fav-btn')
@@ -147,13 +153,16 @@ describe('ModelCard 收藏按钮键盘行为（OPT-3 回归）', () => {
     // 第二段：浏览器随后触发原生 click，收藏生效
     await btn.trigger('click')
     await settle()
-    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({ id: 'm1', favorite: true })
+    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({
+      id: 'm1',
+      favorite: true,
+    })
     expect(state.selectedId).toBeNull()
   })
 
   it('Space：仅切换收藏，不冒泡打开详情', async () => {
     window.api.models.setMetaFlags.mockResolvedValue({
-      meta: { favorite: true, nsfw: false, rating: 0 }
+      meta: { favorite: true, nsfw: false, rating: 0 },
     })
     const wrapper = mountCard(makeModel('m1'))
     const btn = wrapper.find('.fav-btn')
@@ -161,13 +170,16 @@ describe('ModelCard 收藏按钮键盘行为（OPT-3 回归）', () => {
     expect(state.selectedId).toBeNull()
     await btn.trigger('click')
     await settle()
-    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({ id: 'm1', favorite: true })
+    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({
+      id: 'm1',
+      favorite: true,
+    })
     expect(state.selectedId).toBeNull()
   })
 
   it('点击：切换收藏且不打开详情', async () => {
     window.api.models.setMetaFlags.mockResolvedValue({
-      meta: { favorite: true, nsfw: false, rating: 0 }
+      meta: { favorite: true, nsfw: false, rating: 0 },
     })
     const wrapper = mountCard(makeModel('m1'))
     await wrapper.find('.fav-btn').trigger('click')
@@ -178,14 +190,17 @@ describe('ModelCard 收藏按钮键盘行为（OPT-3 回归）', () => {
 
   it('已收藏时 Enter 切换为取消收藏', async () => {
     window.api.models.setMetaFlags.mockResolvedValue({
-      meta: { favorite: false, nsfw: false, rating: 0 }
+      meta: { favorite: false, nsfw: false, rating: 0 },
     })
     const wrapper = mountCard(makeModel('m1', { favorite: true }))
     const btn = wrapper.find('.fav-btn')
     await btn.trigger('keydown', { key: 'Enter' })
     await btn.trigger('click')
     await settle()
-    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({ id: 'm1', favorite: false })
+    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({
+      id: 'm1',
+      favorite: false,
+    })
     expect(state.selectedId).toBeNull()
   })
 })
@@ -205,7 +220,7 @@ describe('ModelCard 封面悬停轮播', () => {
     return Array.from({ length: count }, (_, i) => ({
       rel: `${prefix}${i}.png`,
       path: `/lib/${prefix}${i}.png`,
-      url: `mvimg://local/${prefix}${i}.png`
+      url: `mvimg://local/${prefix}${i}.png`,
     }))
   }
 
@@ -240,7 +255,11 @@ describe('ModelCard 封面悬停轮播', () => {
   it('少于两张封面时悬停不启动轮播', async () => {
     const covers = makeCovers('a', 1)
     const wrapper = mountCard(
-      makeModel('m1', { cover: covers[0].path, covers, coverUrl: 'mvimg://thumb/a0.png' })
+      makeModel('m1', {
+        cover: covers[0].path,
+        covers,
+        coverUrl: 'mvimg://thumb/a0.png',
+      }),
     )
     await wrapper.find('.cover').trigger('mouseenter')
     await vi.advanceTimersByTimeAsync(HOVER_DELAY + CYCLE_INTERVAL * 2)
@@ -252,7 +271,11 @@ describe('ModelCard 封面悬停轮播', () => {
   it('悬停停稳后从默认封面下一张开始轮播并循环', async () => {
     const covers = makeCovers('b', 3)
     const wrapper = mountCard(
-      makeModel('m1', { cover: covers[0].path, covers, coverUrl: 'mvimg://thumb/b0.png' })
+      makeModel('m1', {
+        cover: covers[0].path,
+        covers,
+        coverUrl: 'mvimg://thumb/b0.png',
+      }),
     )
     await wrapper.find('.cover').trigger('mouseenter')
     await vi.advanceTimersByTimeAsync(HOVER_DELAY)
@@ -271,7 +294,11 @@ describe('ModelCard 封面悬停轮播', () => {
     // 第二张携带主进程推送的缩略图地址：预载与展示均走 thumbUrl
     covers[1].thumbUrl = 'mvimg://thumb/t1.jpg'
     const wrapper = mountCard(
-      makeModel('m1', { cover: covers[0].path, covers, coverUrl: 'mvimg://thumb/t0.png' })
+      makeModel('m1', {
+        cover: covers[0].path,
+        covers,
+        coverUrl: 'mvimg://thumb/t0.png',
+      }),
     )
     await wrapper.find('.cover').trigger('mouseenter')
     await vi.advanceTimersByTimeAsync(HOVER_DELAY)
@@ -284,7 +311,11 @@ describe('ModelCard 封面悬停轮播', () => {
     covers[1].thumbUrl = 'mvimg://thumb/u1.jpg'
     failUrls.add(covers[1].thumbUrl)
     const wrapper = mountCard(
-      makeModel('m1', { cover: covers[0].path, covers, coverUrl: 'mvimg://thumb/u0.png' })
+      makeModel('m1', {
+        cover: covers[0].path,
+        covers,
+        coverUrl: 'mvimg://thumb/u0.png',
+      }),
     )
     await wrapper.find('.cover').trigger('mouseenter')
     await vi.advanceTimersByTimeAsync(HOVER_DELAY)
@@ -299,7 +330,11 @@ describe('ModelCard 封面悬停轮播', () => {
   it('光标扫过未停稳不触发轮播', async () => {
     const covers = makeCovers('c', 2)
     const wrapper = mountCard(
-      makeModel('m1', { cover: covers[0].path, covers, coverUrl: 'mvimg://thumb/c0.png' })
+      makeModel('m1', {
+        cover: covers[0].path,
+        covers,
+        coverUrl: 'mvimg://thumb/c0.png',
+      }),
     )
     await wrapper.find('.cover').trigger('mouseenter')
     await vi.advanceTimersByTimeAsync(HOVER_DELAY - 100)
@@ -312,7 +347,11 @@ describe('ModelCard 封面悬停轮播', () => {
   it('离开封面区立即停播并恢复默认封面', async () => {
     const covers = makeCovers('d', 2)
     const wrapper = mountCard(
-      makeModel('m1', { cover: covers[0].path, covers, coverUrl: 'mvimg://thumb/d0.png' })
+      makeModel('m1', {
+        cover: covers[0].path,
+        covers,
+        coverUrl: 'mvimg://thumb/d0.png',
+      }),
     )
     await wrapper.find('.cover').trigger('mouseenter')
     await vi.advanceTimersByTimeAsync(HOVER_DELAY)
@@ -329,7 +368,11 @@ describe('ModelCard 封面悬停轮播', () => {
     const covers = makeCovers('e', 3)
     failUrls.add(covers[1].url)
     const wrapper = mountCard(
-      makeModel('m1', { cover: covers[0].path, covers, coverUrl: 'mvimg://thumb/e0.png' })
+      makeModel('m1', {
+        cover: covers[0].path,
+        covers,
+        coverUrl: 'mvimg://thumb/e0.png',
+      }),
     )
     await wrapper.find('.cover').trigger('mouseenter')
     await vi.advanceTimersByTimeAsync(HOVER_DELAY)

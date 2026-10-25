@@ -16,7 +16,7 @@ import { fakeUserData } from './setup'
 vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
   clipboard: { read: vi.fn() },
-  dialog: { showOpenDialog: vi.fn() }
+  dialog: { showOpenDialog: vi.fn() },
 }))
 
 import { clipboard } from 'electron'
@@ -26,13 +26,21 @@ import {
   importCoverFromPath,
   isValidImageFile,
   pruneOrphanCovers,
-  saveClipboardImage
+  saveClipboardImage,
 } from '../src/main/services/covers'
-import { getCoversDir, loadData, setDataRoot, setModelMeta, wasDataReset } from '../src/main/services/store'
+import {
+  getCoversDir,
+  loadData,
+  setDataRoot,
+  setModelMeta,
+  wasDataReset,
+} from '../src/main/services/store'
 import { DATA_DIR, COVERS_DIR } from '../src/main/services/store'
 
 /** 最小 PNG 文件头（魔数校验所需字节均在文件头 12 字节内） */
-const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
+const PNG_MAGIC = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13,
+])
 
 let root
 const roots = []
@@ -65,7 +73,9 @@ describe('hasImageMagic（魔数校验）', () => {
     const empty = path.join(root, 'empty.png')
     await fs.writeFile(empty, Buffer.alloc(0))
     expect(await hasImageMagic(empty)).toBe(false)
-    await expect(hasImageMagic(path.join(root, 'missing.png'))).rejects.toThrow()
+    await expect(
+      hasImageMagic(path.join(root, 'missing.png')),
+    ).rejects.toThrow()
   })
 })
 
@@ -144,8 +154,12 @@ describe('importCoverFromPath', () => {
     const realStat = fs.stat.bind(fs)
     vi.spyOn(fs, 'stat').mockImplementation(async (p, ...rest) =>
       String(p).endsWith('boundary.png')
-        ? { size: 50 * 1024 * 1024, isFile: () => true, isDirectory: () => false }
-        : realStat(p, ...rest)
+        ? {
+            size: 50 * 1024 * 1024,
+            isFile: () => true,
+            isDirectory: () => false,
+          }
+        : realStat(p, ...rest),
     )
     try {
       const res = await importCoverFromPath(src)
@@ -188,7 +202,9 @@ describe('pruneOrphanCovers（孤儿封面清理）', () => {
     await fs.writeFile(keep, PNG_MAGIC)
     await fs.writeFile(orphan, PNG_MAGIC)
     // 元数据引用 keep.png（模型文件仅需路径可换算，无需真实内容）
-    setModelMeta(path.join(root, 'm.safetensors'), { cover: `${DATA_DIR}/${COVERS_DIR}/keep.png` })
+    setModelMeta(path.join(root, 'm.safetensors'), {
+      cover: `${DATA_DIR}/${COVERS_DIR}/keep.png`,
+    })
 
     await pruneOrphanCovers()
     await expect(fs.access(keep)).resolves.toBeUndefined()
@@ -250,7 +266,9 @@ describe('saveClipboardImage（剪贴板图片大小上限）', () => {
     // 真实 51MB 内存无需分配
     const bigItem = {
       types: ['image/png'],
-      getType: async () => ({ arrayBuffer: async () => ({ byteLength: 51 * 1024 * 1024 }) })
+      getType: async () => ({
+        arrayBuffer: async () => ({ byteLength: 51 * 1024 * 1024 }),
+      }),
     }
     vi.mocked(clipboard.read).mockResolvedValue([bigItem])
 
@@ -264,7 +282,7 @@ describe('saveClipboardImage（剪贴板图片大小上限）', () => {
   it('合法剪贴板图片写入封面目录并返回绝对路径', async () => {
     const item = {
       types: ['image/png'],
-      getType: async () => new Blob([PNG_MAGIC], { type: 'image/png' })
+      getType: async () => new Blob([PNG_MAGIC], { type: 'image/png' }),
     }
     vi.mocked(clipboard.read).mockResolvedValue([item])
 
@@ -275,7 +293,9 @@ describe('saveClipboardImage（剪贴板图片大小上限）', () => {
   })
 
   it('剪贴板无图片内容时返回明确错误', async () => {
-    vi.mocked(clipboard.read).mockResolvedValue([{ types: ['text/plain'], getType: async () => null }])
+    vi.mocked(clipboard.read).mockResolvedValue([
+      { types: ['text/plain'], getType: async () => null },
+    ])
     const res = await saveClipboardImage()
     expect(res.error).toContain('剪贴板中没有图片')
   })

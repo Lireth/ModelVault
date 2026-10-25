@@ -52,7 +52,7 @@ function makeModel(id, overrides = {}) {
     params: null,
     coverUrl: '',
     covers: [],
-    ...overrides
+    ...overrides,
   }
 }
 
@@ -77,15 +77,27 @@ function mountInScroller(models) {
   container.style.overflowY = 'auto'
   container.style.height = '600px'
   document.body.appendChild(container)
-  Object.defineProperty(container, 'clientHeight', { value: 600, configurable: true })
-  Object.defineProperty(container, 'scrollTop', { value: 0, writable: true, configurable: true })
-  const wrapper = mount(VirtualModelList, { props: { models }, attachTo: container })
+  Object.defineProperty(container, 'clientHeight', {
+    value: 600,
+    configurable: true,
+  })
+  Object.defineProperty(container, 'scrollTop', {
+    value: 0,
+    writable: true,
+    configurable: true,
+  })
+  const wrapper = mount(VirtualModelList, {
+    props: { models },
+    attachTo: container,
+  })
   return { wrapper, container }
 }
 
 /** 聚焦指定模型行 */
 function focusRow(wrapper, id) {
-  wrapper.element.querySelector(`[data-model-id="${globalThis.CSS.escape(id)}"]`)?.focus()
+  wrapper.element
+    .querySelector(`[data-model-id="${globalThis.CSS.escape(id)}"]`)
+    ?.focus()
 }
 
 /** 滚动到指定位置并等待 rAF 落定 */
@@ -100,7 +112,9 @@ describe('VirtualModelList 虚拟滚动窗口', () => {
     const models = makeModels(60)
     const { wrapper } = mountInScroller(models)
     await wrapper.vm.$nextTick()
-    expect(wrapper.find('.virtual-list').element.style.height).toBe(`${60 * 36}px`)
+    expect(wrapper.find('.virtual-list').element.style.height).toBe(
+      `${60 * 36}px`,
+    )
     // 窗口行数：ceil(600/36)=17 + 1 + 8*2 = 34
     const rows = wrapper.findAll('.list-row')
     expect(rows).toHaveLength(34)
@@ -166,12 +180,16 @@ describe('VirtualModelList 键盘导航与行激活', () => {
     const { wrapper } = mountInScroller(models)
     await wrapper.vm.$nextTick()
     // 行激活在行级处理（与卡片 article 的 Enter/Space 同一模式）
-    await wrapper.find('[data-model-id="m1"]').trigger('keydown', { key: 'Enter' })
+    await wrapper
+      .find('[data-model-id="m1"]')
+      .trigger('keydown', { key: 'Enter' })
     expect(state.selectedId).toBe('m1')
 
     state.selectedId = null
     state.multiSelect.active = true
-    await wrapper.find('[data-model-id="m1"]').trigger('keydown', { key: 'Enter' })
+    await wrapper
+      .find('[data-model-id="m1"]')
+      .trigger('keydown', { key: 'Enter' })
     expect(state.multiSelect.ids).toEqual(['m1'])
     expect(state.selectedId).toBeNull()
     wrapper.unmount()
@@ -195,7 +213,9 @@ describe('VirtualModelList 键盘导航与行激活', () => {
     state.models = models
     const { wrapper } = mountInScroller(models)
     await wrapper.vm.$nextTick()
-    await wrapper.find('[data-model-id="m1"]').trigger('click', { ctrlKey: true })
+    await wrapper
+      .find('[data-model-id="m1"]')
+      .trigger('click', { ctrlKey: true })
     expect(state.multiSelect.active).toBe(true)
     expect(state.multiSelect.ids).toEqual(['m1'])
     expect(state.selectedId).toBeNull()
@@ -212,7 +232,9 @@ describe('VirtualModelList 键盘导航与行激活', () => {
     await row.trigger('click', { ctrlKey: true })
     expect(state.multiSelect.ids).toEqual(['m1'])
     // Ctrl+点击已设锚 m1：Shift+点击 m3 选中 m1..m3 范围（store 层语义在 multiselect.test.js 覆盖）
-    await wrapper.find('[data-model-id="m3"]').trigger('click', { shiftKey: true })
+    await wrapper
+      .find('[data-model-id="m3"]')
+      .trigger('click', { shiftKey: true })
     expect(state.multiSelect.ids).toEqual(['m1', 'm2', 'm3'])
     wrapper.unmount()
   })
@@ -222,7 +244,9 @@ describe('VirtualModelList 键盘导航与行激活', () => {
     state.models = models
     const { wrapper } = mountInScroller(models)
     await wrapper.vm.$nextTick()
-    await wrapper.find('[data-model-id="m2"]').trigger('click', { shiftKey: true })
+    await wrapper
+      .find('[data-model-id="m2"]')
+      .trigger('click', { shiftKey: true })
     expect(state.multiSelect.active).toBe(true)
     expect(state.multiSelect.ids).toEqual(['m2'])
     expect(state.selectedId).toBeNull()
@@ -233,7 +257,7 @@ describe('VirtualModelList 键盘导航与行激活', () => {
 describe('VirtualModelList 焦点行快捷动作', () => {
   it('F 收藏焦点行', async () => {
     window.api.models.setMetaFlags.mockResolvedValue({
-      meta: { favorite: true, nsfw: false, rating: 0 }
+      meta: { favorite: true, nsfw: false, rating: 0 },
     })
     const models = makeModels(5)
     state.models = models
@@ -242,7 +266,10 @@ describe('VirtualModelList 焦点行快捷动作', () => {
     focusRow(wrapper, 'm2')
     await wrapper.find('.virtual-list').trigger('keydown', { key: 'f' })
     await settle()
-    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({ id: 'm2', favorite: true })
+    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({
+      id: 'm2',
+      favorite: true,
+    })
     wrapper.unmount()
   })
 
@@ -275,7 +302,12 @@ describe('VirtualModelList 列显隐与行内容', () => {
     state.settings.showParams = false
     await wrapper.vm.$nextTick()
     const headers = wrapper.findAll('.list-header-cell')
-    expect(headers.map((h) => h.text())).toEqual(['名称', '分类', '修改日期', '评分'])
+    expect(headers.map((h) => h.text())).toEqual([
+      '名称',
+      '分类',
+      '修改日期',
+      '评分',
+    ])
     expect(wrapper.find('.col-size').exists()).toBe(false)
     expect(wrapper.find('.col-params').exists()).toBe(false)
     wrapper.unmount()
@@ -288,9 +320,16 @@ describe('VirtualModelList 列显隐与行内容', () => {
         type: 'lora',
         subCategory: 'role',
         rating: 3,
-        params: { steps: 28, cfgMin: 5, cfgMax: 7, sampler: 'DPM++ 2M', resMin: 768, resMax: 1024 }
+        params: {
+          steps: 28,
+          cfgMin: 5,
+          cfgMax: 7,
+          sampler: 'DPM++ 2M',
+          resMin: 768,
+          resMax: 1024,
+        },
       }),
-      makeModel('m1', { rating: 0 })
+      makeModel('m1', { rating: 0 }),
     ]
     const { wrapper } = mountInScroller(models)
     await wrapper.vm.$nextTick()
@@ -298,7 +337,9 @@ describe('VirtualModelList 列显隐与行内容', () => {
     expect(rows[0].find('.row-name').text()).toBe('我的 LoRA')
     expect(rows[0].find('.col-type').text()).toBe('LoRA · 角色')
     expect(rows[0].find('.col-rating').text()).toBe('★★★☆☆')
-    expect(rows[0].find('.col-params').text()).toBe('28 步 · CFG 5~7 · DPM++ 2M · 768~1024px')
+    expect(rows[0].find('.col-params').text()).toBe(
+      '28 步 · CFG 5~7 · DPM++ 2M · 768~1024px',
+    )
     expect(rows[1].find('.col-rating').text()).toBe('—')
     expect(rows[1].find('.col-params').text()).toBe('未设置推荐参数')
     wrapper.unmount()

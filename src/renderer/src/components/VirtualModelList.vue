@@ -14,7 +14,7 @@ import {
   toggleFavorite,
   toggleMultiSelectMode,
   toggleSelect,
-  typeInfo
+  typeInfo,
 } from '../store/appStore'
 import { useVirtualScroll } from '../composables/useVirtualScroll'
 
@@ -30,22 +30,23 @@ import { useVirtualScroll } from '../composables/useVirtualScroll'
  */
 
 const props = defineProps({
-  models: { type: Array, required: true }
+  models: { type: Array, required: true },
 })
 
 /** 行高（px，固定）与上下缓冲行数 */
 const ROW_HEIGHT = 36
 const OVERSCAN_ROWS = 8
 
-const { rootEl, startIndex, endIndex, indexById, scrollToRow, focusModel } = useVirtualScroll({
-  rowHeight: ROW_HEIGHT,
-  rowCount: () => props.models.length,
-  models: () => props.models,
-  overscan: OVERSCAN_ROWS,
-  // 单列行模型：行号与模型索引恒等
-  indexAtRow: (row) => row,
-  rowOfIndex: (index) => index
-})
+const { rootEl, startIndex, endIndex, indexById, scrollToRow, focusModel } =
+  useVirtualScroll({
+    rowHeight: ROW_HEIGHT,
+    rowCount: () => props.models.length,
+    models: () => props.models,
+    overscan: OVERSCAN_ROWS,
+    // 单列行模型：行号与模型索引恒等
+    indexAtRow: (row) => row,
+    rowOfIndex: (index) => index,
+  })
 
 /** 列定义：key → 表头文案与 grid 列宽（name/params 弹性，其余定宽） */
 const COL_DEFS = {
@@ -54,7 +55,7 @@ const COL_DEFS = {
   size: { label: '大小', width: '76px' },
   mtime: { label: '修改日期', width: '92px' },
   rating: { label: '评分', width: '88px' },
-  params: { label: '推荐参数', width: 'minmax(120px, 1.5fr)' }
+  params: { label: '推荐参数', width: 'minmax(120px, 1.5fr)' },
 }
 
 /** 可见列（随设置项显隐，与卡片展示开关同源） */
@@ -68,12 +69,14 @@ const visibleCols = computed(() => {
 })
 
 const gridTemplate = computed(() =>
-  visibleCols.value.map((k) => COL_DEFS[k].width).join(' ')
+  visibleCols.value.map((k) => COL_DEFS[k].width).join(' '),
 )
 
 const totalHeight = computed(() => props.models.length * ROW_HEIGHT)
 
-const visibleModels = computed(() => props.models.slice(startIndex.value, endIndex.value))
+const visibleModels = computed(() =>
+  props.models.slice(startIndex.value, endIndex.value),
+)
 
 /** 多选模式与选中态（E4，与卡片同一语义） */
 const selectedSet = multiSelectIdSet
@@ -86,7 +89,8 @@ function displayName(m) {
 /** 分类列文本：主分类标签 + 已标注的二级标签 */
 function typeText(m) {
   const base = typeInfo(m.type).label
-  if (!['other', 'lora', 'checkpoint'].includes(m.type) || !m.subCategory) return base
+  if (!['other', 'lora', 'checkpoint'].includes(m.type) || !m.subCategory)
+    return base
   const sub = subCategoryInfo(m.subCategory)
   return sub ? `${base} · ${sub.label}` : base
 }
@@ -138,12 +142,19 @@ function onContextMenu(m) {
  * Home/End 跳首行/末行；与网格同一交互语言）。
  */
 function onListKeydown(e) {
-  const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
+  const keys = [
+    'ArrowLeft',
+    'ArrowRight',
+    'ArrowUp',
+    'ArrowDown',
+    'Home',
+    'End',
+  ]
   if (!keys.includes(e.key)) {
     handleModelActionKey(e, {
       models: props.models,
       indexById: indexById.value,
-      focusModel
+      focusModel,
     })
     return
   }
@@ -189,7 +200,8 @@ function onListKeydown(e) {
         :key="key"
         class="list-header-cell"
         :class="`col-${key}`"
-      >{{ COL_DEFS[key].label }}</span>
+        >{{ COL_DEFS[key].label }}</span
+      >
     </div>
 
     <div
@@ -198,7 +210,10 @@ function onListKeydown(e) {
       :style="{ height: `${totalHeight}px` }"
       @keydown="onListKeydown"
     >
-      <div class="list-window" :style="{ transform: `translateY(${startIndex * ROW_HEIGHT}px)` }">
+      <div
+        class="list-window"
+        :style="{ transform: `translateY(${startIndex * ROW_HEIGHT}px)` }"
+      >
         <div
           v-for="m in visibleModels"
           :key="m.id"
@@ -208,7 +223,9 @@ function onListKeydown(e) {
           :title="m.id"
           tabindex="0"
           role="button"
-          :aria-pressed="state.multiSelect.active ? selectedSet.has(m.id) : undefined"
+          :aria-pressed="
+            state.multiSelect.active ? selectedSet.has(m.id) : undefined
+          "
           :aria-label="`查看模型 ${displayName(m)} 的详情`"
           :data-model-id="m.id"
           @click="onRowClick(m, $event)"
@@ -226,7 +243,20 @@ function onListKeydown(e) {
               :aria-checked="selectedSet.has(m.id)"
               title="选中/取消选中"
               @click.stop="toggleSelect(m.id)"
-            ><svg v-if="selectedSet.has(m.id)" viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8" /></svg></span>
+              ><svg
+                v-if="selectedSet.has(m.id)"
+                viewBox="0 0 16 16"
+                width="10"
+                height="10"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M3 8.5l3.2 3.2L13 4.8" /></svg
+            ></span>
             <button
               class="row-fav"
               :class="{ active: m.favorite }"
@@ -235,25 +265,55 @@ function onListKeydown(e) {
               @keydown.enter.stop.prevent
               @keydown.space.stop.prevent
             >
-              <svg viewBox="0 0 24 24" width="13" height="13" :fill="m.favorite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true">
-                <path d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z" />
+              <svg
+                viewBox="0 0 24 24"
+                width="13"
+                height="13"
+                :fill="m.favorite ? 'currentColor' : 'none'"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path
+                  d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z"
+                />
               </svg>
             </button>
             <span class="row-name" :title="m.name">{{ displayName(m) }}</span>
-            <span v-if="m.nsfw" class="mini-badge nsfw" title="NSFW 标记">NSFW</span>
-            <span v-if="m.suspect" class="mini-badge suspect" title="文件疑似损坏（结构校验失败或 0 字节）">损坏</span>
-            <span v-if="m.disabled" class="mini-badge disabled" title="已禁用（文件名带 .disabled 后缀）">禁用</span>
+            <span v-if="m.nsfw" class="mini-badge nsfw" title="NSFW 标记"
+              >NSFW</span
+            >
+            <span
+              v-if="m.suspect"
+              class="mini-badge suspect"
+              title="文件疑似损坏（结构校验失败或 0 字节）"
+              >损坏</span
+            >
+            <span
+              v-if="m.disabled"
+              class="mini-badge disabled"
+              title="已禁用（文件名带 .disabled 后缀）"
+              >禁用</span
+            >
           </span>
           <span class="list-cell col-type">{{ typeText(m) }}</span>
-          <span v-if="state.settings.showSize" class="list-cell col-size">{{ formatSize(m.size) }}</span>
-          <span v-if="state.settings.showMtime" class="list-cell col-mtime">{{ formatDate(m.mtimeMs) }}</span>
-          <span class="list-cell col-rating" :class="{ rated: m.rating > 0 }">{{ ratingText(m) }}</span>
+          <span v-if="state.settings.showSize" class="list-cell col-size">{{
+            formatSize(m.size)
+          }}</span>
+          <span v-if="state.settings.showMtime" class="list-cell col-mtime">{{
+            formatDate(m.mtimeMs)
+          }}</span>
+          <span class="list-cell col-rating" :class="{ rated: m.rating > 0 }">{{
+            ratingText(m)
+          }}</span>
           <span
             v-if="state.settings.showParams"
             class="list-cell col-params"
             :class="{ empty: !formatParamSummary(m.params) }"
             :title="formatParamSummary(m.params)"
-          >{{ formatParamSummary(m.params) || '未设置推荐参数' }}</span>
+            >{{ formatParamSummary(m.params) || '未设置推荐参数' }}</span
+          >
         </div>
       </div>
     </div>
@@ -313,7 +373,8 @@ function onListKeydown(e) {
   cursor: pointer;
   font-size: var(--font-xs);
   color: var(--text);
-  transition: background var(--dur-fast) var(--ease-out),
+  transition:
+    background var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out);
 }
 

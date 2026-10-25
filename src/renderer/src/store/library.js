@@ -6,7 +6,7 @@ import {
   replaceSettings,
   effectiveModelHash,
   setHashOverride,
-  clearHashOverrides
+  clearHashOverrides,
 } from './state'
 import { applyCoverOverrides, clearCoverOverrides } from './cover-overrides'
 import { toast } from './toast'
@@ -25,7 +25,8 @@ import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
  * 每次调用返回的 MediaQueryList 状态总是最新的。
  */
 function getSystemThemeQuery() {
-  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+  return typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function'
     ? window.matchMedia('(prefers-color-scheme: light)')
     : null
 }
@@ -35,7 +36,8 @@ function getSystemThemeQuery() {
  * 主进程（原生标题栏配色）只认 dark/light，IPC 一律发送解析后的有效主题。
  */
 export function resolveTheme(mode) {
-  if (mode === 'system') return getSystemThemeQuery()?.matches ? 'light' : 'dark'
+  if (mode === 'system')
+    return getSystemThemeQuery()?.matches ? 'light' : 'dark'
   return mode === 'light' ? 'light' : 'dark'
 }
 
@@ -79,7 +81,9 @@ export async function initApp() {
     // 与激活库是否失效无关——其他已保存库同样可能盘符未挂载
     state.missingRoots = Array.isArray(data.rootStatuses)
       ? data.rootStatuses
-          .filter((r) => r && r.exists === false && typeof r.folder === 'string')
+          .filter(
+            (r) => r && r.exists === false && typeof r.folder === 'string',
+          )
           .map((r) => r.folder.toLowerCase())
       : []
     replaceSettings({ ...defaultSettings(), ...data.settings })
@@ -94,7 +98,11 @@ export async function initApp() {
       // 库路径失效（被移动/重命名/盘符未挂载）：离线页/横幅承担提示与
       // 恢复入口，不再触发注定失败的自动扫描与错误 toast
       state.folderMissing = true
-    } else if (state.folder && Array.isArray(cached?.models) && cached.models.length > 0) {
+    } else if (
+      state.folder &&
+      Array.isArray(cached?.models) &&
+      cached.models.length > 0
+    ) {
       // 秒开上次索引；autoScan 开启时后台校验，关闭时保持缓存展示
       // OP-02：索引装饰结果自带最新缩略图 URL，展示覆盖从空开始
       clearCoverOverrides()
@@ -103,7 +111,7 @@ export async function initApp() {
       replaceModels(cached.models)
       state.lastScan = {
         count: cached.models.length,
-        durationMs: cached.durationMs || 0
+        durationMs: cached.durationMs || 0,
       }
       state.booting = false
       if (state.settings.autoScan !== false) {
@@ -150,7 +158,10 @@ export function applyTheme(theme) {
  * @param {string} accentColor 预设 key 或 #rrggbb
  * @param {string} [effective] 有效主题（缺省按当前设置解析）
  */
-export function applyAccent(accentColor, effective = resolveTheme(state.settings.theme)) {
+export function applyAccent(
+  accentColor,
+  effective = resolveTheme(state.settings.theme),
+) {
   const variant = effective === 'light' ? 'light' : 'dark'
   const preset = ACCENT_PRESETS.find((p) => p.key === accentColor)
   let accent
@@ -216,7 +227,12 @@ export async function saveSettings(patch) {
 export async function chooseFolder() {
   // 扫描/增量刷新/后台校验/导入进行中拒绝切换目录（S2/B-01）：
   // 否则目录已切、列表未刷新，留下半状态
-  if (state.scanning || state.partialScanning || state.backgroundScanning || state.importing) {
+  if (
+    state.scanning ||
+    state.partialScanning ||
+    state.backgroundScanning ||
+    state.importing
+  ) {
     toast('warn', '正在扫描、校验或导入中，请稍候')
     return
   }
@@ -239,7 +255,12 @@ export async function chooseFolder() {
  * @param {string} folder 目标根目录绝对路径
  */
 export async function switchRoot(folder) {
-  if (state.scanning || state.partialScanning || state.backgroundScanning || state.importing) {
+  if (
+    state.scanning ||
+    state.partialScanning ||
+    state.backgroundScanning ||
+    state.importing
+  ) {
     toast('warn', '正在扫描、校验或导入中，请稍候')
     return
   }
@@ -277,12 +298,12 @@ export async function switchRoot(folder) {
       markRootAvailable(state.folder)
       state.lastScan = {
         count: res.models.length,
-        durationMs: res.durationMs || 0
+        durationMs: res.durationMs || 0,
       }
       applyLibrarySettings(res.settings)
       toast(
         'success',
-        `已秒开本地索引（${res.models.length} 个模型），正在后台校验…`
+        `已秒开本地索引（${res.models.length} 个模型），正在后台校验…`,
       )
       // 后台校验：不进入 scanning 遮罩；完成后整体替换为磁盘真实结果
       void scanModels(state.folder, { background: true })
@@ -307,7 +328,7 @@ export async function removeRoot(folder) {
     return
   }
   const next = (state.settings.modelsFolders || []).filter(
-    (f) => f.toLowerCase() !== folder.toLowerCase()
+    (f) => f.toLowerCase() !== folder.toLowerCase(),
   )
   const ok = await saveSettings({ modelsFolders: next })
   if (ok) toast('success', '已从模型库列表移除（磁盘数据不受影响）')
@@ -324,7 +345,12 @@ export async function removeRoot(folder) {
  */
 export async function relocateFolder() {
   // 与 chooseFolder 同规则：扫描/校验/导入进行中拒绝切换，避免半状态
-  if (state.scanning || state.partialScanning || state.backgroundScanning || state.importing) {
+  if (
+    state.scanning ||
+    state.partialScanning ||
+    state.backgroundScanning ||
+    state.importing
+  ) {
     toast('warn', '正在扫描、校验或导入中，请稍候')
     return
   }
@@ -339,7 +365,7 @@ export async function relocateFolder() {
     if (oldFolder && oldFolder.toLowerCase() !== folder.toLowerCase()) {
       const lower = oldFolder.toLowerCase()
       const next = (state.settings.modelsFolders || []).filter(
-        (f) => f.toLowerCase() !== lower
+        (f) => f.toLowerCase() !== lower,
       )
       await saveSettings({ modelsFolders: next })
       // 死条目从失效清单一并移除：库列表已不含该路径，标记失去对象
@@ -363,14 +389,20 @@ export async function relocateFolder() {
  */
 export async function scanModels(folder = state.folder, options = {}) {
   const background = options.background === true
-  const targetRoot = typeof folder === 'string' && folder ? folder : state.folder
+  const targetRoot =
+    typeof folder === 'string' && folder ? folder : state.folder
   if (!targetRoot) {
     toast('warn', '请先选择模型文件夹')
     return false
   }
   // 渲染层防重入（S2/B-01）：主进程虽会拒绝并发扫描，但入口先拦截可避免误导性错误弹窗。
   // 增量刷新在途时同样拒绝：它已持有主进程扫描锁，此时发起全量扫描只会被拒绝。
-  if (state.scanning || state.backgroundScanning || state.partialScanning || state.importing) {
+  if (
+    state.scanning ||
+    state.backgroundScanning ||
+    state.partialScanning ||
+    state.importing
+  ) {
     if (!background) {
       toast(
         'warn',
@@ -378,7 +410,7 @@ export async function scanModels(folder = state.folder, options = {}) {
           ? '正在增量刷新，请稍候'
           : state.importing
             ? '正在导入模型，请稍候'
-            : '正在扫描或校验中，请稍候'
+            : '正在扫描或校验中，请稍候',
       )
     }
     return false
@@ -427,14 +459,21 @@ export async function scanModels(folder = state.folder, options = {}) {
     // 库设置随模型库走：切库扫描（chooseFolder/switchRoot）返回目标库的设置
     applyLibrarySettings(res.settings)
     // A-02：主进程自动重关联了被移动/重命名模型的标注时，告知用户数量
-    const relinkedSuffix = res.relinked > 0
-      ? `（已自动重新关联 ${res.relinked} 个移动/重命名模型的标注）`
-      : ''
+    const relinkedSuffix =
+      res.relinked > 0
+        ? `（已自动重新关联 ${res.relinked} 个移动/重命名模型的标注）`
+        : ''
     const prefix = background ? '后台校验完成' : '扫描完成'
     if (res.errors?.length) {
-      toast('warn', `${prefix}，但有 ${res.errors.length} 个目录无法读取${relinkedSuffix}`)
+      toast(
+        'warn',
+        `${prefix}，但有 ${res.errors.length} 个目录无法读取${relinkedSuffix}`,
+      )
     } else {
-      toast('success', `${prefix}：发现 ${res.models.length} 个模型${relinkedSuffix}`)
+      toast(
+        'success',
+        `${prefix}：发现 ${res.models.length} 个模型${relinkedSuffix}`,
+      )
     }
     return true
   } catch (err) {
@@ -486,8 +525,11 @@ export function applyThumbUpdates(updates) {
  */
 export function applyHashUpdate(progress) {
   if (!progress || progress.active !== false) return
-  const updates = Array.isArray(progress.completions) ? [...progress.completions] : []
-  if (progress.id && progress.hash) updates.push({ id: progress.id, hash: progress.hash })
+  const updates = Array.isArray(progress.completions)
+    ? [...progress.completions]
+    : []
+  if (progress.id && progress.hash)
+    updates.push({ id: progress.id, hash: progress.hash })
   for (const { id, hash } of updates) {
     if (!id || !hash) continue
     const idx = modelIndexOf(id)

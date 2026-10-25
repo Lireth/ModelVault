@@ -1,5 +1,10 @@
 <script setup>
-import { PARAM_LIMITS, PRECISIONS, SAMPLERS, SCHEDULERS } from '../../constants/modelParams'
+import {
+  PARAM_LIMITS,
+  PRECISIONS,
+  SAMPLERS,
+  SCHEDULERS,
+} from '../../constants/modelParams'
 import { selectedModel, toast } from '../../store/appStore'
 
 /**
@@ -12,7 +17,7 @@ import { selectedModel, toast } from '../../store/appStore'
 
 defineProps({
   /** 表单本地副本（MetaForm 持有，reactive 对象） */
-  form: { type: Object, required: true }
+  form: { type: Object, required: true },
 })
 
 /** 复制触发词到剪贴板（一键复制表单当前内容） */
@@ -40,39 +45,83 @@ async function copyTriggerWords(form) {
   <div class="form-grid">
     <label class="field">
       <span>采样步数 (Sampling Steps)</span>
-      <input v-model="form.steps" type="number" :min="PARAM_LIMITS.steps.min" :max="PARAM_LIMITS.steps.max" placeholder="如 20 / 28 / 30" />
+      <input
+        v-model="form.steps"
+        type="number"
+        :min="PARAM_LIMITS.steps.min"
+        :max="PARAM_LIMITS.steps.max"
+        placeholder="如 20 / 28 / 30"
+      />
     </label>
     <label class="field range-field">
       <span>CFG 值（范围）</span>
       <div class="range-inputs">
-        <input v-model="form.cfgMin" type="number" :min="PARAM_LIMITS.cfg.min" :max="PARAM_LIMITS.cfg.max" step="0.5" placeholder="最小，如 4" />
-        <input v-model="form.cfgMax" type="number" :min="PARAM_LIMITS.cfg.min" :max="PARAM_LIMITS.cfg.max" step="0.5" placeholder="最大，如 8" />
+        <input
+          v-model="form.cfgMin"
+          type="number"
+          :min="PARAM_LIMITS.cfg.min"
+          :max="PARAM_LIMITS.cfg.max"
+          step="0.5"
+          placeholder="最小，如 4"
+        />
+        <input
+          v-model="form.cfgMax"
+          type="number"
+          :min="PARAM_LIMITS.cfg.min"
+          :max="PARAM_LIMITS.cfg.max"
+          step="0.5"
+          placeholder="最大，如 8"
+        />
       </div>
     </label>
     <label class="field range-field">
       <span>推荐分辨率（宽 = 高，px）</span>
       <div class="range-inputs">
-        <input v-model="form.resMin" type="number" :min="PARAM_LIMITS.res.min" :max="PARAM_LIMITS.res.max" placeholder="最小，如 512" />
-        <input v-model="form.resMax" type="number" :min="PARAM_LIMITS.res.min" :max="PARAM_LIMITS.res.max" placeholder="最大，如 1024" />
+        <input
+          v-model="form.resMin"
+          type="number"
+          :min="PARAM_LIMITS.res.min"
+          :max="PARAM_LIMITS.res.max"
+          placeholder="最小，如 512"
+        />
+        <input
+          v-model="form.resMax"
+          type="number"
+          :min="PARAM_LIMITS.res.min"
+          :max="PARAM_LIMITS.res.max"
+          placeholder="最大，如 1024"
+        />
       </div>
     </label>
     <label class="field">
       <span>采样器 (Sampler)</span>
-      <input v-model="form.sampler" list="sampler-list" placeholder="选择或输入采样器" />
+      <input
+        v-model="form.sampler"
+        list="sampler-list"
+        placeholder="选择或输入采样器"
+      />
       <datalist id="sampler-list">
         <option v-for="s in SAMPLERS" :key="s" :value="s" />
       </datalist>
     </label>
     <label class="field">
       <span>调度器 (Scheduler)</span>
-      <input v-model="form.scheduler" list="scheduler-list" placeholder="选择或输入调度器" />
+      <input
+        v-model="form.scheduler"
+        list="scheduler-list"
+        placeholder="选择或输入调度器"
+      />
       <datalist id="scheduler-list">
         <option v-for="s in SCHEDULERS" :key="s" :value="s" />
       </datalist>
     </label>
     <label class="field">
       <span>精度 (Precision)</span>
-      <input v-model="form.precision" list="precision-list" placeholder="选择或输入精度，如 FP16" />
+      <input
+        v-model="form.precision"
+        list="precision-list"
+        placeholder="选择或输入精度，如 FP16"
+      />
       <datalist id="precision-list">
         <option v-for="p in PRECISIONS" :key="p" :value="p" />
       </datalist>
@@ -84,7 +133,13 @@ async function copyTriggerWords(form) {
     <div class="trigger-head">
       <span class="trigger-title">触发词</span>
       <span v-if="selectedModel.triggerWordsSource" class="sidecar-hint">
-        来自同名 {{ selectedModel.triggerWordsSource === 'civitai' ? '.civitai.info' : '.txt' }} 自动导入，可自由修改
+        来自同名
+        {{
+          selectedModel.triggerWordsSource === 'civitai'
+            ? '.civitai.info'
+            : '.txt'
+        }}
+        自动导入，可自由修改
       </span>
     </div>
     <div class="trigger-row">
@@ -102,7 +157,9 @@ async function copyTriggerWords(form) {
         :disabled="!form.triggerWords.trim()"
         title="复制触发词到剪贴板"
         @click="copyTriggerWords(form)"
-      >复制</button>
+      >
+        复制
+      </button>
     </div>
   </template>
 

@@ -10,7 +10,7 @@ import {
   selectRedundantDuplicates,
   state,
   toast,
-  typeInfo
+  typeInfo,
 } from '../store/appStore'
 
 /**
@@ -49,7 +49,10 @@ const tagOptions = computed(() => {
  * @param {string} tag 标签
  */
 function toggleTagFilter(tag) {
-  if (!state.tagFilters.includes(tag) && state.tagFilters.length >= MAX_TAG_FILTERS) {
+  if (
+    !state.tagFilters.includes(tag) &&
+    state.tagFilters.length >= MAX_TAG_FILTERS
+  ) {
     toast('warn', `最多同时筛选 ${MAX_TAG_FILTERS} 个标签`)
     return
   }
@@ -83,7 +86,20 @@ function clearTagFilters() {
       "
       @click="state.showDuplicatesOnly = !state.showDuplicatesOnly"
     >
-      <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 4H6a2 2 0 0 0-2 2v10" /></svg>
+      <svg
+        viewBox="0 0 24 24"
+        width="11"
+        height="11"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <rect x="8" y="8" width="12" height="12" rx="2" />
+        <path d="M16 4H6a2 2 0 0 0-2 2v10" />
+      </svg>
       重复 {{ duplicateCount }}
     </button>
     <!-- 重复清理（FEAT-1）：重复筛选开启时提供「保留最优、选中冗余」的一键辅助，
@@ -97,11 +113,17 @@ function clearTagFilters() {
       选中冗余项
     </button>
     <!-- LoRA 分类筛选：仅选中 LoRA 分类时显示（即使筛选结果为空也保持可见） -->
-    <label v-if="state.typeFilter === 'lora'" class="sort-select sub-filter" title="按 LoRA 分类筛选">
+    <label
+      v-if="state.typeFilter === 'lora'"
+      class="sort-select sub-filter"
+      title="按 LoRA 分类筛选"
+    >
       <span class="sort-label">分类</span>
       <select v-model="state.subFilter">
         <option value="">全部</option>
-        <option v-for="t in LORA_TAGS" :key="t.key" :value="t.key">{{ t.label }}</option>
+        <option v-for="t in LORA_TAGS" :key="t.key" :value="t.key">
+          {{ t.label }}
+        </option>
       </select>
     </label>
     <!-- 基底模型家族筛选（F-2）：LoRA/Checkpoint 视图可用；
@@ -116,7 +138,9 @@ function clearTagFilters() {
       <span class="sort-label">基底</span>
       <select v-model="state.baseFilter">
         <option value="">全部</option>
-        <option v-for="b in BASE_MODEL_FAMILIES" :key="b.key" :value="b.key">{{ b.label }}</option>
+        <option v-for="b in BASE_MODEL_FAMILIES" :key="b.key" :value="b.key">
+          {{ b.label }}
+        </option>
       </select>
     </label>
     <!-- 自由标签筛选（F-5/FEAT-01）：多选 AND 语义；库内存在标签时显示；
@@ -124,7 +148,10 @@ function clearTagFilters() {
     <details
       v-if="tagOptions.length"
       class="filter-menu tag-filter-menu"
-      :class="{ 'sub-filter': state.typeFilter !== 'lora' && state.typeFilter !== 'checkpoint' }"
+      :class="{
+        'sub-filter':
+          state.typeFilter !== 'lora' && state.typeFilter !== 'checkpoint',
+      }"
     >
       <summary
         class="tag-trigger"
@@ -140,7 +167,11 @@ function clearTagFilters() {
           {{ state.tagFilters.length }}
         </span>
       </summary>
-      <div class="tag-pop" role="group" aria-label="按标签筛选（多标签同时包含）">
+      <div
+        class="tag-pop"
+        role="group"
+        aria-label="按标签筛选（多标签同时包含）"
+      >
         <label v-for="t in tagOptions" :key="t" class="tag-option">
           <input
             type="checkbox"
@@ -154,7 +185,9 @@ function clearTagFilters() {
           class="tag-clear"
           type="button"
           @click="clearTagFilters"
-        >清除标签筛选</button>
+        >
+          清除标签筛选
+        </button>
       </div>
     </details>
   </div>
@@ -191,8 +224,10 @@ function clearTagFilters() {
   font-size: var(--font-sm);
   cursor: pointer;
   user-select: none;
-  transition: border-color var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
 }
 
 .tag-trigger::-webkit-details-marker {

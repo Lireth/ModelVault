@@ -1,4 +1,9 @@
-import { confirmDialog, deleteModel, state, toggleFavorite } from '../store/appStore'
+import {
+  confirmDialog,
+  deleteModel,
+  state,
+  toggleFavorite,
+} from '../store/appStore'
 
 /**
  * 焦点卡片/行快捷动作（网格与列表双视图共用，键盘导航体系）：
@@ -16,7 +21,8 @@ import { confirmDialog, deleteModel, state, toggleFavorite } from '../store/appS
  */
 export function handleModelActionKey(e, ctx) {
   if (e.ctrlKey || e.metaKey || e.altKey) return false
-  if (state.confirm.visible || state.selectedId !== null || state.settingsOpen) return false
+  if (state.confirm.visible || state.selectedId !== null || state.settingsOpen)
+    return false
   const active = /** @type {any} */ (document.activeElement)
   const id = active?.closest?.('[data-model-id]')?.dataset.modelId
   if (!id) return false
@@ -43,7 +49,10 @@ async function deleteFocusedModel(id, { models, indexById, focusModel }) {
   if (!m) return
   // 删除前取好顺延目标：删除后列表前移，原位置即下一项
   const nextId = models[idx + 1]?.id ?? models[idx - 1]?.id
-  if (!(await confirmDialog(`确定将「${m.alias || m.name}」移入系统回收站吗？`))) return
+  if (
+    !(await confirmDialog(`确定将「${m.alias || m.name}」移入系统回收站吗？`))
+  )
+    return
   if (!(await deleteModel(id))) return
   if (nextId) focusModel(nextId)
 }

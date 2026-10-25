@@ -26,7 +26,7 @@ export function splitRelKey(key) {
   return {
     dir,
     name: dot <= 0 ? file : file.slice(0, dot),
-    ext: dot <= 0 ? '' : file.slice(dot).toLowerCase()
+    ext: dot <= 0 ? '' : file.slice(dot).toLowerCase(),
   }
 }
 
@@ -89,7 +89,7 @@ export function planMetaRelinks(orphans, newcomers) {
     newcomers,
     usedOrphans: new Set(),
     usedNewcomers: new Set(),
-    relinks: []
+    relinks: [],
   }
 
   // R1 移动不改名：同名同扩展名分组各恰好 1 个。
@@ -97,7 +97,7 @@ export function planMetaRelinks(orphans, newcomers) {
   matchOneToOne(
     ctx,
     (o) => `${o.ext}|${o.name}`,
-    (n) => `${n.ext}|${n.name}`
+    (n) => `${n.ext}|${n.name}`,
   )
 
   // R2 同目录改名：同扩展名 + 同目录分组各恰好 1 个（名字不同由 R1 未命中保证）。
@@ -105,7 +105,7 @@ export function planMetaRelinks(orphans, newcomers) {
   matchOneToOne(
     ctx,
     (o) => `${o.ext}|${o.dir}`,
-    (n) => `${n.ext}|${n.dir}`
+    (n) => `${n.ext}|${n.dir}`,
   )
 
   // R3 哈希履历：去重检测曾为该文件计算 SHA256 并记录当时 mtime；
@@ -114,14 +114,14 @@ export function planMetaRelinks(orphans, newcomers) {
   matchOneToOne(
     ctx,
     (o) => (o.hash && o.hashMtime > 0 ? `mtime:${o.hashMtime}` : null),
-    (n) => `mtime:${n.mtimeMs}`
+    (n) => `mtime:${n.mtimeMs}`,
   )
 
   return {
     relinks: ctx.relinks,
     unmatchedOrphanKeys: orphans
       .filter((o) => !ctx.usedOrphans.has(o.key))
-      .map((o) => o.key)
+      .map((o) => o.key),
   }
 }
 

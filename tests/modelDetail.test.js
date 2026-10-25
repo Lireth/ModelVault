@@ -2,7 +2,12 @@
 import { describe, it, expect, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import ModelDetail from '../src/renderer/src/components/ModelDetail.vue'
-import { acceptConfirm, rejectConfirm, replaceModels, state } from '../src/renderer/src/store/appStore'
+import {
+  acceptConfirm,
+  rejectConfirm,
+  replaceModels,
+  state,
+} from '../src/renderer/src/store/appStore'
 import { setupComponentTest, settle } from './helpers/componentTest'
 
 /**
@@ -39,7 +44,7 @@ function makeDetailModel(id, overrides = {}) {
     noteSource: '',
     autoInfo: null,
     params: null,
-    ...overrides
+    ...overrides,
   }
 }
 
@@ -71,7 +76,16 @@ describe('ModelDetail 表单填充与脏检测（C8）', () => {
     selectModel({
       alias: '我的大模型',
       note: '备注内容',
-      params: { steps: 28, cfgMin: 4, cfgMax: 8, sampler: 'euler', scheduler: 'karras', precision: 'FP16', resMin: 512, resMax: 1024 }
+      params: {
+        steps: 28,
+        cfgMin: 4,
+        cfgMax: 8,
+        sampler: 'euler',
+        scheduler: 'karras',
+        precision: 'FP16',
+        resMin: 512,
+        resMax: 1024,
+      },
     })
     const wrapper = mountDetail()
     await flushPromises()
@@ -80,7 +94,9 @@ describe('ModelDetail 表单填充与脏检测（C8）', () => {
     const cfgInputs = wrapper.findAll('.range-inputs input')
     expect(cfgInputs[0].element.value).toBe('4')
     expect(cfgInputs[1].element.value).toBe('8')
-    expect(wrapper.find('input[maxlength="100"]').element.value).toBe('我的大模型')
+    expect(wrapper.find('input[maxlength="100"]').element.value).toBe(
+      '我的大模型',
+    )
     expect(wrapper.find('.note-input').element.value).toBe('备注内容')
     // 脏基线建立：detailDirty 为 false
     expect(state.detailDirty).toBe(false)
@@ -141,7 +157,11 @@ describe('ModelDetail 参数校验与保存', () => {
     await flushPromises()
     await wrapper.find('input[min="1"][max="200"]').setValue('999')
     await saveBtn(wrapper).trigger('click')
-    expect(state.toasts.some((t) => t.text.includes('采样步数') && t.text.includes('超出合理范围'))).toBe(true)
+    expect(
+      state.toasts.some(
+        (t) => t.text.includes('采样步数') && t.text.includes('超出合理范围'),
+      ),
+    ).toBe(true)
     expect(window.api.models.saveModelData).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -154,7 +174,9 @@ describe('ModelDetail 参数校验与保存', () => {
     await cfgInputs[0].setValue('8')
     await cfgInputs[1].setValue('4')
     await saveBtn(wrapper).trigger('click')
-    expect(state.toasts.some((t) => t.text === 'CFG 最小值不能大于最大值')).toBe(true)
+    expect(
+      state.toasts.some((t) => t.text === 'CFG 最小值不能大于最大值'),
+    ).toBe(true)
     expect(window.api.models.saveModelData).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -167,7 +189,9 @@ describe('ModelDetail 参数校验与保存', () => {
     await resInputs[0].setValue('2048')
     await resInputs[1].setValue('512')
     await saveBtn(wrapper).trigger('click')
-    expect(state.toasts.some((t) => t.text === '最小分辨率不能大于最大分辨率')).toBe(true)
+    expect(
+      state.toasts.some((t) => t.text === '最小分辨率不能大于最大分辨率'),
+    ).toBe(true)
     expect(window.api.models.saveModelData).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -178,10 +202,19 @@ describe('ModelDetail 参数校验与保存', () => {
       meta: {
         alias: '新备注名',
         note: '',
-        params: { steps: null, cfgMin: null, cfgMax: null, sampler: '', scheduler: '', precision: '', resMin: null, resMax: null },
+        params: {
+          steps: null,
+          cfgMin: null,
+          cfgMax: null,
+          sampler: '',
+          scheduler: '',
+          precision: '',
+          resMin: null,
+          resMax: null,
+        },
         subCategory: '',
-        triggerWords: '1girl, solo'
-      }
+        triggerWords: '1girl, solo',
+      },
     })
     const wrapper = mountDetail()
     await flushPromises()
@@ -192,9 +225,18 @@ describe('ModelDetail 参数校验与保存', () => {
     expect(window.api.models.saveModelData).toHaveBeenCalledWith({
       id: 'm1',
       alias: '新备注名',
-      params: { steps: null, cfgMin: null, cfgMax: null, sampler: '', scheduler: '', precision: '', resMin: null, resMax: null },
+      params: {
+        steps: null,
+        cfgMin: null,
+        cfgMax: null,
+        sampler: '',
+        scheduler: '',
+        precision: '',
+        resMin: null,
+        resMax: null,
+      },
       note: '',
-      triggerWords: '1girl, solo'
+      triggerWords: '1girl, solo',
     })
     // store 已用响应 meta 更新本地列表，脏基线刷新
     expect(state.models[0].alias).toBe('新备注名')
@@ -266,14 +308,23 @@ describe('ModelDetail 关闭保护与快捷操作', () => {
     await flushPromises()
     await wrapper.find('.fav-toggle').trigger('click')
     await settle()
-    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({ id: 'm1', favorite: true })
+    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({
+      id: 'm1',
+      favorite: true,
+    })
     await wrapper.find('.nsfw-toggle').trigger('click')
     await settle()
-    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({ id: 'm1', nsfw: true })
+    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({
+      id: 'm1',
+      nsfw: true,
+    })
     // 点击第 3 颗星 → 评分 3
     await wrapper.findAll('.star')[2].trigger('click')
     await settle()
-    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({ id: 'm1', rating: 3 })
+    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({
+      id: 'm1',
+      rating: 3,
+    })
     wrapper.unmount()
   })
 
@@ -282,7 +333,7 @@ describe('ModelDetail 关闭保护与快捷操作', () => {
     const writeText = vi.fn(() => Promise.resolve())
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText },
-      configurable: true
+      configurable: true,
     })
     const wrapper = mountDetail()
     await flushPromises()
@@ -356,7 +407,10 @@ describe('ModelDetail 自由标签编辑器（F-5）', () => {
     await input.trigger('keydown.enter')
     await flushPromises()
 
-    expect(window.api.models.setModelTags).toHaveBeenCalledWith('m1', ['基础', '赛博朋克'])
+    expect(window.api.models.setModelTags).toHaveBeenCalledWith('m1', [
+      '基础',
+      '赛博朋克',
+    ])
     // 成功后以最新元数据渲染标签胶囊
     const chips = wrapper.findAll('.tag-chip')
     expect(chips.length).toBe(2)
@@ -365,14 +419,18 @@ describe('ModelDetail 自由标签编辑器（F-5）', () => {
 
   it('点击 × 删除标签：以剩余列表提交', async () => {
     selectModel({ tags: ['基础', '赛博朋克'] })
-    window.api.models.setModelTags = vi.fn().mockResolvedValue({ meta: { tags: ['赛博朋克'] } })
+    window.api.models.setModelTags = vi
+      .fn()
+      .mockResolvedValue({ meta: { tags: ['赛博朋克'] } })
     const wrapper = mountDetail()
     await flushPromises()
 
     await wrapper.findAll('.tag-remove')[0].trigger('click')
     await flushPromises()
 
-    expect(window.api.models.setModelTags).toHaveBeenCalledWith('m1', ['赛博朋克'])
+    expect(window.api.models.setModelTags).toHaveBeenCalledWith('m1', [
+      '赛博朋克',
+    ])
     wrapper.unmount()
   })
 })
@@ -381,9 +439,10 @@ describe('ModelDetail 文件重命名（N1）', () => {
   it('打开重命名条预填基名，回车提交新文件名并重扫', async () => {
     selectModel({ name: 'old-name' })
     state.folder = 'D:\\models'
-    window.api.models.renameModel = vi
-      .fn()
-      .mockResolvedValue({ path: 'D:\\models\\new-name.safetensors', sidecarWarnings: [] })
+    window.api.models.renameModel = vi.fn().mockResolvedValue({
+      path: 'D:\\models\\new-name.safetensors',
+      sidecarWarnings: [],
+    })
     window.api.models.scan = vi
       .fn()
       .mockResolvedValue({ models: [], errors: [], byType: {}, durationMs: 1 })
@@ -404,7 +463,9 @@ describe('ModelDetail 文件重命名（N1）', () => {
 
     expect(window.api.models.renameModel).toHaveBeenCalledWith('m1', 'new-name')
     expect(state.selectedId).toBeNull()
-    expect(state.toasts.some((t) => t.text.includes('已重命名为「new-name」'))).toBe(true)
+    expect(
+      state.toasts.some((t) => t.text.includes('已重命名为「new-name」')),
+    ).toBe(true)
     wrapper.unmount()
   })
 

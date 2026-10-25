@@ -26,7 +26,12 @@ const MAX_LOG_FILES_PER_DAY = 5
 
 /** 日志文件路径：index 0 为当日主文件，其余为分片（.1/.2…） */
 function logFilePath(logDir, dateStr, index) {
-  return path.join(logDir, index === 0 ? `modelvault-${dateStr}.log` : `modelvault-${dateStr}.${index}.log`)
+  return path.join(
+    logDir,
+    index === 0
+      ? `modelvault-${dateStr}.log`
+      : `modelvault-${dateStr}.${index}.log`,
+  )
 }
 
 /** 日志目录绝对路径（%APPDATA%/modelvault/logs；与文件写入流使用的目录一致）。
@@ -52,13 +57,19 @@ function cleanExpiredLogs(logDir) {
     .readdir(logDir)
     .then((files) => {
       const stale = files.filter((name) => {
-        const match = name.match(/^modelvault-(\d{4}-\d{2}-\d{2})(?:\.\d+)?\.log$/)
+        const match = name.match(
+          /^modelvault-(\d{4}-\d{2}-\d{2})(?:\.\d+)?\.log$/,
+        )
         return match && match[1] < cutoffStr
       })
-      return Promise.all(stale.map((name) => fs.promises.rm(path.join(logDir, name), { force: true })))
-        .then(() => {
-          if (stale.length > 0) console.log(`已清理 ${stale.length} 个过期日志文件`)
-        })
+      return Promise.all(
+        stale.map((name) =>
+          fs.promises.rm(path.join(logDir, name), { force: true }),
+        ),
+      ).then(() => {
+        if (stale.length > 0)
+          console.log(`已清理 ${stale.length} 个过期日志文件`)
+      })
     })
     .catch(() => {
       /* 清理失败可忽略 */
@@ -158,7 +169,7 @@ class Logger {
           this.overflowWarned = true
           console.error(
             `日志已达单日体积上限（${MAX_LOG_FILES_PER_DAY} × ${MAX_LOG_BYTES / 1024 / 1024}MB），` +
-              '后续日志仅输出到控制台'
+              '后续日志仅输出到控制台',
           )
         }
         return

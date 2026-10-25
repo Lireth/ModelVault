@@ -37,7 +37,7 @@ export async function batchAssignCivitaiTags() {
   }
   if (
     !(await confirmDialog(
-      `将按 Civitai 分类为选中的 ${loraIds.length} 个 LoRA 模型分配分类标签（已有标签会被覆盖）。请求按限速串行执行，模型较多时需要几分钟。继续吗？`
+      `将按 Civitai 分类为选中的 ${loraIds.length} 个 LoRA 模型分配分类标签（已有标签会被覆盖）。请求按限速串行执行，模型较多时需要几分钟。继续吗？`,
     ))
   ) {
     return
@@ -81,21 +81,32 @@ export async function batchAssignCivitaiTags() {
       if (res.meta) metas.set(id, res.meta)
     }
     const ok = applyMetaUpdates(metas, (meta) => ({
-      subCategory: meta.subCategory || ''
+      subCategory: meta.subCategory || '',
     }))
     const done = ok + skippedNoUrl + unmapped + notFound + failed
     const parts = []
     if (notLora > 0) parts.push(`非 LoRA ${notLora} 个`)
-    if (skippedNoUrl > 0) parts.push(`无 Civitai 链接 ${skippedNoUrl} 个（可先「识别 Civitai」补链接）`)
+    if (skippedNoUrl > 0)
+      parts.push(
+        `无 Civitai 链接 ${skippedNoUrl} 个（可先「识别 Civitai」补链接）`,
+      )
     if (unmapped > 0) parts.push(`类型未映射 ${unmapped} 个`)
     if (notFound > 0) parts.push(`未收录 ${notFound} 个`)
     if (failed > 0) parts.push(`失败 ${failed} 个`)
     if (done < loraIds.length) {
-      toast('warn', `标签分配已取消（完成 ${done}/${loraIds.length}）：已完成部分已保存`)
+      toast(
+        'warn',
+        `标签分配已取消（完成 ${done}/${loraIds.length}）：已完成部分已保存`,
+      )
       return
     }
-    if (ok > 0) toast(failed > 0 ? 'warn' : 'success', `标签分配完成：成功 ${ok} 个${parts.length ? `，${parts.join('，')}` : ''}`)
-    else toast('info', `未分配任何标签：${parts.join('，') || '没有可处理的模型'}`)
+    if (ok > 0)
+      toast(
+        failed > 0 ? 'warn' : 'success',
+        `标签分配完成：成功 ${ok} 个${parts.length ? `，${parts.join('，')}` : ''}`,
+      )
+    else
+      toast('info', `未分配任何标签：${parts.join('，') || '没有可处理的模型'}`)
   } finally {
     state.multiSelect.busy = false
     state.multiSelect.progress = ''
@@ -151,7 +162,7 @@ async function identifySequentially(ids, label) {
     metas,
     notFound,
     failed,
-    cancelled: metas.size + notFound + failed < ids.length
+    cancelled: metas.size + notFound + failed < ids.length,
   }
 }
 
@@ -164,11 +175,14 @@ export async function batchCivitaiIdentify() {
   if (ids.length === 0 || state.multiSelect.busy) return
   state.multiSelect.busy = true
   try {
-    const { metas, notFound, failed, cancelled } = await identifySequentially(ids, '识别中')
+    const { metas, notFound, failed, cancelled } = await identifySequentially(
+      ids,
+      '识别中',
+    )
     const ok = applyMetaUpdates(metas, (meta, cur) => ({
       civitaiUrl: meta.civitaiUrl || '',
       // 基底模型识别回填（F-2）：与单模型识别同一合并语义（本地已有值优先）
-      baseModel: cur?.baseModel || meta.baseModel || ''
+      baseModel: cur?.baseModel || meta.baseModel || '',
     }))
     const done = ok + notFound + failed
     const parts = []
@@ -177,7 +191,7 @@ export async function batchCivitaiIdentify() {
     if (cancelled) {
       toast(
         'warn',
-        `识别已取消（完成 ${done}/${ids.length}）：已识别部分已保存${parts.length ? `，${parts.join('，')}` : ''}`
+        `识别已取消（完成 ${done}/${ids.length}）：已识别部分已保存${parts.length ? `，${parts.join('，')}` : ''}`,
       )
       return
     }
@@ -278,14 +292,14 @@ export async function batchCivitaiImages() {
           cover: imp.cover,
           coverUrl: imp.coverUrl,
           covers: imp.covers || [],
-          hasManualCover: (imp.covers || []).length > 0
+          hasManualCover: (imp.covers || []).length > 0,
         }
         setModelCoverUrl(id, imp.coverUrl)
       }
     }
     applyMetaUpdates(metas, (meta, cur) => ({
       civitaiUrl: meta.civitaiUrl || '',
-      baseModel: cur?.baseModel || meta.baseModel || ''
+      baseModel: cur?.baseModel || meta.baseModel || '',
     }))
     const parts = []
     if (skippedHasCover > 0) parts.push(`已有示例图跳过 ${skippedHasCover} 个`)
@@ -296,7 +310,7 @@ export async function batchCivitaiImages() {
       // 用户请求取消后提前收尾：已导入部分保留，汇总剩余未处理数量
       toast(
         'warn',
-        `示例图获取已取消（完成 ${done}/${targets.length}）：已导入部分保留，未处理 ${targets.length - done} 个`
+        `示例图获取已取消（完成 ${done}/${targets.length}）：已导入部分保留，未处理 ${targets.length - done} 个`,
       )
       return
     }
@@ -306,7 +320,10 @@ export async function batchCivitaiImages() {
         (parts.length ? `（${parts.join('，')}）` : '')
       toast(failed > 0 ? 'warn' : 'success', text)
     } else {
-      toast('info', `未导入任何示例图：${parts.join('，') || '没有可导入的模型'}`)
+      toast(
+        'info',
+        `未导入任何示例图：${parts.join('，') || '没有可导入的模型'}`,
+      )
     }
   } finally {
     state.multiSelect.busy = false

@@ -25,7 +25,9 @@ const MAX_DETAIL_LENGTH = 500
 /** 截取错误详情（堆栈优先），超长时截断 */
 function errorDetail(error) {
   const text = error?.stack || error?.message || String(error)
-  return text.length > MAX_DETAIL_LENGTH ? `${text.slice(0, MAX_DETAIL_LENGTH)}…` : text
+  return text.length > MAX_DETAIL_LENGTH
+    ? `${text.slice(0, MAX_DETAIL_LENGTH)}…`
+    : text
 }
 
 /**
@@ -34,7 +36,9 @@ function errorDetail(error) {
  * @param {any} error 异常对象
  */
 export async function handleUncaughtException(error) {
-  logger.error(`未捕获的异常: ${error?.stack || error?.message || String(error)}`)
+  logger.error(
+    `未捕获的异常: ${error?.stack || error?.message || String(error)}`,
+  )
   if (handling) {
     logger.warn('已处于致命错误处理流程中，忽略后续异常')
     return
@@ -47,7 +51,7 @@ export async function handleUncaughtException(error) {
     await Promise.all([
       flushStoreSave(),
       flushSettingsSave(),
-      flushWindowStateSave()
+      flushWindowStateSave(),
     ]).catch((err) => {
       logger.warn(`致命错误处理中落盘失败: ${err.message}`)
     })
@@ -58,7 +62,7 @@ export async function handleUncaughtException(error) {
       dialog.showErrorBox(
         '模匣 遇到无法恢复的错误',
         `应用将保存数据后自动重启。\n\n错误信息：\n${errorDetail(error)}\n\n` +
-          '若同一问题反复出现，请查看日志目录（%APPDATA%\\modelvault\\logs）并联系开发者。'
+          '若同一问题反复出现，请查看日志目录（%APPDATA%\\modelvault\\logs）并联系开发者。',
       )
     } catch (dialogErr) {
       logger.warn(`错误框展示失败: ${dialogErr?.message || dialogErr}`)

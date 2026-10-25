@@ -1,4 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  afterAll,
+} from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -17,16 +25,24 @@ vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
   BrowserWindow: Object.assign(vi.fn(), {
     fromWebContents: vi.fn(),
-    getAllWindows: vi.fn(() => [])
+    getAllWindows: vi.fn(() => []),
   }),
   clipboard: { read: vi.fn(), writeText: vi.fn() },
-  dialog: { showOpenDialog: vi.fn(), showSaveDialog: vi.fn(), showMessageBox: vi.fn() },
+  dialog: {
+    showOpenDialog: vi.fn(),
+    showSaveDialog: vi.fn(),
+    showMessageBox: vi.fn(),
+  },
   ipcMain: { handle: vi.fn() },
   Menu: { buildFromTemplate: vi.fn() },
-  shell: { trashItem: vi.fn(), showItemInFolder: vi.fn(), openPath: vi.fn(() => '') },
+  shell: {
+    trashItem: vi.fn(),
+    showItemInFolder: vi.fn(),
+    openPath: vi.fn(() => ''),
+  },
   net: { fetch: vi.fn() },
   nativeImage: { createFromBuffer: vi.fn(), createFromPath: vi.fn() },
-  protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() }
+  protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
 }))
 
 // 默认 autoRescan=false，syncWatcher 不启动轮询定时器，无需 mock watcher
@@ -35,7 +51,14 @@ vi.mock('electron', () => ({
 vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([])
 
 import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
-import { getModelMeta, loadData, loadSettings, setDataRoot, setModelMeta, updateSettings } from '../src/main/services/store'
+import {
+  getModelMeta,
+  loadData,
+  loadSettings,
+  setDataRoot,
+  setModelMeta,
+  updateSettings,
+} from '../src/main/services/store'
 
 const settingsFile = path.join(fakeUserData, 'settings.json')
 const roots = []
@@ -108,11 +131,17 @@ describe('models:partialScan 局部增量扫描（A-03）', () => {
   it('dirs 非法（含 .. 逃逸/非数组/空）拒绝', async () => {
     const partial = getRegisteredHandler('models:partialScan')
     await updateSettings({ modelsFolder: root })
-    expect((await partial(makeEvent(), { folder: root, dirs: [] })).error).toContain('子树')
-    expect((await partial(makeEvent(), { folder: root, dirs: ['../escape'] })).error).toContain('子树')
+    expect(
+      (await partial(makeEvent(), { folder: root, dirs: [] })).error,
+    ).toContain('子树')
+    expect(
+      (await partial(makeEvent(), { folder: root, dirs: ['../escape'] })).error,
+    ).toContain('子树')
     // 非数组由 O-2 schema 结构门禁前置拦截（语义文案「缺少变更子树」仅在
     // dirs 为数组但清洗后为空时由 handler 产出）
-    expect((await partial(makeEvent(), { folder: root, dirs: 'lora' })).error).toBe('dirs 须为数组')
+    expect(
+      (await partial(makeEvent(), { folder: root, dirs: 'lora' })).error,
+    ).toBe('dirs 须为数组')
   })
 })
 
@@ -132,7 +161,12 @@ describe('models:scan × A-02 移动后自动重关联', () => {
     expect(first.models.map((m) => m.id)).toContain(oldAbs)
 
     // 用户在资源管理器中移动文件（同卷 rename 保留 mtime），并写入标注
-    setModelMeta(oldAbs, { alias: '我的 LoRA', note: '重要', favorite: true, rating: 4 })
+    setModelMeta(oldAbs, {
+      alias: '我的 LoRA',
+      note: '重要',
+      favorite: true,
+      rating: 4,
+    })
     const newDir = path.join(root, 'loras', 'characters')
     await fs.mkdir(newDir, { recursive: true })
     const newAbs = path.join(newDir, 'my-lora.safetensors')

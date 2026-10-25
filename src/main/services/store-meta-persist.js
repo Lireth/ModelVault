@@ -7,7 +7,12 @@ import { isUnsafeModelKey } from './store-meta-normalize'
 import { removeJournalDir } from './store-meta-journal'
 import { metaState } from './store-meta-state'
 import { serializeJsonOffThread } from './json-serializer'
-import { getCurrentRoot, getDataDir, getDataFilePath, getJournalDir } from './store-paths'
+import {
+  getCurrentRoot,
+  getDataDir,
+  getDataFilePath,
+  getJournalDir,
+} from './store-paths'
 
 /**
  * 关联存储落盘链（O5/O1 自 store-meta.js 拆出）：
@@ -58,7 +63,10 @@ async function isCurrentRootAvailable() {
   const root = getCurrentRoot()
   if (!root) return false
   const now = Date.now()
-  if (metaState.rootProbe.root === root && now - metaState.rootProbe.at < ROOT_PROBE_TTL_MS) {
+  if (
+    metaState.rootProbe.root === root &&
+    now - metaState.rootProbe.at < ROOT_PROBE_TTL_MS
+  ) {
     return true
   }
   try {
@@ -119,7 +127,10 @@ export function scheduleSave() {
     // 大小写不敏感同根判定（与 scan.js/library-index 的根比较口径一致）：
     // 根仅大小写变化（对话框与设置文件对同一目录的两种拼写）不是跨库
     // 切换，不应误判丢弃——数据不丢，但本次修改会延迟到下一次变更才落盘
-    if (String(getCurrentRoot()).toLowerCase() !== String(scheduledRoot).toLowerCase()) {
+    if (
+      String(getCurrentRoot()).toLowerCase() !==
+      String(scheduledRoot).toLowerCase()
+    ) {
       logger.warn('丢弃跨根目录的迟到防抖保存（数据已在切库前落盘）')
       return
     }
@@ -139,7 +150,11 @@ async function writeSnapshot() {
   // 版本快照必须在序列化/写盘之前捕获：序列化与写盘 await 期间若有新变更，
   // dirtyKeys 不能整体清空（否则丢失尚未落盘的修改）
   const versionAtWrite = metaState.mutationVersion
-  const payload = { version: 1, models: metaState.data.models, journalSeq: metaState.journalSeq }
+  const payload = {
+    version: 1,
+    models: metaState.data.models,
+    journalSeq: metaState.journalSeq,
+  }
   // OPT-03：大库全量快照序列化交给 worker，避免主进程长时间阻塞
   const text =
     Object.keys(metaState.data.models).length >= snapshotWorkerThreshold
@@ -185,13 +200,22 @@ async function writeDeltaJournal(keys) {
       return false
     }
   }
-  const file = path.join(journalDir, `delta-${String(seq).padStart(12, '0')}.json`)
-  await atomicWriteFile(file, JSON.stringify({ seq, entries }), { createDirs: false })
+  const file = path.join(
+    journalDir,
+    `delta-${String(seq).padStart(12, '0')}.json`,
+  )
+  await atomicWriteFile(file, JSON.stringify({ seq, entries }), {
+    createDirs: false,
+  })
   metaState.journalSeq = seq
   metaState.journalEntryCount += entries.length
   for (const [key, metaAtWrite] of written) {
     // 引用一致 = 写盘期间未再修改该键；否则保留脏标记，下次增量补写最新值
-    if (metaAtWrite === null ? !metaState.data.models[key] : metaState.data.models[key] === metaAtWrite) {
+    if (
+      metaAtWrite === null
+        ? !metaState.data.models[key]
+        : metaState.data.models[key] === metaAtWrite
+    ) {
       metaState.dirtyKeys.delete(key)
     }
   }
@@ -215,7 +239,8 @@ async function runSave(forceSnapshot) {
     // O5：库目录离线（被移动/盘符未挂载）时跳过序列化与写盘，
     // 脏数据保留在内存，并安排恢复后的自动补写——绝不重建模型根目录树
     if (!(await isCurrentRootAvailable())) {
-      if (metaState.dirtyKeys.size > 0 || metaState.journalEntryCount > 0) scheduleOfflineRetry()
+      if (metaState.dirtyKeys.size > 0 || metaState.journalEntryCount > 0)
+        scheduleOfflineRetry()
       return
     }
     const keys = [...metaState.dirtyKeys]

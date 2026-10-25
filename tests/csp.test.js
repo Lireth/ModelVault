@@ -13,13 +13,18 @@ import { applyProductionCsp } from '../scripts/csp.mjs'
  */
 
 const html = fs.readFileSync(
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/renderer/index.html'),
-  'utf-8'
+  path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../src/renderer/index.html',
+  ),
+  'utf-8',
 )
 
 /** 从 HTML 中提取 CSP meta 的 content 值 */
 function cspOf(source) {
-  const match = source.match(/http-equiv="Content-Security-Policy"\s+content="([^"]*)"/)
+  const match = source.match(
+    /http-equiv="Content-Security-Policy"\s+content="([^"]*)"/,
+  )
   if (!match) throw new Error('未找到 CSP meta 标签')
   return match[1]
 }

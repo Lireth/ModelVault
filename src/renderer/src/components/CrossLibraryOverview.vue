@@ -4,7 +4,7 @@ import {
   formatDate,
   formatSize,
   libraryOverview,
-  loadLibraryOverview
+  loadLibraryOverview,
 } from '../store/appStore'
 
 /**
@@ -18,7 +18,7 @@ import {
 const SOURCE_LABELS = {
   index: '本地索引',
   store: '元数据',
-  none: '不可用'
+  none: '不可用',
 }
 
 const overview = computed(() => libraryOverview.data)
@@ -54,7 +54,9 @@ onMounted(() => {
       只读汇总各库本地索引/元数据，用于发现散落在不同模型库中的同一模型。
     </p>
 
-    <p v-if="libraryOverview.loading && !overview" class="stats-empty">正在汇总各库索引…</p>
+    <p v-if="libraryOverview.loading && !overview" class="stats-empty">
+      正在汇总各库索引…
+    </p>
     <div v-else-if="libraryOverview.error" class="ov-error">
       <span>{{ libraryOverview.error }}</span>
       <button class="btn" @click="refresh">重试</button>
@@ -63,7 +65,9 @@ onMounted(() => {
     <template v-else-if="overview">
       <div class="ov-summary">
         <div class="ov-item">
-          <span class="ov-num">{{ totals.availableLibraries }} / {{ totals.libraries }}</span>
+          <span class="ov-num"
+            >{{ totals.availableLibraries }} / {{ totals.libraries }}</span
+          >
           <span class="ov-label">可用库</span>
         </div>
         <div class="ov-item">
@@ -111,12 +115,16 @@ onMounted(() => {
                 <span v-if="lib.staleIndex" class="ov-stale">索引较旧</span>
               </td>
               <td>{{ lib.models }}</td>
-              <td>{{ lib.sizeKnownModels ? formatSize(lib.totalBytes) : '-' }}</td>
+              <td>
+                {{ lib.sizeKnownModels ? formatSize(lib.totalBytes) : '-' }}
+              </td>
               <td>{{ lib.hashedModels }} / {{ lib.models }}</td>
               <td>{{ lib.localDuplicateGroups || '-' }}</td>
               <td>
                 {{ SOURCE_LABELS[lib.source] || lib.source }}
-                <span v-if="lib.savedAt" class="ov-time">{{ formatDate(lib.savedAt) }}</span>
+                <span v-if="lib.savedAt" class="ov-time">{{
+                  formatDate(lib.savedAt)
+                }}</span>
               </td>
             </tr>
           </tbody>
@@ -126,18 +134,36 @@ onMounted(() => {
       <details v-if="crossGroups.length" class="ov-groups">
         <summary>跨库重复组（{{ crossGroups.length }}）</summary>
         <ul class="ov-group-list">
-          <li v-for="group in crossGroups.slice(0, 20)" :key="group.hash" class="ov-group">
+          <li
+            v-for="group in crossGroups.slice(0, 20)"
+            :key="group.hash"
+            class="ov-group"
+          >
             <div class="ov-group-head">
               <code :title="group.hash">{{ group.hash.slice(0, 12) }}…</code>
-              <span>{{ group.copies }} 份 · {{ group.sizeKnown ? formatSize(group.sizeBytes) : '容量未知' }}</span>
+              <span
+                >{{ group.copies }} 份 ·
+                {{
+                  group.sizeKnown ? formatSize(group.sizeBytes) : '容量未知'
+                }}</span
+              >
               <span class="ov-group-waste">
-                {{ group.sizeKnown ? `可释放 ${formatSize(group.wastedBytes)}` : '可释放空间未知' }}
+                {{
+                  group.sizeKnown
+                    ? `可释放 ${formatSize(group.wastedBytes)}`
+                    : '可释放空间未知'
+                }}
               </span>
             </div>
             <ul class="ov-members">
-              <li v-for="member in group.members" :key="`${member.root}-${member.relPath}`">
+              <li
+                v-for="member in group.members"
+                :key="`${member.root}-${member.relPath}`"
+              >
                 <span class="ov-member-lib">{{ member.library }}</span>
-                <span class="ov-member-path" :title="member.relPath">{{ member.relPath }}</span>
+                <span class="ov-member-path" :title="member.relPath">{{
+                  member.relPath
+                }}</span>
               </li>
             </ul>
           </li>

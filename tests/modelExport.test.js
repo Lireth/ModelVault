@@ -3,7 +3,7 @@ import {
   buildCsv,
   buildExportRows,
   buildJson,
-  buildMarkdown
+  buildMarkdown,
 } from '../src/renderer/src/store/model-export'
 import { replaceModels, state } from '../src/renderer/src/store/appStore'
 
@@ -29,7 +29,7 @@ function model(overrides = {}) {
     note: '第一行\n第二行, 含逗号 "引号" | 竖线',
     params: { steps: 28, cfgMin: 4, cfgMax: 7, sampler: 'euler' },
     civitaiUrl: 'https://civitai.com/models/1',
-    ...overrides
+    ...overrides,
   }
 }
 
@@ -91,14 +91,17 @@ describe('exportModelList 集成', () => {
     vi.stubGlobal('window', {
       api: {
         models: {
-          exportModelList: vi.fn().mockResolvedValue({ ok: true, path: 'list.csv' })
-        }
-      }
+          exportModelList: vi
+            .fn()
+            .mockResolvedValue({ ok: true, path: 'list.csv' }),
+        },
+      },
     })
   })
 
   it('按当前结果生成内容并调用主进程保存', async () => {
-    const { exportModelList } = await import('../src/renderer/src/store/model-export')
+    const { exportModelList } =
+      await import('../src/renderer/src/store/model-export')
     replaceModels([model()])
     const ok = await exportModelList('csv')
     expect(ok).toBe(true)
@@ -108,7 +111,8 @@ describe('exportModelList 集成', () => {
   })
 
   it('空结果不调用 IPC', async () => {
-    const { exportModelList } = await import('../src/renderer/src/store/model-export')
+    const { exportModelList } =
+      await import('../src/renderer/src/store/model-export')
     replaceModels([])
     const ok = await exportModelList('json')
     expect(ok).toBe(false)

@@ -14,7 +14,7 @@ export function applyMetaFlags(id, meta) {
       ...state.models[idx],
       favorite: meta.favorite === true,
       nsfw: meta.nsfw === true,
-      rating: meta.rating || 0
+      rating: meta.rating || 0,
     }
   }
 }
@@ -65,7 +65,10 @@ export async function mapWithConcurrency(items, worker, limit = 16) {
       const index = next++
       if (index >= list.length) return
       try {
-        results[index] = { status: 'fulfilled', value: await worker(list[index], index) }
+        results[index] = {
+          status: 'fulfilled',
+          value: await worker(list[index], index),
+        }
       } catch (reason) {
         results[index] = { status: 'rejected', reason }
       }

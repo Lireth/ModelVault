@@ -10,4 +10,6 @@ import { state } from './state'
  * 命中，替代每次全表 find。模型对象引用仅在元数据更新/批量同步/重扫时替换
  * （元素级替换会使本映射重算），缩略图回填走同一替换路径。
  */
-export const modelById = computed(() => new Map(state.models.map((m) => [m.id, m])))
+export const modelById = computed(
+  () => new Map(state.models.map((m) => [m.id, m])),
+)

@@ -11,13 +11,13 @@ import {
   isAllowedCivitaiImageUrl,
   fetchCivitaiImage,
   fetchCivitaiVideo,
-  readCivitaiImageBody
+  readCivitaiImageBody,
 } from './services/civitai'
 import {
   civCacheContentType,
   getCivImageFromCache,
   removeCivImageCache,
-  saveCivImageCache
+  saveCivImageCache,
 } from './services/civ-cache'
 
 /**
@@ -43,12 +43,22 @@ export function registerImageScheme() {
   protocol.registerSchemesAsPrivileged([
     {
       scheme: SCHEME,
-      privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        stream: true,
+      },
     },
     {
       scheme: CIV_SCHEME,
-      privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
-    }
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        stream: true,
+      },
+    },
   ])
 }
 
@@ -145,12 +155,12 @@ function withCacheHeaders(upstream, immutable) {
   const headers = new Headers(upstream.headers || undefined)
   headers.set(
     'Cache-Control',
-    immutable ? 'public, max-age=31536000, immutable' : 'no-cache'
+    immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
   )
   return new Response(upstream.body, {
     status: upstream.status || 200,
     statusText: upstream.statusText,
-    headers
+    headers,
   })
 }
 
@@ -166,7 +176,7 @@ const PROXY_SAFE_RESPONSE_HEADERS = [
   'Accept-Ranges',
   'Content-Range',
   'ETag',
-  'Last-Modified'
+  'Last-Modified',
 ]
 
 /**
@@ -243,7 +253,7 @@ function registerMvimgHandler() {
         }
         immutableAssetCache.set(cacheKey, {
           realPath,
-          expiresAt: Date.now() + IMMUTABLE_ASSET_TTL_MS
+          expiresAt: Date.now() + IMMUTABLE_ASSET_TTL_MS,
         })
       }
       const upstream = await net.fetch(pathToFileURL(realPath).toString())
@@ -306,7 +316,9 @@ function registerCivimgHandler() {
       }
       const upstream = await fetchCivitaiImage(target)
       if (!upstream.ok) {
-        logger.warn(`civimg 上游响应异常（HTTP ${upstream.status}）: ${target.slice(0, 200)}`)
+        logger.warn(
+          `civimg 上游响应异常（HTTP ${upstream.status}）: ${target.slice(0, 200)}`,
+        )
         return new Response('Upstream Error', { status: 502 })
       }
       // 回源成功：整体读入后回写磁盘缓存（best-effort，失败不影响返回）。
@@ -330,7 +342,7 @@ function registerCivimgHandler() {
       return new Response(buf, {
         status: upstream.status,
         statusText: upstream.statusText,
-        headers
+        headers,
       })
     } catch (err) {
       logger.error(`civimg 协议处理失败: ${err.message}`)
@@ -365,7 +377,9 @@ async function proxyCivitaiVideo(target, request) {
     const range = request?.headers?.get?.('range') || ''
     const upstream = await fetchCivitaiVideo(target, range)
     if (!upstream.ok && upstream.status !== 206) {
-      logger.warn(`civimg 视频上游响应异常（HTTP ${upstream.status}）: ${target.slice(0, 200)}`)
+      logger.warn(
+        `civimg 视频上游响应异常（HTTP ${upstream.status}）: ${target.slice(0, 200)}`,
+      )
       return new Response('Upstream Error', { status: 502 })
     }
     // 流式响应保留上游 Content-Length/Content-Range（拖动播放语义所需），
@@ -375,7 +389,7 @@ async function proxyCivitaiVideo(target, request) {
     return new Response(upstream.body, {
       status: upstream.status,
       statusText: upstream.statusText,
-      headers
+      headers,
     })
   } catch (err) {
     logger.warn(`civimg 视频代理失败: ${err.message}`)

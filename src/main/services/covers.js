@@ -11,7 +11,13 @@ import { IMAGE_EXTENSIONS } from './scanner'
 // 直接依赖存储子模块而非聚合门面（services/store.js）：门面的重导出链在
 // 模块初始化顺序变化时可能拿到尚未就绪的绑定（A-02 引入 meta-relink 后
 // vitest 曾现 getReferencedCovers is not a function）；服务层直连叶子依赖更稳
-import { COVERS_DIR, DATA_DIR, getCoversDir, getCurrentRoot, relativizeCover } from './store-paths'
+import {
+  COVERS_DIR,
+  DATA_DIR,
+  getCoversDir,
+  getCurrentRoot,
+  relativizeCover,
+} from './store-paths'
 import { getReferencedCovers, wasDataReset } from './store-meta'
 
 /**
@@ -32,11 +38,15 @@ const IMAGE_MAGIC = [
   // JPEG: FF D8 FF
   (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
   // GIF: 'GIF87a' / 'GIF89a'
-  (b) => b.toString('latin1', 0, 6) === 'GIF87a' || b.toString('latin1', 0, 6) === 'GIF89a',
+  (b) =>
+    b.toString('latin1', 0, 6) === 'GIF87a' ||
+    b.toString('latin1', 0, 6) === 'GIF89a',
   // BMP: 'BM'
   (b) => b.toString('latin1', 0, 2) === 'BM',
   // WEBP: 'RIFF' + 偏移 8-11 'WEBP'
-  (b) => b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP'
+  (b) =>
+    b.toString('latin1', 0, 4) === 'RIFF' &&
+    b.toString('latin1', 8, 12) === 'WEBP',
 ]
 
 /**
@@ -106,7 +116,7 @@ export async function importCoverFromPath(source) {
     const stat = await fs.stat(source)
     if (stat.size > MAX_COVER_BYTES) {
       return {
-        error: `图片文件过大（上限 ${Math.floor(MAX_COVER_BYTES / 1024 / 1024)}MB），请压缩后再导入`
+        error: `图片文件过大（上限 ${Math.floor(MAX_COVER_BYTES / 1024 / 1024)}MB），请压缩后再导入`,
       }
     }
     // 内容校验：伪装成图片扩展名的非图片文件拒绝导入
@@ -143,7 +153,7 @@ export async function saveCoverBuffer(buf, ext) {
   }
   if (buf.length > MAX_COVER_BYTES) {
     return {
-      error: `图片文件过大（上限 ${Math.floor(MAX_COVER_BYTES / 1024 / 1024)}MB）`
+      error: `图片文件过大（上限 ${Math.floor(MAX_COVER_BYTES / 1024 / 1024)}MB）`,
     }
   }
   if (!isImageBuffer(buf)) {
@@ -151,7 +161,10 @@ export async function saveCoverBuffer(buf, ext) {
   }
   try {
     await fs.mkdir(getCoversDir(), { recursive: true })
-    const dest = path.join(getCoversDir(), `${Date.now()}-civitai${normalizedExt}`)
+    const dest = path.join(
+      getCoversDir(),
+      `${Date.now()}-civitai${normalizedExt}`,
+    )
     await fs.writeFile(dest, buf)
     logger.info(`Civitai 示例图已保存: ${dest}`)
     return { cover: dest }
@@ -171,8 +184,11 @@ export async function pickAndSaveCover(parentWin) {
     title: '选择模型预览图',
     properties: ['openFile'],
     filters: [
-      { name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }
-    ]
+      {
+        name: '图片文件',
+        extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'],
+      },
+    ],
   })
   if (result.canceled || result.filePaths.length === 0) {
     return { canceled: true }
@@ -216,7 +232,7 @@ export async function saveClipboardImage() {
       'image/jpeg': '.jpg',
       'image/webp': '.webp',
       'image/gif': '.gif',
-      'image/bmp': '.bmp'
+      'image/bmp': '.bmp',
     }
     const items = await clipboard.read()
     const item = items.find((it) => it.types.some((t) => t in MIME_EXT))
@@ -232,11 +248,14 @@ export async function saveClipboardImage() {
     const arrayBuffer = await blob.arrayBuffer()
     if (arrayBuffer.byteLength > MAX_COVER_BYTES) {
       return {
-        error: `图片文件过大（上限 ${Math.floor(MAX_COVER_BYTES / 1024 / 1024)}MB），请压缩后再导入`
+        error: `图片文件过大（上限 ${Math.floor(MAX_COVER_BYTES / 1024 / 1024)}MB），请压缩后再导入`,
       }
     }
     await fs.mkdir(getCoversDir(), { recursive: true })
-    const dest = path.join(getCoversDir(), `${Date.now()}-clipboard${MIME_EXT[mime]}`)
+    const dest = path.join(
+      getCoversDir(),
+      `${Date.now()}-clipboard${MIME_EXT[mime]}`,
+    )
     await fs.writeFile(dest, Buffer.from(arrayBuffer))
     logger.info(`剪贴板图片已保存: ${dest}`)
     return { cover: dest }
@@ -297,7 +316,7 @@ export async function pruneOrphanCovers() {
     await runWithConcurrency(
       stale,
       (n) => fs.rm(path.join(dir, n), { force: true }),
-      16
+      16,
     )
     logger.info(`已清理 ${stale.length} 个孤儿封面文件`)
   } catch (err) {

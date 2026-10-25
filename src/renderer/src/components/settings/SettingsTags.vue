@@ -6,7 +6,7 @@ import {
   removeTagGlobally,
   renameTagGlobally,
   tagCounts,
-  toast
+  toast,
 } from '../../store/appStore'
 
 /**
@@ -25,7 +25,7 @@ const busy = ref(false)
 
 /** 标签行（名称 + 使用模型数），随本地列表即时刷新 */
 const rows = computed(() =>
-  allTags.value.map((tag) => ({ tag, count: tagCounts.value.get(tag) || 0 }))
+  allTags.value.map((tag) => ({ tag, count: tagCounts.value.get(tag) || 0 })),
 )
 
 async function startEdit(tag) {
@@ -64,7 +64,7 @@ async function saveEdit() {
   }
   if (allTags.value.includes(to)) {
     const ok = await confirmDialog(
-      `标签「${to}」已存在，重命名将与「${to}」合并：两个标签下的模型都将拥有合并后的「${to}」。`
+      `标签「${to}」已存在，重命名将与「${to}」合并：两个标签下的模型都将拥有合并后的「${to}」。`,
     )
     if (!ok) return
   }
@@ -82,7 +82,7 @@ async function onRemove(tag) {
   if (busy.value) return
   const count = tagCounts.value.get(tag) || 0
   const ok = await confirmDialog(
-    `确定从 ${count} 个模型上移除标签「${tag}」吗？仅移除该标签，不影响模型文件与其他标注。`
+    `确定从 ${count} 个模型上移除标签「${tag}」吗？仅移除该标签，不影响模型文件与其他标注。`,
   )
   if (!ok) return
   busy.value = true
@@ -100,7 +100,9 @@ async function onRemove(tag) {
   <div class="settings-group">
     <div v-if="rows.length === 0" class="setting-row">
       <div class="setting-info">
-        <span class="setting-desc">当前模型库还没有自由标签，可在模型详情页为模型添加标签。</span>
+        <span class="setting-desc"
+          >当前模型库还没有自由标签，可在模型详情页为模型添加标签。</span
+        >
       </div>
     </div>
 
@@ -119,16 +121,22 @@ async function onRemove(tag) {
             @keyup.esc="cancelEdit"
           />
           <span class="setting-desc">
-            输入已有标签名可与该标签合并；当前 {{ row.count }} 个模型使用「{{ row.tag }}」
+            输入已有标签名可与该标签合并；当前 {{ row.count }} 个模型使用「{{
+              row.tag
+            }}」
           </span>
         </div>
         <div class="setting-actions">
           <button
             class="btn btn-primary"
-            :disabled="busy || !editValue.trim() || editValue.trim() === row.tag"
+            :disabled="
+              busy || !editValue.trim() || editValue.trim() === row.tag
+            "
             title="保存重命名"
             @click="saveEdit"
-          >保存</button>
+          >
+            保存
+          </button>
           <button class="btn" :disabled="busy" @click="cancelEdit">取消</button>
         </div>
       </template>
@@ -138,7 +146,12 @@ async function onRemove(tag) {
           <span class="setting-desc">{{ row.count }} 个模型使用</span>
         </div>
         <div class="setting-actions">
-          <button class="btn" :disabled="busy" title="重命名；输入已有标签名可合并" @click="startEdit(row.tag)">
+          <button
+            class="btn"
+            :disabled="busy"
+            title="重命名；输入已有标签名可合并"
+            @click="startEdit(row.tag)"
+          >
             重命名 / 合并
           </button>
           <button
@@ -146,7 +159,9 @@ async function onRemove(tag) {
             :disabled="busy"
             :title="`从 ${row.count} 个模型上移除该标签`"
             @click="onRemove(row.tag)"
-          >移除</button>
+          >
+            移除
+          </button>
         </div>
       </template>
     </div>
@@ -164,7 +179,9 @@ async function onRemove(tag) {
   color: var(--text);
   font-size: var(--font-sm);
   outline: none;
-  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .tag-edit-input:focus {

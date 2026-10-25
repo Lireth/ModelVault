@@ -6,7 +6,7 @@ import {
   modelCoverUrl,
   state,
   subCategoryInfo,
-  typeInfo
+  typeInfo,
 } from '../store/appStore'
 
 /**
@@ -17,7 +17,7 @@ import {
  */
 
 const props = defineProps({
-  model: { type: Object, required: true }
+  model: { type: Object, required: true },
 })
 
 /** 默认封面展示 URL（OP-02：后台缩略图经独立覆盖映射更新，模型对象不变） */
@@ -134,7 +134,9 @@ function startCycle() {
   hoverTimer = setTimeout(() => {
     hoverTimer = 0
     // 从默认封面位置起步，首轮即切到默认封面的下一张
-    const defIdx = cycleList.value.findIndex((c) => c.path === props.model.cover)
+    const defIdx = cycleList.value.findIndex(
+      (c) => c.path === props.model.cover,
+    )
     cycleIdx.value = defIdx >= 0 ? defIdx : 0
     advanceCycle(session)
     cycleTimer = setInterval(() => advanceCycle(session), CYCLE_INTERVAL)
@@ -156,10 +158,7 @@ function onCycleImgError(c) {
 }
 
 // 封面集合变化（详情页增删封面后回到列表）时重置轮播状态
-watch(
-  () => cycleList.value.map((c) => c.path).join('|'),
-  stopCycle
-)
+watch(() => cycleList.value.map((c) => c.path).join('|'), stopCycle)
 onBeforeUnmount(stopCycle)
 
 const info = computed(() => typeInfo(props.model.type))
@@ -167,7 +166,8 @@ const info = computed(() => typeInfo(props.model.type))
 /** 已标注的分类标签（支持其他模型二级分类、LoRA 分类、大模型基底模型） */
 const TAGGED_TYPES = ['other', 'lora', 'checkpoint']
 const subTag = computed(() => {
-  if (!TAGGED_TYPES.includes(props.model.type) || !props.model.subCategory) return null
+  if (!TAGGED_TYPES.includes(props.model.type) || !props.model.subCategory)
+    return null
   return subCategoryInfo(props.model.subCategory)
 })
 
@@ -212,7 +212,9 @@ const isDuplicate = computed(() => duplicateIdSet.value.has(props.model.id))
         :class="{ on: i === cycleIdx }"
       />
     </div>
-    <span class="type-badge" :style="{ background: info.color }">{{ info.label }}</span>
+    <span class="type-badge" :style="{ background: info.color }">{{
+      info.label
+    }}</span>
     <span v-if="model.nsfw" class="nsfw-badge">NSFW</span>
     <!-- 重复角标（FEAT-1）：文件内容与其他模型完全相同；与 NSFW 同在左下角时右移避让 -->
     <span
@@ -220,20 +222,37 @@ const isDuplicate = computed(() => duplicateIdSet.value.has(props.model.id))
       class="dupe-badge"
       :class="{ offset: model.nsfw }"
       title="文件内容与其他模型完全相同（SHA256 一致），可通过「重复」筛选清理冗余副本"
-    >重复</span>
+      >重复</span
+    >
     <!-- 健康检查角标（F6）：0 字节或 safetensors 头部不可解析的疑似损坏文件 -->
     <span
       v-if="model.suspect"
       class="suspect-badge"
       title="文件疑似损坏（结构校验失败或 0 字节），建议重新下载或删除"
-    ><svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor" aria-hidden="true"><path d="M8.9 1.9a1 1 0 0 0-1.8 0l-5.6 10.4A1 1 0 0 0 2.4 13.8h11.2a1 1 0 0 0 .9-1.5zM8 5.6a.9.9 0 0 1 .9.9v2.8a.9.9 0 0 1-1.8 0V6.5a.9.9 0 0 1 .9-.9zm0 6.9a1 1 0 1 1 0-2 1 1 0 0 1 0 2z" /></svg>损坏</span>
+      ><svg
+        viewBox="0 0 16 16"
+        width="10"
+        height="10"
+        fill="currentColor"
+        aria-hidden="true"
+      >
+        <path
+          d="M8.9 1.9a1 1 0 0 0-1.8 0l-5.6 10.4A1 1 0 0 0 2.4 13.8h11.2a1 1 0 0 0 .9-1.5zM8 5.6a.9.9 0 0 1 .9.9v2.8a.9.9 0 0 1-1.8 0V6.5a.9.9 0 0 1 .9-.9zm0 6.9a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"
+        /></svg
+      >损坏</span
+    >
     <!-- 禁用角标（F10）：.disabled 后缀，绘画工具不加载 -->
     <span
       v-if="model.disabled"
       class="disabled-badge"
       title="已禁用（文件名带 .disabled 后缀，绘画工具不加载；右键可启用）"
-    >已禁用</span>
-    <span v-if="subTag" class="sub-badge" :style="{ color: subTag.color, borderColor: subTag.color }">
+      >已禁用</span
+    >
+    <span
+      v-if="subTag"
+      class="sub-badge"
+      :style="{ color: subTag.color, borderColor: subTag.color }"
+    >
       {{ subTag.label }}
     </span>
   </div>
@@ -306,7 +325,8 @@ const isDuplicate = computed(() => duplicateIdSet.value.has(props.model.id))
   background: rgba(255, 255, 255, 0.45);
   /* 压在浅色封面上也可辨 */
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
-  transition: background var(--dur-fast) var(--ease-out),
+  transition:
+    background var(--dur-fast) var(--ease-out),
     transform var(--dur-fast) var(--ease-out);
 }
 

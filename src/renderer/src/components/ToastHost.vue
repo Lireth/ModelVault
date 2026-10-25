@@ -14,14 +14,77 @@ import { dismissToast, state } from '../store/appStore'
           :class="`toast-${t.type}`"
         >
           <span class="toast-icon" aria-hidden="true">
-            <svg v-if="t.type === 'success'" viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3.2L13 4.8" /></svg>
-            <svg v-else-if="t.type === 'error'" viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
-            <svg v-else-if="t.type === 'warn'" viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M8 4v5.5" /><path d="M8 12.6v.2" /></svg>
-            <svg v-else viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M8 7v4.5" /><path d="M8 4.1v.2" /></svg>
+            <svg
+              v-if="t.type === 'success'"
+              viewBox="0 0 16 16"
+              width="10"
+              height="10"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M3 8.5l3.2 3.2L13 4.8" />
+            </svg>
+            <svg
+              v-else-if="t.type === 'error'"
+              viewBox="0 0 16 16"
+              width="10"
+              height="10"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            >
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
+            <svg
+              v-else-if="t.type === 'warn'"
+              viewBox="0 0 16 16"
+              width="10"
+              height="10"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            >
+              <path d="M8 4v5.5" />
+              <path d="M8 12.6v.2" />
+            </svg>
+            <svg
+              v-else
+              viewBox="0 0 16 16"
+              width="10"
+              height="10"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            >
+              <path d="M8 7v4.5" />
+              <path d="M8 4.1v.2" />
+            </svg>
           </span>
           <span>{{ t.text }}</span>
-          <button class="toast-close" title="关闭" aria-label="关闭通知" @click="dismissToast(t.id)">
-            <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+          <button
+            class="toast-close"
+            title="关闭"
+            aria-label="关闭通知"
+            @click="dismissToast(t.id)"
+          >
+            <svg
+              viewBox="0 0 16 16"
+              width="10"
+              height="10"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
           </button>
         </div>
       </TransitionGroup>
@@ -91,10 +154,20 @@ import { dismissToast, state } from '../store/appStore'
   color: var(--on-bright);
 }
 
-.toast-success .toast-icon { background: var(--success); }
-.toast-error .toast-icon { background: var(--danger); color: #fff; }
-.toast-warn .toast-icon { background: var(--warning-soft); }
-.toast-info .toast-icon { background: var(--accent); color: #fff; }
+.toast-success .toast-icon {
+  background: var(--success);
+}
+.toast-error .toast-icon {
+  background: var(--danger);
+  color: #fff;
+}
+.toast-warn .toast-icon {
+  background: var(--warning-soft);
+}
+.toast-info .toast-icon {
+  background: var(--accent);
+  color: #fff;
+}
 
 .toast-enter-active,
 .toast-leave-active {

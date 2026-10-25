@@ -5,7 +5,7 @@ import {
   formatParamSummary,
   formatSize,
   state,
-  toggleFavorite
+  toggleFavorite,
 } from '../store/appStore'
 
 /**
@@ -17,7 +17,7 @@ import {
 const props = defineProps({
   model: { type: Object, required: true },
   /** 显示名称（备注名优先，为空时回退文件名；父组件同源计算） */
-  displayName: { type: String, default: '' }
+  displayName: { type: String, default: '' },
 })
 
 /** 卡片展示的自由标签（F-5）：最多 3 个，溢出以 +N 收尾 */
@@ -51,24 +51,49 @@ function onToggleFavorite() {
         @keydown.enter.stop.prevent
         @keydown.space.stop.prevent
       >
-        <svg viewBox="0 0 24 24" width="15" height="15" :fill="model.favorite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true">
-          <path d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z" />
+        <svg
+          viewBox="0 0 24 24"
+          width="15"
+          height="15"
+          :fill="model.favorite ? 'currentColor' : 'none'"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path
+            d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z"
+          />
         </svg>
       </button>
     </div>
-    <div v-if="state.settings.showSize || state.settings.showMtime" class="model-meta">
+    <div
+      v-if="state.settings.showSize || state.settings.showMtime"
+      class="model-meta"
+    >
       <span v-if="state.settings.showSize">{{ formatSize(model.size) }}</span>
       <span v-if="state.settings.showMtime">{{ mtimeText }}</span>
     </div>
     <!-- 自由标签角标（F-5）：最多展示 3 个，溢出计数收尾 -->
     <div v-if="cardTags.length" class="tag-row">
       <span v-for="t in cardTags" :key="t" class="card-tag">{{ t }}</span>
-      <span v-if="(model.tags || []).length > cardTags.length" class="card-tag more">
+      <span
+        v-if="(model.tags || []).length > cardTags.length"
+        class="card-tag more"
+      >
         +{{ model.tags.length - cardTags.length }}
       </span>
     </div>
-    <p v-if="state.settings.showParams && paramSummary" class="param-summary" :title="paramSummary">{{ paramSummary }}</p>
-    <p v-else-if="state.settings.showParams" class="param-summary empty">未设置推荐参数</p>
+    <p
+      v-if="state.settings.showParams && paramSummary"
+      class="param-summary"
+      :title="paramSummary"
+    >
+      {{ paramSummary }}
+    </p>
+    <p v-else-if="state.settings.showParams" class="param-summary empty">
+      未设置推荐参数
+    </p>
   </div>
 </template>
 
@@ -99,7 +124,9 @@ function onToggleFavorite() {
   display: inline-flex;
   align-items: center;
   border-radius: var(--radius-sm);
-  transition: color var(--dur-fast) var(--ease-out), filter var(--dur-fast) var(--ease-out),
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    filter var(--dur-fast) var(--ease-out),
     transform var(--dur-fast) var(--ease-out);
 }
 

@@ -46,7 +46,9 @@ export function isUnsafeModelKey(key) {
 export function normalizeStoreData(parsed) {
   const models = {}
   const source =
-    parsed && typeof parsed === 'object' ? /** @type {{models?: unknown}} */ (parsed).models : null
+    parsed && typeof parsed === 'object'
+      ? /** @type {{models?: unknown}} */ (parsed).models
+      : null
   if (source && typeof source === 'object') {
     for (const [key, meta] of Object.entries(source)) {
       if (isUnsafeModelKey(key)) continue
@@ -132,14 +134,19 @@ export function normalizeModelMeta(raw) {
     note: typeof raw.note === 'string' ? raw.note.slice(0, 2000) : '',
     // 备注来源（'sidecar' 表示由同名 .txt 自动导入；用户在详情页保存后清除）
     noteSource: raw.noteSource === 'sidecar' ? 'sidecar' : '',
-    subCategory: VALID_SUB_CATEGORIES.has(raw.subCategory) ? raw.subCategory : '',
+    subCategory: VALID_SUB_CATEGORIES.has(raw.subCategory)
+      ? raw.subCategory
+      : '',
     // 触发词（LoRA 等模型的唤起词，自由文本，详情页可一键复制）
     triggerWords:
-      typeof raw.triggerWords === 'string' ? raw.triggerWords.trim().slice(0, 1000) : '',
+      typeof raw.triggerWords === 'string'
+        ? raw.triggerWords.trim().slice(0, 1000)
+        : '',
     // 触发词来源（'sidecar' = 同名 .txt 首行自动导入；'civitai' = 同名
     // .civitai.info 的 trainedWords 自动导入，F8；用户在详情页保存后清除）
     triggerWordsSource:
-      raw.triggerWordsSource === 'sidecar' || raw.triggerWordsSource === 'civitai'
+      raw.triggerWordsSource === 'sidecar' ||
+      raw.triggerWordsSource === 'civitai'
         ? raw.triggerWordsSource
         : '',
     // 收藏标记（false 为未收藏）
@@ -147,10 +154,16 @@ export function normalizeModelMeta(raw) {
     // NSFW 标记：勾选后首页卡片预览图做模糊处理（详情页正常展示）
     nsfw: raw.nsfw === true,
     // 评分（0-5 整数，0 为未评分）
-    rating: Number.isInteger(raw.rating) && raw.rating >= 0 && raw.rating <= 5 ? raw.rating : 0,
+    rating:
+      Number.isInteger(raw.rating) && raw.rating >= 0 && raw.rating <= 5
+        ? raw.rating
+        : 0,
     // 文件 SHA256 哈希与计算时的文件 mtime，
     // mtime 一致则重启后无需重新计算大文件哈希
-    hash: typeof raw.hash === 'string' && /^[0-9a-f]{64}$/i.test(raw.hash) ? raw.hash.toLowerCase() : '',
+    hash:
+      typeof raw.hash === 'string' && /^[0-9a-f]{64}$/i.test(raw.hash)
+        ? raw.hash.toLowerCase()
+        : '',
     hashMtime: Number.isFinite(raw.hashMtime) ? raw.hashMtime : 0,
     // Civitai 在线识别结果（识别成功时由 models:civitaiIdentify 写入）：
     // 模型页面 URL（放行 civitai.{com,red} 页面链接，渲染层经外链白名单打开）
@@ -162,7 +175,9 @@ export function normalizeModelMeta(raw) {
     // 基底模型（F-2 筛选数据源之二）：Civitai 识别回填（safetensors 头部
     // 解析不可用或未携带时的补全来源）；渲染层与 autoInfo.baseModel 合并展示
     baseModel:
-      typeof raw.baseModel === 'string' ? raw.baseModel.trim().slice(0, 100) : '',
+      typeof raw.baseModel === 'string'
+        ? raw.baseModel.trim().slice(0, 100)
+        : '',
     // 自由标签（F-5）：用户自定义多标签，与二级分类标签（固定枚举）互补；
     // 随元数据整体迁移（relink），不参与文件夹整理的目录映射
     tags: normalizeTags(raw.tags),
@@ -174,10 +189,13 @@ export function normalizeModelMeta(raw) {
       sampler: typeof params.sampler === 'string' ? params.sampler : '',
       scheduler: typeof params.scheduler === 'string' ? params.scheduler : '',
       // 模型精度（如 FP16 / BF16 / FP32 / FP8）
-      precision: typeof params.precision === 'string' ? params.precision.slice(0, 20) : '',
+      precision:
+        typeof params.precision === 'string'
+          ? params.precision.slice(0, 20)
+          : '',
       // 兼容旧版四字段（resMinW/resMinH/resMaxW/resMaxH），迁移为宽高共用的单值区间
       resMin: pickLegacyRes(params.resMin, [params.resMinW, params.resMinH]),
-      resMax: pickLegacyRes(params.resMax, [params.resMaxW, params.resMaxH])
-    }
+      resMax: pickLegacyRes(params.resMax, [params.resMaxW, params.resMaxH]),
+    },
   }
 }

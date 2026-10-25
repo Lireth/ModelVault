@@ -10,9 +10,9 @@ vi.mock('electron', () => ({
   app: {
     getPath: vi.fn(() => fakeUserData),
     isPackaged: true,
-    getVersion: vi.fn(() => '0.1.0')
+    getVersion: vi.fn(() => '0.1.0'),
   },
-  net: { fetch: vi.fn() }
+  net: { fetch: vi.fn() },
 }))
 
 import { checkForUpdate, compareVersions } from '../src/main/services/updater'
@@ -43,16 +43,18 @@ describe('checkForUpdate（E1 / B3 下载页域名白名单）', () => {
         JSON.stringify({
           tag_name: 'v9.9.9',
           html_url: 'https://github.com/Lireth/ModelVault/releases/tag/v9.9.9',
-          body: '更新说明'
+          body: '更新说明',
         }),
-        { status: 200 }
-      )
+        { status: 200 },
+      ),
     )
     const res = await checkForUpdate()
     expect(res.error).toBeUndefined()
     expect(res.hasUpdate).toBe(true)
     expect(res.latest).toBe('9.9.9')
-    expect(res.releaseUrl).toBe('https://github.com/Lireth/ModelVault/releases/tag/v9.9.9')
+    expect(res.releaseUrl).toBe(
+      'https://github.com/Lireth/ModelVault/releases/tag/v9.9.9',
+    )
   })
 
   it('API 返回非白名单域名时忽略下载页地址（不向渲染层提供外链）', async () => {
@@ -60,10 +62,10 @@ describe('checkForUpdate（E1 / B3 下载页域名白名单）', () => {
       new Response(
         JSON.stringify({
           tag_name: 'v9.9.9',
-          html_url: 'https://evil.example.com/ModelVault-Setup.exe'
+          html_url: 'https://evil.example.com/ModelVault-Setup.exe',
         }),
-        { status: 200 }
-      )
+        { status: 200 },
+      ),
     )
     const res = await checkForUpdate()
     expect(res.hasUpdate).toBe(true)
@@ -73,7 +75,7 @@ describe('checkForUpdate（E1 / B3 下载页域名白名单）', () => {
 
   it('缺少 html_url 时不留空地址（渲染层隐藏下载入口）', async () => {
     vi.mocked(net.fetch).mockResolvedValue(
-      new Response(JSON.stringify({ tag_name: 'v9.9.9' }), { status: 200 })
+      new Response(JSON.stringify({ tag_name: 'v9.9.9' }), { status: 200 }),
     )
     const res = await checkForUpdate()
     expect(res.hasUpdate).toBe(true)
@@ -82,7 +84,9 @@ describe('checkForUpdate（E1 / B3 下载页域名白名单）', () => {
 
   it('tag_name 非纯数字三段时拒绝（V-06 版本号白名单）', async () => {
     vi.mocked(net.fetch).mockResolvedValue(
-      new Response(JSON.stringify({ tag_name: 'v../../evil' }), { status: 200 })
+      new Response(JSON.stringify({ tag_name: 'v../../evil' }), {
+        status: 200,
+      }),
     )
     const res = await checkForUpdate()
     expect(res.error).toContain('版本号非法')
@@ -93,8 +97,8 @@ describe('checkForUpdate（E1 / B3 下载页域名白名单）', () => {
     vi.mocked(net.fetch).mockResolvedValue(
       new Response('{}', {
         status: 200,
-        headers: { 'Content-Length': String(3 * 1024 * 1024) }
-      })
+        headers: { 'Content-Length': String(3 * 1024 * 1024) },
+      }),
     )
     const res = await checkForUpdate()
     expect(res.error).toContain('更新信息过大')

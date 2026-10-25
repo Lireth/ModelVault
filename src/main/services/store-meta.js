@@ -5,14 +5,18 @@ import path from 'node:path'
 import logger from '../logger'
 import { isEmptyModelMeta, planMetaRelinks, splitRelKey } from './meta-relink'
 import { isRelKeyInScope } from '../../shared/scan-dirs'
-import { isUnsafeModelKey, normalizeModelMeta, normalizeStoreData } from './store-meta-normalize'
+import {
+  isUnsafeModelKey,
+  normalizeModelMeta,
+  normalizeStoreData,
+} from './store-meta-normalize'
 import { loadJournal, removeJournalDir } from './store-meta-journal'
 import { preserveCorruptedFile } from '../utils'
 import {
   clearOfflineRetry,
   flushStoreSave,
   saveStoreNow,
-  scheduleSave
+  scheduleSave,
 } from './store-meta-persist'
 import { markDirty, metaState } from './store-meta-state'
 import {
@@ -24,7 +28,7 @@ import {
   getDataDir,
   getDataFilePath,
   setDataRoot,
-  toRelKey
+  toRelKey,
 } from './store-paths'
 
 /**
@@ -71,7 +75,9 @@ export async function loadData() {
     metaState.hasSnapshot = true
     snapshotSeq = Number.isFinite(parsed?.journalSeq) ? parsed.journalSeq : 0
     metaState.journalSeq = snapshotSeq
-    logger.info(`关联存储加载完成：${Object.keys(metaState.data.models).length} 条记录（${file}）`)
+    logger.info(
+      `关联存储加载完成：${Object.keys(metaState.data.models).length} 条记录（${file}）`,
+    )
   } catch (err) {
     if (err.code === 'ENOENT') {
       metaState.data = { version: 1, models: {} }
@@ -85,14 +91,19 @@ export async function loadData() {
       // 基线时回放 delta 可能把半套数据重新拼起来
       try {
         const backup = await preserveCorruptedFile(file)
-        logger.error(`关联存储文件损坏，原文件已备份为 ${path.basename(backup)} 后重置: ${err.message}`)
+        logger.error(
+          `关联存储文件损坏，原文件已备份为 ${path.basename(backup)} 后重置: ${err.message}`,
+        )
       } catch (backupErr) {
-        logger.error(`关联存储加载失败，已重置（备份失败: ${backupErr.message}）: ${err.message}`)
+        logger.error(
+          `关联存储加载失败，已重置（备份失败: ${backupErr.message}）: ${err.message}`,
+        )
       }
       await removeJournalDir()
     }
   }
-  if (!metaState.dataReset && metaState.hasSnapshot) await loadJournal(snapshotSeq)
+  if (!metaState.dataReset && metaState.hasSnapshot)
+    await loadJournal(snapshotSeq)
   return metaState.data
 }
 
@@ -178,7 +189,10 @@ async function migrateLegacyData() {
           await fs.copyFile(legacyCover, path.join(getCoversDir(), destName))
           normalized.cover = newRel
           // 迁移后的封面同步进封面列表首位（规范化可能已剔除旧绝对路径条目）
-          normalized.covers = [newRel, ...normalized.covers.filter((c) => c !== newRel)]
+          normalized.covers = [
+            newRel,
+            ...normalized.covers.filter((c) => c !== newRel),
+          ]
         } catch {
           normalized.cover = ''
         }
@@ -222,7 +236,9 @@ export function getMetaMapByAbsPath() {
 export function getModelIdsByAbsPath() {
   const root = getCurrentRoot()
   if (!metaState.data || !root) return []
-  return Object.keys(metaState.data.models).map((relKey) => path.join(root, relKey))
+  return Object.keys(metaState.data.models).map((relKey) =>
+    path.join(root, relKey),
+  )
 }
 
 /** 写入单条模型元数据（合并保存，键为模型绝对路径） */
@@ -315,9 +331,12 @@ export async function switchDataRoot(root) {
  */
 export function relinkScannedMeta(scanned, options = {}) {
   const zero = { relinked: 0, prunedEmpty: 0, retainedOrphans: 0 }
-  if (!metaState.data || !getCurrentRoot() || !Array.isArray(scanned)) return zero
+  if (!metaState.data || !getCurrentRoot() || !Array.isArray(scanned))
+    return zero
 
-  const affectedDirs = Array.isArray(options.affectedDirs) ? options.affectedDirs : null
+  const affectedDirs = Array.isArray(options.affectedDirs)
+    ? options.affectedDirs
+    : null
   /** 键的相对目录是否落在受影响集合内（OP-09 共享实现；null = 全量语义） */
   const keyInScope = (key) => isRelKeyInScope(key, affectedDirs)
 
@@ -332,7 +351,7 @@ export function relinkScannedMeta(scanned, options = {}) {
         key,
         ...splitRelKey(key),
         size: m.size,
-        mtimeMs: m.mtimeMs
+        mtimeMs: m.mtimeMs,
       })
     }
   }
@@ -346,7 +365,7 @@ export function relinkScannedMeta(scanned, options = {}) {
       key,
       ...splitRelKey(key),
       hash: meta.hash || '',
-      hashMtime: Number.isFinite(meta.hashMtime) ? meta.hashMtime : 0
+      hashMtime: Number.isFinite(meta.hashMtime) ? meta.hashMtime : 0,
     })
   }
   if (orphans.length === 0) return zero
@@ -372,7 +391,9 @@ export function relinkScannedMeta(scanned, options = {}) {
   if (relinks.length > 0) {
     logger.info(
       `已重新关联 ${relinks.length} 个被移动/重命名模型的标注` +
-        (retainedOrphans > 0 ? `；${retainedOrphans} 个含数据的失效条目已保守保留` : '')
+        (retainedOrphans > 0
+          ? `；${retainedOrphans} 个含数据的失效条目已保守保留`
+          : ''),
     )
   }
   if (relinks.length > 0 || prunedEmpty > 0) scheduleSave()
@@ -385,4 +406,8 @@ export function relinkScannedMeta(scanned, options = {}) {
 // 不可信输入规范化（备份恢复/跨库传输直接消费）
 export { normalizeStoreData } from './store-meta-normalize'
 // 落盘链（备份/退出/切库/离线重试等路径消费）
-export { saveStoreDeltaNow, saveStoreNow, flushStoreSave } from './store-meta-persist'
+export {
+  saveStoreDeltaNow,
+  saveStoreNow,
+  flushStoreSave,
+} from './store-meta-persist'

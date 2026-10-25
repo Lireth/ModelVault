@@ -11,7 +11,7 @@ export const COMPARE_MAX_MODELS = 6
 
 export const compareState = reactive({
   open: false,
-  ids: []
+  ids: [],
 })
 
 /**
@@ -20,7 +20,9 @@ export const compareState = reactive({
  * @returns {boolean} 是否打开
  */
 export function openCompare(ids) {
-  const list = (Array.isArray(ids) ? ids : []).filter((id) => typeof id === 'string' && id)
+  const list = (Array.isArray(ids) ? ids : []).filter(
+    (id) => typeof id === 'string' && id,
+  )
   if (list.length < 2) {
     toast('warn', '请至少选择 2 个模型进行对比')
     return false

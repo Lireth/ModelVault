@@ -14,7 +14,7 @@ import {
   scanModels,
   sidecarBaseOf,
   sidecarFilesFor,
-  sidecarImportPatch
+  sidecarImportPatch,
 } from '../src/main/services/scanner'
 
 /**
@@ -32,19 +32,29 @@ describe('扫描/监控共享遍历策略（O11）', () => {
       name,
       isDirectory: () => kind === 'dir',
       isFile: () => kind === 'file',
-      isSymbolicLink: () => kind === 'sym'
+      isSymbolicLink: () => kind === 'sym',
     }
   }
 
   it('目录项可见性：隐藏/put_/符号链接/内置与用户排除目录均不可见', () => {
     const userExclude = new Set(['temp'])
-    expect(isVisibleScanEntry(dirent('model.safetensors', 'file'), userExclude)).toBe(true)
+    expect(
+      isVisibleScanEntry(dirent('model.safetensors', 'file'), userExclude),
+    ).toBe(true)
     expect(isVisibleScanEntry(dirent('lora', 'dir'), userExclude)).toBe(true)
-    expect(isVisibleScanEntry(dirent('.hidden', 'dir'), userExclude)).toBe(false)
-    expect(isVisibleScanEntry(dirent('put_temp.bin', 'file'), userExclude)).toBe(false)
+    expect(isVisibleScanEntry(dirent('.hidden', 'dir'), userExclude)).toBe(
+      false,
+    )
+    expect(
+      isVisibleScanEntry(dirent('put_temp.bin', 'file'), userExclude),
+    ).toBe(false)
     expect(isVisibleScanEntry(dirent('link', 'sym'), userExclude)).toBe(false)
-    expect(isVisibleScanEntry(dirent('node_modules', 'dir'), userExclude)).toBe(false)
-    expect(isVisibleScanEntry(dirent('$RECYCLE.BIN', 'dir'), userExclude)).toBe(false)
+    expect(isVisibleScanEntry(dirent('node_modules', 'dir'), userExclude)).toBe(
+      false,
+    )
+    expect(isVisibleScanEntry(dirent('$RECYCLE.BIN', 'dir'), userExclude)).toBe(
+      false,
+    )
     expect(isVisibleScanEntry(dirent('TEMP', 'dir'), userExclude)).toBe(false)
     // 用户排除仅作用于目录：同名文件不被误伤
     expect(isVisibleScanEntry(dirent('temp', 'file'), userExclude)).toBe(true)
@@ -55,7 +65,9 @@ describe('扫描/监控共享遍历策略（O11）', () => {
     expect(isExcludedScanName('.modelvault', userExclude)).toBe(true)
     expect(isExcludedScanName('put_upload.tmp', userExclude)).toBe(true)
     expect(isExcludedScanName('Node_Modules', userExclude)).toBe(true)
-    expect(isExcludedScanName('System Volume Information', userExclude)).toBe(true)
+    expect(isExcludedScanName('System Volume Information', userExclude)).toBe(
+      true,
+    )
     expect(isExcludedScanName('CACHE', userExclude)).toBe(true)
     expect(isExcludedScanName('lora', userExclude)).toBe(false)
   })
@@ -66,7 +78,9 @@ describe('classifyModel', () => {
     expect(classifyModel(['models', 'lora'], 'a.safetensors')).toBe('lora')
     expect(classifyModel(['LoRA'], 'a.safetensors')).toBe('lora')
     expect(classifyModel(['vae'], 'a.safetensors')).toBe('vae')
-    expect(classifyModel(['text_encoders'], 'a.safetensors')).toBe('text_encoder')
+    expect(classifyModel(['text_encoders'], 'a.safetensors')).toBe(
+      'text_encoder',
+    )
     expect(classifyModel(['clip'], 'a.safetensors')).toBe('text_encoder')
     expect(classifyModel(['checkpoints'], 'a.safetensors')).toBe('checkpoint')
     expect(classifyModel(['stable-diffusion'], 'a.ckpt')).toBe('checkpoint')
@@ -82,10 +96,18 @@ describe('classifyModel', () => {
   it('文件夹未命中时按文件名关键词兜底', () => {
     expect(classifyModel(['downloads'], 'foo-lora-01.pt')).toBe('lora')
     expect(classifyModel(['downloads'], 'my.model-vae.pth')).toBe('vae')
-    expect(classifyModel(['downloads'], 't5-xxl.safetensors')).toBe('text_encoder')
-    expect(classifyModel(['downloads'], 'text-encoder.bin')).toBe('text_encoder')
-    expect(classifyModel(['downloads'], 'sdxl-base.safetensors')).toBe('checkpoint')
-    expect(classifyModel(['downloads'], 'just-a-model.safetensors')).toBe('other')
+    expect(classifyModel(['downloads'], 't5-xxl.safetensors')).toBe(
+      'text_encoder',
+    )
+    expect(classifyModel(['downloads'], 'text-encoder.bin')).toBe(
+      'text_encoder',
+    )
+    expect(classifyModel(['downloads'], 'sdxl-base.safetensors')).toBe(
+      'checkpoint',
+    )
+    expect(classifyModel(['downloads'], 'just-a-model.safetensors')).toBe(
+      'other',
+    )
   })
 })
 
@@ -152,7 +174,10 @@ describe('scanModels', () => {
     await fs.writeFile(path.join(root, '.git', 'secret.safetensors'), 'x')
     // 大小写变体：内置排除目录按小写比较（Windows 文件系统不区分大小写）
     await fs.mkdir(path.join(root, 'System volume information'))
-    await fs.writeFile(path.join(root, 'System volume information', 'sys.safetensors'), 'x')
+    await fs.writeFile(
+      path.join(root, 'System volume information', 'sys.safetensors'),
+      'x',
+    )
     await fs.writeFile(path.join(root, 'put_interfaces.bin'), 'x')
     await fs.writeFile(path.join(root, 'empty.safetensors'), 'x')
   })
@@ -163,7 +188,10 @@ describe('scanModels', () => {
 
   it('.disabled 后缀文件放行：保留真实扩展名与 disabled 标记，名称剥离双重后缀（F10）', async () => {
     await fs.writeFile(path.join(root, 'off-lora.safetensors.disabled'), 'x')
-    await fs.writeFile(path.join(root, 'lora', 'off-lora.safetensors.disabled'), 'x')
+    await fs.writeFile(
+      path.join(root, 'lora', 'off-lora.safetensors.disabled'),
+      'x',
+    )
     // 非模型主扩展名的 .disabled 不放行
     await fs.writeFile(path.join(root, 'junk.txt.disabled'), 'x')
     try {
@@ -174,22 +202,30 @@ describe('scanModels', () => {
       expect(rootOne.name).toBe('off-lora')
       expect(rootOne.ext).toBe('.safetensors')
       // lora 目录下的禁用文件：文件夹分类照常生效（真实扩展名参与分类链）
-      const loraOne = disabled.find((m) => path.dirname(m.id) === path.join(root, 'lora'))
+      const loraOne = disabled.find(
+        (m) => path.dirname(m.id) === path.join(root, 'lora'),
+      )
       expect(loraOne.type).toBe('lora')
       // 无 disabled 字段的常规模型不受影响
-      const normal = models.find((m) => m.id === path.join(root, 'a.safetensors'))
+      const normal = models.find(
+        (m) => m.id === path.join(root, 'a.safetensors'),
+      )
       expect(normal.disabled).toBe(false)
       expect(models.some((m) => m.id.endsWith('junk.txt.disabled'))).toBe(false)
     } finally {
-      await fs.rm(path.join(root, 'off-lora.safetensors.disabled'), { force: true })
-      await fs.rm(path.join(root, 'lora', 'off-lora.safetensors.disabled'), { force: true })
+      await fs.rm(path.join(root, 'off-lora.safetensors.disabled'), {
+        force: true,
+      })
+      await fs.rm(path.join(root, 'lora', 'off-lora.safetensors.disabled'), {
+        force: true,
+      })
       await fs.rm(path.join(root, 'junk.txt.disabled'), { force: true })
     }
   })
 
   it('递归扫描：扩展名过滤 + 排除目录 + 分类标注', async () => {
     const { models, errors, dirCount } = await scanModels(root, undefined, {
-      excludeDirs: ['temp']
+      excludeDirs: ['temp'],
     })
     expect(errors).toHaveLength(0)
     expect(dirCount).toBeGreaterThanOrEqual(3)
@@ -202,7 +238,9 @@ describe('scanModels', () => {
     expect(ids).not.toContain(path.join(root, '$RECYCLE.BIN', 'd.safetensors'))
     expect(ids).not.toContain(path.join(root, 'node_modules', 'nm.safetensors'))
     expect(ids).not.toContain(path.join(root, '.git', 'secret.safetensors'))
-    expect(ids).not.toContain(path.join(root, 'System volume information', 'sys.safetensors'))
+    expect(ids).not.toContain(
+      path.join(root, 'System volume information', 'sys.safetensors'),
+    )
     expect(ids).not.toContain(path.join(root, 'put_interfaces.bin'))
     // 分类
     const b = models.find((m) => m.name === 'b')
@@ -215,14 +253,16 @@ describe('scanModels', () => {
 
   it('支持自定义扩展名白名单', async () => {
     const { models } = await scanModels(root, undefined, {
-      extensions: ['.ckpt']
+      extensions: ['.ckpt'],
     })
     expect(models).toHaveLength(1)
     expect(models[0].name).toBe('b')
   })
 
   it('OPT-02：扫描同时产出与 watcher 同构的目录名快照', async () => {
-    const { dirSnapshot } = await scanModels(root, undefined, { excludeDirs: ['temp'] })
+    const { dirSnapshot } = await scanModels(root, undefined, {
+      excludeDirs: ['temp'],
+    })
     expect(dirSnapshot).toBeInstanceOf(Map)
     const rootNames = dirSnapshot.get(root)
     expect(rootNames).toContain('a.safetensors')
@@ -243,17 +283,23 @@ describe('scanModels', () => {
 
   it('子树重复/重叠时按 id 去重，扫描结果不含重复模型（B-01 防御）', async () => {
     await fs.mkdir(path.join(root, 'lora', 'sub'), { recursive: true })
-    await fs.writeFile(path.join(root, 'lora', 'sub', 'nested.safetensors'), 'x')
+    await fs.writeFile(
+      path.join(root, 'lora', 'sub', 'nested.safetensors'),
+      'x',
+    )
     try {
       // 入参层已剔除后代；此处直接传入重叠集合，验证 scanner 自身兜底
       const { models } = await scanModels(root, undefined, {
-        subDirs: ['lora', 'lora', 'lora/sub']
+        subDirs: ['lora', 'lora', 'lora/sub'],
       })
       const nestedId = path.join(root, 'lora', 'sub', 'nested.safetensors')
       expect(models.filter((m) => m.id === nestedId)).toHaveLength(1)
       expect(new Set(models.map((m) => m.id)).size).toBe(models.length)
     } finally {
-      await fs.rm(path.join(root, 'lora', 'sub'), { recursive: true, force: true })
+      await fs.rm(path.join(root, 'lora', 'sub'), {
+        recursive: true,
+        force: true,
+      })
     }
   })
 
@@ -276,7 +322,9 @@ describe('scanModels', () => {
 
   describe('subDirs 子树局部扫描（A-03）', () => {
     it('只扫描指定子树：兄弟目录与根目录直属文件均不出现在结果中', async () => {
-      const { models, errors } = await scanModels(root, undefined, { subDirs: ['lora'] })
+      const { models, errors } = await scanModels(root, undefined, {
+        subDirs: ['lora'],
+      })
       expect(errors).toHaveLength(0)
       const ids = models.map((m) => m.id)
       expect(ids).toContain(path.join(root, 'lora', 'b.ckpt'))
@@ -284,9 +332,13 @@ describe('scanModels', () => {
     })
 
     it('支持多个子树', async () => {
-      const { models } = await scanModels(root, undefined, { subDirs: ['lora', 'notes'] })
+      const { models } = await scanModels(root, undefined, {
+        subDirs: ['lora', 'notes'],
+      })
       // notes 内只有 txt（扩展名过滤），仅 lora/b.ckpt 命中
-      expect(models.map((m) => m.id)).toEqual([path.join(root, 'lora', 'b.ckpt')])
+      expect(models.map((m) => m.id)).toEqual([
+        path.join(root, 'lora', 'b.ckpt'),
+      ])
     })
 
     it('空子树列表等价于不限制（全量扫描，向后兼容）', async () => {
@@ -305,21 +357,30 @@ describe('scanModels', () => {
 
     it('不存在的子目录静默跳过（已删除目录的情况），其余子树正常', async () => {
       const { models, errors } = await scanModels(root, undefined, {
-        subDirs: ['lora', 'gone-dir']
+        subDirs: ['lora', 'gone-dir'],
       })
       expect(errors).toHaveLength(0)
-      expect(models.map((m) => m.id)).toContain(path.join(root, 'lora', 'b.ckpt'))
+      expect(models.map((m) => m.id)).toContain(
+        path.join(root, 'lora', 'b.ckpt'),
+      )
     })
 
     it('子树扫描仍受 MAX_DEPTH 约束（深于上限不遍历）', async () => {
       const deep = path.join(root, 'sub-deep')
       // MAX_DEPTH=8：在第 9 层放模型，局部扫描该子树也不应命中
-      const deepDir = path.join(deep, ...Array.from({ length: 9 }, (_, i) => `d${i}`))
+      const deepDir = path.join(
+        deep,
+        ...Array.from({ length: 9 }, (_, i) => `d${i}`),
+      )
       await fs.mkdir(deepDir, { recursive: true })
       await fs.writeFile(path.join(deepDir, 'deep.safetensors'), 'x')
       try {
-        const { models } = await scanModels(root, undefined, { subDirs: ['sub-deep'] })
-        expect(models.map((m) => m.id)).not.toContain(path.join(deepDir, 'deep.safetensors'))
+        const { models } = await scanModels(root, undefined, {
+          subDirs: ['sub-deep'],
+        })
+        expect(models.map((m) => m.id)).not.toContain(
+          path.join(deepDir, 'deep.safetensors'),
+        )
       } finally {
         await fs.rm(deep, { recursive: true, force: true }).catch(() => {})
       }
@@ -358,12 +419,16 @@ describe('findSidecarPreview', () => {
     await fs.writeFile(modelPath, 'x')
     await fs.writeFile(path.join(dir, 'model3.gif'), 'x')
     await fs.writeFile(path.join(dir, 'model3.bmp'), 'x')
-    expect(await findSidecarPreview(modelPath)).toBe(path.join(dir, 'model3.gif'))
+    expect(await findSidecarPreview(modelPath)).toBe(
+      path.join(dir, 'model3.gif'),
+    )
 
     const modelPath4 = path.join(dir, 'model4.safetensors')
     await fs.writeFile(modelPath4, 'x')
     await fs.writeFile(path.join(dir, 'model4.bmp'), 'x')
-    expect(await findSidecarPreview(modelPath4)).toBe(path.join(dir, 'model4.bmp'))
+    expect(await findSidecarPreview(modelPath4)).toBe(
+      path.join(dir, 'model4.bmp'),
+    )
   })
 })
 
@@ -381,8 +446,13 @@ describe('findSidecarText', () => {
   it('读取同名 txt 并修剪首尾空白', async () => {
     const modelPath = path.join(dir, 'm1.safetensors')
     await fs.writeFile(modelPath, 'x')
-    await fs.writeFile(path.join(dir, 'm1.txt'), '  hatsune miku, twintails\nsecond line\n  ')
-    expect(await findSidecarText(modelPath)).toBe('hatsune miku, twintails\nsecond line')
+    await fs.writeFile(
+      path.join(dir, 'm1.txt'),
+      '  hatsune miku, twintails\nsecond line\n  ',
+    )
+    expect(await findSidecarText(modelPath)).toBe(
+      'hatsune miku, twintails\nsecond line',
+    )
   })
 
   it('空文件、不存在、超大文件返回空字符串', async () => {
@@ -406,7 +476,9 @@ describe('sidecarBaseOf / sidecarFilesFor（.disabled 基名单一来源）', ()
     expect(sidecarBaseOf('x.safetensors')).toBe('x')
     expect(sidecarBaseOf('my.model.v2.safetensors')).toBe('my.model.v2')
     // 完整路径输入（sidecar 函数内部以模型绝对路径调用）
-    expect(sidecarBaseOf(path.join('D:', 'loras', 'x.safetensors.disabled'))).toBe('x')
+    expect(
+      sidecarBaseOf(path.join('D:', 'loras', 'x.safetensors.disabled')),
+    ).toBe('x')
   })
 
   it('禁用模型的 sidecar 清单与展示/清理查找全部命中（修复前基名为 x.safetensors，全部落空）', async () => {
@@ -416,16 +488,23 @@ describe('sidecarBaseOf / sidecarFilesFor（.disabled 基名单一来源）', ()
       await fs.writeFile(disabledModel, 'x')
       await fs.writeFile(path.join(dir, 'hero.txt'), 'trigger words\nnote')
       await fs.writeFile(path.join(dir, 'hero.png'), 'x')
-      await fs.writeFile(path.join(dir, 'hero.civitai.info'), '{"trainedWords":["a"]}')
+      await fs.writeFile(
+        path.join(dir, 'hero.civitai.info'),
+        '{"trainedWords":["a"]}',
+      )
 
       // 清单（删除清理 misc.js 与跨库迁移 library-transfer.js 共用）
       const files = sidecarFilesFor(disabledModel)
       expect(files[0]).toBe(path.join(dir, 'hero.txt'))
       expect(files).toContain(path.join(dir, 'hero.png'))
       // 展示侧三个查找函数同样命中
-      expect(await findSidecarPreview(disabledModel)).toBe(path.join(dir, 'hero.png'))
+      expect(await findSidecarPreview(disabledModel)).toBe(
+        path.join(dir, 'hero.png'),
+      )
       expect(await findSidecarText(disabledModel)).toBe('trigger words\nnote')
-      expect(await findSidecarCivitaiInfo(disabledModel)).toEqual({ trainedWords: ['a'] })
+      expect(await findSidecarCivitaiInfo(disabledModel)).toEqual({
+        trainedWords: ['a'],
+      })
     } finally {
       await fs.rm(dir, { recursive: true, force: true })
     }
@@ -439,22 +518,41 @@ describe('sidecarImportPatch', () => {
   })
 
   it('LoRA 触发词为空时导入首行（与备注导入独立判断）', () => {
-    const patch = sidecarImportPatch('lora', { note: '', triggerWords: '' }, '第一行\n第二行')
+    const patch = sidecarImportPatch(
+      'lora',
+      { note: '', triggerWords: '' },
+      '第一行\n第二行',
+    )
     expect(patch.note).toBe('第一行\n第二行')
     expect(patch.triggerWords).toBe('第一行')
     expect(patch.triggerWordsSource).toBe('sidecar')
   })
 
   it('已有备注/触发词时不覆盖；LoRA 仅触发词缺失时仍导入触发词', () => {
-    expect(sidecarImportPatch('lora', { note: '已有', triggerWords: '已有' }, '文本')).toBeNull()
-    const onlyTrigger = sidecarImportPatch('lora', { note: '已有', triggerWords: '' }, '第一行\n第二行')
-    expect(onlyTrigger).toEqual({ triggerWords: '第一行', triggerWordsSource: 'sidecar' })
+    expect(
+      sidecarImportPatch(
+        'lora',
+        { note: '已有', triggerWords: '已有' },
+        '文本',
+      ),
+    ).toBeNull()
+    const onlyTrigger = sidecarImportPatch(
+      'lora',
+      { note: '已有', triggerWords: '' },
+      '第一行\n第二行',
+    )
+    expect(onlyTrigger).toEqual({
+      triggerWords: '第一行',
+      triggerWordsSource: 'sidecar',
+    })
   })
 
   it('非 LoRA 不产生触发词补丁；空文本返回 null', () => {
     const patch = sidecarImportPatch('vae', { note: '' }, '说明')
     expect(patch.triggerWords).toBeUndefined()
-    expect(sidecarImportPatch('lora', { note: '', triggerWords: '' }, '   ')).toBeNull()
+    expect(
+      sidecarImportPatch('lora', { note: '', triggerWords: '' }, '   '),
+    ).toBeNull()
     expect(sidecarImportPatch('lora', { note: '' }, '')).toBeNull()
   })
 })
@@ -463,20 +561,37 @@ describe('civitaiImportPatch / findSidecarCivitaiInfo（F8）', () => {
   it('trainedWords 导入为逗号连接文本并标记来源；已有触发词不覆盖', () => {
     const patch = civitaiImportPatch(
       { triggerWords: '', nsfw: false },
-      { trainedWords: ['trigger-a', ' trigger-b ', ''] }
+      { trainedWords: ['trigger-a', ' trigger-b ', ''] },
     )
-    expect(patch).toEqual({ triggerWords: 'trigger-a, trigger-b', triggerWordsSource: 'civitai' })
+    expect(patch).toEqual({
+      triggerWords: 'trigger-a, trigger-b',
+      triggerWordsSource: 'civitai',
+    })
     // 已有触发词：跳过（哪怕 civitai 有候选）
-    expect(civitaiImportPatch({ triggerWords: '已有', nsfw: false }, { trainedWords: ['x'] })).toBeNull()
+    expect(
+      civitaiImportPatch(
+        { triggerWords: '已有', nsfw: false },
+        { trainedWords: ['x'] },
+      ),
+    ).toBeNull()
   })
 
   it('nsfw 仅在来源明确为 true 且当前未标记时导入，单向不可逆', () => {
-    const patch = civitaiImportPatch({ triggerWords: 'x', nsfw: false }, { nsfw: true })
+    const patch = civitaiImportPatch(
+      { triggerWords: 'x', nsfw: false },
+      { nsfw: true },
+    )
     expect(patch).toEqual({ nsfw: true })
     // 已标记：不重复；来源非 true：不导入（civitai.info 缺失该字段时不得清标记）
-    expect(civitaiImportPatch({ triggerWords: 'x', nsfw: true }, { nsfw: true })).toBeNull()
-    expect(civitaiImportPatch({ triggerWords: 'x', nsfw: false }, { nsfw: false })).toBeNull()
-    expect(civitaiImportPatch({ triggerWords: 'x', nsfw: false }, {})).toBeNull()
+    expect(
+      civitaiImportPatch({ triggerWords: 'x', nsfw: true }, { nsfw: true }),
+    ).toBeNull()
+    expect(
+      civitaiImportPatch({ triggerWords: 'x', nsfw: false }, { nsfw: false }),
+    ).toBeNull()
+    expect(
+      civitaiImportPatch({ triggerWords: 'x', nsfw: false }, {}),
+    ).toBeNull()
   })
 
   it('真实文件读取：合法 JSON 解析、损坏/超大/缺失返回 null', async () => {
@@ -487,7 +602,12 @@ describe('civitaiImportPatch / findSidecarCivitaiInfo（F8）', () => {
       // 合法
       await fs.writeFile(
         path.join(dir, 'my-lora.civitai.info'),
-        JSON.stringify({ name: 'My LoRA', nsfw: true, trainedWords: ['a', 'b'], baseModel: 'SDXL 1.0' })
+        JSON.stringify({
+          name: 'My LoRA',
+          nsfw: true,
+          trainedWords: ['a', 'b'],
+          baseModel: 'SDXL 1.0',
+        }),
       )
       const info = await findSidecarCivitaiInfo(model)
       expect(info.name).toBe('My LoRA')

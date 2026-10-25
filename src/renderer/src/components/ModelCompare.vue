@@ -11,7 +11,7 @@ import {
   openDetail,
   state,
   subCategoryInfo,
-  typeInfo
+  typeInfo,
 } from '../store/appStore'
 
 /**
@@ -27,24 +27,40 @@ const FIELD_DEFS = [
   {
     key: 'subCategory',
     label: '二级分类',
-    get: (m) => subCategoryInfo(m.subCategory)?.label || '-'
+    get: (m) => subCategoryInfo(m.subCategory)?.label || '-',
   },
-  { key: 'baseModel', label: '基底模型', get: (m) => m.baseModel || m.autoInfo?.baseModel || '-' },
+  {
+    key: 'baseModel',
+    label: '基底模型',
+    get: (m) => m.baseModel || m.autoInfo?.baseModel || '-',
+  },
   { key: 'size', label: '文件大小', get: (m) => formatSize(m.size || 0) },
-  { key: 'mtime', label: '修改时间', get: (m) => (m.mtimeMs ? formatDate(m.mtimeMs) : '-') },
-  { key: 'rating', label: '评分', get: (m) => (m.rating > 0 ? `${m.rating} ★` : '未评分') },
+  {
+    key: 'mtime',
+    label: '修改时间',
+    get: (m) => (m.mtimeMs ? formatDate(m.mtimeMs) : '-'),
+  },
+  {
+    key: 'rating',
+    label: '评分',
+    get: (m) => (m.rating > 0 ? `${m.rating} ★` : '未评分'),
+  },
   { key: 'favorite', label: '收藏', get: (m) => (m.favorite ? '是' : '否') },
   { key: 'nsfw', label: 'NSFW', get: (m) => (m.nsfw ? '是' : '否') },
-  { key: 'params', label: '推荐参数', get: (m) => formatParamSummary(m.params) || '-' },
+  {
+    key: 'params',
+    label: '推荐参数',
+    get: (m) => formatParamSummary(m.params) || '-',
+  },
   { key: 'trigger', label: '触发词', get: (m) => m.triggerWords || '-' },
   { key: 'tags', label: '标签', get: (m) => (m.tags || []).join(' / ') || '-' },
   { key: 'note', label: '备注', get: (m) => m.note || '-' },
-  { key: 'path', label: '文件路径', get: (m) => m.id || '-', diff: false }
+  { key: 'path', label: '文件路径', get: (m) => m.id || '-', diff: false },
 ]
 
 const panelEl = ref(null)
 const models = computed(() =>
-  compareState.ids.map((id) => modelById.value.get(id)).filter(Boolean)
+  compareState.ids.map((id) => modelById.value.get(id)).filter(Boolean),
 )
 
 const rows = computed(() =>
@@ -53,9 +69,9 @@ const rows = computed(() =>
     return {
       ...def,
       values,
-      diff: def.diff !== false && new Set(values).size > 1
+      diff: def.diff !== false && new Set(values).size > 1,
     }
-  })
+  }),
 )
 
 function openModel(id) {
@@ -67,7 +83,7 @@ watch(
   () => compareState.open,
   (open) => {
     if (open) nextTick(() => panelEl.value?.focus())
-  }
+  },
 )
 
 function onKeydown(e) {
@@ -82,7 +98,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 <template>
   <Teleport to="body">
-    <div v-if="compareState.open" class="compare-mask" @click.self="closeCompare">
+    <div
+      v-if="compareState.open"
+      class="compare-mask"
+      @click.self="closeCompare"
+    >
       <section
         ref="panelEl"
         class="compare-panel"
@@ -95,7 +115,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <h2>模型对比</h2>
           <span class="compare-count">{{ models.length }} 个模型</span>
           <button class="wc-btn" title="关闭对比" @click="closeCompare">
-            <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+            <svg
+              viewBox="0 0 16 16"
+              width="12"
+              height="12"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
           </button>
         </header>
 
@@ -113,9 +144,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                       alt=""
                       loading="lazy"
                     />
-                    <div v-else class="mini-cover mini-placeholder">{{ m.ext || '—' }}</div>
-                    <span class="mini-name" :title="m.name">{{ m.alias || m.name }}</span>
-                    <button class="mini-detail" @click="openModel(m.id)">详情</button>
+                    <div v-else class="mini-cover mini-placeholder">
+                      {{ m.ext || '—' }}
+                    </div>
+                    <span class="mini-name" :title="m.name">{{
+                      m.alias || m.name
+                    }}</span>
+                    <button class="mini-detail" @click="openModel(m.id)">
+                      详情
+                    </button>
                   </div>
                 </th>
               </tr>
@@ -136,7 +173,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           </table>
         </div>
 
-        <p class="compare-foot">高亮行表示所选模型在该字段上存在差异；对比数据来自当前库标注与自动解析结果。</p>
+        <p class="compare-foot">
+          高亮行表示所选模型在该字段上存在差异；对比数据来自当前库标注与自动解析结果。
+        </p>
       </section>
     </div>
   </Teleport>

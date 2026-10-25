@@ -32,8 +32,8 @@ function seedModels() {
       subCategory: '',
       triggerWords: '',
       coverUrl: '',
-      covers: []
-    }))
+      covers: [],
+    })),
   )
 }
 
@@ -96,10 +96,16 @@ describe('BatchBar 反选按钮', () => {
 
   it('点击反选：筛选内选中态取反', async () => {
     const wrapper = await mountBar()
-    state.multiSelect.ids = ['D:\\models\\a.safetensors', 'D:\\models\\c.safetensors']
+    state.multiSelect.ids = [
+      'D:\\models\\a.safetensors',
+      'D:\\models\\c.safetensors',
+    ]
     await wrapper.vm.$nextTick()
     await wrapper.find('.batch-invert').trigger('click')
-    expect(state.multiSelect.ids).toEqual(['D:\\models\\b.safetensors', 'D:\\models\\d.safetensors'])
+    expect(state.multiSelect.ids).toEqual([
+      'D:\\models\\b.safetensors',
+      'D:\\models\\d.safetensors',
+    ])
     wrapper.unmount()
   })
 })
@@ -127,7 +133,9 @@ describe('BatchBar「更多」下拉', () => {
     state.multiSelect.ids = ['D:\\models\\a.safetensors']
     await wrapper.vm.$nextTick()
     await wrapper.find('.bb-more .btn').trigger('click')
-    const item = wrapper.findAll('.bb-menu-item').find((w) => w.text() === '批量编辑标签…')
+    const item = wrapper
+      .findAll('.bb-menu-item')
+      .find((w) => w.text() === '批量编辑标签…')
     await item.trigger('click')
     expect(wrapper.find('.bb-menu').exists()).toBe(false)
     expect(document.body.querySelector('.bte-dialog')).not.toBeNull()
@@ -162,9 +170,14 @@ describe('BatchBar「更多」下拉', () => {
     await wrapper.vm.$nextTick()
     await wrapper.find('.bb-more .btn').trigger('click')
     // 「填触发词」：无候选模型时走「均已有触发词或无候选」提示分支，仅验证调度与收起
-    await wrapper.findAll('.bb-menu-item').find((w) => w.text() === '填触发词').trigger('click')
+    await wrapper
+      .findAll('.bb-menu-item')
+      .find((w) => w.text() === '填触发词')
+      .trigger('click')
     expect(wrapper.find('.bb-menu').exists()).toBe(false)
-    expect(state.toasts.some((t) => t.text.includes('均已有触发词或无自动解析候选'))).toBe(true)
+    expect(
+      state.toasts.some((t) => t.text.includes('均已有触发词或无自动解析候选')),
+    ).toBe(true)
     wrapper.unmount()
   })
 })

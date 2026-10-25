@@ -25,7 +25,13 @@ describe('themeColors', () => {
   })
 
   it('原型链属性不命中：constructor 等键一律回退深色（B2）', () => {
-    for (const key of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
+    for (const key of [
+      'constructor',
+      'toString',
+      'hasOwnProperty',
+      'valueOf',
+      '__proto__',
+    ]) {
       const colors = themeColors(key)
       // 不得返回函数/原型对象，必须是字段完整的深色配色
       expect(colors).toBe(THEME_COLORS.dark)

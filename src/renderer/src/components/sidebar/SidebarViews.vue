@@ -7,7 +7,7 @@ import {
   saveCurrentAsView,
   savedViews,
   state,
-  viewSummary
+  viewSummary,
 } from '../../store/appStore'
 
 /**
@@ -64,7 +64,8 @@ async function onSaveViewConfirm() {
             @click.stop="deleteSavedView(v.id)"
             @keydown.enter.stop.prevent="deleteSavedView(v.id)"
             @keydown.space.stop.prevent="deleteSavedView(v.id)"
-          >✕</span>
+            >✕</span
+          >
         </button>
       </li>
     </ul>
@@ -80,7 +81,13 @@ async function onSaveViewConfirm() {
         @keydown.esc="cancelSaveView"
       />
       <div class="view-save-actions">
-        <button class="btn btn-primary" :disabled="savingBusy" @click="onSaveViewConfirm">保存</button>
+        <button
+          class="btn btn-primary"
+          :disabled="savingBusy"
+          @click="onSaveViewConfirm"
+        >
+          保存
+        </button>
         <button class="btn" @click="cancelSaveView">取消</button>
       </div>
     </div>
@@ -118,7 +125,9 @@ async function onSaveViewConfirm() {
   font-size: var(--font-xs);
   cursor: pointer;
   text-align: left;
-  transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .view-item:hover {
@@ -199,7 +208,9 @@ async function onSaveViewConfirm() {
   color: var(--text);
   font-size: var(--font-xs);
   outline: none;
-  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .view-save-form input:focus {

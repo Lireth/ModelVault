@@ -62,8 +62,8 @@ vi.mock('electron', () => {
     app: {
       getPath: vi.fn(() => fakeUserData),
       getAppPath: vi.fn(() => fakeUserData),
-      isPackaged: true
-    }
+      isPackaged: true,
+    },
   }
 })
 
@@ -73,7 +73,7 @@ import {
   destroyThumbRenderer,
   isThumbRendererContents,
   setThumbRenderTimeoutForTests,
-  setThumbRendererIdleTimeoutForTests
+  setThumbRendererIdleTimeoutForTests,
 } from '../src/main/services/thumb-renderer'
 import logger from '../src/main/logger'
 import { BrowserWindow as FakeBrowserWindow } from 'electron'
@@ -102,7 +102,7 @@ it('渲染成功：发送任务载荷并在 thumb:done 后以 Buffer 结算', as
   const p = renderThumbJpeg(Buffer.from('fake-png'), {
     thumbWidth: 640,
     minSourceWidth: 720,
-    quality: 0.82
+    quality: 0.82,
   })
   await flush()
 
@@ -119,7 +119,7 @@ it('渲染成功：发送任务载荷并在 thumb:done 后以 Buffer 结算', as
   // 模拟渲染进程回传 JPEG 字节
   w.webContents.emit('ipc-message', {}, 'thumb:done', {
     id: payload.id,
-    jpeg: new Uint8Array([1, 2, 3])
+    jpeg: new Uint8Array([1, 2, 3]),
   })
   await expect(p).resolves.toEqual({ jpeg: Buffer.from([1, 2, 3]) })
 })
@@ -128,7 +128,7 @@ it('按 mvimg 地址派发任务：载荷携带 url 而非整图字节（OP-03�
   const p = renderThumbFromPath('mvimg://local/%2Ftmp%2Fcover.png', {
     thumbWidth: 640,
     minSourceWidth: 720,
-    quality: 0.82
+    quality: 0.82,
   })
   await flush()
   const w = onlyWindow()
@@ -137,13 +137,20 @@ it('按 mvimg 地址派发任务：载荷携带 url 而非整图字节（OP-03�
   expect(payload.url).toBe('mvimg://local/%2Ftmp%2Fcover.png')
   expect(payload.buf).toBeUndefined()
   expect(typeof payload.id).toBe('number')
-  w.webContents.emit('ipc-message', {}, 'thumb:done', { id: payload.id, small: true })
+  w.webContents.emit('ipc-message', {}, 'thumb:done', {
+    id: payload.id,
+    small: true,
+  })
   await expect(p).resolves.toEqual({ small: true })
 })
 
 it('空源图地址直接拒绝，不创建隐藏窗口', async () => {
   await expect(
-    renderThumbFromPath('', { thumbWidth: 640, minSourceWidth: 720, quality: 0.82 })
+    renderThumbFromPath('', {
+      thumbWidth: 640,
+      minSourceWidth: 720,
+      quality: 0.82,
+    }),
   ).rejects.toThrow('无效的源图地址')
   expect(FakeBrowserWindow.instances).toHaveLength(0)
 })
@@ -152,12 +159,15 @@ it('源图过小（small）：以 { small: true } 结算，调用方回退原图
   const p = renderThumbJpeg(Buffer.from('tiny'), {
     thumbWidth: 640,
     minSourceWidth: 720,
-    quality: 0.82
+    quality: 0.82,
   })
   await flush()
   const w = onlyWindow()
   const { payload } = w.webContents.sent[0]
-  w.webContents.emit('ipc-message', {}, 'thumb:done', { id: payload.id, small: true })
+  w.webContents.emit('ipc-message', {}, 'thumb:done', {
+    id: payload.id,
+    small: true,
+  })
   await expect(p).resolves.toEqual({ small: true })
 })
 
@@ -165,12 +175,15 @@ it('渲染失败（损坏文件等）：以渲染进程上报的错误拒绝', a
   const p = renderThumbJpeg(Buffer.from('broken'), {
     thumbWidth: 640,
     minSourceWidth: 720,
-    quality: 0.82
+    quality: 0.82,
   })
   await flush()
   const w = onlyWindow()
   const { payload } = w.webContents.sent[0]
-  w.webContents.emit('ipc-message', {}, 'thumb:done', { id: payload.id, error: '解码失败' })
+  w.webContents.emit('ipc-message', {}, 'thumb:done', {
+    id: payload.id,
+    error: '解码失败',
+  })
   await expect(p).rejects.toThrow('解码失败')
 })
 
@@ -181,15 +194,17 @@ it('渲染超时：拒绝任务并销毁窗口（下次任务重建）', async (
   const p = renderThumbJpeg(Buffer.from('slow'), {
     thumbWidth: 640,
     minSourceWidth: 720,
-    quality: 0.82
+    quality: 0.82,
   })
   // 先挂处理器再推进假时钟：rejection 由 timer 触发，处理器须先行就位
   const outcome = p.then(
     () => 'resolved',
-    (err) => err
+    (err) => err,
   )
   await vi.advanceTimersByTimeAsync(11)
-  expect(await outcome).toMatchObject({ message: expect.stringContaining('缩略图渲染超时') })
+  expect(await outcome).toMatchObject({
+    message: expect.stringContaining('缩略图渲染超时'),
+  })
   expect(onlyWindow().destroyed).toBe(true)
   warnSpy.mockRestore()
 })
@@ -199,7 +214,7 @@ it('渲染进程崩溃（render-process-gone）：在途任务拒绝，窗口销
   const p = renderThumbJpeg(Buffer.from('x'), {
     thumbWidth: 640,
     minSourceWidth: 720,
-    quality: 0.82
+    quality: 0.82,
   })
   await flush()
   const w = onlyWindow()
@@ -213,7 +228,7 @@ it('destroyThumbRenderer：拒绝在途任务（主窗口关闭链路防进程�
   const p = renderThumbJpeg(Buffer.from('x'), {
     thumbWidth: 640,
     minSourceWidth: 720,
-    quality: 0.82
+    quality: 0.82,
   })
   await flush()
   destroyThumbRenderer()
@@ -225,7 +240,7 @@ it('isThumbRendererContents：只识别当前隐藏窗口（业务 IPC 来源拒
   const p = renderThumbJpeg(Buffer.from('x'), {
     thumbWidth: 640,
     minSourceWidth: 720,
-    quality: 0.82
+    quality: 0.82,
   })
   await flush()
   const w = onlyWindow()
@@ -239,7 +254,7 @@ it('隐藏窗口创建参数：沙箱化、无 Node 能力、禁用后台节流'
   const p = renderThumbJpeg(Buffer.from('x'), {
     thumbWidth: 640,
     minSourceWidth: 720,
-    quality: 0.82
+    quality: 0.82,
   })
   await flush()
   const w = onlyWindow()
@@ -250,7 +265,7 @@ it('隐藏窗口创建参数：沙箱化、无 Node 能力、禁用后台节流'
     contextIsolation: true,
     sandbox: true,
     backgroundThrottling: false,
-    spellcheck: false
+    spellcheck: false,
   })
   // 渲染逻辑收敛在专用 preload，不再向隐藏页面注入 Node 脚本
   expect(w.opts.webPreferences.preload).toContain('thumb-preload.js')
@@ -264,12 +279,15 @@ it('空闲回收：任务完成且无在途任务后销毁窗口，下次任务�
   const p = renderThumbJpeg(Buffer.from('x'), {
     thumbWidth: 640,
     minSourceWidth: 720,
-    quality: 0.82
+    quality: 0.82,
   })
   await flush()
   const w = onlyWindow()
   const { payload } = w.webContents.sent[0]
-  w.webContents.emit('ipc-message', {}, 'thumb:done', { id: payload.id, small: true })
+  w.webContents.emit('ipc-message', {}, 'thumb:done', {
+    id: payload.id,
+    small: true,
+  })
   await expect(p).resolves.toEqual({ small: true })
 
   await new Promise((resolve) => setTimeout(resolve, 20))
@@ -279,13 +297,16 @@ it('空闲回收：任务完成且无在途任务后销毁窗口，下次任务�
   const p2 = renderThumbJpeg(Buffer.from('y'), {
     thumbWidth: 640,
     minSourceWidth: 720,
-    quality: 0.82
+    quality: 0.82,
   })
   await flush()
   expect(FakeBrowserWindow.instances).toHaveLength(2)
   const w2 = FakeBrowserWindow.instances[1]
   const { payload: payload2 } = w2.webContents.sent[0]
-  w2.webContents.emit('ipc-message', {}, 'thumb:done', { id: payload2.id, small: true })
+  w2.webContents.emit('ipc-message', {}, 'thumb:done', {
+    id: payload2.id,
+    small: true,
+  })
   await expect(p2).resolves.toEqual({ small: true })
 })
 
@@ -294,7 +315,7 @@ it('空闲回收：仍有在途任务时不销毁窗口', async () => {
   const p = renderThumbJpeg(Buffer.from('x'), {
     thumbWidth: 640,
     minSourceWidth: 720,
-    quality: 0.82
+    quality: 0.82,
   })
   await flush()
   const w = onlyWindow()
@@ -302,6 +323,9 @@ it('空闲回收：仍有在途任务时不销毁窗口', async () => {
   expect(w.destroyed).toBe(false)
 
   const { payload } = w.webContents.sent[0]
-  w.webContents.emit('ipc-message', {}, 'thumb:done', { id: payload.id, small: true })
+  w.webContents.emit('ipc-message', {}, 'thumb:done', {
+    id: payload.id,
+    small: true,
+  })
   await expect(p).resolves.toEqual({ small: true })
 })

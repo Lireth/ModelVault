@@ -14,7 +14,8 @@ const DEV_STYLE_SRC = "style-src 'self' 'unsafe-inline'"
 const PROD_STYLE_SRC = "style-src 'self'"
 
 /** 匹配 CSP meta 标签（http-equiv 与 content 之间允许任意空白） */
-const CSP_META_RE = /(http-equiv="Content-Security-Policy"\s+content=")([^"]*)(")/
+const CSP_META_RE =
+  /(http-equiv="Content-Security-Policy"\s+content=")([^"]*)(")/
 
 /**
  * 把一条 dev CSP 转换为生产 CSP：仅移除 style-src 的内联许可，
@@ -33,5 +34,9 @@ function toProductionCsp(csp) {
  * @returns {string} 替换后的 HTML
  */
 export function applyProductionCsp(html) {
-  return html.replace(CSP_META_RE, (_match, prefix, csp, suffix) => `${prefix}${toProductionCsp(csp)}${suffix}`)
+  return html.replace(
+    CSP_META_RE,
+    (_match, prefix, csp, suffix) =>
+      `${prefix}${toProductionCsp(csp)}${suffix}`,
+  )
 }

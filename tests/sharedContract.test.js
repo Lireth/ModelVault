@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest'
 import {
   MODEL_EXTENSIONS,
   MODEL_EXTENSION_NAMES,
-  MODEL_EXTENSION_SET
+  MODEL_EXTENSION_SET,
 } from '../src/shared/model-extensions'
 import {
   SUB_CATEGORY_DEFS,
@@ -18,7 +18,7 @@ import {
   ALL_CATEGORY_KEYS,
   BASE_FAMILIES,
   normalizeBaseModel,
-  isBaseFamilyKey
+  isBaseFamilyKey,
 } from '../src/shared/model-categories'
 import {
   SORT_OPTION_DEFS,
@@ -26,7 +26,7 @@ import {
   CARD_SIZE_DEFS,
   CARD_SIZE_KEYS,
   VIEW_MODE_DEFS,
-  VIEW_MODE_KEYS
+  VIEW_MODE_KEYS,
 } from '../src/shared/app-enums'
 import { DEFAULT_SETTINGS } from '../src/shared/defaults'
 import { isRelDirInScope, isRelKeyInScope } from '../src/shared/scan-dirs'
@@ -41,7 +41,9 @@ describe('shared/model-extensions', () => {
       expect(typeof item.label).toBe('string')
       expect(item.label.length).toBeGreaterThan(0)
     }
-    expect(new Set(MODEL_EXTENSION_NAMES).size).toBe(MODEL_EXTENSION_NAMES.length)
+    expect(new Set(MODEL_EXTENSION_NAMES).size).toBe(
+      MODEL_EXTENSION_NAMES.length,
+    )
   })
 
   it('names/set 与定义数组一致', () => {
@@ -66,8 +68,21 @@ describe('shared/model-categories', () => {
   })
 
   it('必备标签 key 存在（主进程/渲染层既有行为依赖）', () => {
-    for (const key of ['embedding', 'controlnet', 'upscale', 'hypernetwork', 'other',
-      'role', 'style', 'concept', 'outfit', 'background', 'pose', 'tool', 'base']) {
+    for (const key of [
+      'embedding',
+      'controlnet',
+      'upscale',
+      'hypernetwork',
+      'other',
+      'role',
+      'style',
+      'concept',
+      'outfit',
+      'background',
+      'pose',
+      'tool',
+      'base',
+    ]) {
       expect(ALL_CATEGORY_KEYS.has(key)).toBe(true)
     }
   })
@@ -77,7 +92,14 @@ describe('shared/model-categories 基底模型家族（F-2）', () => {
   it('家族 key 唯一，normalizeBaseModel 输出恒在家族集合内', () => {
     const keys = BASE_FAMILIES.map((d) => d.key)
     expect(new Set(keys).size).toBe(keys.length)
-    for (const sample of ['SDXL 1.0', 'Pony V6', 'sd_v1-5', 'Flux.1 D', ' неизвестно', '']) {
+    for (const sample of [
+      'SDXL 1.0',
+      'Pony V6',
+      'sd_v1-5',
+      'Flux.1 D',
+      ' неизвестно',
+      '',
+    ]) {
       const key = normalizeBaseModel(sample)
       if (key) expect(keys).toContain(key)
     }
@@ -116,17 +138,25 @@ describe('shared/model-categories 基底模型家族（F-2）', () => {
 
 describe('shared/app-enums', () => {
   it('排序 key 集合与展示定义一致，固定语义项标记 directional=false', () => {
-    expect([...SORT_BY_KEYS].sort()).toEqual(SORT_OPTION_DEFS.map((d) => d.key).sort())
-    const fixed = SORT_OPTION_DEFS.filter((d) => d.directional === false).map((d) => d.key)
+    expect([...SORT_BY_KEYS].sort()).toEqual(
+      SORT_OPTION_DEFS.map((d) => d.key).sort(),
+    )
+    const fixed = SORT_OPTION_DEFS.filter((d) => d.directional === false).map(
+      (d) => d.key,
+    )
     expect(fixed.sort()).toEqual(['favorite', 'rating'])
   })
 
   it('卡片尺寸 key 集合与展示定义一致', () => {
-    expect([...CARD_SIZE_KEYS].sort()).toEqual(CARD_SIZE_DEFS.map((d) => d.key).sort())
+    expect([...CARD_SIZE_KEYS].sort()).toEqual(
+      CARD_SIZE_DEFS.map((d) => d.key).sort(),
+    )
   })
 
   it('视图模式 key 集合与展示定义一致（grid/list）', () => {
-    expect([...VIEW_MODE_KEYS].sort()).toEqual(VIEW_MODE_DEFS.map((d) => d.key).sort())
+    expect([...VIEW_MODE_KEYS].sort()).toEqual(
+      VIEW_MODE_DEFS.map((d) => d.key).sort(),
+    )
     expect([...VIEW_MODE_KEYS].sort()).toEqual(['grid', 'list'])
   })
 })
@@ -156,10 +186,26 @@ describe('shared/defaults', () => {
   it('默认设置引用共享扩展名集合的副本，且含全部既有字段', () => {
     expect(DEFAULT_SETTINGS.scanExtensions).toEqual(MODEL_EXTENSION_NAMES)
     const expectedKeys = [
-      'modelsFolder', 'modelsFolders', 'autoScan', 'excludeDirs', 'theme', 'accentColor',
-      'cardSize', 'viewMode', 'sortBy', 'sortAsc', 'scanExtensions',
-      'showSize', 'showMtime', 'showParams', 'civitaiEnabled', 'nsfwBlur', 'autoRescan',
-      'autoCheckUpdate', 'hashWarmup', 'savedViews'
+      'modelsFolder',
+      'modelsFolders',
+      'autoScan',
+      'excludeDirs',
+      'theme',
+      'accentColor',
+      'cardSize',
+      'viewMode',
+      'sortBy',
+      'sortAsc',
+      'scanExtensions',
+      'showSize',
+      'showMtime',
+      'showParams',
+      'civitaiEnabled',
+      'nsfwBlur',
+      'autoRescan',
+      'autoCheckUpdate',
+      'hashWarmup',
+      'savedViews',
     ].sort()
     expect(Object.keys(DEFAULT_SETTINGS).sort()).toEqual(expectedKeys)
   })

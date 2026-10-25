@@ -11,7 +11,7 @@ import path from 'node:path'
  */
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => os.tmpdir()), isPackaged: true }
+  app: { getPath: vi.fn(() => os.tmpdir()), isPackaged: true },
 }))
 
 import {
@@ -23,7 +23,7 @@ import {
   resetIndexWriteStateForTests,
   setIndexWorkerThresholdForTests,
   updateLibraryIndex,
-  writeLibraryIndex
+  writeLibraryIndex,
 } from '../src/main/services/library-index'
 import { resetJsonSerializerForTests } from '../src/main/services/json-serializer'
 
@@ -52,14 +52,16 @@ function model(id, extra = {}) {
     size: 1,
     mtimeMs: 1,
     relDir: '',
-    ...extra
+    ...extra,
   }
 }
 
 describe('library-index', () => {
   it('写入后可读取，root/savedAt/duration/models 完整往返', async () => {
     const models = [model('a.safetensors'), model('b.safetensors')]
-    expect(await writeLibraryIndex(root, { models, durationMs: 123 })).toBe(true)
+    expect(await writeLibraryIndex(root, { models, durationMs: 123 })).toBe(
+      true,
+    )
 
     const cached = await readLibraryIndex(root)
     expect(cached.models).toEqual(models)
@@ -76,10 +78,16 @@ describe('library-index', () => {
     const file = path.join(root, '.modelvault', 'index.json')
     const raw = JSON.parse(await fs.readFile(file, 'utf-8'))
 
-    await fs.writeFile(file, JSON.stringify({ ...raw, root: path.join(root, 'other') }))
+    await fs.writeFile(
+      file,
+      JSON.stringify({ ...raw, root: path.join(root, 'other') }),
+    )
     expect(await readLibraryIndex(root)).toBeNull()
 
-    await fs.writeFile(file, JSON.stringify({ ...raw, version: INDEX_VERSION + 1 }))
+    await fs.writeFile(
+      file,
+      JSON.stringify({ ...raw, version: INDEX_VERSION + 1 }),
+    )
     expect(await readLibraryIndex(root)).toBeNull()
   })
 
@@ -96,8 +104,8 @@ describe('library-index', () => {
         root,
         savedAt: 1,
         durationMs: 1,
-        models: [model('ok.safetensors'), null, { id: '', name: 'x' }, 'bad']
-      })
+        models: [model('ok.safetensors'), null, { id: '', name: 'x' }, 'bad'],
+      }),
     )
     const cached = await readLibraryIndex(root)
     expect(cached.models).toHaveLength(1)
@@ -108,20 +116,26 @@ describe('library-index', () => {
 describe('OPT-03 大库索引写盘降载', () => {
   it('内容未变化时跳过重复写盘（savedAt/durationMs 不参与指纹）', async () => {
     const models = [model('a.safetensors'), model('b.safetensors')]
-    expect(await writeLibraryIndex(root, { models, durationMs: 123 })).toBe(true)
+    expect(await writeLibraryIndex(root, { models, durationMs: 123 })).toBe(
+      true,
+    )
     const file = path.join(root, '.modelvault', 'index.json')
     const first = JSON.parse(await fs.readFile(file, 'utf-8'))
     await new Promise((resolve) => setTimeout(resolve, 10))
 
     // 内容完全一致：即使扫描耗时不同也不重写
-    expect(await writeLibraryIndex(root, { models, durationMs: 999 })).toBe(true)
+    expect(await writeLibraryIndex(root, { models, durationMs: 999 })).toBe(
+      true,
+    )
     const second = JSON.parse(await fs.readFile(file, 'utf-8'))
     expect(second.savedAt).toBe(first.savedAt)
     expect(second.durationMs).toBe(123)
 
     // 内容变化必须写盘
     models[0].size = 2
-    expect(await writeLibraryIndex(root, { models, durationMs: 456 })).toBe(true)
+    expect(await writeLibraryIndex(root, { models, durationMs: 456 })).toBe(
+      true,
+    )
     const third = JSON.parse(await fs.readFile(file, 'utf-8'))
     expect(third.models[0].size).toBe(2)
     expect(third.savedAt).toBeGreaterThanOrEqual(first.savedAt)
@@ -148,18 +162,21 @@ describe('OPT-03 大库索引写盘降载', () => {
   it('局部索引更新合并入队，flush 后一次应用全部变化', async () => {
     await writeLibraryIndex(root, { models: [model('a.safetensors')] })
     queueLibraryIndexUpdate(root, {
-      upsertModels: [model('b.safetensors')]
+      upsertModels: [model('b.safetensors')],
     })
     queueLibraryIndexUpdate(root, {
       upsertModels: [model('c.safetensors')],
-      removeIds: [path.join(root, 'a.safetensors')]
+      removeIds: [path.join(root, 'a.safetensors')],
     })
     expect(getQueuedIndexUpdateCountForTests()).toBe(1)
 
     await flushIndexWrites()
     expect(getQueuedIndexUpdateCountForTests()).toBe(0)
     const cached = await readLibraryIndex(root)
-    expect(cached.models.map((m) => m.name)).toEqual(['b.safetensors', 'c.safetensors'])
+    expect(cached.models.map((m) => m.name)).toEqual([
+      'b.safetensors',
+      'c.safetensors',
+    ])
   })
 })
 
@@ -169,14 +186,14 @@ describe('updateLibraryIndex（O8 增量维护）', () => {
       models: [
         model('a.safetensors'),
         model('lora/old.safetensors', { relDir: 'lora' }),
-        model('ckpt/keep.safetensors', { relDir: 'ckpt' })
+        model('ckpt/keep.safetensors', { relDir: 'ckpt' }),
       ],
-      durationMs: 99
+      durationMs: 99,
     })
 
     const ok = await updateLibraryIndex(root, {
       upsertModels: [model('lora/new.safetensors', { relDir: 'lora' })],
-      affectedDirs: ['lora']
+      affectedDirs: ['lora'],
     })
 
     expect(ok).toBe(true)
@@ -192,19 +209,23 @@ describe('updateLibraryIndex（O8 增量维护）', () => {
   it('removeIds 精确移除（删除模型），大小写不敏感', async () => {
     const target = model('gone.safetensors')
     await writeLibraryIndex(root, {
-      models: [target, model('keep.safetensors')]
+      models: [target, model('keep.safetensors')],
     })
 
-    expect(await updateLibraryIndex(root, { removeIds: [target.id.toUpperCase()] })).toBe(true)
+    expect(
+      await updateLibraryIndex(root, { removeIds: [target.id.toUpperCase()] }),
+    ).toBe(true)
     const cached = await readLibraryIndex(root)
     expect(cached.models.map((m) => m.name)).toEqual(['keep.safetensors'])
   })
 
   it('upsert 已存在 id 时以新记录替换，不产生重复条目', async () => {
-    await writeLibraryIndex(root, { models: [model('a.safetensors', { size: 1 })] })
+    await writeLibraryIndex(root, {
+      models: [model('a.safetensors', { size: 1 })],
+    })
 
     await updateLibraryIndex(root, {
-      upsertModels: [model('a.safetensors', { size: 2, note: '新记录' })]
+      upsertModels: [model('a.safetensors', { size: 2, note: '新记录' })],
     })
 
     const cached = await readLibraryIndex(root)
@@ -213,13 +234,23 @@ describe('updateLibraryIndex（O8 增量维护）', () => {
   })
 
   it('索引缺失/损坏时跳过，不凭空创建不完整索引', async () => {
-    expect(await updateLibraryIndex(root, { upsertModels: [model('a.safetensors')] })).toBe(false)
-    await expect(fs.access(path.join(root, '.modelvault', 'index.json'))).rejects.toThrow()
+    expect(
+      await updateLibraryIndex(root, {
+        upsertModels: [model('a.safetensors')],
+      }),
+    ).toBe(false)
+    await expect(
+      fs.access(path.join(root, '.modelvault', 'index.json')),
+    ).rejects.toThrow()
 
     const file = path.join(root, '.modelvault', 'index.json')
     await fs.mkdir(path.dirname(file), { recursive: true })
     await fs.writeFile(file, '{broken')
-    expect(await updateLibraryIndex(root, { upsertModels: [model('a.safetensors')] })).toBe(false)
+    expect(
+      await updateLibraryIndex(root, {
+        upsertModels: [model('a.safetensors')],
+      }),
+    ).toBe(false)
   })
 
   it('旧记录缺 relDir 时按 id 推导目录，仍能正确按子树清理', async () => {
@@ -230,7 +261,9 @@ describe('updateLibraryIndex（O8 增量维护）', () => {
     await updateLibraryIndex(root, { affectedDirs: ['lora'] })
 
     const cached = await readLibraryIndex(root)
-    expect(cached.models.map((m) => path.basename(m.id))).toEqual(['a.safetensors'])
+    expect(cached.models.map((m) => path.basename(m.id))).toEqual([
+      'a.safetensors',
+    ])
   })
 
   it('并发增量更新经串行链合并，不丢失任一变更', async () => {
@@ -238,10 +271,14 @@ describe('updateLibraryIndex（O8 增量维护）', () => {
 
     await Promise.all([
       updateLibraryIndex(root, { upsertModels: [model('b.safetensors')] }),
-      updateLibraryIndex(root, { removeIds: [path.join(root, 'a.safetensors')] })
+      updateLibraryIndex(root, {
+        removeIds: [path.join(root, 'a.safetensors')],
+      }),
     ])
 
     const cached = await readLibraryIndex(root)
-    expect(cached.models.map((m) => path.basename(m.id))).toEqual(['b.safetensors'])
+    expect(cached.models.map((m) => path.basename(m.id))).toEqual([
+      'b.safetensors',
+    ])
   })
 })

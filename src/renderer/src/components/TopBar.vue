@@ -1,10 +1,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import {
-  chooseFolder,
-  scanModels,
-  state
-} from '../store/appStore'
+import { chooseFolder, scanModels, state } from '../store/appStore'
 
 /**
  * 窄屏操作菜单（OPT-1）：
@@ -91,7 +87,16 @@ onBeforeUnmount(() => {
         :aria-expanded="menuOpen"
         @click="toggleMenu"
       >
-        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+        <svg
+          viewBox="0 0 16 16"
+          width="16"
+          height="16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
           <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" />
         </svg>
       </button>

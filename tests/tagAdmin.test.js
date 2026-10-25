@@ -4,7 +4,7 @@ import {
   removeTagGlobally,
   renameTagGlobally,
   replaceModels,
-  state
+  state,
 } from '../src/renderer/src/store/appStore'
 
 /**
@@ -18,8 +18,8 @@ function makeApiMock() {
   return {
     models: {
       renameTag: vi.fn(() => Promise.resolve({ changed: 0 })),
-      removeTag: vi.fn(() => Promise.resolve({ changed: 0 }))
-    }
+      removeTag: vi.fn(() => Promise.resolve({ changed: 0 })),
+    },
   }
 }
 
@@ -27,7 +27,7 @@ function seedModels() {
   replaceModels([
     { id: 'a', name: 'a.safetensors', tags: ['角色', '废弃'] },
     { id: 'b', name: 'b.safetensors', tags: ['废弃'] },
-    { id: 'c', name: 'c.safetensors', tags: ['风格'] }
+    { id: 'c', name: 'c.safetensors', tags: ['风格'] },
   ])
 }
 

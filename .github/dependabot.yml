@@ -6,7 +6,7 @@
 version: 2
 updates:
   - package-ecosystem: npm
-    directory: "/"
+    directory: '/'
     schedule:
       interval: weekly
       day: monday
@@ -14,24 +14,24 @@ updates:
     labels:
       - dependencies
     commit-message:
-      prefix: "chore(deps)"
-      prefix-development: "chore(deps-dev)"
+      prefix: 'chore(deps)'
+      prefix-development: 'chore(deps-dev)'
     groups:
       # 开发依赖（eslint/vite/vitest 等 15+ 个）的 patch/minor 合入同一 PR；
       # 主版本升级 breaking 风险高，仍单独成 PR 便于逐个审查
       dev-dependencies-minor:
-        dependency-type: "development"
+        dependency-type: 'development'
         update-types:
-          - "version-update:semver-patch"
-          - "version-update:semver-minor"
+          - 'version-update:semver-patch'
+          - 'version-update:semver-minor'
     ignore:
       # 运行时 Electron 与打包工具链大版本需人工确认后升级
-      - dependency-name: "electron"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "electron-builder"
-        update-types: ["version-update:semver-major"]
+      - dependency-name: 'electron'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'electron-builder'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: github-actions
-    directory: "/"
+    directory: '/'
     schedule:
       interval: weekly
       day: monday
@@ -39,4 +39,4 @@ updates:
     labels:
       - dependencies
     commit-message:
-      prefix: "ci(deps)"
+      prefix: 'ci(deps)'

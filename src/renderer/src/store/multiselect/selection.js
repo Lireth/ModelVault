@@ -62,7 +62,8 @@ export function toggleSelect(id) {
 export const allFilteredSelected = computed(() => {
   const filtered = filteredModels.value
   // 快速路径：选中数少于筛选结果数必不全选，免去 O(n) 逐项扫描（部分选中时每次点击都触发）
-  if (filtered.length === 0 || state.multiSelect.ids.length < filtered.length) return false
+  if (filtered.length === 0 || state.multiSelect.ids.length < filtered.length)
+    return false
   return filtered.every((m) => multiSelectIdSet.value.has(m.id))
 })
 
@@ -104,14 +105,17 @@ export function selectRangeTo(id) {
     toggleSelect(id)
     return
   }
-  const [from, to] = anchorIdx <= targetIdx ? [anchorIdx, targetIdx] : [targetIdx, anchorIdx]
+  const [from, to] =
+    anchorIdx <= targetIdx ? [anchorIdx, targetIdx] : [targetIdx, anchorIdx]
   const range = []
   for (let i = from; i <= to; i++) range.push(filtered[i].id)
   state.multiSelect.ids = range
 }
 
 /** 当前筛选结果 id 集合（反选保留判断用，随 filteredModels 缓存） */
-const filteredSet = computed(() => new Set(filteredModels.value.map((m) => m.id)))
+const filteredSet = computed(
+  () => new Set(filteredModels.value.map((m) => m.id)),
+)
 
 /**
  * 反选（仅多选模式，文件管理器惯例）：当前筛选范围内选中态取反，

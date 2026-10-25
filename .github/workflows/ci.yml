@@ -2,11 +2,12 @@
 #
 # 触发条件：推送到 main 分支、针对 main 的 PR、手动触发
 # 职责（矩阵分工）：Node 22 基准腿执行全量门禁——依赖安装 → 运行时依赖
-#   漏洞审计 → ESLint → 类型检查（shared 契约层 + preload）→ 单元测试
-#   （含覆盖率）→ 三端编译 → 编译产物完整性校验 → 启动冒烟（out/ 与
-#   win-unpacked）→ 覆盖率报告归档；Node 24 兼容性腿仅运行单元测试
-#   （验证 engines 纸面承诺）。PR 另做依赖差分审查（dependency-review）。
-#   CodeQL 静态扫描见独立的 codeql.yml。
+#   漏洞审计 → ESLint → Prettier 格式检查 → 类型检查（shared 契约层 +
+#   preload）→ 单元测试（含覆盖率）→ 三端编译 → 编译产物完整性校验 →
+#   启动冒烟（out/ 与 win-unpacked）→ 覆盖率报告归档；Node 24 兼容性腿
+#   仅运行单元测试（验证 engines 纸面承诺）。PR 另做依赖差分审查
+#   （dependency-review，含 license 白名单）。CodeQL 静态扫描见独立的
+#   codeql.yml。
 # 与 release.yml 的分工：本工作流只做质量门禁与目录产物（--dir）启动冒烟，
 #   不生成便携版/安装包、不发布；正式产物由推送 v* 标签触发的 release.yml 负责。
 
@@ -46,6 +47,15 @@ jobs:
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
+          # 本项目 GPL-3.0：入向依赖仅接受宽松/公有领域协议与 GPL 家族
+          # （GPL 项目可合规引入同族 copyleft 依赖）。仅审查 PR 中变化的
+          # 依赖，存量树已核对全部命中白名单
+          allow-licenses: >-
+            MIT, MIT-0, ISC, Apache-2.0, 0BSD, BSD-2-Clause, BSD-3-Clause,
+            BlueOak-1.0.0, CC0-1.0, CC-BY-4.0, Unlicense, WTFPL, Python-2.0,
+            Zlib, GPL-2.0-only, GPL-2.0-or-later, GPL-3.0-only,
+            GPL-3.0-or-later, LGPL-2.1-only, LGPL-2.1-or-later, LGPL-3.0-only,
+            LGPL-3.0-or-later
 
   test-and-build:
     name: Test & Build (Node ${{ matrix.node }})
@@ -59,7 +69,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ["22", "24"]
+        node: ['22', '24']
 
     steps:
       # ---------- 环境准备 ----------
@@ -109,6 +119,12 @@ jobs:
       - name: ESLint 代码检查
         if: matrix.node == '22'
         run: npm run lint
+
+      # 格式门禁：ESLint 已配 eslint-config-prettier 关闭风格类规则，格式
+      # 一致性由 Prettier 单独把关（本地 `npm run format` 修复）。仅基准腿执行
+      - name: Prettier 格式检查
+        if: matrix.node == '22'
+        run: npm run format:check
 
       # O10 渐进式类型门禁：TypeScript checkJs 覆盖 shared 契约层、preload、
       # main 全层与 renderer 全部 JS（.vue 模板由组件测试覆盖），捕获字段漂移类回归；

@@ -8,7 +8,7 @@ import {
   SORT_BY_KEYS,
   CARD_SIZE_KEYS,
   VIEW_MODE_KEYS,
-  HASH_WARMUP_KEYS
+  HASH_WARMUP_KEYS,
 } from '../../shared/app-enums'
 import { DEFAULT_SETTINGS } from '../../shared/defaults'
 import { atomicWriteFile } from './atomic-write'
@@ -18,7 +18,7 @@ import {
   LEGACY_STORE_FILE,
   SETTINGS_FILE,
   getCurrentRoot,
-  getLibSettingsFilePath
+  getLibSettingsFilePath,
 } from './store-paths'
 
 /**
@@ -69,7 +69,7 @@ function defaultSettings() {
   return {
     ...DEFAULT_SETTINGS,
     scanExtensions: [...DEFAULT_SETTINGS.scanExtensions],
-    savedViews: [...DEFAULT_SETTINGS.savedViews]
+    savedViews: [...DEFAULT_SETTINGS.savedViews],
   }
 }
 
@@ -99,7 +99,7 @@ function defaultLibrarySettings() {
     autoRescan: base.autoRescan,
     autoCheckUpdate: base.autoCheckUpdate,
     hashWarmup: base.hashWarmup,
-    savedViews: [...base.savedViews]
+    savedViews: [...base.savedViews],
   }
 }
 
@@ -123,7 +123,11 @@ function normalizeExtensions(raw) {
  * @returns {string[]}
  */
 function normalizeViewTagFilters(raw) {
-  const list = Array.isArray(raw) ? raw : typeof raw === 'string' && raw ? [raw] : []
+  const list = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'string' && raw
+      ? [raw]
+      : []
   const out = []
   for (const item of list) {
     if (typeof item !== 'string') continue
@@ -148,23 +152,27 @@ function normalizeSavedViews(raw) {
     if (!v || typeof v !== 'object') continue
     const id = typeof v.id === 'string' ? v.id.trim() : ''
     const name = typeof v.name === 'string' ? v.name.trim() : ''
-    if (!id || id.length > 40 || !name || name.length > 30 || seen.has(id)) continue
+    if (!id || id.length > 40 || !name || name.length > 30 || seen.has(id))
+      continue
     seen.add(id)
     out.push({
       id,
       name,
       search: typeof v.search === 'string' ? v.search.slice(0, 100) : '',
-      typeFilter: typeof v.typeFilter === 'string' ? v.typeFilter.slice(0, 20) : 'all',
-      subFilter: typeof v.subFilter === 'string' ? v.subFilter.slice(0, 50) : '',
+      typeFilter:
+        typeof v.typeFilter === 'string' ? v.typeFilter.slice(0, 20) : 'all',
+      subFilter:
+        typeof v.subFilter === 'string' ? v.subFilter.slice(0, 50) : '',
       // 基底模型家族筛选（F-2）：旧视图缺省时为 ''（全部）
-      baseFilter: typeof v.baseFilter === 'string' ? v.baseFilter.slice(0, 20) : '',
+      baseFilter:
+        typeof v.baseFilter === 'string' ? v.baseFilter.slice(0, 20) : '',
       // 自由标签筛选（F-5/FEAT-01）：新字段为数组；旧视图单字符串迁移
       tagFilters: normalizeViewTagFilters(v.tagFilters ?? v.tagFilter),
       showFavoritesOnly: v.showFavoritesOnly === true,
       // 重复模型筛选（FEAT-1）：旧视图缺省该字段时为 false
       showDuplicatesOnly: v.showDuplicatesOnly === true,
       sortBy: SORT_BY_KEYS.has(v.sortBy) ? v.sortBy : 'name',
-      sortAsc: typeof v.sortAsc === 'boolean' ? v.sortAsc : true
+      sortAsc: typeof v.sortAsc === 'boolean' ? v.sortAsc : true,
     })
     if (out.length >= 20) break
   }
@@ -177,7 +185,10 @@ function normalizeBootstrapSettings(raw) {
     modelsFolder: typeof raw?.modelsFolder === 'string' ? raw.modelsFolder : '',
     // 多根目录库列表（E7）：与 modelsFolder 取并集（当前根恒在列，防误删激活库），
     // Windows 大小写不敏感去重，上限 20 个
-    modelsFolders: normalizeModelsFolders(raw?.modelsFolders, raw?.modelsFolder)
+    modelsFolders: normalizeModelsFolders(
+      raw?.modelsFolders,
+      raw?.modelsFolder,
+    ),
   }
 }
 
@@ -186,13 +197,15 @@ export function normalizeLibrarySettings(raw) {
   const base = defaultLibrarySettings()
   if (!raw || typeof raw !== 'object') return base
   const excludeDirs = Array.isArray(raw.excludeDirs)
-    ? [...new Set(
-        raw.excludeDirs
-          .filter((d) => typeof d === 'string')
-          // 统一小写：scanner 以小写目录名匹配（Windows 不区分大小写），去重亦随之不区分大小写
-          .map((d) => d.trim().toLowerCase())
-          .filter((d) => d && d.length <= 100)
-      )].slice(0, 100)
+    ? [
+        ...new Set(
+          raw.excludeDirs
+            .filter((d) => typeof d === 'string')
+            // 统一小写：scanner 以小写目录名匹配（Windows 不区分大小写），去重亦随之不区分大小写
+            .map((d) => d.trim().toLowerCase())
+            .filter((d) => d && d.length <= 100),
+        ),
+      ].slice(0, 100)
     : base.excludeDirs
   return {
     autoScan: typeof raw.autoScan === 'boolean' ? raw.autoScan : base.autoScan,
@@ -205,21 +218,28 @@ export function normalizeLibrarySettings(raw) {
     sortAsc: typeof raw.sortAsc === 'boolean' ? raw.sortAsc : base.sortAsc,
     scanExtensions: normalizeExtensions(raw.scanExtensions),
     showSize: typeof raw.showSize === 'boolean' ? raw.showSize : base.showSize,
-    showMtime: typeof raw.showMtime === 'boolean' ? raw.showMtime : base.showMtime,
-    showParams: typeof raw.showParams === 'boolean' ? raw.showParams : base.showParams,
+    showMtime:
+      typeof raw.showMtime === 'boolean' ? raw.showMtime : base.showMtime,
+    showParams:
+      typeof raw.showParams === 'boolean' ? raw.showParams : base.showParams,
     civitaiEnabled: raw.civitaiEnabled !== false,
     nsfwBlur: raw.nsfwBlur !== false,
     autoRescan: raw.autoRescan === true,
     // 启动自动检查更新（O-3）：缺省视为开启（与 civitaiEnabled 同款默认真语义）
     autoCheckUpdate: raw.autoCheckUpdate !== false,
-    hashWarmup: HASH_WARMUP_KEYS.has(raw.hashWarmup) ? raw.hashWarmup : base.hashWarmup,
-    savedViews: normalizeSavedViews(raw.savedViews)
+    hashWarmup: HASH_WARMUP_KEYS.has(raw.hashWarmup)
+      ? raw.hashWarmup
+      : base.hashWarmup,
+    savedViews: normalizeSavedViews(raw.savedViews),
   }
 }
 
 /** 规范化合并设置（内存统一入口）：库字段 + 引导字段 */
 function normalizeSettings(raw) {
-  return { ...normalizeLibrarySettings(raw), ...normalizeBootstrapSettings(raw) }
+  return {
+    ...normalizeLibrarySettings(raw),
+    ...normalizeBootstrapSettings(raw),
+  }
 }
 
 /**
@@ -229,7 +249,9 @@ function normalizeSettings(raw) {
 function normalizeModelsFolders(rawFolders, modelsFolder) {
   const primary = typeof modelsFolder === 'string' ? modelsFolder.trim() : ''
   const list = Array.isArray(rawFolders)
-    ? rawFolders.filter((f) => typeof f === 'string' && f.trim() && f.length <= 500)
+    ? rawFolders.filter(
+        (f) => typeof f === 'string' && f.trim() && f.length <= 500,
+      )
     : []
   const result = []
   const seen = new Set()
@@ -295,9 +317,13 @@ async function loadLibrarySettings(root, seedRaw = null) {
     // （时间戳命名滚动保留，连续损坏不互相覆盖）
     try {
       const backup = await preserveCorruptedFile(file)
-      logger.error(`库设置文件损坏，原文件已备份为 ${path.basename(backup)} 后重置: ${err.message}`)
+      logger.error(
+        `库设置文件损坏，原文件已备份为 ${path.basename(backup)} 后重置: ${err.message}`,
+      )
     } catch (backupErr) {
-      logger.error(`库设置加载失败，已重置（备份失败: ${backupErr.message}）: ${err.message}`)
+      logger.error(
+        `库设置加载失败，已重置（备份失败: ${backupErr.message}）: ${err.message}`,
+      )
     }
     return defaultLibrarySettings()
   }
@@ -305,7 +331,10 @@ async function loadLibrarySettings(root, seedRaw = null) {
 
 /** 将引导字段原子写入全局设置文件（精简后的引导层布局） */
 async function writeBootstrapFile() {
-  await atomicWriteFile(getSettingsFilePath(), JSON.stringify(bootstrap, null, 2))
+  await atomicWriteFile(
+    getSettingsFilePath(),
+    JSON.stringify(bootstrap, null, 2),
+  )
 }
 
 /**
@@ -332,9 +361,13 @@ export async function loadSettings() {
       bootstrap = defaultBootstrapSettings()
       try {
         const backup = await preserveCorruptedFile(getSettingsFilePath())
-        logger.error(`应用设置文件损坏，原文件已备份为 ${path.basename(backup)} 后重置: ${err.message}`)
+        logger.error(
+          `应用设置文件损坏，原文件已备份为 ${path.basename(backup)} 后重置: ${err.message}`,
+        )
       } catch (backupErr) {
-        logger.error(`应用设置加载失败，已重置（备份失败: ${backupErr.message}）: ${err.message}`)
+        logger.error(
+          `应用设置加载失败，已重置（备份失败: ${backupErr.message}）: ${err.message}`,
+        )
       }
     }
   }
@@ -347,10 +380,13 @@ export async function loadSettings() {
     try {
       const legacyText = await fs.readFile(
         path.join(app.getPath('userData'), LEGACY_STORE_FILE),
-        'utf-8'
+        'utf-8',
       )
       const legacy = JSON.parse(legacyText)
-      if (typeof legacy?.settings?.modelsFolder === 'string' && legacy.settings.modelsFolder) {
+      if (
+        typeof legacy?.settings?.modelsFolder === 'string' &&
+        legacy.settings.modelsFolder
+      ) {
         bootstrap = normalizeBootstrapSettings(legacy.settings)
         rawGlobal = legacy.settings
         logger.info(`已从旧版存储恢复应用设置: ${bootstrap.modelsFolder}`)
@@ -365,12 +401,16 @@ export async function loadSettings() {
     library = await loadLibrarySettings(bootstrap.modelsFolder, rawGlobal)
     // 旧版布局迁移收尾：激活库文件已生成后，将全局文件精简为仅引导字段
     // （旧值已迁入库文件；库文件写入失败时保留全局原样，下次启动重试迁移）
-    const hasLegacyFields = Object.keys(rawGlobal || {}).some((k) => !BOOTSTRAP_KEYS.has(k))
+    const hasLegacyFields = Object.keys(rawGlobal || {}).some(
+      (k) => !BOOTSTRAP_KEYS.has(k),
+    )
     if (hasLegacyFields) {
       try {
         await fs.access(getLibSettingsFilePath(bootstrap.modelsFolder))
         await writeBootstrapFile()
-        logger.info('全局设置已精简为引导字段（激活库/库列表），其余设置随模型库存储')
+        logger.info(
+          '全局设置已精简为引导字段（激活库/库列表），其余设置随模型库存储',
+        )
       } catch {
         /* 库文件尚未生成，保留全局文件作为下次迁移种子 */
       }
@@ -418,7 +458,11 @@ export async function flushSettingsSave() {
     const libraryTask = libraryWriteChain
     // 两条链在入队时已 catch（失败经监听器上报），此处等待不会 reject
     await Promise.all([bootstrapTask, libraryTask])
-    if (bootstrapTask === bootstrapWriteChain && libraryTask === libraryWriteChain) return
+    if (
+      bootstrapTask === bootstrapWriteChain &&
+      libraryTask === libraryWriteChain
+    )
+      return
   }
 }
 
@@ -467,14 +511,16 @@ export async function updateSettings(patch) {
   // 调度时立即序列化快照（B-02）：执行时求值会读取可能已被切库/重载替换的
   // 全局 library，导致旧库补丁写入新库。此处快照 + root 均在同步段捕获，
   // 队列任务只写「本次调用所属库」的内容。
-  const bootstrapSnapshot = touchesBootstrap ? JSON.stringify(bootstrap, null, 2) : ''
+  const bootstrapSnapshot = touchesBootstrap
+    ? JSON.stringify(bootstrap, null, 2)
+    : ''
   const libraryRoot = touchesLibrary ? getCurrentRoot() : null
   const librarySnapshot = libraryRoot ? JSON.stringify(library, null, 2) : ''
 
   const tasks = []
   if (touchesBootstrap) {
     const task = bootstrapWriteChain.then(() =>
-      atomicWriteFile(getSettingsFilePath(), bootstrapSnapshot)
+      atomicWriteFile(getSettingsFilePath(), bootstrapSnapshot),
     )
     bootstrapWriteChain = task.catch(() => {})
     tasks.push(task)
@@ -488,7 +534,9 @@ export async function updateSettings(patch) {
     } catch (err) {
       // 设置落盘失败与元数据同样经监听器通知渲染进程（C7）：
       // 否则磁盘满/权限错误时用户无感知，重启后设置静默丢失
-      notifyStoreSaveError(Object.assign(new Error(`设置保存失败: ${err.message}`)))
+      notifyStoreSaveError(
+        Object.assign(new Error(`设置保存失败: ${err.message}`)),
+      )
     }
   }
 }

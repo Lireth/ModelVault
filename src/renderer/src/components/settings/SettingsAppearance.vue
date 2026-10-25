@@ -11,7 +11,7 @@ import { CARD_SIZE_OPTIONS, SORT_OPTIONS } from '../../store/appStore'
 
 defineProps({
   /** 设置表单本地副本（SettingsPage 的 useSettingsForm 产物，reactive 对象） */
-  form: { type: Object, required: true }
+  form: { type: Object, required: true },
 })
 </script>
 
@@ -21,14 +21,16 @@ defineProps({
     <div class="setting-row">
       <div class="setting-info">
         <span class="setting-title">主题</span>
-        <span class="setting-desc">界面配色方案，跟随系统时随系统亮暗自动切换</span>
+        <span class="setting-desc"
+          >界面配色方案，跟随系统时随系统亮暗自动切换</span
+        >
       </div>
       <div class="seg-group">
         <button
           v-for="t in [
             { key: 'dark', label: '深色' },
             { key: 'light', label: '浅色' },
-            { key: 'system', label: '跟随系统' }
+            { key: 'system', label: '跟随系统' },
           ]"
           :key="t.key"
           type="button"
@@ -56,15 +58,25 @@ defineProps({
           :class="{ active: form.accentColor === a.key }"
           :title="a.label"
           :aria-label="`强调色 ${a.label}`"
-          :style="{ background: `linear-gradient(135deg, ${a.dark.accent}, ${a.dark.accent2})` }"
+          :style="{
+            background: `linear-gradient(135deg, ${a.dark.accent}, ${a.dark.accent2})`,
+          }"
           @click="form.accentColor = a.key"
         ></button>
         <label
           class="accent-swatch accent-custom"
           :class="{ active: CUSTOM_ACCENT_RE.test(form.accentColor) }"
-          :title="CUSTOM_ACCENT_RE.test(form.accentColor) ? `自定义 ${form.accentColor}` : '自定义颜色'"
+          :title="
+            CUSTOM_ACCENT_RE.test(form.accentColor)
+              ? `自定义 ${form.accentColor}`
+              : '自定义颜色'
+          "
         >
-          <input v-model="form.accentColor" type="color" aria-label="自定义强调色" />
+          <input
+            v-model="form.accentColor"
+            type="color"
+            aria-label="自定义强调色"
+          />
         </label>
       </div>
     </div>
@@ -149,7 +161,9 @@ defineProps({
   border: 2px solid transparent;
   cursor: pointer;
   padding: 0;
-  transition: transform var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out);
 }
 
@@ -159,7 +173,9 @@ defineProps({
 
 .accent-swatch.active {
   border-color: #fff;
-  box-shadow: 0 0 0 2px var(--accent), 0 0 10px color-mix(in srgb, var(--accent) 50%, transparent);
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 0 10px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 .accent-swatch:focus-visible {

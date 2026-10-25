@@ -30,7 +30,16 @@ function makeModel(id) {
     note: '',
     subCategory: '',
     triggerWords: '',
-    params: { steps: 20, cfgMin: 7, cfgMax: 7, sampler: 'euler', scheduler: 'normal', precision: 'FP16', resMin: 512, resMax: 1024 }
+    params: {
+      steps: 20,
+      cfgMin: 7,
+      cfgMax: 7,
+      sampler: 'euler',
+      scheduler: 'normal',
+      precision: 'FP16',
+      resMin: 512,
+      resMax: 1024,
+    },
   }
 }
 
@@ -48,10 +57,7 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
     expect(wrapper.find('.narrow-actions-menu').exists()).toBe(true)
     const items = wrapper.findAll('.menu-item')
     expect(items).toHaveLength(2)
-    expect(items.map((i) => i.text())).toEqual([
-      '重新扫描',
-      '选择文件夹'
-    ])
+    expect(items.map((i) => i.text())).toEqual(['重新扫描', '选择文件夹'])
   })
 
   it('「选择文件夹」恒可达：空库（未配置过文件夹）时仍可调用', async () => {
@@ -114,11 +120,11 @@ describe('TopBar 窄屏操作菜单（OPT-1 回归）', () => {
     // 无法经断点回调收起」（原 JS 900px / CSS 960px 即此缺陷）
     const topBarSrc = fs.readFileSync(
       path.resolve(__dirname, '../src/renderer/src/components/TopBar.vue'),
-      'utf-8'
+      'utf-8',
     )
     const sidebarSrc = fs.readFileSync(
       path.resolve(__dirname, '../src/renderer/src/components/Sidebar.vue'),
-      'utf-8'
+      'utf-8',
     )
     expect(topBarSrc).toContain(`@media (max-width: ${bp}px)`)
     expect(sidebarSrc).toContain(`@media (max-width: ${bp}px)`)

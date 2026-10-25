@@ -1,5 +1,11 @@
 import { computed, nextTick } from 'vue'
-import { SORT_OPTIONS, sortDirectional, state, subCategoryInfo, typeInfo } from './state'
+import {
+  SORT_OPTIONS,
+  sortDirectional,
+  state,
+  subCategoryInfo,
+  typeInfo,
+} from './state'
 import { BASE_FAMILIES } from '../../../shared/model-categories'
 import { saveSettings } from './library'
 import { toast } from './toast'
@@ -29,7 +35,11 @@ export const savedViews = computed(() => state.settings.savedViews || [])
  * @returns {string[]}
  */
 function viewTagFilters(v) {
-  const raw = Array.isArray(v?.tagFilters) ? v.tagFilters : v?.tagFilter ? [v.tagFilter] : []
+  const raw = Array.isArray(v?.tagFilters)
+    ? v.tagFilters
+    : v?.tagFilter
+      ? [v.tagFilter]
+      : []
   return [...new Set(raw.filter((t) => typeof t === 'string' && t))]
 }
 
@@ -52,7 +62,7 @@ function snapshotFilters() {
     showFavoritesOnly: state.showFavoritesOnly,
     showDuplicatesOnly: state.showDuplicatesOnly,
     sortBy: state.sortBy,
-    sortAsc: state.sortAsc
+    sortAsc: state.sortAsc,
   }
 }
 
@@ -82,9 +92,14 @@ export const activeSavedViewId = computed(() => {
 /** 视图摘要（侧栏 tooltip）：筛选条件 + 排序；无筛选条件时以「全部模型」兜底 */
 export function viewSummary(v) {
   const parts = []
-  if (v.typeFilter && v.typeFilter !== 'all') parts.push(typeInfo(v.typeFilter).label)
-  if (v.subFilter) parts.push(subCategoryInfo(v.subFilter)?.label || v.subFilter)
-  if (v.baseFilter) parts.push(`基底：${BASE_FAMILIES.find((b) => b.key === v.baseFilter)?.label || v.baseFilter}`)
+  if (v.typeFilter && v.typeFilter !== 'all')
+    parts.push(typeInfo(v.typeFilter).label)
+  if (v.subFilter)
+    parts.push(subCategoryInfo(v.subFilter)?.label || v.subFilter)
+  if (v.baseFilter)
+    parts.push(
+      `基底：${BASE_FAMILIES.find((b) => b.key === v.baseFilter)?.label || v.baseFilter}`,
+    )
   const tags = viewTagFilters(v)
   if (tags.length > 0) parts.push(`标签：${tags.join('、')}`)
   if (v.showFavoritesOnly) parts.push('仅收藏')
@@ -93,7 +108,11 @@ export function viewSummary(v) {
   if (parts.length === 0) parts.push('全部模型')
   const sort = SORT_OPTIONS.find((s) => s.key === v.sortBy)
   if (sort) {
-    parts.push(sortDirectional(v.sortBy) ? `${sort.label}${v.sortAsc ? '↑' : '↓'}` : sort.label)
+    parts.push(
+      sortDirectional(v.sortBy)
+        ? `${sort.label}${v.sortAsc ? '↑' : '↓'}`
+        : sort.label,
+    )
   }
   return parts.join(' · ')
 }

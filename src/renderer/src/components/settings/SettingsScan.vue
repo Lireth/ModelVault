@@ -1,5 +1,8 @@
 <script setup>
-import { SCAN_EXTENSION_OPTIONS, HASH_WARMUP_OPTIONS } from '../../store/appStore'
+import {
+  SCAN_EXTENSION_OPTIONS,
+  HASH_WARMUP_OPTIONS,
+} from '../../store/appStore'
 
 /**
  * 设置页「扫描」板块（OPT-01 自 SettingsPage.vue 按域拆出）：
@@ -10,7 +13,7 @@ import { SCAN_EXTENSION_OPTIONS, HASH_WARMUP_OPTIONS } from '../../store/appStor
 
 defineProps({
   /** 设置表单本地副本（SettingsPage 的 useSettingsForm 产物，reactive 对象） */
-  form: { type: Object, required: true }
+  form: { type: Object, required: true },
 })
 </script>
 
@@ -31,7 +34,10 @@ defineProps({
             v-model="form.scanExtensions"
             type="checkbox"
             :value="e.ext"
-            :disabled="form.scanExtensions.length === 1 && form.scanExtensions[0] === e.ext"
+            :disabled="
+              form.scanExtensions.length === 1 &&
+              form.scanExtensions[0] === e.ext
+            "
           />
           {{ e.label }}
         </label>
@@ -40,7 +46,9 @@ defineProps({
 
     <div class="setting-col">
       <span class="setting-title">排除目录</span>
-      <span class="setting-desc">扫描时跳过这些名称的文件夹（每行一个，不区分大小写），保存后自动重新扫描</span>
+      <span class="setting-desc"
+        >扫描时跳过这些名称的文件夹（每行一个，不区分大小写），保存后自动重新扫描</span
+      >
       <textarea
         v-model="form.excludeText"
         class="exclude-input"
@@ -54,7 +62,8 @@ defineProps({
       <div class="setting-info">
         <span class="setting-title">后台哈希预热</span>
         <span class="setting-desc">
-          重复检测需要文件 SHA256。「仅重复候选」只计算大小相同的模型（内容相同的文件必然同大小），磁盘读取最少；
+          重复检测需要文件
+          SHA256。「仅重复候选」只计算大小相同的模型（内容相同的文件必然同大小），磁盘读取最少；
           「全库」为所有缺失哈希的模型计算；「关闭」仅在你识别或打开详情页时按需计算。
         </span>
       </div>

@@ -56,8 +56,11 @@ function serializeOnMainThread(value, hashPrefix, needHash) {
     text,
     bytes: Buffer.byteLength(text, 'utf-8'),
     hash: needHash
-      ? createHash('sha256').update(hashPrefix || '').update(text).digest('hex')
-      : ''
+      ? createHash('sha256')
+          .update(hashPrefix || '')
+          .update(text)
+          .digest('hex')
+      : '',
   }
 }
 
@@ -90,7 +93,8 @@ function ensureWorker() {
     pending.delete(msg.id)
     clearTimeout(task.timer)
     if (msg.error) task.reject(new Error(msg.error))
-    else task.resolve({ text: msg.text, bytes: msg.bytes, hash: msg.hash || '' })
+    else
+      task.resolve({ text: msg.text, bytes: msg.bytes, hash: msg.hash || '' })
   })
   w.on('error', (err) => failWorker(w, err))
   w.on('exit', (code) => {
@@ -110,7 +114,8 @@ function ensureWorker() {
  */
 export async function serializeJsonOffThread(value, options = {}) {
   const needHash = options.hash === true
-  const hashPrefix = typeof options.hashPrefix === 'string' ? options.hashPrefix : ''
+  const hashPrefix =
+    typeof options.hashPrefix === 'string' ? options.hashPrefix : ''
   const timeoutMs =
     Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
       ? options.timeoutMs

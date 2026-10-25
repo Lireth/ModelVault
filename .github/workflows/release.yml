@@ -18,13 +18,13 @@ name: Release Build
 on:
   push:
     tags:
-      - "v*"
+      - 'v*'
   workflow_dispatch:
     inputs:
       version:
-        description: "手动构建的版本号，须与 package.json 一致（如 0.2.0）"
+        description: '手动构建的版本号，须与 package.json 一致（如 0.2.0）'
         required: true
-        default: "0.1.0"
+        default: '0.1.0'
 
 permissions:
   contents: write # 创建 GitHub Release 需要写权限
@@ -48,7 +48,7 @@ jobs:
       - name: 安装 Node.js 22
         uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: '22'
           cache: npm # 缓存 npm 依赖包
 
       # 缓存 Electron / electron-builder 二进制（.npmrc 指向 npmmirror，

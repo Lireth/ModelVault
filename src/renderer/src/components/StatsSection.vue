@@ -14,7 +14,7 @@ import {
   duplicateWastedBytes,
   MODEL_TYPES,
   state,
-  typeInfo
+  typeInfo,
 } from '../store/appStore'
 import { normalizeBaseModel } from '../../../shared/model-categories'
 
@@ -63,7 +63,8 @@ const stats = computed(() => {
     if (m.suspect) suspect += 1
     if (m.nsfw) nsfwCount += 1
     // 近 30 天有文件变动的模型（mtimeMs 为文件修改时间）
-    if (Number.isFinite(m.mtimeMs) && now - m.mtimeMs < 30 * 24 * 3600 * 1000) recent += 1
+    if (Number.isFinite(m.mtimeMs) && now - m.mtimeMs < 30 * 24 * 3600 * 1000)
+      recent += 1
     if (m.rating >= 1 && m.rating <= 5) ratingBuckets[m.rating] += 1
     else unrated += 1
   }
@@ -81,7 +82,7 @@ const stats = computed(() => {
     nsfw: nsfwCount,
     recent,
     ratingBuckets,
-    unrated
+    unrated,
   }
 })
 
@@ -99,7 +100,9 @@ function hasAnyParams(m) {
 
 /** 单模型平均容量（空库返回 0）：辅助判断库内模型的普遍体积 */
 const avgBytes = computed(() =>
-  stats.value.total ? Math.round(stats.value.totalBytes / stats.value.total) : 0
+  stats.value.total
+    ? Math.round(stats.value.totalBytes / stats.value.total)
+    : 0,
 )
 
 /** 各分类行（含未覆盖到的类型归入其他展示） */
@@ -115,7 +118,7 @@ const typeRows = computed(() => {
       color: t.color,
       count: s.count,
       bytes: s.bytes,
-      pct: total === 0 ? 0 : Math.round((s.count / total) * 100)
+      pct: total === 0 ? 0 : Math.round((s.count / total) * 100),
     })
   }
   return rows
@@ -126,7 +129,7 @@ const coverageRows = computed(() => [
   { key: 'note', label: '有备注', value: stats.value.withNote },
   { key: 'alias', label: '有备注名', value: stats.value.withAlias },
   { key: 'params', label: '有推荐参数', value: stats.value.withParams },
-  { key: 'cover', label: '有封面', value: stats.value.withCover }
+  { key: 'cover', label: '有封面', value: stats.value.withCover },
 ])
 
 /** 最占空间 TOP 5（轻量占用分析：清理场景定位大头；pct 为占总容量的百分比） */
@@ -139,7 +142,7 @@ const topSize = computed(() => {
       id: m.id,
       name: m.alias || m.name,
       size: m.size,
-      pct: total > 0 ? Math.round(((m.size || 0) / total) * 100) : 0
+      pct: total > 0 ? Math.round(((m.size || 0) / total) * 100) : 0,
     }))
 })
 
@@ -155,7 +158,7 @@ const EXT_PALETTE = [
   'var(--success)',
   'var(--warning)',
   'var(--warning-soft)',
-  'var(--text-muted)'
+  'var(--text-muted)',
 ]
 
 const extRows = computed(() => {
@@ -163,11 +166,15 @@ const extRows = computed(() => {
   for (const m of state.models) {
     // 优先使用扫描结果携带的真实扩展名（OPT-06）：.disabled 只是禁用后缀，
     // 直接截取路径末段会把 a.safetensors.disabled 误统计为 disabled 格式。
-    let ext = typeof m.ext === 'string' && m.ext ? m.ext.replace(/^\./, '').toLowerCase() : ''
+    let ext =
+      typeof m.ext === 'string' && m.ext
+        ? m.ext.replace(/^\./, '').toLowerCase()
+        : ''
     if (!ext) {
       // 兼容无 ext 的旧索引：剔除 .disabled 后再取最后一段扩展名
       let id = typeof m.id === 'string' ? m.id : ''
-      if (id.toLowerCase().endsWith('.disabled')) id = id.slice(0, -'.disabled'.length)
+      if (id.toLowerCase().endsWith('.disabled'))
+        id = id.slice(0, -'.disabled'.length)
       const dot = id.lastIndexOf('.')
       ext = dot >= 0 ? id.slice(dot + 1).toLowerCase() : '其他'
     }
@@ -183,7 +190,7 @@ const extRows = computed(() => {
     .map((row, i) => ({
       ...row,
       color: EXT_PALETTE[i % EXT_PALETTE.length],
-      pct: total === 0 ? 0 : Math.round((row.count / total) * 100)
+      pct: total === 0 ? 0 : Math.round((row.count / total) * 100),
     }))
 })
 
@@ -195,13 +202,13 @@ const ratingRows = computed(() => {
     star,
     label: '★'.repeat(star),
     count: stats.value.ratingBuckets[star],
-    pct: Math.round((stats.value.ratingBuckets[star] / total) * 100)
+    pct: Math.round((stats.value.ratingBuckets[star] / total) * 100),
   }))
   rows.push({
     star: 0,
     label: '未评分',
     count: stats.value.unrated,
-    pct: Math.round((stats.value.unrated / total) * 100)
+    pct: Math.round((stats.value.unrated / total) * 100),
   })
   return rows
 })
@@ -215,7 +222,9 @@ const baseRows = computed(() => {
   const byFamily = new Map()
   let total = 0
   for (const m of state.models) {
-    const family = normalizeBaseModel(m.baseModel || m.autoInfo?.baseModel || '')
+    const family = normalizeBaseModel(
+      m.baseModel || m.autoInfo?.baseModel || '',
+    )
     if (!family) continue
     total += 1
     const row = byFamily.get(family) || { count: 0, bytes: 0 }
@@ -232,9 +241,9 @@ const baseRows = computed(() => {
         label: f.label,
         count: s.count,
         bytes: s.bytes,
-        pct: total === 0 ? 0 : Math.round((s.count / total) * 100)
+        pct: total === 0 ? 0 : Math.round((s.count / total) * 100),
       }
-    })
+    }),
   }
 })
 
@@ -248,7 +257,8 @@ const dupStats = computed(() => {
   return {
     groups: groups.length,
     redundant,
-    wastedPct: total > 0 ? Math.round((duplicateWastedBytes.value / total) * 100) : 0
+    wastedPct:
+      total > 0 ? Math.round((duplicateWastedBytes.value / total) * 100) : 0,
   }
 })
 </script>
@@ -277,7 +287,11 @@ const dupStats = computed(() => {
     <StatsBaseBreakdown v-if="baseRows.total" :data="baseRows" />
 
     <!-- 重复占用（F-3，数据源 FEAT-1）：把「可释放空间」量化为清理动机 -->
-    <StatsDuplicates v-if="dupStats" :dup="dupStats" :wasted-bytes="duplicateWastedBytes" />
+    <StatsDuplicates
+      v-if="dupStats"
+      :dup="dupStats"
+      :wasted-bytes="duplicateWastedBytes"
+    />
 
     <!-- 最占空间 TOP 5：占比条直观看占用，点击行打开模型详情 -->
     <StatsTopSize v-if="topSize.length" :rows="topSize" />

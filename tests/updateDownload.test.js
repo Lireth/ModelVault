@@ -17,12 +17,12 @@ vi.mock('electron', () => ({
     getPath: vi.fn(() => fakeUserData),
     isPackaged: true,
     getVersion: vi.fn(() => '0.1.0'),
-    quit: vi.fn()
+    quit: vi.fn(),
   },
-  net: { fetch: vi.fn(), request: vi.fn() }
+  net: { fetch: vi.fn(), request: vi.fn() },
 }))
 vi.mock('node:child_process', () => ({
-  spawn: vi.fn(() => ({ unref: vi.fn(), once: vi.fn() }))
+  spawn: vi.fn(() => ({ unref: vi.fn(), once: vi.fn() })),
 }))
 
 import { app, net } from 'electron'
@@ -41,7 +41,7 @@ import {
   evaluateUpdateSignature,
   verifyUpdateSignature,
   setAuthenticodeQueryForTests,
-  setSignerThumbprintForTests
+  setSignerThumbprintForTests,
 } from '../src/main/services/update-download'
 
 const EXE_BYTES = Buffer.from('hello-exe')
@@ -50,19 +50,24 @@ const HASH = createHash('sha256').update(EXE_BYTES).digest('hex')
 const CHECKSUM_BODY = `${HASH}  ModelVault-0.2.0.exe\n`
 
 const ASSETS = {
-  downloadUrl: 'https://github.com/Lireth/ModelVault/releases/download/v0.2.0/ModelVault-0.2.0.exe',
+  downloadUrl:
+    'https://github.com/Lireth/ModelVault/releases/download/v0.2.0/ModelVault-0.2.0.exe',
   checksumUrl:
     'https://github.com/Lireth/ModelVault/releases/download/v0.2.0/ModelVault-0.2.0.exe.sha256',
-  size: EXE_BYTES.length
+  size: EXE_BYTES.length,
 }
 const RELEASE = {
   assets: [
-    { name: 'ModelVault-0.2.0.exe', browser_download_url: ASSETS.downloadUrl, size: EXE_BYTES.length },
+    {
+      name: 'ModelVault-0.2.0.exe',
+      browser_download_url: ASSETS.downloadUrl,
+      size: EXE_BYTES.length,
+    },
     {
       name: 'ModelVault-0.2.0.exe.sha256',
-      browser_download_url: ASSETS.checksumUrl
-    }
-  ]
+      browser_download_url: ASSETS.checksumUrl,
+    },
+  ],
 }
 
 /** 更新目录（userData/update，fakeUserData 随测试文件自动清理） */
@@ -96,15 +101,17 @@ function mockFetchFlow(exeBytes) {
     return Promise.resolve(
       new Response(exeBytes, {
         status: 200,
-        headers: { 'content-length': String(exeBytes.length) }
-      })
+        headers: { 'content-length': String(exeBytes.length) },
+      }),
     )
   })
 }
 
 describe('parseChecksumHash（sha256sum 兼容解析）', () => {
   it('解析首个 64 位 hex token 并小写化', () => {
-    expect(parseChecksumHash(`${'AB'.repeat(32)}  file.exe`)).toBe('ab'.repeat(32))
+    expect(parseChecksumHash(`${'AB'.repeat(32)}  file.exe`)).toBe(
+      'ab'.repeat(32),
+    )
     expect(parseChecksumHash(`\n  ${HASH}  ModelVault-0.2.0.exe\n`)).toBe(HASH)
   })
 
@@ -126,18 +133,28 @@ describe('findUpdateAssets（命名约定 + 白名单双校验）', () => {
   it('资产名与版本不一致 / 缺少校验和 / 地址不在白名单时返回 null', () => {
     expect(findUpdateAssets(RELEASE, '0.3.0')).toBeNull()
     expect(
-      findUpdateAssets({ assets: RELEASE.assets.filter((a) => !a.name.endsWith('.sha256')) }, '0.2.0')
+      findUpdateAssets(
+        { assets: RELEASE.assets.filter((a) => !a.name.endsWith('.sha256')) },
+        '0.2.0',
+      ),
     ).toBeNull()
     expect(
       findUpdateAssets(
         {
           assets: [
-            { name: 'ModelVault-0.2.0.exe', browser_download_url: 'https://evil.com/x.exe', size: 1 },
-            { name: 'ModelVault-0.2.0.exe.sha256', browser_download_url: 'https://evil.com/x.sha256' }
-          ]
+            {
+              name: 'ModelVault-0.2.0.exe',
+              browser_download_url: 'https://evil.com/x.exe',
+              size: 1,
+            },
+            {
+              name: 'ModelVault-0.2.0.exe.sha256',
+              browser_download_url: 'https://evil.com/x.sha256',
+            },
+          ],
         },
-        '0.2.0'
-      )
+        '0.2.0',
+      ),
     ).toBeNull()
     expect(findUpdateAssets(null, '0.2.0')).toBeNull()
   })
@@ -160,11 +177,13 @@ describe('fetchAllowedUpdateUrl（Electron 重定向兼容层）', () => {
         },
         end: () => {
           queueMicrotask(() => {
-            listeners.redirect?.[0]?.(302, 'GET', target, { Location: [target] })
+            listeners.redirect?.[0]?.(302, 'GET', target, {
+              Location: [target],
+            })
           })
         },
         // ClientRequest 的真实取消方法是 abort（无 cancel/destroy）
-        abort: () => calls.push('abort')
+        abort: () => calls.push('abort'),
       }
       return req
     }
@@ -175,7 +194,8 @@ describe('fetchAllowedUpdateUrl（Electron 重定向兼容层）', () => {
   it('Electron 不支持 manual 重定向时（Redirect was cancelled），经 net.request 探测目标并逐跳继续', async () => {
     // Electron 实际行为：net.fetch manual 模式遇 3xx 直接抛错而非返回 3xx 响应；
     // GitHub Release 资产必经 302 跳转 CDN，缺失该兜底时更新下载必然失败
-    const cdnUrl = 'https://objects.githubusercontent.com/gh-release-assets/abc/ModelVault-0.2.0.exe'
+    const cdnUrl =
+      'https://objects.githubusercontent.com/gh-release-assets/abc/ModelVault-0.2.0.exe'
     const requestStub = fakeRedirectingRequest(cdnUrl)
     vi.mocked(net.fetch).mockImplementation(async (url) => {
       if (String(url) === ASSETS.downloadUrl) {
@@ -199,19 +219,21 @@ describe('fetchAllowedUpdateUrl（Electron 重定向兼容层）', () => {
       throw new Error('Redirect was cancelled')
     })
     vi.mocked(net.request).mockImplementation(
-      fakeRedirectingRequest('https://evil.example.com/x.exe')
+      fakeRedirectingRequest('https://evil.example.com/x.exe'),
     )
 
     await expect(fetchAllowedUpdateUrl(ASSETS.downloadUrl, {})).rejects.toThrow(
-      '重定向目标不在 GitHub 白名单内'
+      '重定向目标不在 GitHub 白名单内',
     )
   })
 
   it('非重定向取消类错误原样抛出，不进入探测路径', async () => {
-    vi.mocked(net.fetch).mockRejectedValue(new Error('net::ERR_CONNECTION_RESET'))
+    vi.mocked(net.fetch).mockRejectedValue(
+      new Error('net::ERR_CONNECTION_RESET'),
+    )
 
     await expect(fetchAllowedUpdateUrl(ASSETS.downloadUrl, {})).rejects.toThrow(
-      'ERR_CONNECTION_RESET'
+      'ERR_CONNECTION_RESET',
     )
     expect(net.request).not.toHaveBeenCalled()
   })
@@ -240,7 +262,10 @@ describe('downloadUpdatePackage（下载 + SHA256 校验闭环）', () => {
   })
 
   it('中断后保留 .part，再次下载以 Range 续传并完成校验（OP-06）', async () => {
-    const partPath = path.join(updateDir(), 'ModelVault-0.2.0.exe.download.part')
+    const partPath = path.join(
+      updateDir(),
+      'ModelVault-0.2.0.exe.download.part',
+    )
     await fs.mkdir(updateDir(), { recursive: true })
     // 预置前 5 字节（模拟上次中断）
     await fs.writeFile(partPath, EXE_BYTES.subarray(0, 5))
@@ -254,8 +279,8 @@ describe('downloadUpdatePackage（下载 + SHA256 校验闭环）', () => {
       return Promise.resolve(
         new Response(rest, {
           status: 206,
-          headers: { 'content-length': String(rest.length) }
-        })
+          headers: { 'content-length': String(rest.length) },
+        }),
       )
     })
     setPendingUpdate(ASSETS, '0.2.0')
@@ -268,7 +293,10 @@ describe('downloadUpdatePackage（下载 + SHA256 校验闭环）', () => {
   })
 
   it('服务端忽略 Range（200 全量）时丢弃旧分片从头覆盖', async () => {
-    const partPath = path.join(updateDir(), 'ModelVault-0.2.0.exe.download.part')
+    const partPath = path.join(
+      updateDir(),
+      'ModelVault-0.2.0.exe.download.part',
+    )
     await fs.mkdir(updateDir(), { recursive: true })
     await fs.writeFile(partPath, Buffer.from('garbage'))
 
@@ -280,8 +308,8 @@ describe('downloadUpdatePackage（下载 + SHA256 校验闭环）', () => {
       return Promise.resolve(
         new Response(EXE_BYTES, {
           status: 200,
-          headers: { 'content-length': String(EXE_BYTES.length) }
-        })
+          headers: { 'content-length': String(EXE_BYTES.length) },
+        }),
       )
     })
     setPendingUpdate(ASSETS, '0.2.0')
@@ -292,7 +320,10 @@ describe('downloadUpdatePackage（下载 + SHA256 校验闭环）', () => {
   })
 
   it('网络失败保留已下载分片供下次续传', async () => {
-    const partPath = path.join(updateDir(), 'ModelVault-0.2.0.exe.download.part')
+    const partPath = path.join(
+      updateDir(),
+      'ModelVault-0.2.0.exe.download.part',
+    )
     await fs.mkdir(updateDir(), { recursive: true })
     await fs.writeFile(partPath, EXE_BYTES.subarray(0, 5))
 
@@ -320,7 +351,9 @@ describe('downloadUpdatePackage（下载 + SHA256 校验闭环）', () => {
   })
 
   it('无可用更新信息时拒绝；空闲取消为 no-op', async () => {
-    expect(await downloadUpdatePackage()).toEqual({ error: '没有可用的更新信息，请先检查更新' })
+    expect(await downloadUpdatePackage()).toEqual({
+      error: '没有可用的更新信息，请先检查更新',
+    })
     expect(cancelUpdateDownload()).toEqual({ ok: true })
   })
 
@@ -339,8 +372,8 @@ describe('downloadUpdatePackage（下载 + SHA256 校验闭环）', () => {
         () =>
           new Response(EXE_BYTES, {
             status: 200,
-            headers: { 'content-length': String(EXE_BYTES.length) }
-          })
+            headers: { 'content-length': String(EXE_BYTES.length) },
+          }),
       )
     })
     const first = downloadUpdatePackage()
@@ -374,7 +407,10 @@ describe('downloadUpdatePackage（下载 + SHA256 校验闭环）', () => {
 
   it('校验和重定向到 GitHub 白名单外主机时拒绝（V-06）', async () => {
     vi.mocked(net.fetch).mockResolvedValue(
-      new Response('', { status: 302, headers: { Location: 'https://evil.example.com/x' } })
+      new Response('', {
+        status: 302,
+        headers: { Location: 'https://evil.example.com/x' },
+      }),
     )
     setPendingUpdate(ASSETS, '0.2.0')
     const res = await downloadUpdatePackage()
@@ -385,8 +421,8 @@ describe('downloadUpdatePackage（下载 + SHA256 校验闭环）', () => {
     vi.mocked(net.fetch).mockResolvedValue(
       new Response('x', {
         status: 200,
-        headers: { 'Content-Length': String(65 * 1024) }
-      })
+        headers: { 'Content-Length': String(65 * 1024) },
+      }),
     )
     setPendingUpdate(ASSETS, '0.2.0')
     const res = await downloadUpdatePackage()
@@ -401,8 +437,8 @@ describe('downloadUpdatePackage（下载 + SHA256 校验闭环）', () => {
       return Promise.resolve(
         new Response('x', {
           status: 200,
-          headers: { 'Content-Length': String(601 * 1024 * 1024) }
-        })
+          headers: { 'Content-Length': String(601 * 1024 * 1024) },
+        }),
       )
     })
     setPendingUpdate(ASSETS, '0.2.0')
@@ -418,21 +454,24 @@ describe('E1 Authenticode 更新包验签', () => {
     expect(normalizeThumbprint('aa bb:cc-dd')).toBe('AABBCCDD')
     expect(evaluateUpdateSignature(null, THUMB)).toMatchObject({ ok: false })
     expect(
-      evaluateUpdateSignature({ status: 'NotSigned', thumbprint: '' }, THUMB)
+      evaluateUpdateSignature({ status: 'NotSigned', thumbprint: '' }, THUMB),
     ).toMatchObject({ ok: false, error: expect.stringContaining('NotSigned') })
     expect(
-      evaluateUpdateSignature({ status: 'Valid', thumbprint: 'B'.repeat(40) }, THUMB)
+      evaluateUpdateSignature(
+        { status: 'Valid', thumbprint: 'B'.repeat(40) },
+        THUMB,
+      ),
     ).toMatchObject({ ok: false, error: expect.stringContaining('不一致') })
     expect(
       evaluateUpdateSignature(
         { status: 'Valid', thumbprint: THUMB, subject: 'CN=ModelVault' },
-        THUMB
-      )
+        THUMB,
+      ),
     ).toEqual({
       ok: true,
       required: true,
       thumbprint: THUMB,
-      subject: 'CN=ModelVault'
+      subject: 'CN=ModelVault',
     })
   })
 
@@ -441,7 +480,7 @@ describe('E1 Authenticode 更新包验签', () => {
     setAuthenticodeQueryForTests(async () => ({
       status: 'Valid',
       thumbprint: THUMB,
-      subject: 'CN=ModelVault'
+      subject: 'CN=ModelVault',
     }))
     mockFetchFlow(EXE_BYTES)
     setPendingUpdate(ASSETS, '0.2.0')
@@ -456,7 +495,10 @@ describe('E1 Authenticode 更新包验签', () => {
 
   it('验签失败时拒绝下载并删除临时文件', async () => {
     setSignerThumbprintForTests(THUMB)
-    setAuthenticodeQueryForTests(async () => ({ status: 'HashMismatch', thumbprint: THUMB }))
+    setAuthenticodeQueryForTests(async () => ({
+      status: 'HashMismatch',
+      thumbprint: THUMB,
+    }))
     mockFetchFlow(EXE_BYTES)
     setPendingUpdate(ASSETS, '0.2.0')
 
@@ -464,7 +506,7 @@ describe('E1 Authenticode 更新包验签', () => {
 
     expect(res.error).toContain('数字签名无效')
     await expect(
-      fs.access(path.join(updateDir(), 'ModelVault-0.2.0.exe'))
+      fs.access(path.join(updateDir(), 'ModelVault-0.2.0.exe')),
     ).rejects.toThrow()
   })
 
@@ -481,14 +523,18 @@ describe('E1 Authenticode 更新包验签', () => {
     })
     vi.mocked(spawn).mockImplementationOnce(() => child)
 
-    const pending = verifyUpdateSignature(path.join(updateDir(), 'sign-check.exe'))
+    const pending = verifyUpdateSignature(
+      path.join(updateDir(), 'sign-check.exe'),
+    )
     // 模拟 $ErrorActionPreference='Stop' 下 cmdlet 抛错：约 2MB 错误流
     // （远超管道缓冲）——修复前 stderr 无监听，子进程写满缓冲后阻塞，
     // 只能等 20s 超时返回 null 且丢失错误现场
     for (let i = 0; i < 32; i++) {
       child.stderr.emit(
         'data',
-        Buffer.from(`Get-AuthenticodeSignature : 错误 ${i}\n` + 'E'.repeat(64 * 1024))
+        Buffer.from(
+          `Get-AuthenticodeSignature : 错误 ${i}\n` + 'E'.repeat(64 * 1024),
+        ),
       )
     }
     child.emit('exit', 1)
@@ -514,14 +560,16 @@ describe('E1 Authenticode 更新包验签', () => {
     child.stdout.emit(
       'data',
       // PowerShell 管道可能带 UTF-8 BOM，与真实输出形态一致
-      Buffer.from(`\uFEFF{"status":"Valid","thumbprint":"${THUMB}","subject":"CN=ModelVault"}`)
+      Buffer.from(
+        `\uFEFF{"status":"Valid","thumbprint":"${THUMB}","subject":"CN=ModelVault"}`,
+      ),
     )
     child.emit('exit', 0)
 
     await expect(pending).resolves.toMatchObject({
       ok: true,
       required: true,
-      thumbprint: THUMB
+      thumbprint: THUMB,
     })
   })
 
@@ -531,7 +579,7 @@ describe('E1 Authenticode 更新包验签', () => {
     setAuthenticodeQueryForTests(async () =>
       valid
         ? { status: 'Valid', thumbprint: THUMB }
-        : { status: 'HashMismatch', thumbprint: THUMB }
+        : { status: 'HashMismatch', thumbprint: THUMB },
     )
     mockFetchFlow(EXE_BYTES)
     setPendingUpdate(ASSETS, '0.2.0')
@@ -549,7 +597,7 @@ describe('E1 Authenticode 更新包验签', () => {
     setSignerThumbprintForTests('not-a-thumbprint')
     await expect(verifyUpdateSignature('/tmp/x.exe')).resolves.toMatchObject({
       ok: false,
-      error: '发布者签名指纹配置无效'
+      error: '发布者签名指纹配置无效',
     })
   })
 
@@ -568,7 +616,9 @@ describe('E1 Authenticode 更新包验签', () => {
 
 describe('installUpdatePackage（拉起新版本并等待旧实例退出）', () => {
   it('未下载更新包时拒绝', async () => {
-    expect(await installUpdatePackage()).toEqual({ error: '尚未下载更新包，请先下载更新' })
+    expect(await installUpdatePackage()).toEqual({
+      error: '尚未下载更新包，请先下载更新',
+    })
   })
 
   it('直接拉起新 EXE（带 --wait-for-pid），不经 shell，并退出当前应用', async () => {
@@ -587,7 +637,9 @@ describe('installUpdatePackage（拉起新版本并等待旧实例退出）', ()
       expect(String(exe)).toContain('ModelVault-0.2.0.exe')
       expect(String(exe).toLowerCase()).not.toContain('cmd.exe')
       expect(args).toEqual([`--wait-for-pid=${process.pid}`])
-      expect(options).toEqual(expect.objectContaining({ detached: true, windowsHide: true }))
+      expect(options).toEqual(
+        expect.objectContaining({ detached: true, windowsHide: true }),
+      )
       // 立即拉起新实例；500ms 后退出当前实例释放单实例锁
       expect(app.quit).not.toHaveBeenCalled()
       vi.advanceTimersByTime(600)

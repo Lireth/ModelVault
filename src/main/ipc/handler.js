@@ -106,7 +106,10 @@ export async function checkModelIdInRootReal(id, options = {}) {
  * @param {string} [message] 失败时返回的文案
  * @returns {Promise<string>} 校验通过返回空串，失败返回错误文案
  */
-export async function checkExistingDirectory(p, message = '目录不存在或不是目录') {
+export async function checkExistingDirectory(
+  p,
+  message = '目录不存在或不是目录',
+) {
   try {
     const stat = await fs.stat(p)
     return stat.isDirectory() ? '' : message

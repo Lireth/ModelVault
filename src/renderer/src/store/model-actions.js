@@ -204,7 +204,12 @@ export async function handleMenuAction(id, action) {
       const idx = modelIndexOf(id)
       if (idx === undefined) break
       const m = state.models[idx]
-      if (!(await confirmDialog(`确定将「${m.alias || m.name}」移入系统回收站吗？`))) break
+      if (
+        !(await confirmDialog(
+          `确定将「${m.alias || m.name}」移入系统回收站吗？`,
+        ))
+      )
+        break
       await deleteModel(id)
       break
     }
@@ -238,7 +243,10 @@ export async function toggleDisabledModel(id, disabled) {
     toast('error', res.error)
     return false
   }
-  toast('success', disabled ? '已禁用（文件名加 .disabled 后缀，绘画工具不再加载）' : '已启用')
+  toast(
+    'success',
+    disabled ? '已禁用（文件名加 .disabled 后缀，绘画工具不再加载）' : '已启用',
+  )
   if (!state.scanning) await refreshAfterFileChange()
   return true
 }
@@ -277,9 +285,14 @@ export async function renameModel(id, name) {
     toast('info', '文件名未变化')
     return true
   }
-  const warnings = Array.isArray(res?.sidecarWarnings) ? res.sidecarWarnings : []
+  const warnings = Array.isArray(res?.sidecarWarnings)
+    ? res.sidecarWarnings
+    : []
   if (warnings.length > 0) {
-    toast('warn', `已重命名为「${trimmed}」，但 ${warnings.length} 个 sidecar 未迁移`)
+    toast(
+      'warn',
+      `已重命名为「${trimmed}」，但 ${warnings.length} 个 sidecar 未迁移`,
+    )
   } else {
     toast('success', `已重命名为「${trimmed}」`)
   }
@@ -338,11 +351,13 @@ export async function importModels(mode = 'copy') {
     if (imported === 0) {
       toast(
         'warn',
-        failed.length > 0 ? `导入失败：${failed[0].error}` : '没有导入任何模型'
+        failed.length > 0 ? `导入失败：${failed[0].error}` : '没有导入任何模型',
       )
       return false
     }
-    const parts = [`已${mode === 'move' ? '移动' : '复制'}入台 ${imported} 个模型`]
+    const parts = [
+      `已${mode === 'move' ? '移动' : '复制'}入台 ${imported} 个模型`,
+    ]
     if (renamed > 0) parts.push(`重命名 ${renamed} 个`)
     if (failed.length > 0) parts.push(`${failed.length} 个失败`)
     if (Array.isArray(res.warnings) && res.warnings.length > 0) {

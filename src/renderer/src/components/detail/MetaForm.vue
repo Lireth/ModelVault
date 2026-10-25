@@ -4,7 +4,13 @@ import MetaFlags from './MetaFlags.vue'
 import MetaParamsForm from './MetaParamsForm.vue'
 import MetaTagsEditor from './MetaTagsEditor.vue'
 import { PARAM_LIMITS } from '../../constants/modelParams'
-import { closeDetail, saveModelData, selectedModel, state, toast } from '../../store/appStore'
+import {
+  closeDetail,
+  saveModelData,
+  selectedModel,
+  state,
+  toast,
+} from '../../store/appStore'
 
 /**
  * 详情页中部标注表单列编排壳（O-4 自 ModelDetail.vue 拆出；OPT-01 板块组件化）：
@@ -31,7 +37,7 @@ const form = reactive({
   resMin: '',
   resMax: '',
   note: '',
-  triggerWords: ''
+  triggerWords: '',
 })
 
 /** 从模型对象填充表单（打开详情或切换模型时触发） */
@@ -64,8 +70,17 @@ const formSnapshot = ref(null)
 
 /** 表单字段清单（脏检测用，与 form 的字段一一对应） */
 const FORM_KEYS = [
-  'alias', 'steps', 'cfgMin', 'cfgMax', 'sampler', 'scheduler', 'precision',
-  'resMin', 'resMax', 'note', 'triggerWords'
+  'alias',
+  'steps',
+  'cfgMin',
+  'cfgMax',
+  'sampler',
+  'scheduler',
+  'precision',
+  'resMin',
+  'resMax',
+  'note',
+  'triggerWords',
 ]
 
 /**
@@ -75,21 +90,29 @@ const FORM_KEYS = [
  * 响应式依赖也收敛到具体字段（击键只使对应字段的比较失效）。
  */
 const formDirty = computed(() =>
-  FORM_KEYS.some((k) => form[k] !== formSnapshot.value?.[k])
+  FORM_KEYS.some((k) => form[k] !== formSnapshot.value?.[k]),
 )
 
-watch(selectedModel, (m, old) => {
-  // 同一模型的引用替换（收藏/评分、后台缩略图补齐）且表单有未保存编辑时
-  // 保留编辑不重填：这类更新不经过用户操作，静默覆盖会造成标注丢失
-  if (m && old && m.id === old.id && formDirty.value) return
-  fillForm(m)
-}, { immediate: true })
+watch(
+  selectedModel,
+  (m, old) => {
+    // 同一模型的引用替换（收藏/评分、后台缩略图补齐）且表单有未保存编辑时
+    // 保留编辑不重填：这类更新不经过用户操作，静默覆盖会造成标注丢失
+    if (m && old && m.id === old.id && formDirty.value) return
+    fillForm(m)
+  },
+  { immediate: true },
+)
 
 // 同步到全局状态（须在首次 fillForm 之后注册，快照已建立，避免初始误报为脏）：
 // openDetail/closeDetail 据此在切换/关闭前向用户确认
-watch(formDirty, (d) => {
-  state.detailDirty = d
-}, { immediate: true })
+watch(
+  formDirty,
+  (d) => {
+    state.detailDirty = d
+  },
+  { immediate: true },
+)
 
 /* ---------------- 文件元数据自动解析（AutoInfoPanel 事件，C1） ----------------
  * AutoInfoPanel 现位于 ModelDetail.vue 第三列，经 defineExpose 暴露以下
@@ -132,7 +155,7 @@ function collectParams() {
     scheduler: form.scheduler.trim(),
     precision: form.precision.trim(),
     resMin: num(form.resMin),
-    resMax: num(form.resMax)
+    resMax: num(form.resMax),
   }
   // 校验（范围与输入框 min/max 同源：PARAM_LIMITS）
   const rangeChecks = [
@@ -140,7 +163,7 @@ function collectParams() {
     ['CFG 最小值', params.cfgMin, PARAM_LIMITS.cfg.min, PARAM_LIMITS.cfg.max],
     ['CFG 最大值', params.cfgMax, PARAM_LIMITS.cfg.min, PARAM_LIMITS.cfg.max],
     ['最小分辨率', params.resMin, PARAM_LIMITS.res.min, PARAM_LIMITS.res.max],
-    ['最大分辨率', params.resMax, PARAM_LIMITS.res.min, PARAM_LIMITS.res.max]
+    ['最大分辨率', params.resMax, PARAM_LIMITS.res.min, PARAM_LIMITS.res.max],
   ]
   for (const [label, value, min, max] of rangeChecks) {
     if (Number.isNaN(value)) return { error: `${label} 请输入有效数字` }
@@ -148,10 +171,18 @@ function collectParams() {
       return { error: `${label} 超出合理范围（${min} ~ ${max}）` }
     }
   }
-  if (params.cfgMin !== null && params.cfgMax !== null && params.cfgMin > params.cfgMax) {
+  if (
+    params.cfgMin !== null &&
+    params.cfgMax !== null &&
+    params.cfgMin > params.cfgMax
+  ) {
     return { error: 'CFG 最小值不能大于最大值' }
   }
-  if (params.resMin !== null && params.resMax !== null && params.resMin > params.resMax) {
+  if (
+    params.resMin !== null &&
+    params.resMax !== null &&
+    params.resMin > params.resMax
+  ) {
     return { error: '最小分辨率不能大于最大分辨率' }
   }
   return { params }
@@ -170,7 +201,7 @@ async function onSave() {
     const payload = {
       alias: form.alias.trim(),
       params,
-      note: form.note
+      note: form.note,
     }
     // 触发词仅 LoRA 详情页提供编辑
     if (model.type === 'lora') payload.triggerWords = form.triggerWords
@@ -193,9 +224,24 @@ async function onSave() {
     <MetaFlags />
 
     <!-- 健康检查警示（F6）：下载损坏/中断的模型提前可见，避免使用时才发现 -->
-    <div v-if="selectedModel.suspect" class="suspect-warn alert-warning" role="alert">
-      <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M8.9 1.9a1 1 0 0 0-1.8 0l-5.6 10.4A1 1 0 0 0 2.4 13.8h11.2a1 1 0 0 0 .9-1.5zM8 5.6a.9.9 0 0 1 .9.9v2.8a.9.9 0 0 1-1.8 0V6.5a.9.9 0 0 1 .9-.9zm0 6.9a1 1 0 1 1 0-2 1 1 0 0 1 0 2z" /></svg>
-      该文件疑似损坏（结构校验失败或 0 字节），在绘画工具中加载可能失败，建议重新下载或移入回收站。
+    <div
+      v-if="selectedModel.suspect"
+      class="suspect-warn alert-warning"
+      role="alert"
+    >
+      <svg
+        viewBox="0 0 16 16"
+        width="13"
+        height="13"
+        fill="currentColor"
+        aria-hidden="true"
+      >
+        <path
+          d="M8.9 1.9a1 1 0 0 0-1.8 0l-5.6 10.4A1 1 0 0 0 2.4 13.8h11.2a1 1 0 0 0 .9-1.5zM8 5.6a.9.9 0 0 1 .9.9v2.8a.9.9 0 0 1-1.8 0V6.5a.9.9 0 0 1 .9-.9zm0 6.9a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"
+        />
+      </svg>
+      该文件疑似损坏（结构校验失败或 0
+      字节），在绘画工具中加载可能失败，建议重新下载或移入回收站。
     </div>
 
     <!-- 命名与标签（OPT-01 拆分：detail/MetaTagsEditor.vue） -->
@@ -205,7 +251,9 @@ async function onSave() {
     <MetaParamsForm :form="form" />
 
     <div class="form-actions">
-      <button class="btn btn-primary" :disabled="busy" @click="onSave">保存参数</button>
+      <button class="btn btn-primary" :disabled="busy" @click="onSave">
+        保存参数
+      </button>
       <button class="btn" @click="closeDetail">关闭</button>
     </div>
   </div>

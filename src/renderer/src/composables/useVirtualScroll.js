@@ -34,10 +34,13 @@ export function useVirtualScroll(opts) {
   const rootEl = ref(null)
   const viewportHeight = ref(600)
   const scrollTop = ref(0)
-  const pitch = typeof opts.rowHeight === 'object' ? opts.rowHeight : ref(opts.rowHeight)
+  const pitch =
+    typeof opts.rowHeight === 'object' ? opts.rowHeight : ref(opts.rowHeight)
 
   /** id → 模型索引映射（锚恢复定位用，组件键盘导航共用） */
-  const indexById = computed(() => new Map(opts.models().map((m, i) => [m.id, i])))
+  const indexById = computed(
+    () => new Map(opts.models().map((m, i) => [m.id, i])),
+  )
 
   const startIndex = computed(() => {
     const raw = Math.floor(scrollTop.value / pitch.value) - (opts.overscan || 0)
@@ -46,9 +49,14 @@ export function useVirtualScroll(opts) {
     return Math.min(Math.max(0, raw), Math.max(0, opts.rowCount() - 1))
   })
   const visibleCount = computed(
-    () => Math.ceil(viewportHeight.value / pitch.value) + 1 + (opts.overscan || 0) * 2
+    () =>
+      Math.ceil(viewportHeight.value / pitch.value) +
+      1 +
+      (opts.overscan || 0) * 2,
   )
-  const endIndex = computed(() => Math.min(opts.rowCount(), startIndex.value + visibleCount.value))
+  const endIndex = computed(() =>
+    Math.min(opts.rowCount(), startIndex.value + visibleCount.value),
+  )
 
   /* ---------------- 滚动与尺寸测量 ---------------- */
 
@@ -156,7 +164,7 @@ export function useVirtualScroll(opts) {
       if (anchorId && idx !== undefined) {
         const target = Math.max(
           0,
-          anchorScrollTop + (opts.rowOfIndex(idx) - anchorRow) * pitch.value
+          anchorScrollTop + (opts.rowOfIndex(idx) - anchorRow) * pitch.value,
         )
         if (target !== scroller.scrollTop) {
           scroller.scrollTop = target
@@ -171,7 +179,7 @@ export function useVirtualScroll(opts) {
       anchorScrollTop = 0
       scroller.scrollTop = 0
       scrollTop.value = 0
-    }
+    },
   )
 
   /**
@@ -182,7 +190,9 @@ export function useVirtualScroll(opts) {
    */
   function focusModel(id) {
     nextTick(() => {
-      rootEl.value?.querySelector(`[data-model-id="${CSS.escape(id)}"]`)?.focus()
+      rootEl.value
+        ?.querySelector(`[data-model-id="${CSS.escape(id)}"]`)
+        ?.focus()
     })
   }
 
@@ -207,5 +217,14 @@ export function useVirtualScroll(opts) {
     resizeObserver?.disconnect()
   })
 
-  return { rootEl, scrollTop, viewportHeight, startIndex, endIndex, indexById, scrollToRow, focusModel }
+  return {
+    rootEl,
+    scrollTop,
+    viewportHeight,
+    startIndex,
+    endIndex,
+    indexById,
+    scrollToRow,
+    focusModel,
+  }
 }

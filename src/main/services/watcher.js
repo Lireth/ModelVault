@@ -4,8 +4,16 @@ import path from 'node:path'
 import { BrowserWindow } from 'electron'
 import logger from '../logger'
 import { relativeWithin, runWithConcurrency } from '../utils'
-import { dedupeAndPruneDescendants, isRelDirInScope } from '../../shared/scan-dirs'
-import { MAX_SCAN_DEPTH, isExcludedScanName, isExcludedScanEntryName, isVisibleScanEntry } from './scanner'
+import {
+  dedupeAndPruneDescendants,
+  isRelDirInScope,
+} from '../../shared/scan-dirs'
+import {
+  MAX_SCAN_DEPTH,
+  isExcludedScanName,
+  isExcludedScanEntryName,
+  isVisibleScanEntry,
+} from './scanner'
 
 /**
  * 模型目录变更监控（E8；A8 轮询快照 + OP-05 原生事件加速）：
@@ -136,7 +144,9 @@ function broadcast(root, dirs = []) {
 /** 目录名小写集合（与 scanner 的 excludeDirs 同规则：按目录名小写匹配） */
 function toNameSet(names) {
   return new Set(
-    (names || []).filter((n) => typeof n === 'string' && n).map((n) => n.toLowerCase())
+    (names || [])
+      .filter((n) => typeof n === 'string' && n)
+      .map((n) => n.toLowerCase()),
   )
 }
 
@@ -167,13 +177,17 @@ function nativeEventDirs(w, filename) {
  */
 function startNativeWatch(w) {
   try {
-    const native = fsSync.watch(w.root, { recursive: true }, (_eventType, filename) => {
-      if (w !== watcher) return // 旧根在途事件：丢弃（B2 代际防护）
-      const dirs = nativeEventDirs(w, filename)
-      if (dirs === null) return
-      // refresh：原生事件后回填快照基线，避免下一轮轮询重复检出同一变更
-      scheduleBroadcast(w, dirs, { refresh: true })
-    })
+    const native = fsSync.watch(
+      w.root,
+      { recursive: true },
+      (_eventType, filename) => {
+        if (w !== watcher) return // 旧根在途事件：丢弃（B2 代际防护）
+        const dirs = nativeEventDirs(w, filename)
+        if (dirs === null) return
+        // refresh：原生事件后回填快照基线，避免下一轮轮询重复检出同一变更
+        scheduleBroadcast(w, dirs, { refresh: true })
+      },
+    )
     native.on('error', (err) => {
       logger.warn(`原生目录监听异常，回落到轮询: ${err.message}`)
       try {
@@ -242,7 +256,11 @@ function compareEntryName(a, b) {
  *   startDepth: 起始目录相对扫描根的深度（子树回填时保持全库深度上限语义）
  * @returns {Promise<Map<string, string[]|SnapshotEntry[]>>} 目录快照
  */
-export async function collectDirSnapshot(root, skipNames = new Set(), options = {}) {
+export async function collectDirSnapshot(
+  root,
+  skipNames = new Set(),
+  options = {},
+) {
   const snapshot = new Map()
   const skip = new Set(skipNames)
   const withStats = options.withStats === true
@@ -282,7 +300,11 @@ export async function collectDirSnapshot(root, skipNames = new Set(), options = 
         snapshot.set(dir, visible.map((e) => e.name).sort())
         for (const entry of visible) {
           if (canDescend && entry.isDirectory()) {
-            queue.push({ dir: path.join(dir, entry.name), isRoot: false, depth: depth + 1 })
+            queue.push({
+              dir: path.join(dir, entry.name),
+              isRoot: false,
+              depth: depth + 1,
+            })
           }
         }
         return
@@ -302,19 +324,27 @@ export async function collectDirSnapshot(root, skipNames = new Set(), options = 
         async (entry, index) => {
           try {
             const stat = await fs.stat(path.join(dir, entry.name))
-            stats[index] = { name: entry.name, size: stat.size, mtimeMs: stat.mtimeMs }
+            stats[index] = {
+              name: entry.name,
+              size: stat.size,
+              mtimeMs: stat.mtimeMs,
+            }
           } catch {
             // 遍历期间被删除/锁定：记空值，下一轮内容校验会恢复或再次发现
             stats[index] = { name: entry.name, size: null, mtimeMs: null }
           }
         },
-        STAT_CONCURRENCY
+        STAT_CONCURRENCY,
       )
       list.push(...stats)
       snapshot.set(dir, list.sort(compareEntryName))
       for (const entry of visible) {
         if (canDescend && entry.isDirectory()) {
-          queue.push({ dir: path.join(dir, entry.name), isRoot: false, depth: depth + 1 })
+          queue.push({
+            dir: path.join(dir, entry.name),
+            isRoot: false,
+            depth: depth + 1,
+          })
         }
       }
     }
@@ -349,7 +379,10 @@ export async function collectDirSnapshot(root, skipNames = new Set(), options = 
 function namesFromSnapshot(statSnapshot) {
   const names = new Map()
   for (const [dir, entries] of statSnapshot) {
-    names.set(dir, entries.map((entry) => entry.name))
+    names.set(
+      dir,
+      entries.map((entry) => entry.name),
+    )
   }
   return names
 }
@@ -465,8 +498,11 @@ function sanitizeBaseline(root, snapshot, excludeNames) {
     out.set(
       abs,
       names
-        .filter((name) => typeof name === 'string' && name && !isExcludedScanEntryName(name))
-        .sort()
+        .filter(
+          (name) =>
+            typeof name === 'string' && name && !isExcludedScanEntryName(name),
+        )
+        .sort(),
     )
   }
   return out
@@ -575,7 +611,7 @@ async function refreshSnapshotScopes(w, relDirs) {
   w.refreshing = true
   try {
     const scopes = dedupeAndPruneDescendants(
-      Array.isArray(relDirs) && relDirs.length > 0 ? relDirs : ['']
+      Array.isArray(relDirs) && relDirs.length > 0 ? relDirs : [''],
     )
     for (const rel of scopes) {
       if (w !== watcher) return
@@ -589,7 +625,7 @@ async function refreshSnapshotScopes(w, relDirs) {
         snapshot = await collectDirSnapshot(abs, w.excludeNames, {
           withStats,
           concurrency: w.traversalConcurrency,
-          startDepth: depth
+          startDepth: depth,
         })
       } catch (err) {
         // 子树在事件与回填之间被删除：移除其快照即可，由父目录条目反映变更
@@ -608,13 +644,16 @@ async function refreshSnapshotScopes(w, relDirs) {
       }
       removeSnapshotSubtree(w, abs)
       for (const [dir, entries] of snapshot) {
-        w.snapshot.set(dir, withStats ? entries.map((entry) => entry.name) : entries)
+        w.snapshot.set(
+          dir,
+          withStats ? entries.map((entry) => entry.name) : entries,
+        )
         if (withStats && w.statSnapshot) w.statSnapshot.set(dir, entries)
       }
     }
   } catch (err) {
     logger.warn(
-      `原生事件快照回填失败${w === watcher ? '，已停止监控' : '（旧根已丢弃）'}: ${err.message}`
+      `原生事件快照回填失败${w === watcher ? '，已停止监控' : '（旧根已丢弃）'}: ${err.message}`,
     )
     if (w === watcher) stopWatcher()
   } finally {
@@ -656,7 +695,9 @@ async function deliverBroadcast(w, nativeDirs, confirmedDirs, needsRefresh) {
     // 原生事件未产生任何快照差异（重复/噪声事件）：不广播，避免重复局部扫描
     return
   }
-  logger.info(`检测到模型目录变更，触发重扫: ${w.root}（${dirs.length} 个子树）`)
+  logger.info(
+    `检测到模型目录变更，触发重扫: ${w.root}（${dirs.length} 个子树）`,
+  )
   broadcast(w.root, dirs)
 }
 
@@ -668,7 +709,12 @@ async function pumpDeliverQueue(w) {
     while (w === watcher && w.deliverQueue.length > 0) {
       const entry = w.deliverQueue.shift()
       try {
-        await deliverBroadcast(w, entry.nativeDirs, entry.confirmedDirs, entry.needsRefresh)
+        await deliverBroadcast(
+          w,
+          entry.nativeDirs,
+          entry.confirmedDirs,
+          entry.needsRefresh,
+        )
       } catch (err) {
         // 单批失败不阻塞后续批次；下一轮轮询仍会兜底检出未广播的变更
         logger.warn(`目录变更广播交付失败: ${err.message}`)
@@ -733,7 +779,7 @@ function windowsVisible() {
     (win) =>
       !win.isDestroyed() &&
       (typeof win.isVisible !== 'function' || win.isVisible()) &&
-      (typeof win.isMinimized !== 'function' || !win.isMinimized())
+      (typeof win.isMinimized !== 'function' || !win.isMinimized()),
   )
 }
 
@@ -778,14 +824,15 @@ function runWalk(w, silent) {
 
       // O4：内容校验轮采集 size/mtime；其余轮次只做低成本名称比对。
       // 基准轮（silent）必须建立内容基线，否则首个间隔内的同名覆盖无法发现。
-      const contentEnabled = Number.isFinite(w.contentCheckInterval) && w.contentCheckInterval > 0
+      const contentEnabled =
+        Number.isFinite(w.contentCheckInterval) && w.contentCheckInterval > 0
       const wantStats =
         contentEnabled &&
         (silent || Date.now() - w.lastContentCheckAt >= w.contentCheckInterval)
       const revisionAtStart = w.snapshotRevision
       const snapshot = await collectDirSnapshot(w.root, w.excludeNames, {
         withStats: wantStats,
-        concurrency: w.traversalConcurrency
+        concurrency: w.traversalConcurrency,
       })
 
       // 遍历期间进入扫描期/开始原生事件回填/基线已被其他路径更新：本轮结果
@@ -823,7 +870,7 @@ function runWalk(w, silent) {
           ? computeStatSnapshotDiff(
               w.root,
               w.statSnapshot,
-              /** @type {Map<string, SnapshotEntry[]>} */ (snapshot)
+              /** @type {Map<string, SnapshotEntry[]>} */ (snapshot),
             )
           : []
         w.statSnapshot = snapshot
@@ -841,7 +888,7 @@ function runWalk(w, silent) {
       const changedDirs = computeSnapshotDiff(
         w.root,
         w.snapshot,
-        /** @type {Map<string, string[]>} */ (snapshot)
+        /** @type {Map<string, string[]>} */ (snapshot),
       )
       if (changedDirs.length === 0) {
         w.idleRounds += 1
@@ -859,7 +906,9 @@ function runWalk(w, silent) {
       // 根目录不可读（被删除/离线）：停止监控，等下次扫描/设置变更重新发起。
       // 代际校验（B2 修复）：异常来自旧根的在途遍历时，当前 watcher 已是新根，
       // 绝不能被误停——只丢弃该次遍历
-      logger.warn(`目录监控异常${w === watcher ? '，已停止' : '（旧根遍历已丢弃）'}: ${err.message}`)
+      logger.warn(
+        `目录监控异常${w === watcher ? '，已停止' : '（旧根遍历已丢弃）'}: ${err.message}`,
+      )
       if (w === watcher) stopWatcher()
     })
     .finally(() => {
@@ -933,7 +982,11 @@ export function refreshWatcherBaseline(root, dirs, snapshot) {
  */
 export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
   const wantEnabled = enabled === true
-  if (watcher && sameRoot(watcher.root, root) && watcher.enabled === wantEnabled) {
+  if (
+    watcher &&
+    sameRoot(watcher.root, root) &&
+    watcher.enabled === wantEnabled
+  ) {
     // 同根同状态（如每次扫描完成后的重复同步）：刷新排除名单；若本次扫描
     // 提供了目录快照，直接覆盖基线并清理已扫描的待广播项（OPT-02），
     // 不重启遍历（skipNames 每轮遍历时读取，热生效）
@@ -953,7 +1006,8 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
   // OP-05：原生事件监听默认关闭（由调用方显式开启）；开启时轮询降频为兜底
   const nativeWatch = timing.nativeWatch === true
   const pollMs =
-    timing.pollInterval ?? (nativeWatch ? NATIVE_WATCH_POLL_INTERVAL : DEFAULT_POLL_INTERVAL)
+    timing.pollInterval ??
+    (nativeWatch ? NATIVE_WATCH_POLL_INTERVAL : DEFAULT_POLL_INTERVAL)
   const w = {
     root,
     enabled: true,
@@ -965,7 +1019,7 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
     contentCheckInterval:
       timing.contentCheckInterval ?? DEFAULT_CONTENT_CHECK_INTERVAL,
     traversalConcurrency: normalizeConcurrency(
-      timing.traversalConcurrency ?? DEFAULT_TRAVERSAL_CONCURRENCY
+      timing.traversalConcurrency ?? DEFAULT_TRAVERSAL_CONCURRENCY,
     ),
     debounceTimer: null,
     timer: null,
@@ -993,8 +1047,14 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
           ? [NATIVE_WATCH_POLL_INTERVAL, 30000]
           : DEFAULT_BACKOFF),
     debounceMs: timing.broadcastDebounce ?? DEFAULT_BROADCAST_DEBOUNCE,
-    isVisible: typeof timing.isVisible === 'function' ? timing.isVisible : windowsVisible,
-    onPollScheduled: typeof timing.onPollScheduled === 'function' ? timing.onPollScheduled : null
+    isVisible:
+      typeof timing.isVisible === 'function'
+        ? timing.isVisible
+        : windowsVisible,
+    onPollScheduled:
+      typeof timing.onPollScheduled === 'function'
+        ? timing.onPollScheduled
+        : null,
   }
   watcher = w
   // OPT-02：本次扫描已产出目录快照时直接复用为监控基线，无需扫描结束后
@@ -1016,7 +1076,7 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
       (w.contentCheckInterval > 0
         ? `，内容校验 ${w.contentCheckInterval}ms`
         : '，内容校验已关闭') +
-      `）: ${root}`
+      `）: ${root}`,
   )
   if (reusedBaseline) {
     // 已有权威名称基线：直接进入轮询链，不再立即遍历全树

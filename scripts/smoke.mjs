@@ -16,7 +16,8 @@ import electronPath from 'electron'
  */
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const packaged = process.argv.includes('--packaged') || process.env.SMOKE_PACKAGED === '1'
+const packaged =
+  process.argv.includes('--packaged') || process.env.SMOKE_PACKAGED === '1'
 const LAUNCH_TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS || 90000)
 const MAX_LOG_CHARS = 120000
 
@@ -42,7 +43,11 @@ async function resolveTarget() {
     if (!(await exists(mainEntry))) {
       throw new Error(`未找到 ${mainEntry}，请先运行 npm run build`)
     }
-    return { command: electronPath, args: ['--disable-gpu', root], label: 'out/ 编译产物' }
+    return {
+      command: electronPath,
+      args: ['--disable-gpu', root],
+      label: 'out/ 编译产物',
+    }
   }
 
   const pkg = await readPackage()
@@ -52,7 +57,7 @@ async function resolveTarget() {
     : path.join(root, 'dist', pkg.version, 'win-unpacked')
   const candidates = [
     path.join(dir, `${pkg.productName || 'ModelVault'}.exe`),
-    path.join(dir, 'ModelVault.exe')
+    path.join(dir, 'ModelVault.exe'),
   ]
   for (const candidate of candidates) {
     if (await exists(candidate)) {
@@ -60,13 +65,15 @@ async function resolveTarget() {
     }
   }
   throw new Error(
-    `未找到打包产物（${candidates.join(' 或 ')}），请先运行 npx electron-builder --dir`
+    `未找到打包产物（${candidates.join(' 或 ')}），请先运行 npx electron-builder --dir`,
   )
 }
 
 /** 终端输出裁剪：完整日志可能包含大量 Chromium 噪声 */
 function tail(text) {
-  return text.length > MAX_LOG_CHARS ? `…（前文已截断）\n${text.slice(-MAX_LOG_CHARS)}` : text
+  return text.length > MAX_LOG_CHARS
+    ? `…（前文已截断）\n${text.slice(-MAX_LOG_CHARS)}`
+    : text
 }
 
 async function main() {
@@ -81,7 +88,7 @@ async function main() {
     MODELVAULT_SMOKE: '1',
     MODELVAULT_SMOKE_USER_DATA: userData,
     MODELVAULT_SMOKE_RESULT: resultPath,
-    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
   }
 
   console.log(`[smoke] 启动目标: ${target.label}`)
@@ -89,7 +96,7 @@ async function main() {
     cwd: root,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true
+    windowsHide: true,
   })
 
   let stdout = ''
@@ -132,25 +139,29 @@ async function main() {
     console.error(
       timedOut
         ? `[smoke] 启动超时（${LAUNCH_TIMEOUT_MS}ms），未生成检查结果`
-        : `[smoke] 应用退出（code=${exitCode}）但未生成检查结果，请查看上方日志`
+        : `[smoke] 应用退出（code=${exitCode}）但未生成检查结果，请查看上方日志`,
     )
     process.exit(1)
   }
 
   console.log('[smoke] 检查结果:')
   for (const check of result.checks || []) {
-    console.log(`  ${check.ok ? 'PASS' : 'FAIL'}  ${check.name}${check.detail ? `  (${check.detail})` : ''}`)
+    console.log(
+      `  ${check.ok ? 'PASS' : 'FAIL'}  ${check.name}${check.detail ? `  (${check.detail})` : ''}`,
+    )
   }
   if (result.error) {
     console.error(`[smoke] ${result.error}`)
   }
 
   if (!result.ok || exitCode !== 0) {
-    console.error(`[smoke] 失败（exitCode=${exitCode}，packaged=${result.usedPackagedRenderer}）`)
+    console.error(
+      `[smoke] 失败（exitCode=${exitCode}，packaged=${result.usedPackagedRenderer}）`,
+    )
     process.exit(1)
   }
   console.log(
-    `[smoke] 通过（${target.label}，Electron ${result.electron}，app ${result.appVersion}）`
+    `[smoke] 通过（${target.label}，Electron ${result.electron}，app ${result.appVersion}）`,
   )
 }
 

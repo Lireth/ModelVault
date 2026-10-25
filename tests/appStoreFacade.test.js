@@ -168,7 +168,7 @@ const EXPECTED_EXPORTS = [
   'toggleDisabledModel',
   'renameModel',
   'moveModelTo',
-  'importModels'
+  'importModels',
 ]
 
 describe('appStore 门面导出契约（A-04）', () => {
@@ -191,7 +191,13 @@ describe('appStore 门面导出契约（A-04）', () => {
   })
 
   it('关键动作导出为可调用函数', () => {
-    for (const name of ['scanModels', 'toast', 'toggleSelect', 'openDetail', 'formatSize']) {
+    for (const name of [
+      'scanModels',
+      'toast',
+      'toggleSelect',
+      'openDetail',
+      'formatSize',
+    ]) {
       expect(typeof store[name]).toBe('function')
     }
   })

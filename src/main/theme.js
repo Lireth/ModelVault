@@ -4,8 +4,16 @@
  * 必须使用同一份数据，避免双份维护导致改色遗漏。
  */
 export const THEME_COLORS = {
-  dark: { backgroundColor: '#101418', overlayColor: '#101418', symbolColor: '#e6eaee' },
-  light: { backgroundColor: '#f5f7fa', overlayColor: '#f5f7fa', symbolColor: '#24292f' }
+  dark: {
+    backgroundColor: '#101418',
+    overlayColor: '#101418',
+    symbolColor: '#e6eaee',
+  },
+  light: {
+    backgroundColor: '#f5f7fa',
+    overlayColor: '#f5f7fa',
+    symbolColor: '#24292f',
+  },
 }
 
 /**
@@ -16,5 +24,7 @@ export const THEME_COLORS = {
  * 本函数是主进程取主题色的唯一收口（窗口创建与 window:setTheme 均经此）。
  */
 export function themeColors(theme) {
-  return Object.hasOwn(THEME_COLORS, theme) ? THEME_COLORS[theme] : THEME_COLORS.dark
+  return Object.hasOwn(THEME_COLORS, theme)
+    ? THEME_COLORS[theme]
+    : THEME_COLORS.dark
 }

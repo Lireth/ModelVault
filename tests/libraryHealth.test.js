@@ -6,12 +6,15 @@ import {
   loadData,
   setDataRoot,
   setModelMeta,
-  getModelMeta
+  getModelMeta,
 } from '../src/main/services/store'
-import { checkLibraryHealth, repairLibraryHealth } from '../src/main/services/library-health'
+import {
+  checkLibraryHealth,
+  repairLibraryHealth,
+} from '../src/main/services/library-health'
 import {
   releaseMaintenance,
-  tryAcquireMaintenance
+  tryAcquireMaintenance,
 } from '../src/main/services/maintenance-lock'
 
 /**
@@ -60,7 +63,7 @@ async function seedProblemLibrary() {
   await touchCover('a.jpg')
   setModelMeta(a, {
     covers: ['.modelvault/covers/a.jpg', '.modelvault/covers/missing.jpg'],
-    cover: '.modelvault/covers/a.jpg'
+    cover: '.modelvault/covers/a.jpg',
   })
 
   const b = await touchModel('lora/b.safetensors')
@@ -84,25 +87,33 @@ describe('checkLibraryHealth（只读体检）', () => {
     expect(res.error).toBeUndefined()
     const report = res.report
     expect(report.totalModels).toBe(4)
-    expect(report.missingFiles.map((x) => x.rel)).toContain('missing.safetensors')
+    expect(report.missingFiles.map((x) => x.rel)).toContain(
+      'missing.safetensors',
+    )
     expect(report.brokenCovers).toContainEqual(
-      expect.objectContaining({ cover: '.modelvault/covers/missing.jpg', reason: 'missing-file' })
+      expect.objectContaining({
+        cover: '.modelvault/covers/missing.jpg',
+        reason: 'missing-file',
+      }),
     )
     expect(report.orphanCovers.map((x) => x.name)).toEqual(['orphan.jpg'])
     expect(report.duplicateHashes).toHaveLength(1)
-    expect(report.duplicateHashes[0].models).toEqual(['lora/b.safetensors', 'lora/c.safetensors'])
+    expect(report.duplicateHashes[0].models).toEqual([
+      'lora/b.safetensors',
+      'lora/c.safetensors',
+    ])
     expect(report.summary).toMatchObject({
       missingFiles: 1,
       brokenCovers: 1,
       orphanCovers: 1,
       duplicateHashes: 1,
-      repairable: 3
+      repairable: 3,
     })
     // 只读：幽灵标注仍在
     expect(getModelMeta(missing)).toBeTruthy()
     // 孤儿封面文件未被移动
     await expect(
-      fs.access(path.join(root, '.modelvault', 'covers', 'orphan.jpg'))
+      fs.access(path.join(root, '.modelvault', 'covers', 'orphan.jpg')),
     ).resolves.toBeUndefined()
   })
 
@@ -117,7 +128,7 @@ describe('checkLibraryHealth（只读体检）', () => {
       brokenCovers: 0,
       orphanCovers: 0,
       duplicateHashes: 0,
-      repairable: 0
+      repairable: 0,
     })
   })
 })
@@ -133,7 +144,7 @@ describe('repairLibraryHealth（一键修复）', () => {
       removedMetadata: 1,
       fixedCoverModels: 1,
       removedCoverRefs: 1,
-      movedOrphanCovers: 1
+      movedOrphanCovers: 1,
     })
     expect(res.backupPath).toContain(path.join('.modelvault', 'backups'))
     await expect(fs.access(res.backupPath)).resolves.toBeUndefined()
@@ -143,17 +154,19 @@ describe('repairLibraryHealth（一键修复）', () => {
     // 失效引用被清理，默认封面回退到仍存在的 a.jpg
     expect(getModelMeta(a)).toMatchObject({
       covers: ['.modelvault/covers/a.jpg'],
-      cover: '.modelvault/covers/a.jpg'
+      cover: '.modelvault/covers/a.jpg',
     })
     // 孤儿封面已移动（保留可恢复性），封面目录只剩有效文件
     await expect(
-      fs.access(path.join(root, '.modelvault', 'covers', 'orphan.jpg'))
+      fs.access(path.join(root, '.modelvault', 'covers', 'orphan.jpg')),
     ).rejects.toThrow()
     const covers = await fs.readdir(path.join(root, '.modelvault', 'covers'))
     expect(covers).toEqual(['a.jpg'])
     const trashRoots = await fs.readdir(path.join(root, '.modelvault', 'trash'))
     expect(trashRoots).toHaveLength(1)
-    const trashed = await fs.readdir(path.join(root, '.modelvault', 'trash', trashRoots[0]))
+    const trashed = await fs.readdir(
+      path.join(root, '.modelvault', 'trash', trashRoots[0]),
+    )
     expect(trashed).toContain('orphan.jpg')
   })
 
@@ -167,7 +180,7 @@ describe('repairLibraryHealth（一键修复）', () => {
       removedMetadata: 0,
       fixedCoverModels: 0,
       removedCoverRefs: 0,
-      movedOrphanCovers: 0
+      movedOrphanCovers: 0,
     })
     expect(res.backupPath).toBe('')
   })

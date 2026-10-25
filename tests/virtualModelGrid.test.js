@@ -2,7 +2,11 @@
 import { describe, it, expect, beforeEach, beforeAll } from 'vitest'
 import { mount } from '@vue/test-utils'
 import VirtualModelGrid from '../src/renderer/src/components/VirtualModelGrid.vue'
-import { acceptConfirm, rejectConfirm, state } from '../src/renderer/src/store/appStore'
+import {
+  acceptConfirm,
+  rejectConfirm,
+  state,
+} from '../src/renderer/src/store/appStore'
 import { setupComponentTest, settle } from './helpers/componentTest'
 
 /**
@@ -60,7 +64,7 @@ function makeModel(id) {
     subCategory: '',
     triggerWords: '',
     coverUrl: '',
-    covers: []
+    covers: [],
   }
 }
 
@@ -86,15 +90,28 @@ function mountInScroller(models, cardSize = 'normal') {
   container.style.overflowY = 'auto'
   container.style.height = '600px'
   document.body.appendChild(container)
-  Object.defineProperty(container, 'clientHeight', { value: 600, configurable: true })
-  Object.defineProperty(container, 'scrollTop', { value: 0, writable: true, configurable: true })
-  const wrapper = mount(VirtualModelGrid, { props: { models }, attachTo: container })
+  Object.defineProperty(container, 'clientHeight', {
+    value: 600,
+    configurable: true,
+  })
+  Object.defineProperty(container, 'scrollTop', {
+    value: 0,
+    writable: true,
+    configurable: true,
+  })
+  const wrapper = mount(VirtualModelGrid, {
+    props: { models },
+    attachTo: container,
+  })
   return { wrapper, container }
 }
 
 /** 为根元素注入容器宽度并触发 ResizeObserver → measure */
 async function setContainerWidth(wrapper, width) {
-  Object.defineProperty(wrapper.element, 'clientWidth', { value: width, configurable: true })
+  Object.defineProperty(wrapper.element, 'clientWidth', {
+    value: width,
+    configurable: true,
+  })
   resizeCallback?.()
   await wrapper.vm.$nextTick()
 }
@@ -141,8 +158,12 @@ describe('VirtualModelGrid 虚拟滚动数学', () => {
     // 每行 4 张，共 20 张
     expect(wrapper.findAll('.model-card')).toHaveLength(20)
     // 首行/末行切片正确
-    expect(rows[0].findAll('.model-card')[0].attributes('data-model-id')).toBe('m0')
-    expect(rows[4].findAll('.model-card')[3].attributes('data-model-id')).toBe('m19')
+    expect(rows[0].findAll('.model-card')[0].attributes('data-model-id')).toBe(
+      'm0',
+    )
+    expect(rows[4].findAll('.model-card')[3].attributes('data-model-id')).toBe(
+      'm19',
+    )
     wrapper.unmount()
   })
 
@@ -153,7 +174,9 @@ describe('VirtualModelGrid 虚拟滚动数学', () => {
     const rows = wrapper.findAll('.grid-row')
     expect(rows).toHaveLength(6)
     expect(rows[5].findAll('.model-card')).toHaveLength(2)
-    expect(rows[5].findAll('.model-card')[1].attributes('data-model-id')).toBe('m21')
+    expect(rows[5].findAll('.model-card')[1].attributes('data-model-id')).toBe(
+      'm21',
+    )
     wrapper.unmount()
   })
 
@@ -169,8 +192,12 @@ describe('VirtualModelGrid 虚拟滚动数学', () => {
     const rows = wrapper.findAll('.grid-row')
     expect(rows).toHaveLength(1)
     // 仅第 4 行（模型 16-19）
-    expect(rows[0].findAll('.model-card')[0].attributes('data-model-id')).toBe('m16')
-    expect(rows[0].findAll('.model-card')[3].attributes('data-model-id')).toBe('m19')
+    expect(rows[0].findAll('.model-card')[0].attributes('data-model-id')).toBe(
+      'm16',
+    )
+    expect(rows[0].findAll('.model-card')[3].attributes('data-model-id')).toBe(
+      'm19',
+    )
     wrapper.unmount()
   })
 
@@ -185,7 +212,9 @@ describe('VirtualModelGrid 虚拟滚动数学', () => {
     await wrapper.vm.$nextTick()
     const rows = wrapper.findAll('.grid-row')
     expect(rows).toHaveLength(5)
-    expect(rows[0].findAll('.model-card')[0].attributes('data-model-id')).toBe('m0')
+    expect(rows[0].findAll('.model-card')[0].attributes('data-model-id')).toBe(
+      'm0',
+    )
     wrapper.unmount()
   })
 })
@@ -193,13 +222,17 @@ describe('VirtualModelGrid 虚拟滚动数学', () => {
 describe('VirtualModelGrid 键盘网格导航（E10）', () => {
   /** 聚焦指定模型卡片 */
   function focusCard(wrapper, id) {
-    wrapper.element.querySelector(`[data-model-id="${globalThis.CSS.escape(id)}"]`)?.focus()
+    wrapper.element
+      .querySelector(`[data-model-id="${globalThis.CSS.escape(id)}"]`)
+      ?.focus()
   }
 
   it('无焦点时按方向键聚焦第一张卡片', async () => {
     const { wrapper } = mountInScroller(makeModels(20))
     await wrapper.vm.$nextTick()
-    await wrapper.find('.virtual-grid').trigger('keydown', { key: 'ArrowRight' })
+    await wrapper
+      .find('.virtual-grid')
+      .trigger('keydown', { key: 'ArrowRight' })
     expect(document.activeElement?.getAttribute('data-model-id')).toBe('m0')
     wrapper.unmount()
   })
@@ -209,7 +242,9 @@ describe('VirtualModelGrid 键盘网格导航（E10）', () => {
     const { wrapper } = mountInScroller(models)
     await setContainerWidth(wrapper, 1000)
     focusCard(wrapper, 'm0')
-    await wrapper.find('.virtual-grid').trigger('keydown', { key: 'ArrowRight' })
+    await wrapper
+      .find('.virtual-grid')
+      .trigger('keydown', { key: 'ArrowRight' })
     expect(document.activeElement?.getAttribute('data-model-id')).toBe('m1')
     focusCard(wrapper, 'm3')
     await wrapper.find('.virtual-grid').trigger('keydown', { key: 'ArrowDown' })
@@ -258,12 +293,14 @@ describe('VirtualModelGrid 键盘网格导航（E10）', () => {
 
 describe('VirtualModelGrid 焦点卡片快捷键（F 收藏 / Delete 删除）', () => {
   function focusCard(wrapper, id) {
-    wrapper.element.querySelector(`[data-model-id="${globalThis.CSS.escape(id)}"]`)?.focus()
+    wrapper.element
+      .querySelector(`[data-model-id="${globalThis.CSS.escape(id)}"]`)
+      ?.focus()
   }
 
   it('F 收藏/取消收藏焦点卡片', async () => {
     window.api.models.setMetaFlags.mockResolvedValue({
-      meta: { favorite: true, nsfw: false, rating: 0 }
+      meta: { favorite: true, nsfw: false, rating: 0 },
     })
     const models = makeModels(5)
     state.models = models
@@ -273,13 +310,16 @@ describe('VirtualModelGrid 焦点卡片快捷键（F 收藏 / Delete 删除）',
     await wrapper.find('.virtual-grid').trigger('keydown', { key: 'f' })
     await settle()
     expect(window.api.models.setMetaFlags).toHaveBeenCalledTimes(1)
-    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({ id: 'm2', favorite: true })
+    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({
+      id: 'm2',
+      favorite: true,
+    })
     wrapper.unmount()
   })
 
   it('F 在多选模式下只作用于焦点卡片本身（不触发批量收藏）', async () => {
     window.api.models.setMetaFlags.mockResolvedValue({
-      meta: { favorite: true, nsfw: false, rating: 0 }
+      meta: { favorite: true, nsfw: false, rating: 0 },
     })
     const models = makeModels(5)
     state.models = models
@@ -291,7 +331,10 @@ describe('VirtualModelGrid 焦点卡片快捷键（F 收藏 / Delete 删除）',
     await wrapper.find('.virtual-grid').trigger('keydown', { key: 'f' })
     await settle()
     expect(window.api.models.setMetaFlags).toHaveBeenCalledTimes(1)
-    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({ id: 'm2', favorite: true })
+    expect(window.api.models.setMetaFlags).toHaveBeenCalledWith({
+      id: 'm2',
+      favorite: true,
+    })
     wrapper.unmount()
   })
 
@@ -301,7 +344,9 @@ describe('VirtualModelGrid 焦点卡片快捷键（F 收藏 / Delete 删除）',
     const { wrapper } = mountInScroller(models)
     await wrapper.vm.$nextTick()
     focusCard(wrapper, 'm2')
-    await wrapper.find('.virtual-grid').trigger('keydown', { key: 'f', ctrlKey: true })
+    await wrapper
+      .find('.virtual-grid')
+      .trigger('keydown', { key: 'f', ctrlKey: true })
     await settle()
     expect(window.api.models.setMetaFlags).not.toHaveBeenCalled()
     wrapper.unmount()
@@ -395,7 +440,9 @@ describe('浏览位置锚（B7：局部重扫不把用户拉回顶部）', () =>
     expect(container.scrollTop).toBe(371 + 50)
     // 锚模型回到可视区顶部行
     const rows = wrapper.findAll('.grid-row')
-    const firstRendered = rows[0]?.findAll('.model-card')[0]?.attributes('data-model-id')
+    const firstRendered = rows[0]
+      ?.findAll('.model-card')[0]
+      ?.attributes('data-model-id')
     expect(['m4', 'm5', 'm6', 'm7']).toContain(firstRendered)
     wrapper.unmount()
   })
@@ -407,7 +454,11 @@ describe('浏览位置锚（B7：局部重扫不把用户拉回顶部）', () =>
     await scrollTo(container, 371 * 2 + 50)
 
     // 列表尾部的增删（局部重扫常见）：锚行不受影响
-    const rescanned = [...models.slice(0, 19), makeModel('m-new'), makeModel('m-new2')]
+    const rescanned = [
+      ...models.slice(0, 19),
+      makeModel('m-new'),
+      makeModel('m-new2'),
+    ]
     await wrapper.setProps({ models: rescanned })
     await wrapper.vm.$nextTick()
 

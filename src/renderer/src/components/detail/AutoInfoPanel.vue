@@ -14,7 +14,9 @@ const autoInfo = computed(() => selectedModel.value?.autoInfo || null)
 
 /** 触发词候选（来自训练集高频标签 ss_tag_frequency，需用户确认后保存）。
  *  F3 修正：不限 LoRA——不少 Checkpoint 同样内嵌训练标签，此前被静默丢弃 */
-const autoTriggerCandidates = computed(() => autoInfo.value?.triggerCandidates || [])
+const autoTriggerCandidates = computed(
+  () => autoInfo.value?.triggerCandidates || [],
+)
 
 /** 张量索引统计（F-1，本地零网络；旧装饰缓存/非 safetensors 无此字段） */
 const tensorStats = computed(() => autoInfo.value?.tensorStats || null)
@@ -38,14 +40,21 @@ const componentPcts = computed(() => {
   return {
     textEncoder: Math.round(r.textEncoder * 100),
     unet: Math.round(r.unet * 100),
-    vae: Math.max(0, 100 - Math.round(r.textEncoder * 100) - Math.round(r.unet * 100))
+    vae: Math.max(
+      0,
+      100 - Math.round(r.textEncoder * 100) - Math.round(r.unet * 100),
+    ),
   }
 })
 
 function applyResolution() {
   const a = autoInfo.value
   if (!a || !Number.isFinite(a.resMin)) return
-  emit('apply-resolution', a.resMin, Number.isFinite(a.resMax) ? a.resMax : a.resMin)
+  emit(
+    'apply-resolution',
+    a.resMin,
+    Number.isFinite(a.resMax) ? a.resMax : a.resMin,
+  )
 }
 
 function applyTriggers() {
@@ -77,7 +86,10 @@ const emit = defineEmits(['apply-resolution', 'apply-triggers'])
       <template v-if="autoInfo.networkModule">
         <dt>网络结构</dt>
         <dd>
-          {{ autoInfo.networkModule }}<template v-if="autoInfo.networkAlpha !== null">（α={{ autoInfo.networkAlpha }}）</template>
+          {{ autoInfo.networkModule
+          }}<template v-if="autoInfo.networkAlpha !== null"
+            >（α={{ autoInfo.networkAlpha }}）</template
+          >
         </dd>
       </template>
       <template v-if="autoInfo.precision">
@@ -99,36 +111,62 @@ const emit = defineEmits(['apply-resolution', 'apply-triggers'])
       </template>
       <template v-if="tensorStats?.dtypeMain">
         <dt>张量 / 精度</dt>
-        <dd>{{ tensorStats.tensorCount.toLocaleString() }} 个张量 · {{ tensorStats.dtypeMain }} 为主</dd>
+        <dd>
+          {{ tensorStats.tensorCount.toLocaleString() }} 个张量 ·
+          {{ tensorStats.dtypeMain }} 为主
+        </dd>
       </template>
     </dl>
     <!-- 组件字节构成（F-1）：文本编码器 / UNet(DiT) / VAE 占比条 -->
     <div v-if="componentPcts" class="autoinfo-components">
       <div class="autoinfo-bar" aria-hidden="true">
-        <div class="autoinfo-seg te" :style="{ width: componentPcts.textEncoder + '%' }"></div>
-        <div class="autoinfo-seg unet" :style="{ width: componentPcts.unet + '%' }"></div>
-        <div class="autoinfo-seg vae" :style="{ width: componentPcts.vae + '%' }"></div>
+        <div
+          class="autoinfo-seg te"
+          :style="{ width: componentPcts.textEncoder + '%' }"
+        ></div>
+        <div
+          class="autoinfo-seg unet"
+          :style="{ width: componentPcts.unet + '%' }"
+        ></div>
+        <div
+          class="autoinfo-seg vae"
+          :style="{ width: componentPcts.vae + '%' }"
+        ></div>
       </div>
       <span class="autoinfo-comp-legend">
-        文本编码器 {{ componentPcts.textEncoder }}% · UNet/DiT {{ componentPcts.unet }}% · VAE {{ componentPcts.vae }}%
+        文本编码器 {{ componentPcts.textEncoder }}% · UNet/DiT
+        {{ componentPcts.unet }}% · VAE {{ componentPcts.vae }}%
       </span>
     </div>
     <div v-if="autoTriggerCandidates.length" class="autoinfo-words">
-      <span v-for="w in autoTriggerCandidates" :key="w" class="autoinfo-word" :title="w">{{ w }}</span>
+      <span
+        v-for="w in autoTriggerCandidates"
+        :key="w"
+        class="autoinfo-word"
+        :title="w"
+        >{{ w }}</span
+      >
     </div>
-    <div v-if="Number.isFinite(autoInfo.resMin) || autoTriggerCandidates.length" class="autoinfo-actions">
+    <div
+      v-if="Number.isFinite(autoInfo.resMin) || autoTriggerCandidates.length"
+      class="autoinfo-actions"
+    >
       <button
         v-if="Number.isFinite(autoInfo.resMin)"
         class="btn"
         type="button"
         @click="applyResolution"
-      >填入推荐分辨率</button>
+      >
+        填入推荐分辨率
+      </button>
       <button
         v-if="autoTriggerCandidates.length"
         class="btn btn-primary"
         type="button"
         @click="applyTriggers"
-      >填入触发词</button>
+      >
+        填入触发词
+      </button>
     </div>
   </div>
 </template>

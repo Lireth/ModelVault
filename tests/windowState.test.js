@@ -13,12 +13,14 @@ import { fakeUserData } from './setup'
 vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
   screen: {
-    getAllDisplays: vi.fn(() => [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }])
+    getAllDisplays: vi.fn(() => [
+      { workArea: { x: 0, y: 0, width: 1920, height: 1080 } },
+    ]),
   },
   BrowserWindow: Object.assign(vi.fn(), {
     fromWebContents: vi.fn(),
-    getAllWindows: vi.fn(() => [])
-  })
+    getAllWindows: vi.fn(() => []),
+  }),
 }))
 
 import { loadWindowState } from '../src/main/windows/mainWindow'
@@ -41,7 +43,7 @@ describe('loadWindowState 健壮性', () => {
       y: 50,
       width: 1200,
       height: 800,
-      maximized: true
+      maximized: true,
     })
   })
 

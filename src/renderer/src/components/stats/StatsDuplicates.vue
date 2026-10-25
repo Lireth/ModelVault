@@ -11,7 +11,7 @@ defineProps({
   /** 重复统计（StatsSection 的 dupStats computed：{ groups, redundant, wastedPct }） */
   dup: { type: Object, required: true },
   /** 冗余副本可释放字节数（duplicateWastedBytes） */
-  wastedBytes: { type: Number, default: 0 }
+  wastedBytes: { type: Number, default: 0 },
 })
 </script>
 
@@ -19,17 +19,23 @@ defineProps({
   <div class="stats-block">
     <h4>重复占用</h4>
     <p class="dup-summary">
-      {{ dup.groups }} 组重复内容、{{ dup.redundant }} 个冗余副本，
-      可释放 <strong>{{ formatSize(wastedBytes) }}</strong>（约占总容量 {{ dup.wastedPct }}%）
+      {{ dup.groups }} 组重复内容、{{ dup.redundant }} 个冗余副本， 可释放
+      <strong>{{ formatSize(wastedBytes) }}</strong
+      >（约占总容量 {{ dup.wastedPct }}%）
     </p>
     <div class="cov-row">
       <span class="cov-label">可释放</span>
       <div class="cov-bar">
-        <div class="cov-fill dup-fill" :style="{ width: `${dup.wastedPct}%` }"></div>
+        <div
+          class="cov-fill dup-fill"
+          :style="{ width: `${dup.wastedPct}%` }"
+        ></div>
       </div>
       <span class="cov-value">{{ dup.wastedPct }}%</span>
     </div>
-    <p class="stats-empty">在结果栏开启「重复」筛选并「选中冗余项」即可批量清理</p>
+    <p class="stats-empty">
+      在结果栏开启「重复」筛选并「选中冗余项」即可批量清理
+    </p>
   </div>
 </template>
 

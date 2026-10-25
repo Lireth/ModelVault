@@ -5,7 +5,7 @@ import {
   confirmTransfer,
   targetDisplayName,
   transferState,
-  transferTargets
+  transferTargets,
 } from '../store/appStore'
 
 /**
@@ -19,7 +19,9 @@ const confirmBtn = ref(null)
 const cancelBtn = ref(null)
 
 const idsCount = computed(() => transferState.ids.length)
-const canConfirm = computed(() => Boolean(selectedTarget.value) && !transferState.busy)
+const canConfirm = computed(
+  () => Boolean(selectedTarget.value) && !transferState.busy,
+)
 
 watch(
   () => transferState.visible,
@@ -30,7 +32,7 @@ watch(
       await nextTick()
       cancelBtn.value?.focus()
     }
-  }
+  },
 )
 
 function onKeydown(e) {
@@ -54,13 +56,21 @@ function onKeydown(e) {
       @click.self="closeTransfer"
       @keydown="onKeydown"
     >
-      <div class="transfer-dialog" role="dialog" aria-modal="true" aria-label="跨库传输">
+      <div
+        class="transfer-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="跨库传输"
+      >
         <p class="transfer-title">
-          {{ transferState.mode === 'move' ? '移动' : '复制' }} {{ idsCount }} 个模型到其他库
+          {{ transferState.mode === 'move' ? '移动' : '复制' }}
+          {{ idsCount }} 个模型到其他库
         </p>
         <p class="transfer-desc">
           保持库内相对路径与标注（评分/收藏/标签/封面）一并迁移；目标库已有同名文件时跳过不覆盖。
-          <template v-if="transferState.mode === 'move'">移动完成后源文件将被删除。</template>
+          <template v-if="transferState.mode === 'move'"
+            >移动完成后源文件将被删除。</template
+          >
         </p>
 
         <ul class="transfer-list" role="listbox" aria-label="选择目标模型库">
@@ -91,7 +101,12 @@ function onKeydown(e) {
         </div>
 
         <div class="transfer-actions">
-          <button ref="cancelBtn" class="btn" :disabled="transferState.busy" @click="closeTransfer">
+          <button
+            ref="cancelBtn"
+            class="btn"
+            :disabled="transferState.busy"
+            @click="closeTransfer"
+          >
             取消
           </button>
           <button
@@ -100,7 +115,13 @@ function onKeydown(e) {
             :disabled="!canConfirm"
             @click="confirmTransfer(selectedTarget)"
           >
-            {{ transferState.busy ? '传输中…' : transferState.mode === 'move' ? '移动' : '复制' }}
+            {{
+              transferState.busy
+                ? '传输中…'
+                : transferState.mode === 'move'
+                  ? '移动'
+                  : '复制'
+            }}
           </button>
         </div>
       </div>

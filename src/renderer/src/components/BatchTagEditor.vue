@@ -20,7 +20,11 @@ const MAX_TAG_LEN = 32
 const MODES = [
   { key: 'add', label: '添加', title: '保留现有标签，追加输入的新标签' },
   { key: 'remove', label: '移除', title: '从每个选中模型移除输入的同名标签' },
-  { key: 'replace', label: '替换', title: '用输入标签整体替换每个模型的现有标签' }
+  {
+    key: 'replace',
+    label: '替换',
+    title: '用输入标签整体替换每个模型的现有标签',
+  },
 ]
 
 const mode = ref('add')
@@ -46,7 +50,10 @@ const suggestions = computed(() => {
   const keyword = input.value.trim().toLowerCase()
   const selected = new Set(tags.value)
   return allTags.value
-    .filter((tag) => !selected.has(tag) && (!keyword || tag.toLowerCase().includes(keyword)))
+    .filter(
+      (tag) =>
+        !selected.has(tag) && (!keyword || tag.toLowerCase().includes(keyword)),
+    )
     .slice(0, 30)
 })
 
@@ -117,8 +124,8 @@ function focusables() {
   if (!dialogEl.value) return []
   return [
     ...dialogEl.value.querySelectorAll(
-      'button, input, [href], select, textarea, [tabindex]:not([tabindex="-1"])'
-    )
+      'button, input, [href], select, textarea, [tabindex]:not([tabindex="-1"])',
+    ),
   ].filter((el) => !el.disabled && el.offsetParent !== null)
 }
 
@@ -164,8 +171,25 @@ onMounted(() => {
             <h2 id="bte-title">批量编辑标签</h2>
             <p class="bte-summary">{{ summaryText }}</p>
           </div>
-          <button class="bte-close" type="button" title="关闭（Esc）" aria-label="关闭" @click="close">
-            <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+          <button
+            class="bte-close"
+            type="button"
+            title="关闭（Esc）"
+            aria-label="关闭"
+            @click="close"
+          >
+            <svg
+              viewBox="0 0 16 16"
+              width="12"
+              height="12"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
           </button>
         </header>
 
@@ -191,7 +215,9 @@ onMounted(() => {
               :title="`移除「${tag}」`"
               :aria-label="`移除标签「${tag}」`"
               @click="removeTag(tag)"
-            >×</button>
+            >
+              ×
+            </button>
           </span>
           <input
             ref="inputEl"
@@ -205,7 +231,9 @@ onMounted(() => {
         </div>
         <div class="bte-tag-meta">
           <span>已输入 {{ tags.length }}/{{ MAX_TAGS }}</span>
-          <span v-if="mode === 'remove'" class="bte-hint">未选中的标签不会变化</span>
+          <span v-if="mode === 'remove'" class="bte-hint"
+            >未选中的标签不会变化</span
+          >
         </div>
 
         <div v-if="suggestions.length > 0" class="bte-suggestions">
@@ -216,7 +244,9 @@ onMounted(() => {
             type="button"
             class="bte-suggestion"
             @click="chooseSuggestion(tag)"
-          >{{ tag }}</button>
+          >
+            {{ tag }}
+          </button>
         </div>
 
         <p v-if="mode === 'replace'" class="bte-warning" role="alert">
@@ -225,13 +255,24 @@ onMounted(() => {
 
         <footer class="bte-actions">
           <span v-if="state.multiSelect.busy" class="bte-busy">处理中…</span>
-          <button class="btn" type="button" :disabled="state.multiSelect.busy" @click="close">取消</button>
+          <button
+            class="btn"
+            type="button"
+            :disabled="state.multiSelect.busy"
+            @click="close"
+          >
+            取消
+          </button>
           <button
             class="btn btn-primary bte-apply"
             type="button"
-            :disabled="state.multiSelect.busy || tags.length === 0 || selectedCount === 0"
+            :disabled="
+              state.multiSelect.busy || tags.length === 0 || selectedCount === 0
+            "
             @click="submit"
-          >{{ MODES.find((m) => m.key === mode)?.label }}标签</button>
+          >
+            {{ MODES.find((m) => m.key === mode)?.label }}标签
+          </button>
         </footer>
       </section>
     </div>
@@ -317,8 +358,10 @@ onMounted(() => {
   color: var(--text-muted);
   font-size: var(--font-xs);
   cursor: pointer;
-  transition: border-color var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
 }
 
 .bte-mode input {

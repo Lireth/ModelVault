@@ -31,7 +31,7 @@ function withTimeout(promise, ms, label) {
       (err) => {
         clearTimeout(timer)
         reject(err)
-      }
+      },
     )
   })
 }
@@ -86,12 +86,16 @@ export async function runStartupSmoke(win) {
       electron: process.versions.electron,
       usedPackagedRenderer: app.isPackaged,
       checks,
-      error: error ? String(error.stack || error.message || error) : ''
+      error: error ? String(error.stack || error.message || error) : '',
     }
     const resultPath = process.env.MODELVAULT_SMOKE_RESULT
     if (resultPath) {
       try {
-        await fs.writeFile(resultPath, JSON.stringify(payload, null, 2), 'utf-8')
+        await fs.writeFile(
+          resultPath,
+          JSON.stringify(payload, null, 2),
+          'utf-8',
+        )
       } catch (writeErr) {
         logger.error(`冒烟结果写入失败: ${writeErr.message}`)
       }
@@ -100,7 +104,15 @@ export async function runStartupSmoke(win) {
       logger.info(`启动冒烟通过: ${checks.map((c) => c.name).join(', ')}`)
       process.stdout.write('MODELVAULT_SMOKE_OK\n')
     } else {
-      logger.error(`启动冒烟失败: ${error?.message || checks.filter((c) => !c.ok).map((c) => c.name).join(', ')}`)
+      logger.error(
+        `启动冒烟失败: ${
+          error?.message ||
+          checks
+            .filter((c) => !c.ok)
+            .map((c) => c.name)
+            .join(', ')
+        }`,
+      )
       process.stdout.write('MODELVAULT_SMOKE_FAIL\n')
     }
     // 冒烟使用独立 userData，直接退出即可（无需等待业务落盘）
@@ -118,17 +130,19 @@ export async function runStartupSmoke(win) {
     checks.push({
       name: 'main-window',
       ok: !win.isDestroyed() && win.getTitle().length > 0,
-      detail: `title=${win.isDestroyed() ? '<destroyed>' : win.getTitle()}`
+      detail: `title=${win.isDestroyed() ? '<destroyed>' : win.getTitle()}`,
     })
 
     const url = win.isDestroyed() ? '' : win.webContents.getURL()
     checks.push({
       name: 'renderer-loaded',
       ok: /[/\\]renderer[/\\]index\.html(?:[?#].*)?$/.test(url),
-      detail: url
+      detail: url,
     })
 
-    const protocolOk = protocol.isProtocolHandled('mvimg') && protocol.isProtocolHandled('civimg')
+    const protocolOk =
+      protocol.isProtocolHandled('mvimg') &&
+      protocol.isProtocolHandled('civimg')
     checks.push({ name: 'image-protocol', ok: protocolOk })
 
     // 完整走一遍 contextBridge → preload 白名单 → IPC schema → handler
@@ -138,15 +152,17 @@ export async function runStartupSmoke(win) {
           if (!window.api || typeof window.api.app?.getInfo !== 'function') return null
           return window.api.app.getInfo()
         })()`,
-        true
+        true,
       ),
       CHECK_TIMEOUT_MS,
-      'IPC 往返检查'
+      'IPC 往返检查',
     )
     checks.push({
       name: 'preload-ipc',
       ok: Boolean(info && typeof info.version === 'string' && info.electron),
-      detail: info ? `version=${info.version} electron=${info.electron}` : 'window.api 不可用'
+      detail: info
+        ? `version=${info.version} electron=${info.electron}`
+        : 'window.api 不可用',
     })
 
     // OPT-01：真实渲染一次缩略图，验证沙箱化隐藏窗口 + 专用 preload 的
@@ -157,21 +173,27 @@ export async function runStartupSmoke(win) {
       .createFromBitmap(bitmap, { width: sourceSize, height: sourceSize })
       .toPNG()
     const thumb = await withTimeout(
-      renderThumbJpeg(png, { thumbWidth: 640, minSourceWidth: 720, quality: 0.8 }),
+      renderThumbJpeg(png, {
+        thumbWidth: 640,
+        minSourceWidth: 720,
+        quality: 0.8,
+      }),
       THUMB_CHECK_TIMEOUT_MS,
-      '缩略图渲染检查'
+      '缩略图渲染检查',
     )
     checks.push({
       name: 'thumb-renderer',
       ok: Boolean(thumb && thumb.jpeg && thumb.jpeg.length > 0),
-      detail: thumb?.jpeg ? `jpeg=${thumb.jpeg.length}B` : '未生成 JPEG'
+      detail: thumb?.jpeg ? `jpeg=${thumb.jpeg.length}B` : '未生成 JPEG',
     })
 
-    const windows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
+    const windows = BrowserWindow.getAllWindows().filter(
+      (w) => !w.isDestroyed(),
+    )
     checks.push({
       name: 'window-count',
       ok: windows.length >= 1,
-      detail: `windows=${windows.length}`
+      detail: `windows=${windows.length}`,
     })
 
     clearTimeout(failsafe)

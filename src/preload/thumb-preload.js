@@ -52,9 +52,15 @@ ipcRenderer.on('thumb:render', async (_event, task) => {
     if (!context) throw new Error('缩略图画布不可用')
     context.drawImage(source, 0, 0, thumbWidth, outHeight)
     const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality })
-    ipcRenderer.send('thumb:done', { id, jpeg: new Uint8Array(await blob.arrayBuffer()) })
+    ipcRenderer.send('thumb:done', {
+      id,
+      jpeg: new Uint8Array(await blob.arrayBuffer()),
+    })
   } catch (err) {
-    ipcRenderer.send('thumb:done', { id, error: (err && err.message) || String(err) })
+    ipcRenderer.send('thumb:done', {
+      id,
+      error: (err && err.message) || String(err),
+    })
   } finally {
     if (bitmap) bitmap.close()
   }

@@ -11,7 +11,7 @@ export const SUB_CATEGORY_DEFS = [
   { key: 'controlnet', label: 'ControlNet', color: '#ff7eb6' },
   { key: 'upscale', label: '放大模型', color: '#4dd0e1' },
   { key: 'hypernetwork', label: 'HyperNetwork', color: '#c3e88d' },
-  { key: 'other', label: '其他', color: '#8a97a5' }
+  { key: 'other', label: '其他', color: '#8a97a5' },
 ]
 
 /** LoRA 的分类标签 */
@@ -22,15 +22,19 @@ export const LORA_TAG_DEFS = [
   { key: 'outfit', label: '服饰', color: '#4dd0e1' },
   { key: 'background', label: '背景', color: '#3ddc97' },
   { key: 'pose', label: '姿势', color: '#c3e88d' },
-  { key: 'tool', label: '工具', color: '#8a97a5' }
+  { key: 'tool', label: '工具', color: '#8a97a5' },
 ]
 
 /** Checkpoint 的自动分类标签（无需手动标注） */
-export const CHECKPOINT_TAG_DEFS = [{ key: 'base', label: '基底模型', color: '#4f9cf9' }]
+export const CHECKPOINT_TAG_DEFS = [
+  { key: 'base', label: '基底模型', color: '#4f9cf9' },
+]
 
 /** 全部合法二级分类 key 集合（主进程 VALID_SUB_CATEGORIES 校验用） */
 export const ALL_CATEGORY_KEYS = new Set(
-  [...SUB_CATEGORY_DEFS, ...LORA_TAG_DEFS, ...CHECKPOINT_TAG_DEFS].map((d) => d.key)
+  [...SUB_CATEGORY_DEFS, ...LORA_TAG_DEFS, ...CHECKPOINT_TAG_DEFS].map(
+    (d) => d.key,
+  ),
 )
 
 /** LoRA 分类标签 key 集合（自动标签与一键移动仅作用于这 7 类） */
@@ -72,7 +76,7 @@ const CIVITAI_TYPE_TO_TAG = new Map([
   ['background', 'background'],
   ['pose', 'pose'],
   ['poses', 'pose'],
-  ['tool', 'tool']
+  ['tool', 'tool'],
 ])
 
 /**
@@ -118,7 +122,7 @@ export const BASE_FAMILIES = [
   { key: 'noobai', label: 'NoobAI' },
   { key: 'flux', label: 'Flux' },
   { key: 'sd3', label: 'SD 3/3.5' },
-  { key: 'other', label: '其他基底' }
+  { key: 'other', label: '其他基底' },
 ]
 
 const BASE_FAMILY_KEYS = new Set(BASE_FAMILIES.map((d) => d.key))
@@ -144,7 +148,7 @@ export function normalizeBaseModel(text) {
     ['flux', /flux/],
     ['sd3', /sd[ _-]?3/],
     ['sdxl', /sdxl|\bxl\b/],
-    ['sd15', /(?:sd|v)[ _-]?1[._-]5|1\.5/]
+    ['sd15', /(?:sd|v)[ _-]?1[._-]5|1\.5/],
   ]
   for (const [key, re] of rules) {
     if (re.test(s)) return key

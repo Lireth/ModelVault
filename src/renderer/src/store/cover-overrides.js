@@ -38,7 +38,8 @@ export function clearModelCoverOverrides(ids) {
 
 /** 设置某封面路径的缩略图 URL */
 function setCoverThumbUrl(path, url) {
-  if (typeof path === 'string' && path && typeof url === 'string' && url) byPath.set(path, url)
+  if (typeof path === 'string' && path && typeof url === 'string' && url)
+    byPath.set(path, url)
 }
 
 /**
@@ -53,7 +54,11 @@ export function applyCoverOverrides(updates) {
       setModelCoverUrl(update.id, update.coverUrl)
     }
     const thumb = update.coverThumb
-    if (thumb && typeof thumb.path === 'string' && typeof thumb.thumbUrl === 'string') {
+    if (
+      thumb &&
+      typeof thumb.path === 'string' &&
+      typeof thumb.thumbUrl === 'string'
+    ) {
       setCoverThumbUrl(thumb.path, thumb.thumbUrl)
     }
   }

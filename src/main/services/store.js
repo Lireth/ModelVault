@@ -47,7 +47,7 @@ export {
   isInRoot,
   toRelKey,
   resolveCover,
-  relativizeCover
+  relativizeCover,
 } from './store-paths'
 
 /* ---------------- 应用设置（引导层 + 随模型库的库层） ---------------- */
@@ -60,7 +60,7 @@ export {
   reloadLibrarySettings,
   saveLibrarySettings,
   normalizeLibrarySettings,
-  flushSettingsSave
+  flushSettingsSave,
 } from './store-settings'
 
 /* ---------------- 关联存储（按模型根目录） ---------------- */
@@ -80,5 +80,5 @@ export {
   saveStoreNow,
   saveStoreDeltaNow,
   flushStoreSave,
-  switchDataRoot
+  switchDataRoot,
 } from './store-meta'

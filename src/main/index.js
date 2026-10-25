@@ -1,5 +1,9 @@
 import { app, Menu, dialog, session, shell } from 'electron'
-import { createMainWindow, getMainWindow, loadWindowState } from './windows/mainWindow'
+import {
+  createMainWindow,
+  getMainWindow,
+  loadWindowState,
+} from './windows/mainWindow'
 import { registerWindowShortcuts } from './menu'
 import { registerIpcHandlers } from './ipc'
 import { registerImageScheme, registerImageProtocolHandler } from './protocol'
@@ -8,11 +12,18 @@ import { scheduleStartupUpdateCheck } from './services/updater'
 import { quitAfterFlush } from './quit'
 import { handleUncaughtException } from './fatal-error'
 import { runStartupSmoke } from './smoke'
-import { isAllowedExternalUrl, parseWaitForPid, waitForProcessExit } from './utils'
+import {
+  isAllowedExternalUrl,
+  parseWaitForPid,
+  waitForProcessExit,
+} from './utils'
 import logger from './logger'
 
 // 启动冒烟使用独立 userData，避免污染真实用户配置与单实例锁
-if (process.env.MODELVAULT_SMOKE === '1' && process.env.MODELVAULT_SMOKE_USER_DATA) {
+if (
+  process.env.MODELVAULT_SMOKE === '1' &&
+  process.env.MODELVAULT_SMOKE_USER_DATA
+) {
   app.setPath('userData', process.env.MODELVAULT_SMOKE_USER_DATA)
 }
 
@@ -39,7 +50,9 @@ process.on('uncaughtException', (error) => {
 })
 
 process.on('unhandledRejection', (reason) => {
-  logger.error(`未处理的 Promise 拒绝: ${reason instanceof Error ? reason.stack : String(reason)}`)
+  logger.error(
+    `未处理的 Promise 拒绝: ${reason instanceof Error ? reason.stack : String(reason)}`,
+  )
 })
 
 /**
@@ -83,67 +96,77 @@ async function startApp() {
     })
   })
 
-  app.whenReady().then(async () => {
-    // 移除原生菜单栏（不设置则 Electron 会启用默认英文菜单）
-    Menu.setApplicationMenu(null)
-    // 仅注册窗口级快捷键
-    registerImageProtocolHandler()
-    registerIpcHandlers()
+  app
+    .whenReady()
+    .then(async () => {
+      // 移除原生菜单栏（不设置则 Electron 会启用默认英文菜单）
+      Menu.setApplicationMenu(null)
+      // 仅注册窗口级快捷键
+      registerImageProtocolHandler()
+      registerIpcHandlers()
 
-    // Chromium 权限显式 deny-all：应用自身不申请任何权限（媒体/剪贴板/
-    // 通知/本地字体等），不设 handler 时授权面随 Electron/Chromium 升级
-    // 静默变化——显式归零消除对该默认行为的隐式依赖。全部窗口（含缩略图
-    // 隐藏窗口）均使用 defaultSession，无自定义 partition；媒体播放（封面
-    // 视频）不经过权限系统，不受影响
-    session.defaultSession.setPermissionRequestHandler(
-      (webContents, permission, callback) => {
-        logger.warn(`已拒绝渲染进程权限申请: ${permission}`)
-        callback(false)
+      // Chromium 权限显式 deny-all：应用自身不申请任何权限（媒体/剪贴板/
+      // 通知/本地字体等），不设 handler 时授权面随 Electron/Chromium 升级
+      // 静默变化——显式归零消除对该默认行为的隐式依赖。全部窗口（含缩略图
+      // 隐藏窗口）均使用 defaultSession，无自定义 partition；媒体播放（封面
+      // 视频）不经过权限系统，不受影响
+      session.defaultSession.setPermissionRequestHandler(
+        (webContents, permission, callback) => {
+          logger.warn(`已拒绝渲染进程权限申请: ${permission}`)
+          callback(false)
+        },
+      )
+      // 同步权限查询走同一拒绝结论（高频同步回调，不打日志）
+      session.defaultSession.setPermissionCheckHandler(() => false)
+
+      // 启动链路并行化（OP-01）：设置与窗口状态互不依赖，并行读取后再一次性
+      // 创建窗口，缩短首屏前的串行 IO 等待。
+      const [, windowState] = await Promise.all([
+        loadSettings(),
+        loadWindowState(),
+      ])
+
+      const win = await createMainWindow(windowState)
+      registerWindowShortcuts(win)
+
+      // 阻止在应用内打开新窗口：http(s) 外链交给系统默认浏览器；
+      // 其余协议（file:/smb:/自定义协议等）一律拒绝并记日志，防止渲染进程
+      // 被注入后构造任意协议 URL 唤起系统处理程序
+      win.webContents.setWindowOpenHandler(({ url }) => {
+        // 外链拉起收敛到域名白名单（B3）：渲染进程可控的 window.open
+        // 不得打开任意 https 站点；URL 来自渲染进程，日志截断防止
+        // 不可信长串写入
+        if (isAllowedExternalUrl(url)) {
+          shell.openExternal(url)
+        } else {
+          logger.warn(
+            `已拦截非白名单外链打开请求: ${String(url).slice(0, 200)}`,
+          )
+        }
+        return { action: 'deny' }
+      })
+
+      logger.info(
+        `应用启动完成 (Electron ${process.versions.electron} / Node ${process.versions.node})`,
+      )
+
+      // 启动自动检查更新（O-3）：延迟静默执行，仅在发现新版本时推送渲染层提示；
+      // 开发环境/冒烟模式内部跳过，是否检查由触发时刻的设置值决定
+      scheduleStartupUpdateCheck()
+
+      // 冒烟模式：完成启动链路检查后自行退出（仅 CI/手工 smoke 设置该环境变量）
+      if (process.env.MODELVAULT_SMOKE === '1') {
+        void runStartupSmoke(win)
       }
-    )
-    // 同步权限查询走同一拒绝结论（高频同步回调，不打日志）
-    session.defaultSession.setPermissionCheckHandler(() => false)
-
-    // 启动链路并行化（OP-01）：设置与窗口状态互不依赖，并行读取后再一次性
-    // 创建窗口，缩短首屏前的串行 IO 等待。
-    const [, windowState] = await Promise.all([loadSettings(), loadWindowState()])
-
-    const win = await createMainWindow(windowState)
-    registerWindowShortcuts(win)
-
-    // 阻止在应用内打开新窗口：http(s) 外链交给系统默认浏览器；
-    // 其余协议（file:/smb:/自定义协议等）一律拒绝并记日志，防止渲染进程
-    // 被注入后构造任意协议 URL 唤起系统处理程序
-    win.webContents.setWindowOpenHandler(({ url }) => {
-      // 外链拉起收敛到域名白名单（B3）：渲染进程可控的 window.open
-      // 不得打开任意 https 站点；URL 来自渲染进程，日志截断防止
-      // 不可信长串写入
-      if (isAllowedExternalUrl(url)) {
-        shell.openExternal(url)
-      } else {
-        logger.warn(`已拦截非白名单外链打开请求: ${String(url).slice(0, 200)}`)
-      }
-      return { action: 'deny' }
     })
-
-    logger.info(`应用启动完成 (Electron ${process.versions.electron} / Node ${process.versions.node})`)
-
-    // 启动自动检查更新（O-3）：延迟静默执行，仅在发现新版本时推送渲染层提示；
-    // 开发环境/冒烟模式内部跳过，是否检查由触发时刻的设置值决定
-    scheduleStartupUpdateCheck()
-
-    // 冒烟模式：完成启动链路检查后自行退出（仅 CI/手工 smoke 设置该环境变量）
-    if (process.env.MODELVAULT_SMOKE === '1') {
-      void runStartupSmoke(win)
-    }
-  }).catch((error) => {
-    logger.error(`应用初始化失败: ${error.stack || error.message}`)
-    // 冒烟模式不弹模态框：CI 无人工关闭，会表现为挂起而非明确失败
-    if (process.env.MODELVAULT_SMOKE !== '1') {
-      dialog.showErrorBox('模匣 启动失败', String(error?.message || error))
-    }
-    app.quit()
-  })
+    .catch((error) => {
+      logger.error(`应用初始化失败: ${error.stack || error.message}`)
+      // 冒烟模式不弹模态框：CI 无人工关闭，会表现为挂起而非明确失败
+      if (process.env.MODELVAULT_SMOKE !== '1') {
+        dialog.showErrorBox('模匣 启动失败', String(error?.message || error))
+      }
+      app.quit()
+    })
 }
 
 void startApp()

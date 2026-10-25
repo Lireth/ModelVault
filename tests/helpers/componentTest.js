@@ -6,7 +6,7 @@ import {
   exitMultiSelect,
   replaceModels,
   resetLibraryOverview,
-  state
+  state,
 } from '../../src/renderer/src/store/appStore'
 
 /**
@@ -23,7 +23,9 @@ function makeComponentApiMock() {
   return {
     // 拖拽文件真实路径解析（preload webUtils 的测试替身）：
     // 默认取 File 对象的 path 属性（测试构造的 File-like 对象携带），无则空串
-    getPathForFile: vi.fn((file) => (file && typeof file.path === 'string' ? file.path : '')),
+    getPathForFile: vi.fn((file) =>
+      file && typeof file.path === 'string' ? file.path : '',
+    ),
     models: {
       loadStore: vi.fn(),
       openLibrary: vi.fn(),
@@ -32,7 +34,9 @@ function makeComponentApiMock() {
       chooseFolder: vi.fn(),
       setMetaFlags: vi.fn(),
       setModelTags: vi.fn(() => Promise.resolve({ meta: { tags: [] } })),
-      renameModel: vi.fn(() => Promise.resolve({ path: '', sidecarWarnings: [] })),
+      renameModel: vi.fn(() =>
+        Promise.resolve({ path: '', sidecarWarnings: [] }),
+      ),
       renameTag: vi.fn(() => Promise.resolve({ changed: 0 })),
       removeTag: vi.fn(() => Promise.resolve({ changed: 0 })),
       deleteModel: vi.fn(),
@@ -44,14 +48,18 @@ function makeComponentApiMock() {
       setDefaultCover: vi.fn(),
       deleteCover: vi.fn(),
       importCover: vi.fn(),
-      partialScan: vi.fn(() => Promise.resolve({ models: [], dirs: [], relinked: 0 })),
+      partialScan: vi.fn(() =>
+        Promise.resolve({ models: [], dirs: [], relinked: 0 }),
+      ),
       transferToLibrary: vi.fn(() =>
-        Promise.resolve({ transferred: 0, skipped: [], failed: [] })
+        Promise.resolve({ transferred: 0, skipped: [], failed: [] }),
       ),
       warmupHash: vi.fn(() => Promise.resolve({ ok: true })),
       checkHealth: vi.fn(() => Promise.resolve({ report: null })),
       repairHealth: vi.fn(() => Promise.resolve({ repaired: {} })),
-      exportModelList: vi.fn(() => Promise.resolve({ ok: true, path: 'list.csv' })),
+      exportModelList: vi.fn(() =>
+        Promise.resolve({ ok: true, path: 'list.csv' }),
+      ),
       crossLibraryOverview: vi.fn(() =>
         Promise.resolve({
           overview: {
@@ -64,33 +72,37 @@ function makeComponentApiMock() {
               crossGroups: 0,
               redundantCopies: 0,
               wastedBytes: 0,
-              unknownSizeGroups: 0
+              unknownSizeGroups: 0,
             },
             libraries: [],
-            crossLibraryGroups: []
+            crossLibraryGroups: [],
           },
-          warnings: []
-        })
+          warnings: [],
+        }),
       ),
       onScanProgress: vi.fn(() => () => {}),
       onWarmupProgress: vi.fn(() => () => {}),
       onMenuAction: vi.fn(() => () => {}),
       onThumbsReady: vi.fn(() => () => {}),
       onStoreError: vi.fn(() => () => {}),
-      onFsChanged: vi.fn(() => () => {})
+      onFsChanged: vi.fn(() => () => {}),
     },
     settings: { update: vi.fn() },
     window: { setTheme: vi.fn(() => Promise.resolve()) },
     app: {
       getInfo: vi.fn(),
       checkUpdate: vi.fn(() => Promise.resolve({ hasUpdate: false })),
-      downloadUpdate: vi.fn(() => Promise.resolve({ error: '没有可用的更新信息' })),
+      downloadUpdate: vi.fn(() =>
+        Promise.resolve({ error: '没有可用的更新信息' }),
+      ),
       cancelUpdateDownload: vi.fn(() => Promise.resolve({ ok: true })),
       installUpdate: vi.fn(() => Promise.resolve({ error: '尚未下载更新包' })),
       onUpdateProgress: vi.fn(() => () => {}),
       openLogs: vi.fn(() => Promise.resolve({ ok: true })),
-      exportDiagnostics: vi.fn(() => Promise.resolve({ ok: true, path: 'diag.zip', logs: 0 }))
-    }
+      exportDiagnostics: vi.fn(() =>
+        Promise.resolve({ ok: true, path: 'diag.zip', logs: 0 }),
+      ),
+    },
   }
 }
 
@@ -118,7 +130,11 @@ function resetStoreState() {
   state.sortAsc = true
   state.selectedId = null
   state.detailDirty = false
-  Object.assign(state.multiSelect, { busy: false, progress: '', cancelRequested: false })
+  Object.assign(state.multiSelect, {
+    busy: false,
+    progress: '',
+    cancelRequested: false,
+  })
   // active/ids 经 exitMultiSelect 复位：顺带清掉 store 模块级的 Shift
   // 范围选择锚点（非响应式记忆，整体赋值复位无法触达）
   exitMultiSelect()
@@ -140,7 +156,7 @@ export function setupComponentTest() {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
       addListener: vi.fn(),
-      removeListener: vi.fn()
+      removeListener: vi.fn(),
     })
     resetStoreState()
     resetLibraryOverview()

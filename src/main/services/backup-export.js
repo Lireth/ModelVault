@@ -10,9 +10,13 @@ import {
   flushStoreSave,
   getCurrentRoot,
   getLibrarySettings,
-  toRelKey
+  toRelKey,
 } from './store'
-import { BACKUP_FORMAT, BACKUP_VERSION, PARTIAL_BACKUP_VERSION } from './backup-format'
+import {
+  BACKUP_FORMAT,
+  BACKUP_VERSION,
+  PARTIAL_BACKUP_VERSION,
+} from './backup-format'
 import { MAX_COVERS_BYTES, writeBackupZipToFile } from './backup-zip'
 
 /**
@@ -45,7 +49,7 @@ async function mapLimit(items, limit, task) {
     }
   }
   await Promise.all(
-    Array.from({ length: Math.min(limit, items.length) }, () => worker())
+    Array.from({ length: Math.min(limit, items.length) }, () => worker()),
   )
   return results
 }
@@ -68,7 +72,9 @@ export async function exportBackup(win, options = {}) {
   const librarySettings = getLibrarySettings()
   const root = getCurrentRoot()
   const mode =
-    options.mode === 'selected' || options.mode === 'metadata' ? options.mode : 'full'
+    options.mode === 'selected' || options.mode === 'metadata'
+      ? options.mode
+      : 'full'
   const partial = mode !== 'full'
   const settingsText = JSON.stringify(librarySettings, null, 2)
   const manifest = {
@@ -79,7 +85,7 @@ export async function exportBackup(win, options = {}) {
     appVersion: app.getVersion(),
     settings: true,
     mode,
-    partial
+    partial,
   }
 
   let models = 0
@@ -109,14 +115,15 @@ export async function exportBackup(win, options = {}) {
     // FN-08：选择性/元数据模式在内存中裁剪 store.json（不修改磁盘数据）
     let keepModels = null
     if (storeText && mode !== 'full') {
-      const modelMap = parsedStore?.models && typeof parsedStore.models === 'object'
-        ? parsedStore.models
-        : {}
+      const modelMap =
+        parsedStore?.models && typeof parsedStore.models === 'object'
+          ? parsedStore.models
+          : {}
       if (mode === 'selected') {
         const wanted = new Set(
           (Array.isArray(options.ids) ? options.ids : [])
             .map((id) => toRelKey(id))
-            .filter(Boolean)
+            .filter(Boolean),
         )
         keepModels = Object.keys(modelMap).filter((key) => wanted.has(key))
         if (keepModels.length === 0) {
@@ -143,7 +150,8 @@ export async function exportBackup(win, options = {}) {
         for (const key of keepModels || []) {
           const meta = parsedStore.models[key] || {}
           for (const rel of [...(meta.covers || []), meta.cover]) {
-            if (typeof rel === 'string' && rel) referenced.add(path.basename(rel))
+            if (typeof rel === 'string' && rel)
+              referenced.add(path.basename(rel))
           }
         }
         coverNames = coverNames.filter((name) => referenced.has(name))
@@ -151,18 +159,21 @@ export async function exportBackup(win, options = {}) {
         coverNames = []
       }
       const stats = await mapLimit(coverNames, COVER_IO_CONCURRENCY, (name) =>
-        fs.stat(path.join(coversDir, name)).catch(() => null)
+        fs.stat(path.join(coversDir, name)).catch(() => null),
       )
       let totalBytes = 0
       for (let i = 0; i < coverNames.length; i++) {
         const stat = stats[i]
         if (!stat?.isFile()) continue
         totalBytes += stat.size
-        coverFiles.push({ name: coverNames[i], path: path.join(coversDir, coverNames[i]) })
+        coverFiles.push({
+          name: coverNames[i],
+          path: path.join(coversDir, coverNames[i]),
+        })
       }
       if (totalBytes > MAX_COVERS_BYTES) {
         return {
-          error: `封面数据总量超过 ${Math.floor(MAX_COVERS_BYTES / 1024 / 1024)}MB，为避免内存占用过高已停止备份；请手动复制 .modelvault 文件夹`
+          error: `封面数据总量超过 ${Math.floor(MAX_COVERS_BYTES / 1024 / 1024)}MB，为避免内存占用过高已停止备份；请手动复制 .modelvault 文件夹`,
         }
       }
       covers = coverFiles.length
@@ -175,7 +186,7 @@ export async function exportBackup(win, options = {}) {
   const result = await dialog.showSaveDialog(win, {
     title: '导出备份',
     defaultPath: `modelvault-backup-${date}.zip`,
-    filters: [{ name: '备份文件', extensions: ['zip'] }]
+    filters: [{ name: '备份文件', extensions: ['zip'] }],
   })
   if (result.canceled || !result.filePath) return { canceled: true }
   try {
@@ -185,10 +196,12 @@ export async function exportBackup(win, options = {}) {
       settingsText,
       storeText,
       manifestText,
-      covers: coverFiles
+      covers: coverFiles,
     })
     const outStat = await fs.stat(result.filePath)
-    logger.info(`备份已导出: ${result.filePath}（${models} 模型 / ${covers} 封面）`)
+    logger.info(
+      `备份已导出: ${result.filePath}（${models} 模型 / ${covers} 封面）`,
+    )
     return {
       path: result.filePath,
       sizeBytes: outStat.size,
@@ -196,7 +209,7 @@ export async function exportBackup(win, options = {}) {
       models,
       covers,
       mode,
-      partial
+      partial,
     }
   } catch (err) {
     // 失败时清理半成品，避免用户误以为备份可用

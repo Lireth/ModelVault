@@ -5,7 +5,10 @@ import { registerCoverHandlers } from './covers'
 import { registerMiscHandlers } from './misc'
 import { registerFilesHandlers } from './files'
 import { registerBackupHandlers } from './backup'
-import { registerCivitaiHandlers, setupWarmupProgressForwarding } from './civitai'
+import {
+  registerCivitaiHandlers,
+  setupWarmupProgressForwarding,
+} from './civitai'
 
 /**
  * models 域 IPC 处理器聚合入口（对外签名与行为不变）。

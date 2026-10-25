@@ -19,13 +19,18 @@ vi.mock('electron', () => ({
   clipboard: { readImage: vi.fn() },
   net: { fetch: vi.fn() },
   nativeImage: { createFromPath: vi.fn() },
-  protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() }
+  protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
 }))
 
 import { mergeSaveModelData } from '../src/main/ipc/models/meta'
 import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
 import { importCoverFromPath } from '../src/main/services/covers'
-import { getModelMeta, loadData, setModelMeta, setDataRoot } from '../src/main/services/store'
+import {
+  getModelMeta,
+  loadData,
+  setModelMeta,
+  setDataRoot,
+} from '../src/main/services/store'
 import { registerImageProtocolHandler, toImageUrl } from '../src/main/protocol'
 import { getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
 
@@ -36,14 +41,16 @@ const baseMeta = {
   noteSource: 'sidecar',
   subCategory: 'Pony',
   covers: ['covers/a.png'],
-  cover: 'covers/a.png'
+  cover: 'covers/a.png',
 }
 
 /** 本文件创建的全部临时目录（afterAll 只清理这些，不动系统临时目录） */
 const roots = []
 
 /** 最小 PNG 文件头（魔数校验所需 8 字节 + 补足数据） */
-const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
+const PNG_MAGIC = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13,
+])
 
 describe('mergeSaveModelData', () => {
   it('全字段显式传入时正常覆盖', () => {
@@ -51,7 +58,7 @@ describe('mergeSaveModelData', () => {
       alias: '新别名',
       params: { steps: 30 },
       note: '新备注',
-      subCategory: 'SDXL'
+      subCategory: 'SDXL',
     })
     expect(merged.alias).toBe('新别名')
     expect(merged.params).toEqual({ steps: 30 })
@@ -76,7 +83,10 @@ describe('mergeSaveModelData', () => {
   })
 
   it('显式传 null/空串仍视为有效覆盖（允许主动清空）', () => {
-    const merged = mergeSaveModelData(baseMeta, { params: null, subCategory: '' })
+    const merged = mergeSaveModelData(baseMeta, {
+      params: null,
+      subCategory: '',
+    })
     expect(merged.params).toBeNull()
     expect(merged.subCategory).toBe('')
     expect(merged.alias).toBe('旧别名')
@@ -111,7 +121,9 @@ describe('importCoverFromPath 封面导入', () => {
     const res = await importCoverFromPath(fake)
     expect(res.error).toBeTruthy()
     // covers 目录不应被创建/写入
-    await expect(fs.access(path.join(root, '.modelvault', 'covers'))).rejects.toThrow()
+    await expect(
+      fs.access(path.join(root, '.modelvault', 'covers')),
+    ).rejects.toThrow()
   })
 
   it('真实 PNG 内容导入成功并复制到封面目录', async () => {
@@ -164,7 +176,9 @@ describe('mvimg 协议路径白名单', () => {
   })
 
   it('根目录外路径拒绝（403）', async () => {
-    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-outside-'))
+    const outsideDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-outside-'),
+    )
     roots.push(outsideDir)
     const img = path.join(outsideDir, 'secret.png')
     await fs.writeFile(img, 'x')
@@ -173,7 +187,9 @@ describe('mvimg 协议路径白名单', () => {
   })
 
   it('根目录内 junction 指向外部文件被拒绝（B8 绕过）', async (ctx) => {
-    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-outside-'))
+    const outsideDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-outside-'),
+    )
     roots.push(outsideDir)
     const img = path.join(outsideDir, 'secret.png')
     await fs.writeFile(img, 'x')
@@ -215,7 +231,7 @@ describe('models:saveModelData / models:setMetaFlags 集成（D1）', () => {
       note: '旧备注',
       params: { steps: 20 },
       covers: ['covers/a.png'],
-      cover: 'covers/a.png'
+      cover: 'covers/a.png',
     })
     return abs
   }
@@ -236,7 +252,10 @@ describe('models:saveModelData / models:setMetaFlags 集成（D1）', () => {
   it('saveModelData 触发词仅随显式字符串更新', async () => {
     const abs = await setupModel()
     // setModelMeta 为整条替换：带上已有字段预置触发词
-    setModelMeta(abs, { ...getModelMeta(abs), triggerWords: 'masterpiece, best quality' })
+    setModelMeta(abs, {
+      ...getModelMeta(abs),
+      triggerWords: 'masterpiece, best quality',
+    })
     const handler = getRegisteredHandler('models:saveModelData')
     // 未传 triggerWords：不更新不清空
     await handler(makeEvent(), { id: abs, note: 'x' })
@@ -248,13 +267,20 @@ describe('models:saveModelData / models:setMetaFlags 集成（D1）', () => {
 
   it('saveModelData 无效标识拒绝', async () => {
     const handler = getRegisteredHandler('models:saveModelData')
-    expect(await handler(makeEvent(), { id: '' })).toEqual({ error: '无效的模型标识' })
+    expect(await handler(makeEvent(), { id: '' })).toEqual({
+      error: '无效的模型标识',
+    })
   })
 
   it('setMetaFlags 更新传入字段并即时落盘', async () => {
     const abs = await setupModel()
     const handler = getRegisteredHandler('models:setMetaFlags')
-    const res = await handler(makeEvent(), { id: abs, favorite: true, nsfw: true, rating: 4 })
+    const res = await handler(makeEvent(), {
+      id: abs,
+      favorite: true,
+      nsfw: true,
+      rating: 4,
+    })
     expect(res.error).toBeUndefined()
     expect(res.meta.favorite).toBe(true)
     expect(res.meta.nsfw).toBe(true)
@@ -270,16 +296,23 @@ describe('models:saveModelData / models:setMetaFlags 集成（D1）', () => {
     const handler = getRegisteredHandler('models:setMetaFlags')
     // O9：类型错误在 schema 前置门禁拒绝（handler 保留同名校验作纵深防御）
     expect(await handler(makeEvent(), { id: abs, favorite: 'yes' })).toEqual({
-      error: 'favorite 须为布尔值'
+      error: 'favorite 须为布尔值',
     })
-    expect(await handler(makeEvent(), { id: abs, rating: 6 })).toEqual({ error: '评分需为 0-5 的整数' })
-    expect(await handler(makeEvent(), { id: abs })).toEqual({ error: '无有效的更新字段' })
+    expect(await handler(makeEvent(), { id: abs, rating: 6 })).toEqual({
+      error: '评分需为 0-5 的整数',
+    })
+    expect(await handler(makeEvent(), { id: abs })).toEqual({
+      error: '无有效的更新字段',
+    })
   })
 
   it('setModelTags 整体覆写标签并即时落盘（F-5）', async () => {
     const abs = await setupModel()
     const handler = getRegisteredHandler('models:setModelTags')
-    const res = await handler(makeEvent(), { id: abs, tags: ['赛博朋克', '服装'] })
+    const res = await handler(makeEvent(), {
+      id: abs,
+      tags: ['赛博朋克', '服装'],
+    })
     expect(res.error).toBeUndefined()
     expect(res.meta.tags).toEqual(['赛博朋克', '服装'])
     expect(getModelMeta(abs).tags).toEqual(['赛博朋克', '服装'])
@@ -292,14 +325,24 @@ describe('models:saveModelData / models:setMetaFlags 集成（D1）', () => {
     const abs = await setupModel()
     const handler = getRegisteredHandler('models:setModelTags')
     // 非数组 tags 由 O-2 schema 结构门禁前置拦截
-    expect(await handler(makeEvent(), { id: abs, tags: 'x' })).toEqual({ error: 'tags 须为数组' })
+    expect(await handler(makeEvent(), { id: abs, tags: 'x' })).toEqual({
+      error: 'tags 须为数组',
+    })
     // tags 必填（整体覆写语义不允许缺省）
-    expect(await handler(makeEvent(), { id: '' })).toEqual({ error: 'tags 缺失' })
+    expect(await handler(makeEvent(), { id: '' })).toEqual({
+      error: 'tags 缺失',
+    })
     // 空串 id 语义文案由 handler 产出（schema 对 id 只查类型）
-    expect(await handler(makeEvent(), { id: '', tags: [] })).toEqual({ error: '无效的模型标识' })
+    expect(await handler(makeEvent(), { id: '', tags: [] })).toEqual({
+      error: '无效的模型标识',
+    })
     // 越界模型（checkModelIdInRoot）
-    expect(await handler(makeEvent(), { id: path.join(root, '..', 'x.safetensors'), tags: [] }))
-      .toEqual({ error: '模型不在当前根目录内' })
+    expect(
+      await handler(makeEvent(), {
+        id: path.join(root, '..', 'x.safetensors'),
+        tags: [],
+      }),
+    ).toEqual({ error: '模型不在当前根目录内' })
   })
 
   it('setModelTags 条目经规范化：去重（大小写不敏感）/去空/trim（F-5）', async () => {
@@ -307,7 +350,7 @@ describe('models:saveModelData / models:setMetaFlags 集成（D1）', () => {
     const handler = getRegisteredHandler('models:setModelTags')
     const res = await handler(makeEvent(), {
       id: abs,
-      tags: ['Pony', 'pony', '  ', 'Style', '  Style  ']
+      tags: ['Pony', 'pony', '  ', 'Style', '  Style  '],
     })
     expect(res.meta.tags).toEqual(['Pony', 'Style'])
   })
@@ -337,7 +380,10 @@ describe('models:renameTag / models:removeTag 全库标签管理（F4）', () =>
     setModelMeta(a, { tags: ['旧名', '风格'] })
     setModelMeta(b, { tags: ['旧名'] })
 
-    const res = await getRegisteredHandler('models:renameTag')(makeEvent(), { from: '旧名', to: '新名' })
+    const res = await getRegisteredHandler('models:renameTag')(makeEvent(), {
+      from: '旧名',
+      to: '新名',
+    })
 
     expect(res).toEqual({ changed: 2 })
     expect(getModelMeta(a).tags).toEqual(['新名', '风格'])
@@ -351,7 +397,10 @@ describe('models:renameTag / models:removeTag 全库标签管理（F4）', () =>
     const a = await touchModel('a.safetensors')
     setModelMeta(a, { tags: ['风格', '旧名'] })
 
-    const res = await getRegisteredHandler('models:renameTag')(makeEvent(), { from: '旧名', to: '风格' })
+    const res = await getRegisteredHandler('models:renameTag')(makeEvent(), {
+      from: '旧名',
+      to: '风格',
+    })
 
     expect(res).toEqual({ changed: 1 })
     // normalizeTags 的大小写不敏感去重收敛重复项
@@ -362,9 +411,24 @@ describe('models:renameTag / models:removeTag 全库标签管理（F4）', () =>
     const a = await touchModel('a.safetensors')
     setModelMeta(a, { tags: ['风格'] })
 
-    expect(await getRegisteredHandler('models:renameTag')(makeEvent(), { from: '风格', to: '风格' })).toEqual({ changed: 0 })
-    expect(await getRegisteredHandler('models:renameTag')(makeEvent(), { from: '', to: 'x' })).toEqual({ error: '标签名称不能为空' })
-    expect(await getRegisteredHandler('models:renameTag')(makeEvent(), { from: '风格', to: '  ' })).toEqual({ error: '标签名称不能为空' })
+    expect(
+      await getRegisteredHandler('models:renameTag')(makeEvent(), {
+        from: '风格',
+        to: '风格',
+      }),
+    ).toEqual({ changed: 0 })
+    expect(
+      await getRegisteredHandler('models:renameTag')(makeEvent(), {
+        from: '',
+        to: 'x',
+      }),
+    ).toEqual({ error: '标签名称不能为空' })
+    expect(
+      await getRegisteredHandler('models:renameTag')(makeEvent(), {
+        from: '风格',
+        to: '  ',
+      }),
+    ).toEqual({ error: '标签名称不能为空' })
     // 无一改动
     expect(getModelMeta(a).tags).toEqual(['风格'])
   })
@@ -375,7 +439,9 @@ describe('models:renameTag / models:removeTag 全库标签管理（F4）', () =>
     setModelMeta(a, { tags: ['废弃', '风格'] })
     setModelMeta(b, { tags: ['风格'] })
 
-    const res = await getRegisteredHandler('models:removeTag')(makeEvent(), { tag: '废弃' })
+    const res = await getRegisteredHandler('models:removeTag')(makeEvent(), {
+      tag: '废弃',
+    })
 
     expect(res).toEqual({ changed: 1 })
     expect(getModelMeta(a).tags).toEqual(['风格'])
@@ -386,8 +452,12 @@ describe('models:renameTag / models:removeTag 全库标签管理（F4）', () =>
 
   it('移除空名拒绝', async () => {
     // 空串通过 schema（只查类型），语义文案由 handler 产出
-    expect(await getRegisteredHandler('models:removeTag')(makeEvent(), { tag: '' })).toEqual({ error: '标签名称不能为空' })
+    expect(
+      await getRegisteredHandler('models:removeTag')(makeEvent(), { tag: '' }),
+    ).toEqual({ error: '标签名称不能为空' })
     // 缺参在 schema 门禁即被拒（O1 fail-closed）
-    expect(await getRegisteredHandler('models:removeTag')(makeEvent(), {})).toEqual({ error: 'tag 缺失' })
+    expect(
+      await getRegisteredHandler('models:removeTag')(makeEvent(), {}),
+    ).toEqual({ error: 'tag 缺失' })
   })
 })

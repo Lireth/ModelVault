@@ -7,18 +7,21 @@ import { isPathRealWithin, relativeWithin } from '../../utils'
 import { getCurrentRoot, renameModelMeta, toRelKey } from '../../services/store'
 import { sidecarFilesFor } from './misc'
 import { LORA_TAG_DEFS, LORA_TAG_KEYS } from '../../../shared/model-categories'
-import { MODEL_EXTENSION_NAMES, MODEL_EXTENSION_SET } from '../../../shared/model-extensions'
+import {
+  MODEL_EXTENSION_NAMES,
+  MODEL_EXTENSION_SET,
+} from '../../../shared/model-extensions'
 import { SIDECAR_PREVIEW_EXTS, sidecarBaseOf } from '../../services/scanner'
 import {
   maintenanceBusyMessage,
   releaseMaintenance,
-  tryAcquireMaintenance
+  tryAcquireMaintenance,
 } from '../../services/maintenance-lock'
 import { transferModelsToLibrary } from '../../services/library-transfer'
 import {
   wrapHandler,
   checkModelIdInRootReal,
-  getRealRootPath
+  getRealRootPath,
 } from '../handler'
 
 /**
@@ -64,7 +67,8 @@ export function planOrganizeMoves(moves, root) {
         skipped.push({ id: item.id, reason: 'invalid-tag' })
         continue
       }
-      const label = LORA_TAG_DEFS.find((d) => d.key === item.subCategory)?.label || ''
+      const label =
+        LORA_TAG_DEFS.find((d) => d.key === item.subCategory)?.label || ''
       if (!label) {
         skipped.push({ id: item.id, reason: 'invalid-tag' })
         continue
@@ -84,7 +88,11 @@ export function planOrganizeMoves(moves, root) {
 /* ---------------- F2：外部模型导入 ---------------- */
 
 /** 导入时随模型一并搬运的 sidecar 后缀（说明/元数据/预览图） */
-const IMPORT_SIDECAR_SUFFIXES = ['.txt', '.civitai.info', ...SIDECAR_PREVIEW_EXTS]
+const IMPORT_SIDECAR_SUFFIXES = [
+  '.txt',
+  '.civitai.info',
+  ...SIDECAR_PREVIEW_EXTS,
+]
 
 /**
  * 拆分模型文件名（兼容 WebUI 的 `.disabled` 双重后缀）。
@@ -187,22 +195,27 @@ async function importModels({ mode, win } = {}) {
   const root = getCurrentRoot()
   if (!root) return { error: '尚未选择模型库' }
   const picked = await dialog.showOpenDialog(win, {
-    title: mode === 'move' ? '选择要移动入台的模型文件' : '选择要复制入台的模型文件',
+    title:
+      mode === 'move' ? '选择要移动入台的模型文件' : '选择要复制入台的模型文件',
     properties: ['openFile', 'multiSelections'],
     filters: [
       {
         name: '模型文件',
         // .disabled 是 WebUI 的禁用后缀，需单独加入过滤器才可被选中
-        extensions: [...MODEL_EXTENSION_NAMES.map((e) => e.slice(1)), 'disabled']
-      }
-    ]
+        extensions: [
+          ...MODEL_EXTENSION_NAMES.map((e) => e.slice(1)),
+          'disabled',
+        ],
+      },
+    ],
   })
-  if (picked.canceled || picked.filePaths.length === 0) return { canceled: true }
+  if (picked.canceled || picked.filePaths.length === 0)
+    return { canceled: true }
 
   const targetPick = await dialog.showOpenDialog(win, {
     title: '选择导入目标文件夹（须在当前模型库内）',
     defaultPath: root,
-    properties: ['openDirectory', 'createDirectory']
+    properties: ['openDirectory', 'createDirectory'],
   })
   if (targetPick.canceled || !targetPick.filePaths[0]) return { canceled: true }
   const targetDir = path.resolve(targetPick.filePaths[0])
@@ -210,8 +223,12 @@ async function importModels({ mode, win } = {}) {
     return { error: '目标文件夹不在当前模型库内' }
   }
   const targetRelRaw = path.relative(root, targetDir)
-  const targetRelDir = targetRelRaw === '' ? '' : targetRelRaw.split(path.sep).join('/')
-  if (targetRelDir === '.modelvault' || targetRelDir.startsWith('.modelvault/')) {
+  const targetRelDir =
+    targetRelRaw === '' ? '' : targetRelRaw.split(path.sep).join('/')
+  if (
+    targetRelDir === '.modelvault' ||
+    targetRelDir.startsWith('.modelvault/')
+  ) {
     return { error: '不能导入到关联存储目录' }
   }
   // 真实路径校验：拦截库内 junction/符号链接指向库外
@@ -278,7 +295,10 @@ async function importModels({ mode, win } = {}) {
       // sidecar 同批搬运（失败只告警，不撤销已成功导入的模型）
       const sourceBase = splitModelFileName(sourceName).base
       for (const suffix of IMPORT_SIDECAR_SUFFIXES) {
-        const sidecarSource = path.join(path.dirname(source), `${sourceBase}${suffix}`)
+        const sidecarSource = path.join(
+          path.dirname(source),
+          `${sourceBase}${suffix}`,
+        )
         try {
           const sidecarStat = await fs.lstat(sidecarSource)
           if (!sidecarStat.isFile()) continue
@@ -294,7 +314,7 @@ async function importModels({ mode, win } = {}) {
       }
     }
     logger.info(
-      `模型导入完成（${mode}）：成功 ${imported}，重命名 ${renamed}，失败 ${failed.length} → ${targetDir}`
+      `模型导入完成（${mode}）：成功 ${imported}，重命名 ${renamed}，失败 ${failed.length} → ${targetDir}`,
     )
     return {
       root,
@@ -303,7 +323,7 @@ async function importModels({ mode, win } = {}) {
       imported,
       renamed,
       failed,
-      warnings
+      warnings,
     }
   } catch (err) {
     logger.warn(`模型导入失败: ${err.message}`)
@@ -354,237 +374,269 @@ export function planRenameTarget(id, name) {
 /** 注册文件操作链路的 IPC 处理器 */
 export function registerFilesHandlers() {
   // 加/去 .disabled 后缀（F10）：幂等；目标名已存在时拒绝
-  wrapHandler('models:toggleDisabled', async (event, { id, disabled } = {}) => {
-    const invalid = await checkModelIdInRootReal(id)
-    if (invalid) return { error: invalid }
-    if (typeof disabled !== 'boolean') return { error: '无效的禁用状态' }
-    const isCurrently = id.toLowerCase().endsWith('.disabled')
-    if (isCurrently === disabled) return { path: id }
-    const newPath = disabled ? `${id}.disabled` : id.replace(/\.disabled$/i, '')
-    try {
-      await fs.access(newPath)
-      return { error: '目标文件名已存在' }
-    } catch {
-      /* 不存在，可改名 */
-    }
-    try {
-      await fs.rename(id, newPath)
-    } catch (err) {
-      logger.warn(`禁用/启用改名失败: ${id} ${err.message}`)
-      return { error: `改名失败: ${err.message}` }
-    }
-    renameModelMeta(id, newPath)
-    logger.info(`模型已${disabled ? '禁用' : '启用'}: ${path.basename(newPath)}`)
-    return { path: newPath }
-  }, { errorPrefix: '禁用/启用失败' })
-
-  // 模型文件重命名（N1）：仅改当前目录内的文件名，扩展名保持不变；
-  // 同名 sidecar 一并改名（目标已存在则跳过不覆盖），元数据键即时迁移
-  wrapHandler('models:renameModel', async (event, { id, name } = {}) => {
-    const invalid = await checkModelIdInRootReal(id)
-    if (invalid) return { error: invalid }
-    const plan = planRenameTarget(id, name)
-    if (plan.error) return { error: plan.error }
-    if (plan.path === id) {
-      return { path: id, renamedSidecars: 0, sidecarWarnings: [] }
-    }
-    // 目标存在则拒绝；仅大小写变化的改名（Windows 大小写不敏感）跳过存在性检查
-    if (plan.path.toLowerCase() !== id.toLowerCase()) {
+  wrapHandler(
+    'models:toggleDisabled',
+    async (event, { id, disabled } = {}) => {
+      const invalid = await checkModelIdInRootReal(id)
+      if (invalid) return { error: invalid }
+      if (typeof disabled !== 'boolean') return { error: '无效的禁用状态' }
+      const isCurrently = id.toLowerCase().endsWith('.disabled')
+      if (isCurrently === disabled) return { path: id }
+      const newPath = disabled
+        ? `${id}.disabled`
+        : id.replace(/\.disabled$/i, '')
       try {
-        await fs.access(plan.path)
+        await fs.access(newPath)
         return { error: '目标文件名已存在' }
       } catch {
         /* 不存在，可改名 */
       }
-    }
-    try {
-      await fs.rename(id, plan.path)
-    } catch (err) {
-      if (err.code === 'EXDEV') {
-        return { error: '不支持跨磁盘重命名（目标须与模型在同一磁盘）' }
+      try {
+        await fs.rename(id, newPath)
+      } catch (err) {
+        logger.warn(`禁用/启用改名失败: ${id} ${err.message}`)
+        return { error: `改名失败: ${err.message}` }
       }
-      logger.warn(`模型重命名失败: ${id} ${err.message}`)
-      return { error: `重命名失败: ${err.message}` }
-    }
-    const dir = path.dirname(id)
-    const oldBase = path.basename(id, path.extname(id))
-    const newBase = path.basename(plan.path, path.extname(plan.path))
-    let renamedSidecars = 0
-    const sidecarWarnings = []
-    for (const f of sidecarFilesFor(id)) {
-      const suffix = path.basename(f).slice(oldBase.length)
-      const target = path.join(dir, `${newBase}${suffix}`)
-      // 仅大小写变化时目标即源文件本身（Windows 大小写不敏感），不做事前冲突检查
-      if (target.toLowerCase() !== f.toLowerCase()) {
+      renameModelMeta(id, newPath)
+      logger.info(
+        `模型已${disabled ? '禁用' : '启用'}: ${path.basename(newPath)}`,
+      )
+      return { path: newPath }
+    },
+    { errorPrefix: '禁用/启用失败' },
+  )
+
+  // 模型文件重命名（N1）：仅改当前目录内的文件名，扩展名保持不变；
+  // 同名 sidecar 一并改名（目标已存在则跳过不覆盖），元数据键即时迁移
+  wrapHandler(
+    'models:renameModel',
+    async (event, { id, name } = {}) => {
+      const invalid = await checkModelIdInRootReal(id)
+      if (invalid) return { error: invalid }
+      const plan = planRenameTarget(id, name)
+      if (plan.error) return { error: plan.error }
+      if (plan.path === id) {
+        return { path: id, renamedSidecars: 0, sidecarWarnings: [] }
+      }
+      // 目标存在则拒绝；仅大小写变化的改名（Windows 大小写不敏感）跳过存在性检查
+      if (plan.path.toLowerCase() !== id.toLowerCase()) {
         try {
-          await fs.access(target)
-          sidecarWarnings.push(`${path.basename(f)} 的目标已存在，已跳过`)
-          continue
+          await fs.access(plan.path)
+          return { error: '目标文件名已存在' }
         } catch {
-          /* 目标不存在，可改名 */
+          /* 不存在，可改名 */
         }
       }
       try {
-        await fs.rename(f, target)
-        renamedSidecars += 1
+        await fs.rename(id, plan.path)
       } catch (err) {
-        if (err.code !== 'ENOENT') {
-          sidecarWarnings.push(`${path.basename(f)}: ${err.message}`)
+        if (err.code === 'EXDEV') {
+          return { error: '不支持跨磁盘重命名（目标须与模型在同一磁盘）' }
+        }
+        logger.warn(`模型重命名失败: ${id} ${err.message}`)
+        return { error: `重命名失败: ${err.message}` }
+      }
+      const dir = path.dirname(id)
+      const oldBase = path.basename(id, path.extname(id))
+      const newBase = path.basename(plan.path, path.extname(plan.path))
+      let renamedSidecars = 0
+      const sidecarWarnings = []
+      for (const f of sidecarFilesFor(id)) {
+        const suffix = path.basename(f).slice(oldBase.length)
+        const target = path.join(dir, `${newBase}${suffix}`)
+        // 仅大小写变化时目标即源文件本身（Windows 大小写不敏感），不做事前冲突检查
+        if (target.toLowerCase() !== f.toLowerCase()) {
+          try {
+            await fs.access(target)
+            sidecarWarnings.push(`${path.basename(f)} 的目标已存在，已跳过`)
+            continue
+          } catch {
+            /* 目标不存在，可改名 */
+          }
+        }
+        try {
+          await fs.rename(f, target)
+          renamedSidecars += 1
+        } catch (err) {
+          if (err.code !== 'ENOENT') {
+            sidecarWarnings.push(`${path.basename(f)}: ${err.message}`)
+          }
         }
       }
-    }
-    renameModelMeta(id, plan.path)
-    logger.info(`模型已重命名: ${path.basename(id)} -> ${path.basename(plan.path)}`)
-    return { path: plan.path, renamedSidecars, sidecarWarnings }
-  }, { errorPrefix: '重命名失败' })
+      renameModelMeta(id, plan.path)
+      logger.info(
+        `模型已重命名: ${path.basename(id)} -> ${path.basename(plan.path)}`,
+      )
+      return { path: plan.path, renamedSidecars, sidecarWarnings }
+    },
+    { errorPrefix: '重命名失败' },
+  )
 
   // 库内移动/归档（F11）：目录选择对话框 + 同名 sidecar 一并移动
-  wrapHandler('models:moveModelTo', async (event, { id } = {}) => {
-    const invalid = await checkModelIdInRootReal(id)
-    if (invalid) return { error: invalid }
-    const win = BrowserWindow.fromWebContents(event.sender)
-    const pick = await dialog.showOpenDialog(win, {
-      title: '选择目标文件夹（须在当前模型库内）',
-      properties: ['openDirectory']
-    })
-    if (pick.canceled || !pick.filePaths[0]) return { canceled: true }
-    const targetDir = pick.filePaths[0]
-    // 目标目录必须在当前库内（以构造文件路径换算相对键判定）
-    const newPath = path.join(targetDir, path.basename(id))
-    if (!toRelKey(newPath)) {
-      return { error: '目标文件夹不在当前模型库内' }
-    }
-    // O6：真实路径校验——拦截目标目录本身是指向库外的 junction/符号链接
-    const rootReal = await getRealRootPath()
-    if (!rootReal || !(await isPathRealWithin(targetDir, rootReal))) {
-      return { error: '目标文件夹真实路径不在当前模型库内' }
-    }
-    if (newPath === id) return { path: id }
-    try {
-      await fs.access(newPath)
-      return { error: '目标位置已存在同名文件' }
-    } catch {
-      /* 不存在，可移动 */
-    }
-    try {
-      await fs.rename(id, newPath)
-    } catch (err) {
-      if (err.code === 'EXDEV') {
-        return { error: '不支持跨磁盘移动（目标文件夹须与模型库在同一磁盘）' }
+  wrapHandler(
+    'models:moveModelTo',
+    async (event, { id } = {}) => {
+      const invalid = await checkModelIdInRootReal(id)
+      if (invalid) return { error: invalid }
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const pick = await dialog.showOpenDialog(win, {
+        title: '选择目标文件夹（须在当前模型库内）',
+        properties: ['openDirectory'],
+      })
+      if (pick.canceled || !pick.filePaths[0]) return { canceled: true }
+      const targetDir = pick.filePaths[0]
+      // 目标目录必须在当前库内（以构造文件路径换算相对键判定）
+      const newPath = path.join(targetDir, path.basename(id))
+      if (!toRelKey(newPath)) {
+        return { error: '目标文件夹不在当前模型库内' }
       }
-      logger.warn(`模型移动失败: ${id} ${err.message}`)
-      return { error: `移动失败: ${err.message}` }
-    }
-    // 同名 sidecar（预览图/说明文本）一并移动：整理场景下说明与模型不应分家
-    for (const f of sidecarFilesFor(id)) {
-      await fs.rename(f, path.join(targetDir, path.basename(f))).catch(() => {})
-    }
-    renameModelMeta(id, newPath)
-    logger.info(`模型已移动: ${id} -> ${newPath}`)
-    return { path: newPath }
-  }, { errorPrefix: '移动失败' })
-
-  // 跨库移动/复制（F-3）：目标必须是已保存的其他模型库；文件/sidecar/封面/
-  // 元数据保持相对路径整体迁移，安全校验与维护锁在服务层（library-transfer）
-  wrapHandler('models:transferToLibrary', async (event, { ids, targetRoot, mode } = {}) => {
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return { error: '没有可传输的模型' }
-    }
-    if (ids.length > 500) {
-      return { error: '单次最多传输 500 个模型' }
-    }
-    return transferModelsToLibrary({ ids, targetRoot, mode })
-  }, { errorPrefix: '跨库传输失败' })
-
-  // 一键移动文件（自动标签整理）：根目录创建 LoRA 文件夹及其下 7 个标签
-  // 子文件夹（已存在不动），已标注 LoRA 移入 LoRA/<标签>/，未标注 LoRA 移入
-  // LoRA/ 根目录；元数据键即时迁移，watcher 触发局部重扫。
-  // 单个失败（同名冲突等）不中断整批，结果按模型反馈。
-  wrapHandler('models:organizeByTags', async (event, { moves } = {}) => {
-    if (!Array.isArray(moves) || moves.length === 0) {
-      return { error: '没有需要移动的模型' }
-    }
-    if (moves.length > 10000) {
-      return { error: '单次最多移动 10000 个模型' }
-    }
-    const root = getCurrentRoot()
-    if (!root) return { error: '未选择模型库根目录' }
-    const rootReal = await getRealRootPath()
-    if (!rootReal) return { error: '模型库根目录不可访问' }
-    // 逐项校验归属（O6：realpath 后仍须在库内）：非法项跳过而非整体失败
-    const valid = []
-    const skipped = []
-    for (const item of moves) {
-      if (!item || typeof item.id !== 'string') continue
-      if (await checkModelIdInRootReal(item.id, { realRoot: rootReal })) {
-        skipped.push({ id: item.id, reason: 'out-of-root' })
-        continue
+      // O6：真实路径校验——拦截目标目录本身是指向库外的 junction/符号链接
+      const rootReal = await getRealRootPath()
+      if (!rootReal || !(await isPathRealWithin(targetDir, rootReal))) {
+        return { error: '目标文件夹真实路径不在当前模型库内' }
       }
-      valid.push(item)
-    }
-    const { planned, skipped: planSkipped } = planOrganizeMoves(valid, root)
-    skipped.push(...planSkipped)
-    if (planned.length === 0) {
-      return { moved: 0, failed: [], skipped }
-    }
-    // 创建 LoRA 一级目录与 7 个标签子文件夹（recursive：已存在时静默保持原样）。
-    // O6：已存在的 LoRA 目录若是指向库外的 junction，拒绝整理（避免 mkdir 跟随到库外）
-    const loraDir = path.join(root, LORA_DIR)
-    let loraExists = true
-    try {
-      await fs.access(loraDir)
-    } catch {
-      loraExists = false
-    }
-    if (loraExists && !(await isPathRealWithin(loraDir, rootReal))) {
-      return { error: 'LoRA 文件夹真实路径不在当前模型库内' }
-    }
-    try {
-      await fs.mkdir(loraDir, { recursive: true })
-      for (const folder of TAG_FOLDER_NAMES) {
-        await fs.mkdir(path.join(loraDir, folder), { recursive: true })
-      }
-    } catch (err) {
-      return { error: `创建分类文件夹失败: ${err.message}` }
-    }
-    let moved = 0
-    const failed = []
-    for (const { id, newPath } of planned) {
-      // 目标标签子文件夹同样做真实路径校验（已存在指库外的 junction 时拒绝）
-      if (!(await isPathRealWithin(path.dirname(newPath), rootReal))) {
-        failed.push({ id, error: '目标文件夹真实路径不在当前模型库内' })
-        continue
-      }
+      if (newPath === id) return { path: id }
       try {
         await fs.access(newPath)
-        failed.push({ id, error: '目标位置已存在同名文件' })
-        continue
+        return { error: '目标位置已存在同名文件' }
       } catch {
         /* 不存在，可移动 */
       }
       try {
         await fs.rename(id, newPath)
       } catch (err) {
-        logger.warn(`一键移动失败: ${id} ${err.message}`)
-        failed.push({ id, error: err.message })
-        continue
+        if (err.code === 'EXDEV') {
+          return { error: '不支持跨磁盘移动（目标文件夹须与模型库在同一磁盘）' }
+        }
+        logger.warn(`模型移动失败: ${id} ${err.message}`)
+        return { error: `移动失败: ${err.message}` }
       }
-      // 同名 sidecar（预览图/说明文本）一并移动，与 moveModelTo 同一约定
+      // 同名 sidecar（预览图/说明文本）一并移动：整理场景下说明与模型不应分家
       for (const f of sidecarFilesFor(id)) {
-        await fs.rename(f, path.join(path.dirname(newPath), path.basename(f))).catch(() => {})
+        await fs
+          .rename(f, path.join(targetDir, path.basename(f)))
+          .catch(() => {})
       }
       renameModelMeta(id, newPath)
-      moved += 1
-    }
-    logger.info(`一键移动文件完成: 移动 ${moved}，失败 ${failed.length}，跳过 ${skipped.length}`)
-    return { moved, failed, skipped }
-  }, { errorPrefix: '一键移动文件失败' })
+      logger.info(`模型已移动: ${id} -> ${newPath}`)
+      return { path: newPath }
+    },
+    { errorPrefix: '移动失败' },
+  )
+
+  // 跨库移动/复制（F-3）：目标必须是已保存的其他模型库；文件/sidecar/封面/
+  // 元数据保持相对路径整体迁移，安全校验与维护锁在服务层（library-transfer）
+  wrapHandler(
+    'models:transferToLibrary',
+    async (event, { ids, targetRoot, mode } = {}) => {
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return { error: '没有可传输的模型' }
+      }
+      if (ids.length > 500) {
+        return { error: '单次最多传输 500 个模型' }
+      }
+      return transferModelsToLibrary({ ids, targetRoot, mode })
+    },
+    { errorPrefix: '跨库传输失败' },
+  )
+
+  // 一键移动文件（自动标签整理）：根目录创建 LoRA 文件夹及其下 7 个标签
+  // 子文件夹（已存在不动），已标注 LoRA 移入 LoRA/<标签>/，未标注 LoRA 移入
+  // LoRA/ 根目录；元数据键即时迁移，watcher 触发局部重扫。
+  // 单个失败（同名冲突等）不中断整批，结果按模型反馈。
+  wrapHandler(
+    'models:organizeByTags',
+    async (event, { moves } = {}) => {
+      if (!Array.isArray(moves) || moves.length === 0) {
+        return { error: '没有需要移动的模型' }
+      }
+      if (moves.length > 10000) {
+        return { error: '单次最多移动 10000 个模型' }
+      }
+      const root = getCurrentRoot()
+      if (!root) return { error: '未选择模型库根目录' }
+      const rootReal = await getRealRootPath()
+      if (!rootReal) return { error: '模型库根目录不可访问' }
+      // 逐项校验归属（O6：realpath 后仍须在库内）：非法项跳过而非整体失败
+      const valid = []
+      const skipped = []
+      for (const item of moves) {
+        if (!item || typeof item.id !== 'string') continue
+        if (await checkModelIdInRootReal(item.id, { realRoot: rootReal })) {
+          skipped.push({ id: item.id, reason: 'out-of-root' })
+          continue
+        }
+        valid.push(item)
+      }
+      const { planned, skipped: planSkipped } = planOrganizeMoves(valid, root)
+      skipped.push(...planSkipped)
+      if (planned.length === 0) {
+        return { moved: 0, failed: [], skipped }
+      }
+      // 创建 LoRA 一级目录与 7 个标签子文件夹（recursive：已存在时静默保持原样）。
+      // O6：已存在的 LoRA 目录若是指向库外的 junction，拒绝整理（避免 mkdir 跟随到库外）
+      const loraDir = path.join(root, LORA_DIR)
+      let loraExists = true
+      try {
+        await fs.access(loraDir)
+      } catch {
+        loraExists = false
+      }
+      if (loraExists && !(await isPathRealWithin(loraDir, rootReal))) {
+        return { error: 'LoRA 文件夹真实路径不在当前模型库内' }
+      }
+      try {
+        await fs.mkdir(loraDir, { recursive: true })
+        for (const folder of TAG_FOLDER_NAMES) {
+          await fs.mkdir(path.join(loraDir, folder), { recursive: true })
+        }
+      } catch (err) {
+        return { error: `创建分类文件夹失败: ${err.message}` }
+      }
+      let moved = 0
+      const failed = []
+      for (const { id, newPath } of planned) {
+        // 目标标签子文件夹同样做真实路径校验（已存在指库外的 junction 时拒绝）
+        if (!(await isPathRealWithin(path.dirname(newPath), rootReal))) {
+          failed.push({ id, error: '目标文件夹真实路径不在当前模型库内' })
+          continue
+        }
+        try {
+          await fs.access(newPath)
+          failed.push({ id, error: '目标位置已存在同名文件' })
+          continue
+        } catch {
+          /* 不存在，可移动 */
+        }
+        try {
+          await fs.rename(id, newPath)
+        } catch (err) {
+          logger.warn(`一键移动失败: ${id} ${err.message}`)
+          failed.push({ id, error: err.message })
+          continue
+        }
+        // 同名 sidecar（预览图/说明文本）一并移动，与 moveModelTo 同一约定
+        for (const f of sidecarFilesFor(id)) {
+          await fs
+            .rename(f, path.join(path.dirname(newPath), path.basename(f)))
+            .catch(() => {})
+        }
+        renameModelMeta(id, newPath)
+        moved += 1
+      }
+      logger.info(
+        `一键移动文件完成: 移动 ${moved}，失败 ${failed.length}，跳过 ${skipped.length}`,
+      )
+      return { moved, failed, skipped }
+    },
+    { errorPrefix: '一键移动文件失败' },
+  )
 
   // F2：外部模型导入（复制/移动入台）
   wrapHandler(
     'models:importModels',
     (event, { mode } = {}) =>
       importModels({ mode, win: BrowserWindow.fromWebContents(event.sender) }),
-    { errorPrefix: '模型导入失败' }
+    { errorPrefix: '模型导入失败' },
   )
 }

@@ -73,7 +73,7 @@ export function buildExportRows(models) {
       paramsSummary: formatParamSummary(m.params),
       params: m.params || null,
       path: m.id || '',
-      civitaiUrl: m.civitaiUrl || ''
+      civitaiUrl: m.civitaiUrl || '',
     }
   })
 }
@@ -112,7 +112,7 @@ export function buildCsv(rows) {
     '推荐参数',
     '备注',
     '文件路径',
-    'Civitai链接'
+    'Civitai链接',
   ]
   const lines = [header.map(csvCell).join(',')]
   for (const row of rows) {
@@ -133,10 +133,10 @@ export function buildCsv(rows) {
         row.paramsSummary,
         row.note,
         row.path,
-        row.civitaiUrl
+        row.civitaiUrl,
       ]
         .map(csvCell)
-        .join(',')
+        .join(','),
     )
   }
   return `\uFEFF${lines.join(CSV_EOL)}${CSV_EOL}`
@@ -159,11 +159,11 @@ export function buildMarkdown(rows) {
     '标签',
     '触发词',
     '推荐参数',
-    '备注'
+    '备注',
   ]
   const lines = [
     `| ${header.join(' | ')} |`,
-    `| ${header.map(() => '---').join(' | ')} |`
+    `| ${header.map(() => '---').join(' | ')} |`,
   ]
   for (const row of rows) {
     lines.push(
@@ -178,10 +178,10 @@ export function buildMarkdown(rows) {
         row.tags.join(' / '),
         row.triggerWords,
         row.paramsSummary,
-        row.note
+        row.note,
       ]
         .map(mdCell)
-        .join(' | ')} |`
+        .join(' | ')} |`,
     )
   }
   return `${lines.join('\n')}\n`

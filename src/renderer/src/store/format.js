@@ -29,7 +29,11 @@ export function formatParamSummary(p) {
   const parts = []
   if (Number.isFinite(p.steps)) parts.push(`${p.steps} 步`)
   // CFG 区间：min/max 相等或缺失时只显示单个值
-  if (Number.isFinite(p.cfgMin) && Number.isFinite(p.cfgMax) && p.cfgMin !== p.cfgMax) {
+  if (
+    Number.isFinite(p.cfgMin) &&
+    Number.isFinite(p.cfgMax) &&
+    p.cfgMin !== p.cfgMax
+  ) {
     parts.push(`CFG ${p.cfgMin}~${p.cfgMax}`)
   } else if (Number.isFinite(p.cfgMin)) {
     parts.push(`CFG ${p.cfgMin}`)

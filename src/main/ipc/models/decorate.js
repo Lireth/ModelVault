@@ -5,11 +5,18 @@ import {
   findSidecarCivitaiInfo,
   findSidecarPreview,
   findSidecarText,
-  sidecarImportPatch
+  sidecarImportPatch,
 } from '../../services/scanner'
 import { isValidImageFile } from '../../services/covers'
-import { drainDeferredThumbs, getThumbPathDeferred, pruneThumbs } from '../../services/thumbs'
-import { checkSafetensorsHealthy, readSafetensorsInfo } from '../../services/safetensors'
+import {
+  drainDeferredThumbs,
+  getThumbPathDeferred,
+  pruneThumbs,
+} from '../../services/thumbs'
+import {
+  checkSafetensorsHealthy,
+  readSafetensorsInfo,
+} from '../../services/safetensors'
 import { toImageUrl } from '../../protocol'
 import {
   DECORATE_CACHE_DEFAULT_LIMIT,
@@ -17,7 +24,7 @@ import {
   getDecorateCacheLimit,
   getThumbDrainPromise,
   setDecorateCacheLimit,
-  setThumbDrainPromise
+  setThumbDrainPromise,
 } from './model-state'
 import { abortError, boundedMapSet, runWithConcurrency } from '../../utils'
 
@@ -50,7 +57,8 @@ let cachePolicyHardMax = DECORATE_CACHE_HARD_MAX
  * @returns {number} 容量上限
  */
 export function computeDecorateCacheLimit(modelCount) {
-  const count = Number.isFinite(modelCount) && modelCount > 0 ? Math.floor(modelCount) : 0
+  const count =
+    Number.isFinite(modelCount) && modelCount > 0 ? Math.floor(modelCount) : 0
   // 整数运算实现 10% 向上取整，避免 1.1 浮点误差把 9000 算成 9901
   const target = Math.ceil((count * 11) / 10)
   return Math.min(cachePolicyHardMax, Math.max(cachePolicyMin, target))
@@ -95,10 +103,22 @@ export function metaSignature(meta) {
   const cached = signatureCache.get(meta)
   if (cached !== undefined) return cached
   const signature = JSON.stringify([
-    meta.cover, meta.covers, meta.alias, meta.note, meta.subCategory,
-    meta.triggerWords, meta.favorite, meta.nsfw, meta.rating, meta.params, meta.hash,
-    meta.civitaiUrl, meta.baseModel, meta.tags,
-    meta.noteSource, meta.triggerWordsSource
+    meta.cover,
+    meta.covers,
+    meta.alias,
+    meta.note,
+    meta.subCategory,
+    meta.triggerWords,
+    meta.favorite,
+    meta.nsfw,
+    meta.rating,
+    meta.params,
+    meta.hash,
+    meta.civitaiUrl,
+    meta.baseModel,
+    meta.tags,
+    meta.noteSource,
+    meta.triggerWordsSource,
   ])
   signatureCache.set(meta, signature)
   return signature
@@ -139,7 +159,12 @@ let pendingThumbBatch = null
 
 /** 底层发送（不做批次刷新，避免 flush 递归） */
 function deliverThumbReady(win, updates) {
-  if (!win || typeof win.isDestroyed !== 'function' || win.isDestroyed() || !updates?.length) {
+  if (
+    !win ||
+    typeof win.isDestroyed !== 'function' ||
+    win.isDestroyed() ||
+    !updates?.length
+  ) {
     return
   }
   win.webContents.send('models:thumbsReady', { updates })
@@ -163,11 +188,17 @@ function dropPendingThumbBatch() {
 
 /** 累积一条/一批缩略图更新；达到阈值立即发送，否则在时间窗后合并发送 */
 function queueThumbReady(win, updates) {
-  if (!win || typeof win.isDestroyed !== 'function' || win.isDestroyed() || !updates?.length) {
+  if (
+    !win ||
+    typeof win.isDestroyed !== 'function' ||
+    win.isDestroyed() ||
+    !updates?.length
+  ) {
     return
   }
   // 多窗口场景：切换目标窗口前先送达上一窗口，避免更新错投/丢失
-  if (pendingThumbBatch && pendingThumbBatch.win !== win) flushThumbReadyUpdates()
+  if (pendingThumbBatch && pendingThumbBatch.win !== win)
+    flushThumbReadyUpdates()
   if (!pendingThumbBatch) {
     pendingThumbBatch = { win, updates: [], timer: null }
   }
@@ -177,7 +208,10 @@ function queueThumbReady(win, updates) {
     return
   }
   if (pendingThumbBatch.timer) return
-  pendingThumbBatch.timer = setTimeout(flushThumbReadyUpdates, THUMB_EVENT_FLUSH_MS)
+  pendingThumbBatch.timer = setTimeout(
+    flushThumbReadyUpdates,
+    THUMB_EVENT_FLUSH_MS,
+  )
   pendingThumbBatch.timer.unref?.()
 }
 
@@ -240,7 +274,9 @@ export function startThumbDrain(win) {
           // OPT-1：轮播封面（含作为默认封面的 covers 条目）缩略图生成完成后
           // 回写装饰缓存（下一轮扫描命中即携带），并以 coverThumb 通知渲染层
           // 更新对应 covers 条目（渲染层轮播据此从原图切换为缩略图）
-          const coverEntry = (entry.decorated.covers || []).find((cv) => cv.path === absCover)
+          const coverEntry = (entry.decorated.covers || []).find(
+            (cv) => cv.path === absCover,
+          )
           if (coverEntry) {
             coverEntry.thumbPath = thumbPath
             coverEntry.thumbUrl = thumbUrl
@@ -278,8 +314,10 @@ async function importSidecarMeta(model, meta) {
   const needCivitai = !meta.triggerWords || meta.nsfw !== true
   if (!needNote && !needTxtTriggers && !needCivitai) return meta
   const [text, civitaiInfo] = await Promise.all([
-    needNote || needTxtTriggers ? findSidecarText(model.id) : Promise.resolve(''),
-    needCivitai ? findSidecarCivitaiInfo(model.id) : Promise.resolve(null)
+    needNote || needTxtTriggers
+      ? findSidecarText(model.id)
+      : Promise.resolve(''),
+    needCivitai ? findSidecarCivitaiInfo(model.id) : Promise.resolve(null),
   ])
   // await 间隙后重读最新元数据：读取与写盘之间用户可能已并发保存
   // （saveModelData/setMetaFlags 为同步读-改-写），基于旧 meta 展开写回
@@ -293,7 +331,7 @@ async function importSidecarMeta(model, meta) {
   if (txtPatch) Object.assign(patch, txtPatch)
   const civitaiPatch = civitaiImportPatch(
     txtPatch && txtPatch.triggerWords ? { ...latest, ...txtPatch } : latest,
-    civitaiInfo
+    civitaiInfo,
   )
   if (civitaiPatch) Object.assign(patch, civitaiPatch)
   if (Object.keys(patch).length === 0) return latest
@@ -323,7 +361,12 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
   //（命中路径不做任何文件 IO，sidecar 导入仅发生在缓存未命中时）。
   // forceRefresh 由局部扫描在变更子树上置位：即使模型文件 mtime 未变，
   // 也必须重新检查 sidecar/封面文件，避免新增/修改的 sidecar 被缓存遮蔽。
-  if (!forceRefresh && cached && cached.mtimeMs === model.mtimeMs && cached.signature === metaSignature(meta0)) {
+  if (
+    !forceRefresh &&
+    cached &&
+    cached.mtimeMs === model.mtimeMs &&
+    cached.signature === metaSignature(meta0)
+  ) {
     // 刷新插入顺序实现简易 LRU
     decorateCache.delete(model.id)
     decorateCache.set(model.id, cached)
@@ -349,11 +392,12 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
       return resolved && (await isValidImageFile(resolved))
         ? { rel, path: resolved, url: toImageUrl(resolved) }
         : null
-    })
+    }),
   )
   const covers = coverChecks.filter(Boolean)
   // 默认封面：优先显式设置值，缺省取第一张；再缺省回退 sidecar 预览图
-  const defaultEntry = covers.find((c) => c.rel === meta.cover) || covers[0] || null
+  const defaultEntry =
+    covers.find((c) => c.rel === meta.cover) || covers[0] || null
   let cover = defaultEntry ? defaultEntry.path : ''
   if (!cover) {
     cover = await findSidecarPreview(model.id)
@@ -377,7 +421,7 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
       }
       // 默认封面在封面列表内时复用循环结果，避免重复 stat/登记
       if (defaultEntry && c.path === cover) defaultThumbPath = tp
-    })
+    }),
   )
   // 卡片显示使用缩略图：默认封面复用上方循环结果（封面列表内），
   // sidecar 回退的默认封面单独解析；未命中登记后台生成，
@@ -386,7 +430,9 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
   let thumbPath = ''
   let deferredCover = ''
   if (cover) {
-    thumbPath = defaultEntry ? defaultThumbPath : await getThumbPathDeferred(cover)
+    thumbPath = defaultEntry
+      ? defaultThumbPath
+      : await getThumbPathDeferred(cover)
     if (thumbPath) {
       usedThumbs.add(path.basename(thumbPath))
       coverUrl = toImageUrl(thumbPath)
@@ -447,14 +493,14 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
     baseModel: autoInfo?.baseModel || meta.baseModel || '',
     // 自由标签（F-5）：用户自定义多标签，卡片角标/筛选/搜索消费
     tags: meta.tags || [],
-    autoInfo
+    autoInfo,
   }
   // 写入装饰缓存（容量超限时按 LRU 顺序淘汰最旧条目，C4 共享工具）
   boundedMapSet(
     decorateCache,
     model.id,
     { mtimeMs: model.mtimeMs, signature, thumbPath, deferredCover, decorated },
-    getDecorateCacheLimit()
+    getDecorateCacheLimit(),
   )
   return decorated
 }
@@ -501,7 +547,8 @@ export async function decorateModels(models, signal, opts = {}) {
     ? new Set(models.map((m) => /** @type {{id: string}} */ (m).id))
     : null
   // OPT-04：先按当前库规模调整容量，再开始装饰；扩容后整库条目可留在 LRU
-  if (adaptCacheSize) setDecorateCacheLimit(computeDecorateCacheLimit(models.length))
+  if (adaptCacheSize)
+    setDecorateCacheLimit(computeDecorateCacheLimit(models.length))
   // 流式固定并发池（与 scanner/watcher 共用 utils.runWithConcurrency，O-5）：
   // 完成一个补位一个，消除「批内并发、批间串行」的整批等待尾延迟——每批
   // 最慢的模型（多封面逐张 stat + safetensors 头解析）不再拖住同批其余任务。
@@ -513,7 +560,7 @@ export async function decorateModels(models, signal, opts = {}) {
       if (signal?.aborted) throw abortError()
       result[index] = await decorateOne(m, usedThumbs, forceRefresh)
     },
-    DECORATE_BATCH_SIZE
+    DECORATE_BATCH_SIZE,
   )
   // OPT-04：全量扫描结束后清理陈旧条目并裁剪到当前容量；局部扫描不清理
   if (adaptCacheSize && fullModelIds) pruneDecorateCache(fullModelIds)

@@ -17,14 +17,14 @@ export const transferState = reactive({
   /** 传输模式：'copy' 复制（源不动）/ 'move' 移动（成功后清理源） */
   mode: 'copy',
   /** 传输进行中（浮层确认按钮防连点） */
-  busy: false
+  busy: false,
 })
 
 /** 可选目标库：已保存库列表去掉当前库 */
 export const transferTargets = computed(() =>
   (state.settings.modelsFolders || []).filter(
-    (f) => typeof f === 'string' && f && f !== state.folder
-  )
+    (f) => typeof f === 'string' && f && f !== state.folder,
+  ),
 )
 
 /** 库名显示（目录名；盘符根回退完整路径） */
@@ -39,7 +39,9 @@ export function targetDisplayName(folder) {
  * @param {string[]|string} ids 单个模型路径或路径数组
  */
 export function openTransferToLibrary(ids) {
-  const list = Array.isArray(ids) ? ids.filter((x) => typeof x === 'string' && x) : [ids]
+  const list = Array.isArray(ids)
+    ? ids.filter((x) => typeof x === 'string' && x)
+    : [ids]
   if (list.length === 0) return
   if (transferTargets.value.length === 0) {
     toast('info', '当前只有这一个模型库，请先在侧栏添加其他模型库')
@@ -63,13 +65,14 @@ export function closeTransfer() {
  * @param {string} targetRoot 目标库根目录（浮层选择）
  */
 export async function confirmTransfer(targetRoot) {
-  if (!targetRoot || transferState.busy || transferState.ids.length === 0) return
+  if (!targetRoot || transferState.busy || transferState.ids.length === 0)
+    return
   transferState.busy = true
   try {
     const res = await window.api.models.transferToLibrary({
       ids: transferState.ids,
       targetRoot,
-      mode: transferState.mode
+      mode: transferState.mode,
     })
     if (res?.error) {
       toast('error', res.error)
@@ -81,7 +84,10 @@ export async function confirmTransfer(targetRoot) {
     if (res.skipped?.length > 0) parts.push(`跳过 ${res.skipped.length} 个`)
     if (res.failed?.length > 0) parts.push(`失败 ${res.failed.length} 个`)
     if (res.transferred > 0) {
-      toast(res.failed?.length > 0 ? 'warn' : 'success', `跨库传输完成：${parts.join('，')}`)
+      toast(
+        res.failed?.length > 0 ? 'warn' : 'success',
+        `跨库传输完成：${parts.join('，')}`,
+      )
     } else {
       toast('info', `未传输任何模型：${parts.join('，') || '无可用项'}`)
     }

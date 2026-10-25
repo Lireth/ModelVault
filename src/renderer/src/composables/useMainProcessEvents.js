@@ -6,7 +6,7 @@ import {
   handleMenuAction,
   partialScanModels,
   state,
-  toast
+  toast,
 } from '../store/appStore'
 
 /**
@@ -94,7 +94,7 @@ export function useMainProcessEvents() {
         fsChangedPendingDirs = null
         if (state.settings.autoRescan) scheduleFsRescan(pending, state.folder)
       }
-    }
+    },
   )
 
   function subscribe() {
@@ -126,9 +126,11 @@ export function useMainProcessEvents() {
     })
     // 订阅启动自动检查更新结果（O-3）：仅在有新版本时推送一次，
     // 记录到 update store 并 toast 提示，设置页「关于」直接展示
-    unsubscribeUpdateAvailable = window.api.app.onUpdateAvailable?.((payload) => {
-      applyUpdateAvailable(payload)
-    })
+    unsubscribeUpdateAvailable = window.api.app.onUpdateAvailable?.(
+      (payload) => {
+        applyUpdateAvailable(payload)
+      },
+    )
   }
 
   function unsubscribeAll() {

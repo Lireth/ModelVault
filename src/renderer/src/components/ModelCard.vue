@@ -9,7 +9,7 @@ import {
   showContextMenu,
   state,
   toggleMultiSelectMode,
-  toggleSelect
+  toggleSelect,
 } from '../store/appStore'
 
 /**
@@ -21,7 +21,7 @@ import {
  */
 
 const props = defineProps({
-  model: { type: Object, required: true }
+  model: { type: Object, required: true },
 })
 
 /** 多选模式（E4）：点击卡片切换选中态而非打开详情（O4：Set 命中 O(1)） */
@@ -90,7 +90,20 @@ function onContextMenu() {
       :aria-checked="selected"
       title="选中/取消选中"
       @click.stop="toggleSelect(model.id)"
-    ><svg v-if="selected" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8" /></svg></span>
+      ><svg
+        v-if="selected"
+        viewBox="0 0 16 16"
+        width="12"
+        height="12"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2.4"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M3 8.5l3.2 3.2L13 4.8" /></svg
+    ></span>
     <ModelCardCover :model="model" />
     <ModelCardBody :model="model" :display-name="displayName" />
   </article>
@@ -105,7 +118,9 @@ function onContextMenu() {
   border-radius: var(--radius-lg);
   overflow: hidden;
   cursor: pointer;
-  transition: transform var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out),
+  transition:
+    transform var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out),
     box-shadow var(--dur-base) var(--ease-out);
   display: flex;
   flex-direction: column;
@@ -120,7 +135,8 @@ function onContextMenu() {
 /* 多选选中态（E4）：强调边框 + 勾选角标 */
 .model-card.selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent) inset,
+  box-shadow:
+    0 0 0 1px var(--accent) inset,
     0 0 18px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 

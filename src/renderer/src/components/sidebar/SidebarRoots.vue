@@ -11,8 +11,8 @@ import { removeRoot, state, switchRoot } from '../../store/appStore'
 /** 模型库列表（E7 多根目录）：剔除当前激活库后仍存在的其他库 */
 const otherRoots = computed(() =>
   (state.settings.modelsFolders || []).filter(
-    (f) => f.toLowerCase() !== state.folder.toLowerCase()
-  )
+    (f) => f.toLowerCase() !== state.folder.toLowerCase(),
+  ),
 )
 
 /** 库显示名：取路径末段 */
@@ -39,10 +39,17 @@ function isRootMissing(f) {
         <button
           class="root-item"
           :class="{ 'root-offline': isRootMissing(f) }"
-          :title="isRootMissing(f) ? `${f}（文件夹不可用——点击切换后可重新定位）` : `${f}（点击切换）`"
+          :title="
+            isRootMissing(f)
+              ? `${f}（文件夹不可用——点击切换后可重新定位）`
+              : `${f}（点击切换）`
+          "
           @click="switchRoot(f)"
         >
-          <span class="root-dot" :class="{ 'root-dot-offline': isRootMissing(f) }"></span>
+          <span
+            class="root-dot"
+            :class="{ 'root-dot-offline': isRootMissing(f) }"
+          ></span>
           <span class="root-name">{{ rootName(f) }}</span>
           <span
             class="root-remove"
@@ -53,7 +60,8 @@ function isRootMissing(f) {
             @click.stop="removeRoot(f)"
             @keydown.enter.stop.prevent="removeRoot(f)"
             @keydown.space.stop.prevent="removeRoot(f)"
-          >✕</span>
+            >✕</span
+          >
         </button>
       </li>
     </ul>

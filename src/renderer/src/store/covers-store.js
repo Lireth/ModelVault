@@ -32,7 +32,7 @@ export async function saveModelData(id, payload, opts = {}) {
       alias: res.meta.alias || '',
       note: res.meta.note,
       subCategory: res.meta.subCategory || '',
-      triggerWords: res.meta.triggerWords || ''
+      triggerWords: res.meta.triggerWords || '',
     }
   }
   if (!opts.silent) toast('success', '参数已保存')
@@ -48,7 +48,7 @@ function applyCoverResult(id, res) {
       cover: res.cover,
       coverUrl: res.coverUrl,
       covers: res.covers || [],
-      hasManualCover: (res.covers || []).length > 0
+      hasManualCover: (res.covers || []).length > 0,
     }
     // OP-02：封面被替换/清空时同步覆盖，避免旧缩略图继续遮住新结果
     setModelCoverUrl(id, res.coverUrl)
@@ -161,7 +161,7 @@ export async function clearAllCovers() {
       cover: '',
       coverUrl: '',
       covers: [],
-      hasManualCover: false
+      hasManualCover: false,
     }
     // OP-02：清空覆盖，避免旧缩略图仍在卡片上显示
     setModelCoverUrl(m.id, '')
@@ -183,7 +183,7 @@ export async function clearAllCovers() {
  */
 export async function importCoversFromDrop(id, sourcePaths) {
   const paths = (Array.isArray(sourcePaths) ? sourcePaths : []).filter(
-    (p) => typeof p === 'string' && p
+    (p) => typeof p === 'string' && p,
   )
   if (paths.length === 0) {
     return { ok: false, total: 0, failed: 0, errors: [] }
@@ -201,5 +201,10 @@ export async function importCoversFromDrop(id, sourcePaths) {
   }
   // 单趟同步：最后一次成功响应已包含全部封面（含本次导入的所有张）
   if (lastRes) applyCoverResult(id, lastRes)
-  return { ok: lastRes !== null, total: paths.length, failed: errors.length, errors }
+  return {
+    ok: lastRes !== null,
+    total: paths.length,
+    failed: errors.length,
+    errors,
+  }
 }

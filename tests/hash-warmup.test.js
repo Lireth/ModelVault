@@ -14,11 +14,11 @@ import { fakeUserData } from './setup'
  */
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => fakeUserData), isPackaged: true }
+  app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
 }))
 
 vi.mock('../src/main/services/civitai', () => ({
-  computeFileHash: vi.fn()
+  computeFileHash: vi.fn(),
 }))
 
 import { computeFileHash } from '../src/main/services/civitai'
@@ -30,13 +30,18 @@ import {
   resumeHashWarmup,
   setHashRetryDelayForTests,
   setWarmupProgressListener,
-  whenWarmupIdle
+  whenWarmupIdle,
 } from '../src/main/services/hash-warmup'
-import { getModelMeta, loadData, setDataRoot, setModelMeta } from '../src/main/services/store'
+import {
+  getModelMeta,
+  loadData,
+  setDataRoot,
+  setModelMeta,
+} from '../src/main/services/store'
 
 /** 64 位十六进制假哈希（按调用序号变化便于区分） */
 function fakeHash(n) {
-  return (n.toString(16).padStart(4, '0') + 'a'.repeat(60))
+  return n.toString(16).padStart(4, '0') + 'a'.repeat(60)
 }
 
 let root
@@ -90,7 +95,11 @@ describe('computeAndCacheHash', () => {
     const { mtimeMs } = await fs.stat(id)
     // 受控延迟：两个调用落在计算完成之前
     let release
-    computeFileHash.mockReturnValue(new Promise((r) => { release = () => r(fakeHash(2)) }))
+    computeFileHash.mockReturnValue(
+      new Promise((r) => {
+        release = () => r(fakeHash(2))
+      }),
+    )
 
     const p1 = computeAndCacheHash(id, mtimeMs)
     const p2 = computeAndCacheHash(id, mtimeMs)
@@ -133,15 +142,19 @@ describe('computeAndCacheHash', () => {
       id,
       undefined,
       expect.any(Function),
-      { priority: true }
+      { priority: true },
     )
   })
 
   it('OPT-05：线程池临时崩溃后自动重试并完成，进度在重试前复位', async () => {
     const id = await makeModel('retry-crash.safetensors')
     const { mtimeMs } = await fs.stat(id)
-    const crash = Object.assign(new Error('worker crashed'), { name: 'WorkerCrashError' })
-    computeFileHash.mockRejectedValueOnce(crash).mockResolvedValueOnce(fakeHash(40))
+    const crash = Object.assign(new Error('worker crashed'), {
+      name: 'WorkerCrashError',
+    })
+    computeFileHash
+      .mockRejectedValueOnce(crash)
+      .mockResolvedValueOnce(fakeHash(40))
     const events = []
     setWarmupProgressListener((p) => events.push({ ...p }))
 
@@ -150,7 +163,7 @@ describe('computeAndCacheHash', () => {
     expect(getModelMeta(id).hash).toBe(fakeHash(40))
     // 重试前推送 active + percent=0，避免界面停在失败尝试的旧百分比
     expect(
-      events.some((e) => e.active === true && e.id === id && e.percent === 0)
+      events.some((e) => e.active === true && e.id === id && e.percent === 0),
     ).toBe(true)
   })
 
@@ -158,12 +171,12 @@ describe('computeAndCacheHash', () => {
     const id = await makeModel('retry-exhausted.safetensors')
     const { mtimeMs } = await fs.stat(id)
     const crash = Object.assign(new Error('worker unavailable'), {
-      name: 'WorkerUnavailableError'
+      name: 'WorkerUnavailableError',
     })
     computeFileHash.mockRejectedValue(crash)
 
     await expect(computeAndCacheHash(id, mtimeMs)).rejects.toMatchObject({
-      name: 'WorkerUnavailableError'
+      name: 'WorkerUnavailableError',
     })
     // 初始 1 次 + 重试 2 次
     expect(computeFileHash).toHaveBeenCalledTimes(3)
@@ -204,7 +217,9 @@ describe('computeAndCacheHash', () => {
     const { mtimeMs } = await fs.stat(id)
     computeFileHash.mockResolvedValue(fakeHash(52))
 
-    await expect(computeAndCacheHash(id, mtimeMs + 5000)).rejects.toThrow('文件被修改')
+    await expect(computeAndCacheHash(id, mtimeMs + 5000)).rejects.toThrow(
+      '文件被修改',
+    )
     expect(getModelMeta(id)?.hash).toBeUndefined()
   })
 })
@@ -241,9 +256,9 @@ describe('requestHashWarmup（队列消费）', () => {
       requestHashWarmup(
         [
           { id: a, size: sa.size, mtimeMs: sa.mtimeMs },
-          { id: b, size: sb.size, mtimeMs: sb.mtimeMs }
+          { id: b, size: sb.size, mtimeMs: sb.mtimeMs },
         ],
-        { mode: 'full', full: true, delayMs: 0 }
+        { mode: 'full', full: true, delayMs: 0 },
       )
       await whenWarmupIdle()
       expect(computeFileHash).toHaveBeenCalledTimes(1)
@@ -292,7 +307,8 @@ describe('requestHashWarmup（队列消费）', () => {
 
   it('优先任务插队：详情页打开的模型先于批量队列处理', async () => {
     const batch = []
-    for (let i = 0; i < 3; i++) batch.push(await makeModel(`batch${i}.safetensors`))
+    for (let i = 0; i < 3; i++)
+      batch.push(await makeModel(`batch${i}.safetensors`))
     const hot = await makeModel('hot.safetensors')
     computeFileHash.mockImplementation(async () => fakeHash(5))
     requestHashWarmup(batch, { delayMs: 0 })
@@ -308,7 +324,10 @@ describe('requestHashWarmup（队列消费）', () => {
     const { mtimeMs } = await fs.stat(a)
     let release
     computeFileHash.mockImplementation(
-      () => new Promise((r) => { release = () => r(fakeHash(6)) })
+      () =>
+        new Promise((r) => {
+          release = () => r(fakeHash(6))
+        }),
     )
     // 识别链路先发起计算（进行中），随后批量预热入队同一模型
     const identifyPromise = computeAndCacheHash(a, mtimeMs)
@@ -333,14 +352,16 @@ describe('哈希预热策略（O1：体积预筛 + 按需计算）', () => {
       [
         { id: a, size: stats[0].size, mtimeMs: stats[0].mtimeMs },
         { id: b, size: stats[1].size, mtimeMs: stats[1].mtimeMs },
-        { id: unique, size: stats[2].size, mtimeMs: stats[2].mtimeMs }
+        { id: unique, size: stats[2].size, mtimeMs: stats[2].mtimeMs },
       ],
-      { mode: 'candidates', full: true, delayMs: 0 }
+      { mode: 'candidates', full: true, delayMs: 0 },
     )
     await whenWarmupIdle()
 
     expect(computeFileHash).toHaveBeenCalledTimes(2)
-    expect(computeFileHash.mock.calls.map((call) => call[0]).sort()).toEqual([a, b].sort())
+    expect(computeFileHash.mock.calls.map((call) => call[0]).sort()).toEqual(
+      [a, b].sort(),
+    )
     expect(getModelMeta(unique)).toBeNull()
   })
 
@@ -354,7 +375,7 @@ describe('哈希预热策略（O1：体积预筛 + 按需计算）', () => {
     requestHashWarmup([{ id: a, size: sa.size, mtimeMs: sa.mtimeMs }], {
       mode: 'candidates',
       full: true,
-      delayMs: 0
+      delayMs: 0,
     })
     await whenWarmupIdle()
     expect(computeFileHash).not.toHaveBeenCalled()
@@ -363,7 +384,7 @@ describe('哈希预热策略（O1：体积预筛 + 按需计算）', () => {
     requestHashWarmup([{ id: b, size: sb.size, mtimeMs: sb.mtimeMs }], {
       mode: 'candidates',
       full: false,
-      delayMs: 0
+      delayMs: 0,
     })
     await whenWarmupIdle()
 
@@ -393,11 +414,17 @@ describe('哈希预热策略（O1：体积预筛 + 按需计算）', () => {
     const unique = await makeModel('c14.safetensors', 'u'.repeat(2048))
     computeFileHash.mockResolvedValue(fakeHash(16))
 
-    requestHashWarmup([a, b, unique], { mode: 'candidates', full: true, delayMs: 0 })
+    requestHashWarmup([a, b, unique], {
+      mode: 'candidates',
+      full: true,
+      delayMs: 0,
+    })
     await whenWarmupIdle()
 
     expect(computeFileHash).toHaveBeenCalledTimes(2)
-    expect(computeFileHash.mock.calls.map((call) => call[0]).sort()).toEqual([a, b].sort())
+    expect(computeFileHash.mock.calls.map((call) => call[0]).sort()).toEqual(
+      [a, b].sort(),
+    )
     expect(getModelMeta(unique)).toBeNull()
   })
 
@@ -411,9 +438,9 @@ describe('哈希预热策略（O1：体积预筛 + 按需计算）', () => {
     requestHashWarmup(
       [
         { id: a, size: sa.size, mtimeMs: sa.mtimeMs },
-        { id: b, size: sb.size, mtimeMs: sb.mtimeMs }
+        { id: b, size: sb.size, mtimeMs: sb.mtimeMs },
       ],
-      { mode: 'candidates', full: true, delayMs: 0 }
+      { mode: 'candidates', full: true, delayMs: 0 },
     )
     await whenWarmupIdle()
 
@@ -548,7 +575,13 @@ describe('进度事件推送', () => {
     // 事件序列：开始（active）→ 进度 tick → 完成（inactive）
     expect(events.length).toBe(3)
     expect(events[0]).toMatchObject({ active: true, id, percent: 0, hash: '' })
-    expect(events[1]).toMatchObject({ active: true, id, percent: 50, hashedBytes: 100, totalBytes: 200 })
+    expect(events[1]).toMatchObject({
+      active: true,
+      id,
+      percent: 50,
+      hashedBytes: 100,
+      totalBytes: 200,
+    })
     // FEAT-1：完成事件携带算得的哈希，渲染层据此回填模型对象
     expect(events[2]).toMatchObject({ active: false, id, hash: fakeHash(8) })
   })
@@ -565,7 +598,11 @@ describe('进度事件推送', () => {
     const afterDrain = events.filter((e) => e.done === 2 && e.remaining === 0)
     expect(afterDrain.length).toBeGreaterThanOrEqual(1)
     // 队列清空后 done 归零，供下一轮批量从 0 计数
-    expect(events[events.length - 1]).toMatchObject({ active: false, done: 2, remaining: 0 })
+    expect(events[events.length - 1]).toMatchObject({
+      active: false,
+      done: 2,
+      remaining: 0,
+    })
   })
 
   it('未注册监听器时推送静默忽略，不影响预热', async () => {

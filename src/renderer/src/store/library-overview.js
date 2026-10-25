@@ -14,7 +14,7 @@ export const libraryOverview = reactive({
   data: null,
   warnings: [],
   error: '',
-  loadedAt: 0
+  loadedAt: 0,
 })
 
 /** 请求代际：并发/切库时丢弃过期响应 */

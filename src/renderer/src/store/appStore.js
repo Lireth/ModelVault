@@ -38,11 +38,17 @@ export {
   tagsForType,
   typeInfo,
   subCategoryInfo,
-  defaultSettings
+  defaultSettings,
 } from './state'
 
 // Toast 与确认层
-export { toast, dismissToast, confirmDialog, acceptConfirm, rejectConfirm } from './toast'
+export {
+  toast,
+  dismissToast,
+  confirmDialog,
+  acceptConfirm,
+  rejectConfirm,
+} from './toast'
 
 // 展示格式化
 export { formatSize, formatDate, formatParamSummary } from './format'
@@ -65,7 +71,7 @@ export {
   scanModels,
   cancelScan,
   applyThumbUpdates,
-  applyHashUpdate
+  applyHashUpdate,
 } from './library'
 
 // 筛选派生（含重复模型分组，FEAT-1；自由标签池 F-5）
@@ -76,7 +82,7 @@ export {
   duplicateIdSet,
   duplicateWastedBytes,
   allTags,
-  tagCounts
+  tagCounts,
 } from './filter'
 
 // 全库标签管理（F4：设置页标签管理面板）
@@ -89,18 +95,22 @@ export {
   viewSummary,
   saveCurrentAsView,
   applySavedView,
-  deleteSavedView
+  deleteSavedView,
 } from './saved-views'
 
 // 跨库存储总览（FN-01，按需拉取，不参与当前库派生链）
-export { libraryOverview, loadLibraryOverview, resetLibraryOverview } from './library-overview'
+export {
+  libraryOverview,
+  loadLibraryOverview,
+  resetLibraryOverview,
+} from './library-overview'
 
 // 封面/缩略图展示覆盖（OP-02：避免缩略图回填触发全量派生重算）
 export {
   applyCoverOverrides,
   modelCoverUrl,
   coverThumbUrl,
-  clearCoverOverrides
+  clearCoverOverrides,
 } from './cover-overrides'
 
 // 当前筛选结果导出（FN-04）
@@ -110,11 +120,16 @@ export {
   buildCsv,
   buildMarkdown,
   buildJson,
-  exportModelList
+  exportModelList,
 } from './model-export'
 
 // 模型对比（FN-03）
-export { COMPARE_MAX_MODELS, compareState, openCompare, closeCompare } from './compare'
+export {
+  COMPARE_MAX_MODELS,
+  compareState,
+  openCompare,
+  closeCompare,
+} from './compare'
 
 // 启动自动检查更新（O-3）
 export { updateAvailable, applyUpdateAvailable } from './update'
@@ -126,7 +141,7 @@ export {
   targetDisplayName,
   openTransferToLibrary,
   closeTransfer,
-  confirmTransfer
+  confirmTransfer,
 } from './transfer'
 
 // 查找派生
@@ -163,7 +178,7 @@ export {
   batchDeleteModels,
   batchCivitaiIdentify,
   batchCivitaiImages,
-  requestBatchCancel
+  requestBatchCancel,
 } from './multiselect'
 
 // 详情数据保存与封面操作
@@ -175,11 +190,15 @@ export {
   deleteCover,
   clearCovers,
   clearAllCovers,
-  importCoversFromDrop
+  importCoversFromDrop,
 } from './covers-store'
 
 // Civitai 在线识别与一键补全
-export { civitaiIdentify, civitaiComplete, civitaiImportImages } from './civitai-store'
+export {
+  civitaiIdentify,
+  civitaiComplete,
+  civitaiImportImages,
+} from './civitai-store'
 
 // 单模型操作/即时标注/右键菜单/文件操作（批次 4）/自由标签（F-5）
 export {
@@ -194,5 +213,5 @@ export {
   toggleDisabledModel,
   renameModel,
   moveModelTo,
-  importModels
+  importModels,
 } from './model-actions'

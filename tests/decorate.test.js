@@ -15,7 +15,7 @@ import { fakeUserData } from './setup'
  */
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => fakeUserData), isPackaged: true }
+  app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
 }))
 
 // 缩略图渲染（P2 改造后经隐藏渲染进程）在测试中打桩：
@@ -24,7 +24,7 @@ vi.mock('../src/main/services/thumb-renderer', () => ({
   renderThumbJpeg: vi.fn(),
   renderThumbFromPath: vi.fn(),
   destroyThumbRenderer: vi.fn(),
-  setThumbRenderTimeoutForTests: vi.fn()
+  setThumbRenderTimeoutForTests: vi.fn(),
 }))
 
 // scanner 侧 sidecar 纯函数保持真实实现；findSidecarText 单独可控，
@@ -42,23 +42,32 @@ import {
   setDecorateCachePolicyForTests,
   startThumbDrain,
   clearDeferredOwners,
-  trackDeferredOwner
+  trackDeferredOwner,
 } from '../src/main/ipc/models/decorate'
 import {
   awaitThumbDrain,
   decorateCache,
   getDecorateCacheLimit,
   getThumbDrainPromise,
-  resetDecorateCache
+  resetDecorateCache,
 } from '../src/main/ipc/models/model-state'
-import { loadData, setDataRoot, getModelMeta, setModelMeta, DATA_DIR, COVERS_DIR } from '../src/main/services/store'
+import {
+  loadData,
+  setDataRoot,
+  getModelMeta,
+  setModelMeta,
+  DATA_DIR,
+  COVERS_DIR,
+} from '../src/main/services/store'
 import { findSidecarText } from '../src/main/services/scanner'
 import { clearDeferredJobs } from '../src/main/services/thumbs'
 import * as thumbsModule from '../src/main/services/thumbs'
 import { renderThumbFromPath } from '../src/main/services/thumb-renderer'
 import logger from '../src/main/logger'
 
-const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
+const PNG_MAGIC = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13,
+])
 
 let root
 const roots = []
@@ -74,7 +83,7 @@ function makeModel(id, overrides = {}) {
     type: 'checkpoint',
     size: 10,
     mtimeMs: 1000,
-    ...overrides
+    ...overrides,
   }
 }
 
@@ -106,7 +115,7 @@ describe('decorateModels 元数据装饰', () => {
       nsfw: true,
       rating: 4,
       triggerWords: 'trigger-a',
-      params: { steps: 28, cfgMin: 4, cfgMax: 12, sampler: 'euler' }
+      params: { steps: 28, cfgMin: 4, cfgMax: 12, sampler: 'euler' },
     })
 
     const [decorated] = await decorateModels([makeModel(abs)])
@@ -132,12 +141,17 @@ describe('decorateModels 元数据装饰', () => {
     await fs.writeFile(existsAbs, PNG_MAGIC)
     setModelMeta(abs, {
       cover: `${DATA_DIR}/${COVERS_DIR}/exists.png`,
-      covers: [`${DATA_DIR}/${COVERS_DIR}/exists.png`, `${DATA_DIR}/${COVERS_DIR}/gone.png`]
+      covers: [
+        `${DATA_DIR}/${COVERS_DIR}/exists.png`,
+        `${DATA_DIR}/${COVERS_DIR}/gone.png`,
+      ],
     })
 
     const [decorated] = await decorateModels([makeModel(abs)])
     // gone.png 不存在被过滤，仅保留有效封面
-    expect(decorated.covers.map((c) => c.rel)).toEqual([`${DATA_DIR}/${COVERS_DIR}/exists.png`])
+    expect(decorated.covers.map((c) => c.rel)).toEqual([
+      `${DATA_DIR}/${COVERS_DIR}/exists.png`,
+    ])
     expect(decorated.hasManualCover).toBe(true)
     // 缩略图未命中：登记后台任务，先用原图 URL
     expect(decorated.cover).toBe(existsAbs)
@@ -148,7 +162,9 @@ describe('decorateModels 元数据装饰', () => {
   it('无元数据模型不产生封面，字段取安全默认值', async () => {
     const abs = path.join(root, 'c.ckpt')
     await fs.writeFile(abs, 'x')
-    const [decorated] = await decorateModels([makeModel(abs, { type: 'other', ext: '.ckpt' })])
+    const [decorated] = await decorateModels([
+      makeModel(abs, { type: 'other', ext: '.ckpt' }),
+    ])
     expect(decorated.cover).toBe('')
     expect(decorated.favorite).toBe(false)
     expect(decorated.rating).toBe(0)
@@ -177,7 +193,10 @@ describe('decorateModels 元数据装饰', () => {
   it('自动标签合成：非 lora 类型忽略文件夹标签（checkpoint 仍自动 base）', async () => {
     const abs = path.join(root, 'ck.safetensors')
     await fs.writeFile(abs, 'x')
-    const model = makeModel(abs, { type: 'checkpoint', folderSubCategory: 'role' })
+    const model = makeModel(abs, {
+      type: 'checkpoint',
+      folderSubCategory: 'role',
+    })
     const [decorated] = await decorateModels([model])
     expect(decorated.subCategory).toBe('base')
   })
@@ -203,8 +222,10 @@ describe('decorateModels 元数据装饰', () => {
     await fs.writeFile(abs, 'x')
     const controller = new AbortController()
     controller.abort()
-    await expect(decorateModels([makeModel(abs)], controller.signal)).rejects.toMatchObject({
-      name: 'AbortError'
+    await expect(
+      decorateModels([makeModel(abs)], controller.signal),
+    ).rejects.toMatchObject({
+      name: 'AbortError',
     })
   })
 
@@ -213,7 +234,10 @@ describe('decorateModels 元数据装饰', () => {
     // 头部解析耗时不同），顺序只能由索引回填保证
     const models = []
     for (let i = 0; i < 150; i++) {
-      const abs = path.join(root, `order-${String(i).padStart(3, '0')}.safetensors`)
+      const abs = path.join(
+        root,
+        `order-${String(i).padStart(3, '0')}.safetensors`,
+      )
       await fs.writeFile(abs, 'x')
       models.push(makeModel(abs))
     }
@@ -246,7 +270,9 @@ describe('OPT-04 装饰缓存容量与生命周期', () => {
     expect(decorateCache.size).toBe(6)
 
     // 模拟库内 3 个文件被删除后的全量扫描：容量收敛到 4，陈旧条目清理
-    await decorateModels(models.slice(0, 3), undefined, { adaptCacheSize: true })
+    await decorateModels(models.slice(0, 3), undefined, {
+      adaptCacheSize: true,
+    })
     expect(getDecorateCacheLimit()).toBe(4)
     expect(decorateCache.size).toBe(3)
     const ids = new Set(models.slice(0, 3).map((m) => m.id))
@@ -278,14 +304,14 @@ describe('OPT-07 局部扫描缓存感知 sidecar/封面变化', () => {
     // sidecar 新增不改变模型文件 mtime，默认缓存命中仍返回旧结果
     await fs.writeFile(
       path.join(root, 'late-info-lora.civitai.info'),
-      JSON.stringify({ trainedWords: ['late-trigger'] })
+      JSON.stringify({ trainedWords: ['late-trigger'] }),
     )
     const [cached] = await decorateModels([{ ...model }])
     expect(cached.triggerWords).toBe('')
 
     // 局部扫描携带 forceRefresh：重新读取 sidecar 并导入触发词
     const [refreshed] = await decorateModels([{ ...model }], undefined, {
-      forceRefresh: true
+      forceRefresh: true,
     })
     expect(refreshed.triggerWords).toBe('late-trigger')
     expect(refreshed.triggerWordsSource).toBe('civitai')
@@ -304,7 +330,7 @@ describe('OPT-07 局部扫描缓存感知 sidecar/封面变化', () => {
     expect(cached.cover).toBe('')
 
     const [refreshed] = await decorateModels([{ ...model }], undefined, {
-      forceRefresh: true
+      forceRefresh: true,
     })
     expect(refreshed.cover).toBe(preview)
     expect(refreshed.coverUrl).toContain('mvimg://local/')
@@ -325,10 +351,12 @@ describe('sidecar 导入与用户并发保存的竞态（E3 回归）', () => {
       () =>
         new Promise((resolve) => {
           releaseSidecar = () => resolve('自动导入的备注')
-        })
+        }),
     )
 
-    const pending = decorateModels([makeModel(abs, { type: 'lora', ext: '.ckpt' })])
+    const pending = decorateModels([
+      makeModel(abs, { type: 'lora', ext: '.ckpt' }),
+    ])
     const deadline = Date.now() + 5000
     while (typeof releaseSidecar !== 'function' && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 5))
@@ -362,10 +390,12 @@ describe('sidecar 导入与用户并发保存的竞态（E3 回归）', () => {
       () =>
         new Promise((resolve) => {
           releaseSidecar = () => resolve('sidecar 全文')
-        })
+        }),
     )
 
-    const pending = decorateModels([makeModel(abs, { type: 'lora', ext: '.ckpt' })])
+    const pending = decorateModels([
+      makeModel(abs, { type: 'lora', ext: '.ckpt' }),
+    ])
     const deadline = Date.now() + 5000
     while (typeof releaseSidecar !== 'function' && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 5))
@@ -410,7 +440,9 @@ describe('startThumbDrain 窗口生命周期（A7）', () => {
     await fs.writeFile(path.join(coversDir, 'cover.png'), PNG_MAGIC)
     setModelMeta(abs, { cover: `${DATA_DIR}/${COVERS_DIR}/cover.png` })
     // 缩略图渲染桩：模拟可缩放大图，使缩略图生成真实走完落盘路径
-    vi.mocked(renderThumbFromPath).mockResolvedValue({ jpeg: Buffer.from('fake-jpeg') })
+    vi.mocked(renderThumbFromPath).mockResolvedValue({
+      jpeg: Buffer.from('fake-jpeg'),
+    })
     const [decorated] = await decorateModels([makeModel(abs)])
     return { abs, decorated }
   }
@@ -436,7 +468,9 @@ describe('startThumbDrain 窗口生命周期（A7）', () => {
     // （toImageUrl 对路径做百分位编码，按编码中立的 'thumbs' 目录名断言）
     expect(decorated.coverUrl).toContain('thumbs')
     expect(decorated.coverUrl).not.toBe(urlBefore)
-    const misleading = warnSpy.mock.calls.filter((c) => String(c[0]).includes('后台缩略图生成失败'))
+    const misleading = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes('后台缩略图生成失败'),
+    )
     expect(misleading).toHaveLength(0)
   })
 
@@ -453,21 +487,26 @@ describe('startThumbDrain 窗口生命周期（A7）', () => {
         {
           id: abs,
           coverUrl: expect.stringContaining('thumbs'),
-          coverThumb: { path: expect.any(String), thumbUrl: expect.stringContaining('thumbs') }
-        }
-      ]
+          coverThumb: {
+            path: expect.any(String),
+            thumbUrl: expect.stringContaining('thumbs'),
+          },
+        },
+      ],
     })
   })
 
   it('上一轮 drain 未完成时新一轮排队等待：不并发执行，链尾才清登记（B5）', async () => {
     // spy 真实 drainDeferredThumbs：按调用序挂起，手动释放以控制时序
     const releases = []
-    const drainSpy = vi.spyOn(thumbsModule, 'drainDeferredThumbs').mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          releases.push(() => resolve())
-        })
-    )
+    const drainSpy = vi
+      .spyOn(thumbsModule, 'drainDeferredThumbs')
+      .mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            releases.push(() => resolve())
+          }),
+      )
 
     try {
       const win1 = { isDestroyed: () => false, webContents: { send: vi.fn() } }
@@ -477,7 +516,10 @@ describe('startThumbDrain 窗口生命周期（A7）', () => {
       startThumbDrain(win1) // 第一轮取走任务 1（drain 挂起中）
       // 第二轮的归属登记：第二模型不能走 setupDeferredThumb——同一模型会命中
       // 装饰缓存而不登记任何新任务，导致第二轮被 deferredOwners 空表短路
-      trackDeferredOwner(path.join(root, 'second.safetensors'), path.join(root, 'second.png'))
+      trackDeferredOwner(
+        path.join(root, 'second.safetensors'),
+        path.join(root, 'second.png'),
+      )
       startThumbDrain(win2) // 第二轮登记：必须排队，不得并发启动
 
       // 让出事件循环：排队实现的 spy 调用发生在微任务中。
@@ -507,23 +549,31 @@ describe('健康检查与 civitai 自动导入（F6/F8 集成）', () => {
   async function writeSafetensors(abs, metadata) {
     const header = JSON.stringify({
       weight: { dtype: 'F16', shape: [1], data_offsets: [0, 2] },
-      ...(metadata ? { __metadata__: metadata } : {})
+      ...(metadata ? { __metadata__: metadata } : {}),
     })
     const lenBuf = Buffer.alloc(8)
     lenBuf.writeUInt32LE(Buffer.byteLength(header), 0)
-    await fs.writeFile(abs, Buffer.concat([lenBuf, Buffer.from(header), Buffer.from([1, 2])]))
+    await fs.writeFile(
+      abs,
+      Buffer.concat([lenBuf, Buffer.from(header), Buffer.from([1, 2])]),
+    )
   }
 
   it('0 字节与损坏 safetensors 标记 suspect；合法但无元信息的不标记（F6）', async () => {
     // 0 字节文件（任意扩展名）
     const empty = path.join(root, 'empty.ckpt')
     await fs.writeFile(empty, '')
-    const [d0] = await decorateModels([makeModel(empty, { ext: '.ckpt', type: 'other', size: 0 })])
+    const [d0] = await decorateModels([
+      makeModel(empty, { ext: '.ckpt', type: 'other', size: 0 }),
+    ])
     expect(d0.suspect).toBe(true)
 
     // 损坏 safetensors（垃圾字节，头部不可解析）
     const broken = path.join(root, 'broken.safetensors')
-    await fs.writeFile(broken, Buffer.from('garbage — not a safetensors container!!'))
+    await fs.writeFile(
+      broken,
+      Buffer.from('garbage — not a safetensors container!!'),
+    )
     const [d1] = await decorateModels([makeModel(broken)])
     expect(d1.suspect).toBe(true)
     expect(d1.autoInfo).toBeNull()
@@ -543,7 +593,11 @@ describe('健康检查与 civitai 自动导入（F6/F8 集成）', () => {
     await writeSafetensors(abs, null)
     await fs.writeFile(
       path.join(root, 'girl-lora.civitai.info'),
-      JSON.stringify({ name: 'Girl LoRA', trainedWords: ['cat-girl', 'masterpiece'], nsfw: true })
+      JSON.stringify({
+        name: 'Girl LoRA',
+        trainedWords: ['cat-girl', 'masterpiece'],
+        nsfw: true,
+      }),
     )
     const [decorated] = await decorateModels([makeModel(abs, { type: 'lora' })])
     expect(decorated.triggerWords).toBe('cat-girl, masterpiece')
@@ -560,7 +614,7 @@ describe('健康检查与 civitai 自动导入（F6/F8 集成）', () => {
     await writeSafetensors(abs, null)
     await fs.writeFile(
       path.join(root, 'owned-lora.civitai.info'),
-      JSON.stringify({ trainedWords: ['should-not-apply'] })
+      JSON.stringify({ trainedWords: ['should-not-apply'] }),
     )
     setModelMeta(abs, { triggerWords: '用户已有' })
     const [decorated] = await decorateModels([makeModel(abs, { type: 'lora' })])
@@ -591,9 +645,14 @@ describe('OPT-1 轮播封面复用缩略图管线', () => {
     await fs.writeFile(c1, PNG_MAGIC)
     setModelMeta(abs, {
       cover: `${DATA_DIR}/${COVERS_DIR}/c0.png`,
-      covers: [`${DATA_DIR}/${COVERS_DIR}/c0.png`, `${DATA_DIR}/${COVERS_DIR}/c1.png`]
+      covers: [
+        `${DATA_DIR}/${COVERS_DIR}/c0.png`,
+        `${DATA_DIR}/${COVERS_DIR}/c1.png`,
+      ],
     })
-    vi.mocked(renderThumbFromPath).mockResolvedValue({ jpeg: Buffer.from('fake-jpeg') })
+    vi.mocked(renderThumbFromPath).mockResolvedValue({
+      jpeg: Buffer.from('fake-jpeg'),
+    })
     return { abs, c0, c1 }
   }
 
@@ -612,10 +671,12 @@ describe('OPT-1 轮播封面复用缩略图管线', () => {
     expect(decorated.coverUrl).toContain('thumbs')
     expect(decorated.covers.map((c) => c.thumbUrl)).toEqual([
       expect.stringContaining('thumbs'),
-      expect.stringContaining('thumbs')
+      expect.stringContaining('thumbs'),
     ])
     // O2：同一轮 drain 的两张缩略图完成事件合并为一次 thumbsReady 推送
-    const readyCalls = win.webContents.send.mock.calls.filter((c) => c[0] === 'models:thumbsReady')
+    const readyCalls = win.webContents.send.mock.calls.filter(
+      (c) => c[0] === 'models:thumbsReady',
+    )
     expect(readyCalls).toHaveLength(1)
     // 推送载荷：默认封面条目 coverUrl + coverThumb 双字段；非默认仅 coverThumb
     const updates = readyCalls.flatMap((c) => c[1].updates)
@@ -623,10 +684,16 @@ describe('OPT-1 轮播封面复用缩略图管线', () => {
     const defaultUpdate = updates.find((u) => u.coverUrl)
     const carouselUpdate = updates.find((u) => !u.coverUrl)
     expect(defaultUpdate.id).toBe(abs)
-    expect(defaultUpdate.coverThumb).toEqual({ path: c0, thumbUrl: expect.any(String) })
+    expect(defaultUpdate.coverThumb).toEqual({
+      path: c0,
+      thumbUrl: expect.any(String),
+    })
     expect(carouselUpdate.id).toBe(abs)
     expect(carouselUpdate.coverUrl).toBe('')
-    expect(carouselUpdate.coverThumb).toEqual({ path: c1, thumbUrl: expect.any(String) })
+    expect(carouselUpdate.coverThumb).toEqual({
+      path: c1,
+      thumbUrl: expect.any(String),
+    })
   })
 
   it('缩略图生成后再次装饰命中缓存：thumbUrl 保留且缓存文件不被 prune 误删', async () => {
@@ -650,7 +717,9 @@ describe('OPT-1 轮播封面复用缩略图管线', () => {
     // 同名 sidecar 预览图（非 covers 成员）
     const sidecar = path.join(root, 'sidecar-default.png')
     await fs.writeFile(sidecar, PNG_MAGIC)
-    vi.mocked(renderThumbFromPath).mockResolvedValue({ jpeg: Buffer.from('fake-jpeg') })
+    vi.mocked(renderThumbFromPath).mockResolvedValue({
+      jpeg: Buffer.from('fake-jpeg'),
+    })
 
     const win = { isDestroyed: () => false, webContents: { send: vi.fn() } }
     const [decorated] = await decorateModels([makeModel(abs)])
@@ -684,7 +753,7 @@ describe('metaSignature（装饰缓存签名，A-08 记忆化表征）', () => {
       hash: '',
       noteSource: '',
       triggerWordsSource: '',
-      ...overrides
+      ...overrides,
     }
   }
 
@@ -712,8 +781,10 @@ describe('metaSignature（装饰缓存签名，A-08 记忆化表征）', () => {
     ['params', { params: { steps: 28 } }],
     ['hash', { hash: 'a'.repeat(64) }],
     ['noteSource', { noteSource: 'sidecar' }],
-    ['triggerWordsSource', { triggerWordsSource: 'sidecar' }]
+    ['triggerWordsSource', { triggerWordsSource: 'sidecar' }],
   ])('%s 变化时签名改变', (_key, overrides) => {
-    expect(metaSignature(baseMeta(overrides))).not.toBe(metaSignature(baseMeta()))
+    expect(metaSignature(baseMeta(overrides))).not.toBe(
+      metaSignature(baseMeta()),
+    )
   })
 })

@@ -5,7 +5,7 @@ import {
   setModelTags,
   subCategoryInfo,
   tagsForType,
-  toast
+  toast,
 } from '../../store/appStore'
 
 /**
@@ -17,11 +17,13 @@ import {
 
 defineProps({
   /** 表单本地副本（MetaForm 持有，reactive 对象） */
-  form: { type: Object, required: true }
+  form: { type: Object, required: true },
 })
 
 /** 当前生效的分类标签展示信息（自动分配：文件夹名 / Civitai 类型 / 大模型基底） */
-const currentSubInfo = computed(() => subCategoryInfo(selectedModel.value?.subCategory))
+const currentSubInfo = computed(() =>
+  subCategoryInfo(selectedModel.value?.subCategory),
+)
 
 /* ---------------- 自由标签（F-5，即时保存） ---------------- */
 
@@ -54,7 +56,10 @@ async function addTag() {
 async function removeTag(tag) {
   const model = selectedModel.value
   if (!model) return
-  await setModelTags(model.id, tags.value.filter((x) => x !== tag))
+  await setModelTags(
+    model.id,
+    tags.value.filter((x) => x !== tag),
+  )
 }
 </script>
 
@@ -62,16 +67,29 @@ async function removeTag(tag) {
   <h3>命名与标签</h3>
   <label class="field">
     <span>备注名（卡片显示名，为空时显示文件名）</span>
-    <input v-model="form.alias" type="text" maxlength="100" :placeholder="selectedModel.name" />
+    <input
+      v-model="form.alias"
+      type="text"
+      maxlength="100"
+      :placeholder="selectedModel.name"
+    />
   </label>
   <div class="tags-editor">
     <!-- 二级分类标签：自动分配（所在文件夹名 / Civitai 类型 / 大模型基底），只读 -->
     <span
       v-if="tagsForType(selectedModel.type) && currentSubInfo"
       class="subcat-chip locked"
-      :style="{ borderColor: currentSubInfo.color, color: currentSubInfo.color }"
-      :title="selectedModel.type === 'checkpoint' ? '大模型自动标注为基底模型' : '二级分类（自动分配）'"
-    >{{ currentSubInfo.label }}</span>
+      :style="{
+        borderColor: currentSubInfo.color,
+        color: currentSubInfo.color,
+      }"
+      :title="
+        selectedModel.type === 'checkpoint'
+          ? '大模型自动标注为基底模型'
+          : '二级分类（自动分配）'
+      "
+      >{{ currentSubInfo.label }}</span
+    >
     <!-- 自由标签（F-5）：即时保存，与二级分类标签（固定枚举）互补 -->
     <span v-for="t in tags" :key="t" class="tag-chip">
       {{ t }}
@@ -81,7 +99,9 @@ async function removeTag(tag) {
         :title="`删除标签「${t}」`"
         :aria-label="`删除标签「${t}」`"
         @click="removeTag(t)"
-      >×</button>
+      >
+        ×
+      </button>
     </span>
     <input
       v-model="newTag"
@@ -93,8 +113,12 @@ async function removeTag(tag) {
       @keydown.enter.prevent="addTag"
     />
   </div>
-  <span v-if="tagsForType(selectedModel.type) && !currentSubInfo" class="subcat-hint">
-    二级分类未分配（可在文件所在文件夹按标签命名自动匹配，或使用批量栏「Civitai 分配标签」，仅 LoRA）
+  <span
+    v-if="tagsForType(selectedModel.type) && !currentSubInfo"
+    class="subcat-hint"
+  >
+    二级分类未分配（可在文件所在文件夹按标签命名自动匹配，或使用批量栏「Civitai
+    分配标签」，仅 LoRA）
   </span>
 </template>
 

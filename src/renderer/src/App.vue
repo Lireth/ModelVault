@@ -1,5 +1,11 @@
 <script setup>
-import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  onMounted,
+  onUnmounted,
+  ref,
+} from 'vue'
 import TopBar from './components/TopBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import BatchBar from './components/BatchBar.vue'
@@ -15,13 +21,23 @@ import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import VirtualModelList from './components/VirtualModelList.vue'
 import { useGlobalShortcuts } from './composables/useGlobalShortcuts'
 import { useMainProcessEvents } from './composables/useMainProcessEvents'
-import { filteredModels, initApp, relocateFolder, scanModels, state } from './store/appStore'
+import {
+  filteredModels,
+  initApp,
+  relocateFolder,
+  scanModels,
+  state,
+} from './store/appStore'
 
 // 次要页面异步加载（OP-01）：设置页/统计页仅在打开时渲染，按需加载可显著
 // 缩减启动期首包解析与执行量。详情页保持同步引用——其 Teleport 骨架常驻，
 // 延迟加载不会节省启动成本，且同步挂载保证关闭时的焦点归还时序不变。
-const SettingsPage = defineAsyncComponent(() => import('./components/SettingsPage.vue'))
-const StatsPage = defineAsyncComponent(() => import('./components/StatsPage.vue'))
+const SettingsPage = defineAsyncComponent(
+  () => import('./components/SettingsPage.vue'),
+)
+const StatsPage = defineAsyncComponent(
+  () => import('./components/StatsPage.vue'),
+)
 
 /**
  * 应用根布局（O-4/O-5 拆分）：
@@ -100,23 +116,43 @@ onUnmounted(() => {
           <!-- 离线横幅（F1-offline 双形态之一）：库路径失效但有缓存模型可展示时
                顶部提示（区别于金色 scan-error-bar 的普通扫描失败）；空库时的
                全屏形态由 LibraryStates 离线分支承担 -->
-          <div v-if="state.folderMissing && state.models.length > 0" class="offline-bar">
+          <div
+            v-if="state.folderMissing && state.models.length > 0"
+            class="offline-bar"
+          >
             <span class="offline-text" :title="state.folder">
-              ⚠ 模型文件夹不可用：{{ state.folder }}（可能被移动、重命名或盘符未挂载，重新定位后标注自动恢复）
+              ⚠ 模型文件夹不可用：{{
+                state.folder
+              }}（可能被移动、重命名或盘符未挂载，重新定位后标注自动恢复）
             </span>
-            <button class="offline-btn" @click="relocateFolder">重新定位</button>
+            <button class="offline-btn" @click="relocateFolder">
+              重新定位
+            </button>
             <button class="offline-btn" @click="scanModels()">重试</button>
           </div>
 
           <!-- 重扫失败但仍有上次结果：顶部错误横幅（B15）；
                离线态语义更明确，优先由离线形态承担（F1-offline） -->
-          <div v-if="state.scanError && !state.folderMissing && !state.scanning && state.models.length > 0" class="scan-error-bar alert-gold">
-            <span class="scan-error-text" :title="state.scanError">⚠ {{ state.scanError }}</span>
+          <div
+            v-if="
+              state.scanError &&
+              !state.folderMissing &&
+              !state.scanning &&
+              state.models.length > 0
+            "
+            class="scan-error-bar alert-gold"
+          >
+            <span class="scan-error-text" :title="state.scanError"
+              >⚠ {{ state.scanError }}</span
+            >
             <button class="scan-error-retry" @click="scanModels">重试</button>
           </div>
 
           <!-- 搜索 + 排序 + 视图切换（选择文件夹后显示；两种离线形态都隐藏工具栏） -->
-          <LibraryToolbar v-if="state.folder && !state.folderMissing" ref="toolbarRef" />
+          <LibraryToolbar
+            v-if="state.folder && !state.folderMissing"
+            ref="toolbarRef"
+          />
 
           <!-- 启动/引导/扫描/失败/空库五态互斥；库中有模型时渲染默认插槽 -->
           <LibraryStates>
@@ -130,14 +166,30 @@ onUnmounted(() => {
             <!-- 空结果（有筛选条件时保留结果栏，便于切换分类/取消收藏筛选/清空搜索） -->
             <div v-if="filteredModels.length === 0" class="empty-state">
               <div class="empty-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.3 15.3 20.5 20.5" /></svg>
+                <svg
+                  viewBox="0 0 24 24"
+                  width="52"
+                  height="52"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linecap="round"
+                >
+                  <circle cx="10.5" cy="10.5" r="6.5" />
+                  <path d="M15.3 15.3 20.5 20.5" />
+                </svg>
               </div>
               <h2>没有匹配的模型</h2>
-              <p class="muted">当前筛选或搜索条件下没有模型，试试切换分类、取消「收藏」筛选或清空搜索词。</p>
+              <p class="muted">
+                当前筛选或搜索条件下没有模型，试试切换分类、取消「收藏」筛选或清空搜索词。
+              </p>
             </div>
 
             <!-- 模型列表区：网格/紧凑列表双视图，虚拟滚动仅渲染视口附近行 -->
-            <VirtualModelGrid v-if="state.viewMode === 'grid'" :models="filteredModels" />
+            <VirtualModelGrid
+              v-if="state.viewMode === 'grid'"
+              :models="filteredModels"
+            />
             <VirtualModelList v-else :models="filteredModels" />
           </LibraryStates>
         </template>
@@ -209,7 +261,9 @@ onUnmounted(() => {
   background: transparent;
   color: var(--warning);
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 
 .offline-btn:hover {
@@ -243,7 +297,9 @@ onUnmounted(() => {
   background: transparent;
   color: var(--favorite);
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 
 .scan-error-retry:hover {

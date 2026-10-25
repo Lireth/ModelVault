@@ -14,7 +14,7 @@ import { fakeUserData } from './setup'
  */
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => fakeUserData), isPackaged: true }
+  app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
 }))
 
 // 缩略图渲染打桩：真实实现依赖 Electron BrowserWindow，此处模拟其响应协议
@@ -22,10 +22,14 @@ vi.mock('../src/main/services/thumb-renderer', () => ({
   renderThumbJpeg: vi.fn(),
   renderThumbFromPath: vi.fn(),
   destroyThumbRenderer: vi.fn(),
-  setThumbRenderTimeoutForTests: vi.fn()
+  setThumbRenderTimeoutForTests: vi.fn(),
 }))
 
-import { getThumbPathDeferred, drainDeferredThumbs, clearDeferredJobs } from '../src/main/services/thumbs'
+import {
+  getThumbPathDeferred,
+  drainDeferredThumbs,
+  clearDeferredJobs,
+} from '../src/main/services/thumbs'
 import { setDataRoot } from '../src/main/services/store'
 import { renderThumbFromPath } from '../src/main/services/thumb-renderer'
 
@@ -38,8 +42,12 @@ let source
  * @param {{mode?: 'wide'|'small'|'broken'}} opts
  */
 function mockRender({ mode = 'wide' } = {}) {
-  if (mode === 'wide') vi.mocked(renderThumbFromPath).mockResolvedValue({ jpeg: Buffer.from('fake-jpeg') })
-  else if (mode === 'small') vi.mocked(renderThumbFromPath).mockResolvedValue({ small: true })
+  if (mode === 'wide')
+    vi.mocked(renderThumbFromPath).mockResolvedValue({
+      jpeg: Buffer.from('fake-jpeg'),
+    })
+  else if (mode === 'small')
+    vi.mocked(renderThumbFromPath).mockResolvedValue({ small: true })
   else vi.mocked(renderThumbFromPath).mockRejectedValue(new Error('解码失败'))
 }
 
@@ -81,7 +89,11 @@ describe('缩略图生成（P2：渲染进程解码）', () => {
     expect(renderThumbFromPath).toHaveBeenCalledTimes(1)
     const [url, opts] = vi.mocked(renderThumbFromPath).mock.calls[0]
     expect(url).toBe(`mvimg://local/${encodeURIComponent(source)}`)
-    expect(opts).toEqual({ thumbWidth: 640, minSourceWidth: 720, quality: 0.82 })
+    expect(opts).toEqual({
+      thumbWidth: 640,
+      minSourceWidth: 720,
+      quality: 0.82,
+    })
     // 缩略图文件已写入且内容为渲染进程回传的 JPEG 字节
     const written = await fs.readFile(thumbPath)
     expect(written.toString()).toBe('fake-jpeg')
@@ -115,13 +127,22 @@ describe('延迟生成队列（扫描装饰阶段专用）', () => {
     // 首次：缓存未命中，登记后台任务，先回退原图
     expect(await getThumbPathDeferred(source)).toBe('')
     const generated = []
-    await drainDeferredThumbs((absCover, thumbPath) => generated.push({ absCover, thumbPath }))
+    await drainDeferredThumbs((absCover, thumbPath) =>
+      generated.push({ absCover, thumbPath }),
+    )
     expect(generated).toHaveLength(1)
     expect(generated[0].absCover).toBe(source)
-    expect(await fs.access(generated[0].thumbPath).then(() => true, () => false)).toBe(true)
+    expect(
+      await fs.access(generated[0].thumbPath).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(true)
     // 队列已清空：再次 drain 无动作
     const again = []
-    await drainDeferredThumbs((absCover, thumbPath) => again.push({ absCover, thumbPath }))
+    await drainDeferredThumbs((absCover, thumbPath) =>
+      again.push({ absCover, thumbPath }),
+    )
     expect(again).toHaveLength(0)
   })
 
@@ -139,7 +160,9 @@ describe('延迟生成队列（扫描装饰阶段专用）', () => {
     expect(await getThumbPathDeferred(source)).toBe('')
     await fs.rm(source)
     const generated = []
-    await drainDeferredThumbs((absCover, thumbPath) => generated.push({ absCover, thumbPath }))
+    await drainDeferredThumbs((absCover, thumbPath) =>
+      generated.push({ absCover, thumbPath }),
+    )
     expect(generated).toHaveLength(0)
   })
 
@@ -149,13 +172,17 @@ describe('延迟生成队列（扫描装饰阶段专用）', () => {
     expect(await getThumbPathDeferred(source)).toBe('')
     clearDeferredJobs()
     const cleared = []
-    await drainDeferredThumbs((absCover, thumbPath) => cleared.push({ absCover, thumbPath }))
+    await drainDeferredThumbs((absCover, thumbPath) =>
+      cleared.push({ absCover, thumbPath }),
+    )
     expect(cleared).toHaveLength(0)
 
     // 对照：未清空时同场景 drain 正常生成并回调
     expect(await getThumbPathDeferred(source)).toBe('')
     const kept = []
-    await drainDeferredThumbs((absCover, thumbPath) => kept.push({ absCover, thumbPath }))
+    await drainDeferredThumbs((absCover, thumbPath) =>
+      kept.push({ absCover, thumbPath }),
+    )
     expect(kept).toHaveLength(1)
     expect(kept[0].absCover).toBe(source)
   })

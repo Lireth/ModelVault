@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   buildLibraryOverview,
-  normalizeLibraryRoots
+  normalizeLibraryRoots,
 } from '../src/main/services/library-overview'
 
 /**
@@ -20,7 +20,7 @@ function entry(root, rel, hash, size = 0) {
     relPath: rel,
     name: path.basename(rel),
     size,
-    hash
+    hash,
   }
 }
 
@@ -32,22 +32,28 @@ function library(root, models, overrides = {}) {
     source: 'index',
     savedAt: Date.now(),
     models,
-    ...overrides
+    ...overrides,
   }
 }
 
 describe('normalizeLibraryRoots', () => {
   it('去空、去重（Windows 大小写不敏感）并保持顺序', () => {
     const lower = ROOT_A.toLowerCase()
-    expect(normalizeLibraryRoots([ROOT_A, lower, '', null, ROOT_B])).toEqual([ROOT_A, ROOT_B])
+    expect(normalizeLibraryRoots([ROOT_A, lower, '', null, ROOT_B])).toEqual([
+      ROOT_A,
+      ROOT_B,
+    ])
   })
 })
 
 describe('buildLibraryOverview', () => {
   it('跨库同哈希聚合：副本数、可释放空间与库内统计', () => {
     const overview = buildLibraryOverview([
-      library(ROOT_A, [entry(ROOT_A, 'a.safetensors', 'h1', 100), entry(ROOT_A, 'b.safetensors', 'h2', 50)]),
-      library(ROOT_B, [entry(ROOT_B, 'c.safetensors', 'h1', 100)])
+      library(ROOT_A, [
+        entry(ROOT_A, 'a.safetensors', 'h1', 100),
+        entry(ROOT_A, 'b.safetensors', 'h2', 50),
+      ]),
+      library(ROOT_B, [entry(ROOT_B, 'c.safetensors', 'h1', 100)]),
     ])
 
     expect(overview.totals.libraries).toBe(2)
@@ -59,15 +65,16 @@ describe('buildLibraryOverview', () => {
     expect(overview.totals.wastedBytes).toBe(100)
     expect(overview.crossLibraryGroups[0].libraries).toBe(2)
     expect(overview.crossLibraryGroups[0].members).toHaveLength(2)
-    for (const lib of overview.libraries) expect(lib.localDuplicateGroups).toBe(0)
+    for (const lib of overview.libraries)
+      expect(lib.localDuplicateGroups).toBe(0)
   })
 
   it('仅库内重复不进入跨库组，但计数用于指引现有「重复」筛选', () => {
     const overview = buildLibraryOverview([
       library(ROOT_A, [
         entry(ROOT_A, 'x.safetensors', 'local', 10),
-        entry(ROOT_A, 'y.safetensors', 'local', 10)
-      ])
+        entry(ROOT_A, 'y.safetensors', 'local', 10),
+      ]),
     ])
     expect(overview.totals.crossGroups).toBe(0)
     expect(overview.libraries[0].localDuplicateGroups).toBe(1)
@@ -76,8 +83,12 @@ describe('buildLibraryOverview', () => {
 
   it('元数据回退（size=0）时标记容量未知，仍统计副本数', () => {
     const overview = buildLibraryOverview([
-      library(ROOT_A, [entry(ROOT_A, 'a.safetensors', 'h', 0)], { source: 'store' }),
-      library(ROOT_B, [entry(ROOT_B, 'b.safetensors', 'h', 0)], { source: 'store' })
+      library(ROOT_A, [entry(ROOT_A, 'a.safetensors', 'h', 0)], {
+        source: 'store',
+      }),
+      library(ROOT_B, [entry(ROOT_B, 'b.safetensors', 'h', 0)], {
+        source: 'store',
+      }),
     ])
     expect(overview.totals.crossGroups).toBe(1)
     expect(overview.totals.redundantCopies).toBe(1)
@@ -90,7 +101,7 @@ describe('buildLibraryOverview', () => {
     const now = Date.now()
     const overview = buildLibraryOverview(
       [library(ROOT_A, [], { savedAt: now - 8 * 24 * 3600 * 1000 })],
-      now
+      now,
     )
     expect(overview.libraries[0].staleIndex).toBe(true)
   })
@@ -99,7 +110,7 @@ describe('buildLibraryOverview', () => {
     const duplicate = entry(ROOT_A, 'one.safetensors', 'h1', 100)
     const overview = buildLibraryOverview([
       library(ROOT_A, [duplicate, { ...duplicate }]),
-      library(ROOT_B, [entry(ROOT_B, 'two.safetensors', 'h1', 100)])
+      library(ROOT_B, [entry(ROOT_B, 'two.safetensors', 'h1', 100)]),
     ])
     expect(overview.totals.crossGroups).toBe(1)
     expect(overview.crossLibraryGroups[0].copies).toBe(2)

@@ -19,8 +19,19 @@ const TAG_CANDIDATES_LIMIT = 15
 
 /** 各 dtype 的单元素字节数（safetensors 规范类型；未知类型按 0 计） */
 const DTYPE_BYTES = {
-  F64: 8, I64: 8, U64: 8, F32: 4, I32: 4, F16: 2, BF16: 2,
-  I16: 2, I8: 1, U8: 1, BOOL: 1, F8_E4M3: 1, F8_E5M2: 1
+  F64: 8,
+  I64: 8,
+  U64: 8,
+  F32: 4,
+  I32: 4,
+  F16: 2,
+  BF16: 2,
+  I16: 2,
+  I8: 1,
+  U8: 1,
+  BOOL: 1,
+  F8_E4M3: 1,
+  F8_E5M2: 1,
 }
 
 /**
@@ -113,14 +124,16 @@ export function extractSafetensorsInfo(metadata) {
     // 展示字段
     title: str(metadata['modelspec.title']),
     author: str(metadata['modelspec.author']),
-    baseModel: str(metadata.ss_base_model_version) || str(metadata['modelspec.architecture']),
+    baseModel:
+      str(metadata.ss_base_model_version) ||
+      str(metadata['modelspec.architecture']),
     networkModule: str(metadata.ss_network_module),
     networkAlpha: Number.isFinite(alpha) ? alpha : null,
     precision: str(metadata.ss_mixed_precision) || str(metadata.ss_precision),
     // 可填入表单的推荐值（分辨率区间约定与详情页单值输入一致：宽高取较小/较大值）
     resMin: res ? res.min : null,
     resMax: res ? res.max : null,
-    triggerCandidates
+    triggerCandidates,
   }
 }
 
@@ -154,13 +167,17 @@ function inferArchitecture(keys) {
   let sdxlLora = false
   let classicLora = false
   for (const key of keys) {
-    if (key.startsWith('model.diffusion_model.') || key.startsWith('first_stage_model.')) {
+    if (
+      key.startsWith('model.diffusion_model.') ||
+      key.startsWith('first_stage_model.')
+    ) {
       hasCheckpoint = true
     }
     if (key.startsWith('conditioner.embedders.1.')) hasCond2 = true
     else if (key.startsWith('conditioner.embedders.0.')) hasCond1 = true
     if (key.startsWith('text_encoders.')) hasTextEncoders = true
-    if (key.includes('double_blocks') || key.includes('single_blocks')) flux = true
+    if (key.includes('double_blocks') || key.includes('single_blocks'))
+      flux = true
     else if (key.includes('joint_blocks')) sd3 = true
     if (key.startsWith('lora_te2_')) sdxlLora = true
     if (
@@ -201,7 +218,8 @@ function classifyTensorKey(key) {
   ) {
     return 'textEncoder'
   }
-  if (key.startsWith('first_stage_model.') || key.startsWith('lora_vae')) return 'vae'
+  if (key.startsWith('first_stage_model.') || key.startsWith('lora_vae'))
+    return 'vae'
   if (
     key.startsWith('model.diffusion_model.') ||
     key.startsWith('diffusion_model.') ||
@@ -251,7 +269,8 @@ export function analyzeTensorIndex(header) {
     keys.push(key)
   }
   if (tensorCount === 0) return null
-  const classified = componentBytes.textEncoder + componentBytes.unet + componentBytes.vae
+  const classified =
+    componentBytes.textEncoder + componentBytes.unet + componentBytes.vae
   const componentRatios = { textEncoder: 0, unet: 0, vae: 0 }
   if (classified > 0) {
     for (const k of Object.keys(componentRatios)) {
@@ -261,14 +280,18 @@ export function analyzeTensorIndex(header) {
   const dtypes = [...dtypeParams.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
-    .map(([dtype, params]) => ({ dtype, params, tensors: dtypeTensors.get(dtype) || 0 }))
+    .map(([dtype, params]) => ({
+      dtype,
+      params,
+      tensors: dtypeTensors.get(dtype) || 0,
+    }))
   return {
     tensorCount,
     paramCount,
     dtypeMain: dtypes.length > 0 ? dtypes[0].dtype : '',
     dtypes,
     architecture: inferArchitecture(keys),
-    componentRatios
+    componentRatios,
   }
 }
 
@@ -281,12 +304,12 @@ export function hasUsefulInfo(info) {
   if (!info) return false
   return Boolean(
     info.title ||
-      info.author ||
-      info.baseModel ||
-      info.networkModule ||
-      info.precision ||
-      Number.isFinite(info.resMin) ||
-      info.triggerCandidates.length > 0
+    info.author ||
+    info.baseModel ||
+    info.networkModule ||
+    info.precision ||
+    Number.isFinite(info.resMin) ||
+    info.triggerCandidates.length > 0,
   )
 }
 
@@ -300,7 +323,7 @@ const EMPTY_INFO = Object.freeze({
   precision: '',
   resMin: null,
   resMax: null,
-  triggerCandidates: []
+  triggerCandidates: [],
 })
 
 /**
@@ -319,7 +342,10 @@ export function parseHeaderBuffer(headerBuf) {
     return null
   }
   if (!header || typeof header !== 'object') return null
-  const info = extractSafetensorsInfo(header?.__metadata__) || { ...EMPTY_INFO, triggerCandidates: [] }
+  const info = extractSafetensorsInfo(header?.__metadata__) || {
+    ...EMPTY_INFO,
+    triggerCandidates: [],
+  }
   const tensorStats = analyzeTensorIndex(header)
   if (!hasUsefulInfo(info) && !tensorStats) return null
   return { ...info, tensorStats: tensorStats || null }

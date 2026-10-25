@@ -68,7 +68,8 @@ let throttleChain = Promise.resolve()
  * @param {number} ms 间隔毫秒数
  */
 export function setCivitaiApiInterval(ms) {
-  civitaiApiIntervalMs = Number.isFinite(ms) && ms >= 0 ? ms : CIVITAI_API_MIN_INTERVAL_MS
+  civitaiApiIntervalMs =
+    Number.isFinite(ms) && ms >= 0 ? ms : CIVITAI_API_MIN_INTERVAL_MS
 }
 
 function sleep(ms) {
@@ -89,7 +90,13 @@ function throttleCivitaiApi() {
 
 /** 是否为需要跟随的 HTTP 重定向状态 */
 function isRedirectStatus(status) {
-  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308
+  return (
+    status === 301 ||
+    status === 302 ||
+    status === 303 ||
+    status === 307 ||
+    status === 308
+  )
 }
 
 /** Electron 网络栈对 fetch manual 重定向不支持时的特征错误 */
@@ -121,7 +128,7 @@ function probeRedirectTarget(url, options) {
       url,
       redirect: 'manual',
       useSessionCookies: true,
-      headers: headersRecord
+      headers: headersRecord,
     })
     let settled = false
     const finish = (ok, value) => {
@@ -137,17 +144,20 @@ function probeRedirectTarget(url, options) {
       }
       return headers
     }
-    request.on('redirect', (statusCode, _method, redirectUrl, responseHeaders) => {
-      const headers = headersOf(responseHeaders)
-      // ClientRequest 的取消方法是 abort（无 cancel/destroy；用可选链防御
-      // Electron 版本 API 差异，避免事件处理器内抛错演变成主进程致命错误）
-      request.abort?.()
-      finish(true, {
-        status: statusCode,
-        location: headers.get('location') || redirectUrl || '',
-        headers
-      })
-    })
+    request.on(
+      'redirect',
+      (statusCode, _method, redirectUrl, responseHeaders) => {
+        const headers = headersOf(responseHeaders)
+        // ClientRequest 的取消方法是 abort（无 cancel/destroy；用可选链防御
+        // Electron 版本 API 差异，避免事件处理器内抛错演变成主进程致命错误）
+        request.abort?.()
+        finish(true, {
+          status: statusCode,
+          location: headers.get('location') || redirectUrl || '',
+          headers,
+        })
+      },
+    )
     request.on('response', (incoming) => {
       // 未发 redirect 事件直接拿到响应（3xx 且无跳转目标等）：按终态返回空体
       // （IncomingMessage 无 destroy 方法，经 request.abort 中止 body 传输）
@@ -155,7 +165,7 @@ function probeRedirectTarget(url, options) {
       finish(true, {
         status: incoming.statusCode || 0,
         location: '',
-        headers: headersOf(incoming.headers)
+        headers: headersOf(incoming.headers),
       })
     })
     request.on('error', (err) => finish(false, err))
@@ -166,10 +176,14 @@ function probeRedirectTarget(url, options) {
         finish(false, new DOMException('已终止', 'AbortError'))
         return
       }
-      signal.addEventListener('abort', () => {
-        request.abort?.()
-        finish(false, new DOMException('已终止', 'AbortError'))
-      }, { once: true })
+      signal.addEventListener(
+        'abort',
+        () => {
+          request.abort?.()
+          finish(false, new DOMException('已终止', 'AbortError'))
+        },
+        { once: true },
+      )
     }
     request.end()
   })
@@ -200,7 +214,10 @@ async function fetchWithAllowedRedirects(url, options, isAllowed, label) {
       const probe = await probeRedirectTarget(current, options)
       // 无跳转目标的 3xx 按终态响应处理（调用方按非 ok 分支报错，与
       // 规范的 manual 语义一致；body 恒为空——3xx 本就无有效载荷）
-      response = new Response('', { status: probe.status, headers: probe.headers })
+      response = new Response('', {
+        status: probe.status,
+        headers: probe.headers,
+      })
     }
     if (!isRedirectStatus(response.status)) return response
     const location = response.headers.get('location')
@@ -231,7 +248,9 @@ function isAllowedCivitaiApiUrl(url) {
     const parsed = new URL(url)
     if (parsed.protocol !== 'https:') return false
     const host = parsed.hostname.toLowerCase()
-    return CIVITAI_BASE_HOSTS.some((base) => host === base || host.endsWith(`.${base}`))
+    return CIVITAI_BASE_HOSTS.some(
+      (base) => host === base || host.endsWith(`.${base}`),
+    )
   } catch {
     return false
   }
@@ -258,15 +277,22 @@ async function fetchCivitaiApi(url, options = {}) {
         url,
         { ...options, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
         isAllowedCivitaiApiUrl,
-        'Civitai 请求'
+        'Civitai 请求',
       )
     } catch (err) {
-      return { networkError: err instanceof Error ? err : new Error(String(err)) }
+      return {
+        networkError: err instanceof Error ? err : new Error(String(err)),
+      }
     }
     if (response.status === 429 && attempt < CIVITAI_429_MAX_RETRIES) {
       const ra = Number(response.headers.get('retry-after'))
-      const waitSec = Number.isFinite(ra) && ra >= 0 ? Math.min(ra, CIVITAI_429_MAX_WAIT_S) : CIVITAI_429_FALLBACK_WAIT_S
-      logger.warn(`Civitai API 限流（429），${waitSec}s 后重试（第 ${attempt + 1}/${CIVITAI_429_MAX_RETRIES} 次）`)
+      const waitSec =
+        Number.isFinite(ra) && ra >= 0
+          ? Math.min(ra, CIVITAI_429_MAX_WAIT_S)
+          : CIVITAI_429_FALLBACK_WAIT_S
+      logger.warn(
+        `Civitai API 限流（429），${waitSec}s 后重试（第 ${attempt + 1}/${CIVITAI_429_MAX_RETRIES} 次）`,
+      )
       await sleep(waitSec * 1000)
       continue
     }
@@ -287,7 +313,9 @@ export function isAllowedCivitaiImageUrl(url) {
     const parsed = new URL(String(url))
     if (parsed.protocol !== 'https:') return false
     const host = parsed.hostname.toLowerCase()
-    return CIVITAI_BASE_HOSTS.some((base) => host === base || host.endsWith(`.${base}`))
+    return CIVITAI_BASE_HOSTS.some(
+      (base) => host === base || host.endsWith(`.${base}`),
+    )
   } catch {
     return false
   }
@@ -299,7 +327,7 @@ const MIME_EXT = {
   'image/png': '.png',
   'image/webp': '.webp',
   'image/gif': '.gif',
-  'image/bmp': '.bmp'
+  'image/bmp': '.bmp',
 }
 
 /**
@@ -315,7 +343,12 @@ const MIME_EXT = {
  * @param {{priority?: boolean}} [options] priority=true 为前台任务（OPT-08）
  * @returns {Promise<string>} 64 位十六进制哈希
  */
-export async function computeFileHash(filePath, signal, onProgress, options = {}) {
+export async function computeFileHash(
+  filePath,
+  signal,
+  onProgress,
+  options = {},
+) {
   return computeFileHashOffThread(filePath, signal, onProgress, options)
 }
 
@@ -330,11 +363,14 @@ export async function fetchCivitaiVersionByHash(hash) {
   const { response, networkError } = await fetchCivitaiApi(
     `${CIVITAI_API_BASE}/model-versions/by-hash/${hash}`,
     {
-      headers: { 'User-Agent': 'ModelVault', Accept: 'application/json' }
-    }
+      headers: { 'User-Agent': 'ModelVault', Accept: 'application/json' },
+    },
   )
   if (networkError) {
-    if (networkError.name === 'TimeoutError' || networkError.name === 'AbortError') {
+    if (
+      networkError.name === 'TimeoutError' ||
+      networkError.name === 'AbortError'
+    ) {
       return { found: false, error: '请求超时，请检查网络后重试' }
     }
     return { found: false, error: `网络请求失败: ${networkError.message}` }
@@ -344,12 +380,19 @@ export async function fetchCivitaiVersionByHash(hash) {
     return { found: false }
   }
   if (!response.ok) {
-    return { found: false, error: `Civitai 查询失败（HTTP ${response.status}）` }
+    return {
+      found: false,
+      error: `Civitai 查询失败（HTTP ${response.status}）`,
+    }
   }
   let raw
   try {
     raw = JSON.parse(
-      await readResponseTextLimited(response, MAX_API_JSON_BYTES, 'Civitai 响应')
+      await readResponseTextLimited(
+        response,
+        MAX_API_JSON_BYTES,
+        'Civitai 响应',
+      ),
     )
   } catch (err) {
     return { found: false, error: `响应解析失败: ${err.message}` }
@@ -388,7 +431,9 @@ export function normalizeVersionInfo(raw) {
   const versionId = Number.isFinite(raw.id) ? raw.id : null
   if (!Number.isFinite(modelId) || !Number.isFinite(versionId)) return null
   const trainedWords = Array.isArray(raw.trainedWords)
-    ? raw.trainedWords.filter((w) => typeof w === 'string' && w.trim()).map((w) => w.trim())
+    ? raw.trainedWords
+        .filter((w) => typeof w === 'string' && w.trim())
+        .map((w) => w.trim())
     : []
   const media = Array.isArray(raw.images)
     ? raw.images
@@ -398,7 +443,7 @@ export function normalizeVersionInfo(raw) {
             typeof item === 'object' &&
             (item.type === 'image' || item.type === 'video') &&
             typeof item.url === 'string' &&
-            item.url.startsWith('https://')
+            item.url.startsWith('https://'),
         )
         .slice(0, MAX_IMAGES)
     : []
@@ -408,7 +453,9 @@ export function normalizeVersionInfo(raw) {
       url: img.url,
       width: Number.isFinite(img.width) ? img.width : 0,
       height: Number.isFinite(img.height) ? img.height : 0,
-      nsfw: img.nsfw === true || (Array.isArray(img.nsfwLevel) && img.nsfwLevel.length > 0)
+      nsfw:
+        img.nsfw === true ||
+        (Array.isArray(img.nsfwLevel) && img.nsfwLevel.length > 0),
     }))
   const videos = media
     .filter((item) => item.type === 'video')
@@ -416,12 +463,15 @@ export function normalizeVersionInfo(raw) {
       url: video.url,
       width: Number.isFinite(video.width) ? video.width : 0,
       height: Number.isFinite(video.height) ? video.height : 0,
-      nsfw: video.nsfw === true || (Array.isArray(video.nsfwLevel) && video.nsfwLevel.length > 0),
+      nsfw:
+        video.nsfw === true ||
+        (Array.isArray(video.nsfwLevel) && video.nsfwLevel.length > 0),
       // Civitai 部分视频条目提供缩略图；不可信 URL 仅接受 https 字符串
       thumbnailUrl:
-        typeof video.thumbnailUrl === 'string' && video.thumbnailUrl.startsWith('https://')
+        typeof video.thumbnailUrl === 'string' &&
+        video.thumbnailUrl.startsWith('https://')
           ? video.thumbnailUrl
-          : ''
+          : '',
     }))
   return {
     url: `https://civitai.red/models/${modelId}?modelVersionId=${versionId}`,
@@ -431,7 +481,7 @@ export function normalizeVersionInfo(raw) {
     trainedWords,
     description: typeof raw.description === 'string' ? raw.description : '',
     images,
-    videos
+    videos,
   }
 }
 
@@ -444,7 +494,9 @@ export function normalizeVersionInfo(raw) {
  */
 export function parseCivitaiModelId(url) {
   if (typeof url !== 'string') return null
-  const m = url.match(/^https:\/\/civitai\.(?:com|red)\/models\/(\d+)(?:[/?#]|$)/)
+  const m = url.match(
+    /^https:\/\/civitai\.(?:com|red)\/models\/(\d+)(?:[/?#]|$)/,
+  )
   return m ? m[1] : null
 }
 
@@ -460,11 +512,14 @@ export async function fetchCivitaiModelType(modelId) {
   const { response, networkError } = await fetchCivitaiApi(
     `${CIVITAI_API_BASE}/models/${modelId}`,
     {
-      headers: { 'User-Agent': 'ModelVault', Accept: 'application/json' }
-    }
+      headers: { 'User-Agent': 'ModelVault', Accept: 'application/json' },
+    },
   )
   if (networkError) {
-    if (networkError.name === 'TimeoutError' || networkError.name === 'AbortError') {
+    if (
+      networkError.name === 'TimeoutError' ||
+      networkError.name === 'AbortError'
+    ) {
       return { found: false, error: '请求超时，请检查网络后重试' }
     }
     return { found: false, error: `网络请求失败: ${networkError.message}` }
@@ -473,21 +528,35 @@ export async function fetchCivitaiModelType(modelId) {
     return { found: false }
   }
   if (!response.ok) {
-    return { found: false, error: `Civitai 查询失败（HTTP ${response.status}）` }
+    return {
+      found: false,
+      error: `Civitai 查询失败（HTTP ${response.status}）`,
+    }
   }
   let raw
   try {
     raw = JSON.parse(
-      await readResponseTextLimited(response, MAX_API_JSON_BYTES, 'Civitai 响应')
+      await readResponseTextLimited(
+        response,
+        MAX_API_JSON_BYTES,
+        'Civitai 响应',
+      ),
     )
   } catch (err) {
     return { found: false, error: `响应解析失败: ${err.message}` }
   }
-  if (!raw || typeof raw !== 'object' || typeof raw.type !== 'string' || !raw.type.trim()) {
+  if (
+    !raw ||
+    typeof raw !== 'object' ||
+    typeof raw.type !== 'string' ||
+    !raw.type.trim()
+  ) {
     return { found: false, error: '响应数据格式异常' }
   }
   const tags = Array.isArray(raw.tags)
-    ? raw.tags.filter((t) => typeof t === 'string' && t.trim()).map((t) => t.trim())
+    ? raw.tags
+        .filter((t) => typeof t === 'string' && t.trim())
+        .map((t) => t.trim())
     : []
   return { found: true, type: raw.type.trim(), tags }
 }
@@ -556,12 +625,12 @@ export async function fetchCivitaiImage(url) {
     {
       headers: {
         Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-        Referer: 'https://civitai.red/'
+        Referer: 'https://civitai.red/',
       },
-      signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS)
+      signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS),
     },
     isAllowedCivitaiImageUrl,
-    'Civitai 图片请求'
+    'Civitai 图片请求',
   )
 }
 
@@ -583,7 +652,7 @@ const RANGE_HEADER_RE = /^bytes=\d{0,16}-\d{0,16}$/
 export async function fetchCivitaiVideo(url, range = '') {
   const headers = {
     Accept: 'video/mp4,video/webm,video/*;q=0.9,*/*;q=0.5',
-    Referer: 'https://civitai.red/'
+    Referer: 'https://civitai.red/',
   }
   if (typeof range === 'string' && range.trim()) {
     const value = range.trim()
@@ -593,7 +662,9 @@ export async function fetchCivitaiVideo(url, range = '') {
     if (RANGE_HEADER_RE.test(value)) {
       headers.Range = value
     } else {
-      logger.warn(`已丢弃非法 Range 请求头（按无 Range 回源）: ${value.slice(0, 60)}`)
+      logger.warn(
+        `已丢弃非法 Range 请求头（按无 Range 回源）: ${value.slice(0, 60)}`,
+      )
     }
   }
   // 头部阶段超时：此前完全无 signal——CDN 连接挂死时协议请求无限悬挂、
@@ -605,13 +676,16 @@ export async function fetchCivitaiVideo(url, range = '') {
       url,
       { headers, signal: controller.signal },
       isAllowedCivitaiImageUrl,
-      'Civitai 视频请求'
+      'Civitai 视频请求',
     )
   } catch (err) {
     if (controller.signal.aborted && err?.name === 'AbortError') {
-      throw new Error(`视频上游 ${VIDEO_HEADER_TIMEOUT_MS / 1000}s 内未响应（连接挂起），已中止`, {
-        cause: err
-      })
+      throw new Error(
+        `视频上游 ${VIDEO_HEADER_TIMEOUT_MS / 1000}s 内未响应（连接挂起），已中止`,
+        {
+          cause: err,
+        },
+      )
     }
     throw err
   } finally {
@@ -643,7 +717,10 @@ export async function downloadCivitaiImage(url) {
   try {
     response = await fetchCivitaiImage(url)
   } catch (err) {
-    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+    if (
+      err instanceof Error &&
+      (err.name === 'TimeoutError' || err.name === 'AbortError')
+    ) {
       return { error: '图片下载超时' }
     }
     return { error: `图片下载失败: ${err.message}` }
@@ -661,7 +738,10 @@ export async function downloadCivitaiImage(url) {
     return { error: '图片内容为空' }
   }
   // 内容校验：按响应 Content-Type 推断扩展名，URL 路径扩展名兜底
-  const mime = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
+  const mime = String(response.headers.get('content-type') || '')
+    .split(';')[0]
+    .trim()
+    .toLowerCase()
   let ext = MIME_EXT[mime] || ''
   if (!ext) {
     const m = new URL(url).pathname.match(/\.(jpe?g|png|webp|gif|bmp)$/i)

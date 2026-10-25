@@ -26,22 +26,22 @@ vi.mock('electron', () => ({
     getPath: vi.fn(() => fakeUserData),
     isPackaged: true,
     relaunch,
-    exit
+    exit,
   },
-  dialog: { showErrorBox }
+  dialog: { showErrorBox },
 }))
 
 vi.mock('../src/main/logger', () => ({
-  default: { error: loggerError, warn: loggerWarn, info: vi.fn() }
+  default: { error: loggerError, warn: loggerWarn, info: vi.fn() },
 }))
 
 vi.mock('../src/main/services/store', () => ({
   flushStoreSave,
-  flushSettingsSave
+  flushSettingsSave,
 }))
 
 vi.mock('../src/main/windows/mainWindow', () => ({
-  flushWindowStateSave
+  flushWindowStateSave,
 }))
 
 /** 每个用例以全新模块实例运行（处理中标记为模块级状态，跨用例需复位） */
@@ -52,7 +52,7 @@ async function freshHandler() {
 }
 
 const sampleError = Object.assign(new Error('boom'), {
-  stack: 'Error: boom\n    at somewhere'
+  stack: 'Error: boom\n    at somewhere',
 })
 
 beforeEach(() => {
@@ -78,8 +78,12 @@ describe('handleUncaughtException', () => {
     await handleUncaughtException(sampleError)
 
     // 异常信息入日志（堆栈优先）
-    expect(loggerError).toHaveBeenCalledWith(expect.stringContaining('未捕获的异常'))
-    expect(loggerError).toHaveBeenCalledWith(expect.stringContaining('Error: boom'))
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.stringContaining('未捕获的异常'),
+    )
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.stringContaining('Error: boom'),
+    )
     // 顺序：先尽力保存数据，再提示用户，最后重启
     expect(timeline).toEqual(['flush', 'dialog', 'relaunch', 'exit'])
     // 设置、元数据与窗口状态三路都尽力落盘（与 quit.js 退出路径对齐）
@@ -87,7 +91,7 @@ describe('handleUncaughtException', () => {
     expect(flushWindowStateSave).toHaveBeenCalledTimes(1)
     expect(showErrorBox).toHaveBeenCalledWith(
       expect.stringContaining('模匣'),
-      expect.stringContaining('重启')
+      expect.stringContaining('重启'),
     )
     expect(exit).toHaveBeenCalledWith(1)
   })
@@ -110,7 +114,7 @@ describe('handleUncaughtException', () => {
       () =>
         new Promise((resolve) => {
           releaseFlush = resolve
-        })
+        }),
     )
 
     const first = handleUncaughtException(sampleError)
@@ -133,7 +137,9 @@ describe('handleUncaughtException', () => {
     })
 
     await expect(handleUncaughtException(sampleError)).resolves.toBeUndefined()
-    expect(loggerWarn).toHaveBeenCalledWith(expect.stringContaining('错误框展示失败'))
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.stringContaining('错误框展示失败'),
+    )
     expect(relaunch).toHaveBeenCalledTimes(1)
     expect(exit).toHaveBeenCalledWith(1)
   })

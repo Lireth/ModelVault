@@ -9,7 +9,7 @@ import {
   state,
   toggleMultiSelectMode,
   toggleSelect,
-  toggleSelectAllFiltered
+  toggleSelectAllFiltered,
 } from '../src/renderer/src/store/appStore'
 
 /**
@@ -28,7 +28,10 @@ const id = (name) => `D:\\models\\${name}.safetensors`
 beforeEach(() => {
   vi.stubGlobal('window', { api: { models: {} } })
   vi.stubGlobal('document', {
-    documentElement: { classList: { toggle: vi.fn() }, style: { setProperty: vi.fn() } }
+    documentElement: {
+      classList: { toggle: vi.fn() },
+      style: { setProperty: vi.fn() },
+    },
   })
   state.folder = ''
   state.scanning = false
@@ -65,8 +68,8 @@ function seedModels(names, extra = {}) {
       triggerWords: '',
       coverUrl: '',
       covers: [],
-      ...extra
-    }))
+      ...extra,
+    })),
   )
 }
 
@@ -170,8 +173,8 @@ describe('反选（invertSelectionFiltered）', () => {
         subCategory: '',
         triggerWords: '',
         coverUrl: '',
-        covers: []
-      }))
+        covers: [],
+      })),
     )
     state.multiSelect.active = true
     toggleSelect(id('a'))
@@ -186,12 +189,72 @@ describe('重复清理选择（selectRedundantDuplicates，FEAT-1）', () => {
   /** 注入两个重复组 + 独立模型：x 组（哈希 h1）、y 组（哈希 h2）、z 独立 */
   function seedDupes() {
     replaceModels([
-      { id: id('x1'), name: 'x1', type: 'lora', size: 100, mtimeMs: 1, favorite: false, rating: 0, hash: 'h1', covers: [] },
-      { id: id('x2'), name: 'x2', type: 'lora', size: 100, mtimeMs: 2, favorite: false, rating: 4, hash: 'h1', covers: [] },
-      { id: id('x3'), name: 'x3', type: 'lora', size: 100, mtimeMs: 3, favorite: true, rating: 0, hash: 'h1', covers: [] },
-      { id: id('y1'), name: 'y1', type: 'lora', size: 50, mtimeMs: 1, favorite: false, rating: 0, hash: 'h2', covers: [] },
-      { id: id('y2'), name: 'y2', type: 'lora', size: 50, mtimeMs: 2, favorite: false, rating: 0, hash: 'h2', covers: [] },
-      { id: id('z'), name: 'z', type: 'lora', size: 10, mtimeMs: 1, favorite: true, rating: 5, hash: 'h3', covers: [] }
+      {
+        id: id('x1'),
+        name: 'x1',
+        type: 'lora',
+        size: 100,
+        mtimeMs: 1,
+        favorite: false,
+        rating: 0,
+        hash: 'h1',
+        covers: [],
+      },
+      {
+        id: id('x2'),
+        name: 'x2',
+        type: 'lora',
+        size: 100,
+        mtimeMs: 2,
+        favorite: false,
+        rating: 4,
+        hash: 'h1',
+        covers: [],
+      },
+      {
+        id: id('x3'),
+        name: 'x3',
+        type: 'lora',
+        size: 100,
+        mtimeMs: 3,
+        favorite: true,
+        rating: 0,
+        hash: 'h1',
+        covers: [],
+      },
+      {
+        id: id('y1'),
+        name: 'y1',
+        type: 'lora',
+        size: 50,
+        mtimeMs: 1,
+        favorite: false,
+        rating: 0,
+        hash: 'h2',
+        covers: [],
+      },
+      {
+        id: id('y2'),
+        name: 'y2',
+        type: 'lora',
+        size: 50,
+        mtimeMs: 2,
+        favorite: false,
+        rating: 0,
+        hash: 'h2',
+        covers: [],
+      },
+      {
+        id: id('z'),
+        name: 'z',
+        type: 'lora',
+        size: 10,
+        mtimeMs: 1,
+        favorite: true,
+        rating: 5,
+        hash: 'h3',
+        covers: [],
+      },
     ])
   }
 
@@ -206,8 +269,28 @@ describe('重复清理选择（selectRedundantDuplicates，FEAT-1）', () => {
 
   it('评分与收藏相同时保留最新文件（mtime 新者优先）', () => {
     replaceModels([
-      { id: id('a1'), name: 'a1', type: 'lora', size: 10, mtimeMs: 5, favorite: true, rating: 2, hash: 'h1', covers: [] },
-      { id: id('a2'), name: 'a2', type: 'lora', size: 10, mtimeMs: 9, favorite: true, rating: 2, hash: 'h1', covers: [] }
+      {
+        id: id('a1'),
+        name: 'a1',
+        type: 'lora',
+        size: 10,
+        mtimeMs: 5,
+        favorite: true,
+        rating: 2,
+        hash: 'h1',
+        covers: [],
+      },
+      {
+        id: id('a2'),
+        name: 'a2',
+        type: 'lora',
+        size: 10,
+        mtimeMs: 9,
+        favorite: true,
+        rating: 2,
+        hash: 'h1',
+        covers: [],
+      },
     ])
     expect(selectRedundantDuplicates()).toBe(1)
     expect(state.multiSelect.ids).toEqual([id('a1')])
@@ -261,8 +344,8 @@ describe('全选判定（allFilteredSelected）', () => {
         subCategory: '',
         triggerWords: '',
         coverUrl: '',
-        covers: []
-      }))
+        covers: [],
+      })),
     )
     state.showFavoritesOnly = true // 筛选结果为 [a, b]
     state.multiSelect.active = true
@@ -281,7 +364,9 @@ describe('全选判定（allFilteredSelected）', () => {
   })
 
   it('万级模型全选行为正确（回归性能优化的行为不变性）', () => {
-    seedModels(Array.from({ length: 10000 }, (_, i) => `m${String(i).padStart(5, '0')}`))
+    seedModels(
+      Array.from({ length: 10000 }, (_, i) => `m${String(i).padStart(5, '0')}`),
+    )
     state.multiSelect.active = true
     toggleSelectAllFiltered()
     expect(state.multiSelect.ids).toHaveLength(10000)

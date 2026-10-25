@@ -10,7 +10,7 @@ import {
   replaceSettings,
   scanModels,
   state,
-  toast
+  toast,
 } from '../../store/appStore'
 
 /**
@@ -38,14 +38,16 @@ const healthReport = ref(null)
 
 /** 带手动示例图的模型数（确认对话框文案用，随扫描/标注即时刷新） */
 const modelsWithCovers = computed(
-  () => state.models.filter((m) => (m.covers || []).length > 0).length
+  () => state.models.filter((m) => (m.covers || []).length > 0).length,
 )
 
 /** 体检报告摘要（无报告时为 null） */
 const healthSummary = computed(() => healthReport.value?.summary || null)
 
 /** 是否存在可安全修复的问题（重复哈希只报告，不自动处理） */
-const canRepairHealth = computed(() => (healthSummary.value?.repairable || 0) > 0)
+const canRepairHealth = computed(
+  () => (healthSummary.value?.repairable || 0) > 0,
+)
 
 /** 报告中的少量示例，便于用户判断是否需要修复 */
 const healthExamples = computed(() => {
@@ -57,7 +59,7 @@ const healthExamples = computed(() => {
       `缺失模型文件 ${report.missingFiles.length} 个：${report.missingFiles
         .slice(0, 3)
         .map((x) => x.rel)
-        .join('、')}${report.missingFiles.length > 3 ? '…' : ''}`
+        .join('、')}${report.missingFiles.length > 3 ? '…' : ''}`,
     )
   }
   if (report.brokenCovers.length) {
@@ -65,7 +67,7 @@ const healthExamples = computed(() => {
       `失效封面引用 ${report.brokenCovers.length} 条：${report.brokenCovers
         .slice(0, 3)
         .map((x) => x.cover)
-        .join('、')}${report.brokenCovers.length > 3 ? '…' : ''}`
+        .join('、')}${report.brokenCovers.length > 3 ? '…' : ''}`,
     )
   }
   if (report.orphanCovers.length) {
@@ -73,17 +75,17 @@ const healthExamples = computed(() => {
       `孤儿封面 ${report.orphanCovers.length} 个：${report.orphanCovers
         .slice(0, 3)
         .map((x) => x.name)
-        .join('、')}${report.orphanCovers.length > 3 ? '…' : ''}`
+        .join('、')}${report.orphanCovers.length > 3 ? '…' : ''}`,
     )
   }
   if (report.duplicateHashes.length) {
     lines.push(
-      `重复哈希 ${report.duplicateHashes.length} 组（仅提示，不自动删除任何模型文件）`
+      `重复哈希 ${report.duplicateHashes.length} 组（仅提示，不自动删除任何模型文件）`,
     )
   }
   if (report.summary.inaccessible > 0) {
     lines.push(
-      `无法访问 ${report.summary.inaccessible} 项（可能是磁盘离线/权限不足，已跳过自动修复）`
+      `无法访问 ${report.summary.inaccessible} 项（可能是磁盘离线/权限不足，已跳过自动修复）`,
     )
   }
   return lines
@@ -125,7 +127,7 @@ async function onRepairHealth() {
       `· 移除 ${summary.missingFiles} 条“模型文件已缺失”的标注\n` +
       `· 清理 ${summary.brokenCovers} 条失效封面引用\n` +
       `· 将 ${summary.orphanCovers} 个无人引用的封面移入 .modelvault/trash（可手动恢复）\n` +
-      `修复前会自动备份 .modelvault/store.json。重复哈希仅保留提示，不会删除模型文件。是否继续？`
+      `修复前会自动备份 .modelvault/store.json。重复哈希仅保留提示，不会删除模型文件。是否继续？`,
   )
   if (!ok) return
   healthRepairing.value = true
@@ -139,7 +141,7 @@ async function onRepairHealth() {
     toast(
       'success',
       `修复完成：移除 ${repaired.removedMetadata || 0} 条标注、修正 ${repaired.fixedCoverModels || 0} 个模型封面、移动 ${repaired.movedOrphanCovers || 0} 个孤儿封面` +
-        (res.backupPath ? '（元数据已备份）' : '')
+        (res.backupPath ? '（元数据已备份）' : ''),
     )
     if (res.dataResetSkipped) {
       toast('warn', '元数据曾因损坏重置，本次已跳过孤儿封面清理以避免误删')
@@ -164,7 +166,7 @@ async function onClearAllCovers() {
     return
   }
   const ok = await confirmDialog(
-    `确定移除当前模型库中 ${count} 个模型的全部示例图吗？图片文件将被删除且不可恢复，模型文件与参数/备注等标注不受影响。`
+    `确定移除当前模型库中 ${count} 个模型的全部示例图吗？图片文件将被删除且不可恢复，模型文件与参数/备注等标注不受影响。`,
   )
   if (!ok) return
   clearingCovers.value = true
@@ -188,7 +190,11 @@ async function onExportBackup(options = { mode: 'full' }) {
       return
     }
     const modeLabel =
-      res.mode === 'selected' ? '当前筛选' : res.mode === 'metadata' ? '仅标注' : '完整'
+      res.mode === 'selected'
+        ? '当前筛选'
+        : res.mode === 'metadata'
+          ? '仅标注'
+          : '完整'
     const scope = res.library
       ? `${res.models} 个模型标注${res.covers ? ` / ${res.covers} 张封面` : ''}`
       : '应用设置（当前库暂无标注数据）'
@@ -204,7 +210,7 @@ async function onExportBackup(options = { mode: 'full' }) {
 function onExportSelectedBackup() {
   onExportBackup({
     mode: 'selected',
-    ids: filteredModels.value.map((m) => m.id)
+    ids: filteredModels.value.map((m) => m.id),
   })
 }
 
@@ -253,10 +259,12 @@ async function onImportBackup() {
     if (res.libraryRestored?.partial) {
       parts.push(
         `合并 ${res.libraryRestored.models} 个模型标注（新增 ${res.libraryRestored.added || 0} / 更新 ${res.libraryRestored.updated || 0}` +
-          `${res.libraryRestored.covers ? ` / ${res.libraryRestored.covers} 张封面` : ''}）`
+          `${res.libraryRestored.covers ? ` / ${res.libraryRestored.covers} 张封面` : ''}）`,
       )
     } else if (res.libraryRestored) {
-      parts.push(`模型库数据（${res.libraryRestored.models} 个模型 / ${res.libraryRestored.covers} 张封面）`)
+      parts.push(
+        `模型库数据（${res.libraryRestored.models} 个模型 / ${res.libraryRestored.covers} 张封面）`,
+      )
     }
     if (parts.length === 0) {
       toast('warn', '备份中无可恢复的数据')
@@ -279,22 +287,41 @@ async function onImportBackup() {
       <div class="setting-info">
         <span class="setting-title">备份与恢复</span>
         <span class="setting-desc">
-          导出：应用设置 + 当前模型库的标注（备注 / 参数 / 收藏 / 评分）与封面，打包为 zip 文件。
+          导出：应用设置 + 当前模型库的标注（备注 / 参数 / 收藏 /
+          评分）与封面，打包为 zip 文件。
           缩略图为可再生缓存，不纳入备份。可导出完整备份、当前筛选结果（含封面）
-          或仅标注（不含封面）。恢复完整备份时选择目标文件夹，已有数据先留 .bak；
-          选择性/仅标注备份会合并到当前激活库（同名标注覆盖，恢复前自动快照 store.json）。
+          或仅标注（不含封面）。恢复完整备份时选择目标文件夹，已有数据先留
+          .bak；
+          选择性/仅标注备份会合并到当前激活库（同名标注覆盖，恢复前自动快照
+          store.json）。
         </span>
       </div>
       <div class="setting-actions">
-        <button class="btn" :disabled="backupBusy" @click="onExportBackup()">导出完整备份…</button>
+        <button class="btn" :disabled="backupBusy" @click="onExportBackup()">
+          导出完整备份…
+        </button>
         <button
           class="btn"
           :disabled="backupBusy || filteredModels.length === 0"
-          :title="filteredModels.length === 0 ? '当前筛选结果为空' : '仅备份当前筛选结果的标注与封面'"
+          :title="
+            filteredModels.length === 0
+              ? '当前筛选结果为空'
+              : '仅备份当前筛选结果的标注与封面'
+          "
           @click="onExportSelectedBackup"
-        >导出当前筛选…</button>
-        <button class="btn" :disabled="backupBusy" @click="onExportMetadataBackup">仅导出标注…</button>
-        <button class="btn" :disabled="backupBusy" @click="onImportBackup">从备份恢复…</button>
+        >
+          导出当前筛选…
+        </button>
+        <button
+          class="btn"
+          :disabled="backupBusy"
+          @click="onExportMetadataBackup"
+        >
+          仅导出标注…
+        </button>
+        <button class="btn" :disabled="backupBusy" @click="onImportBackup">
+          从备份恢复…
+        </button>
       </div>
     </div>
 
@@ -303,14 +330,32 @@ async function onImportBackup() {
       <div class="setting-info">
         <span class="setting-title">模型清单导出</span>
         <span class="setting-desc">
-          将当前搜索/筛选/排序结果导出为清单文件（CSV 可用 Excel 打开，Markdown 为表格，
-          JSON 保留结构化字段与推荐参数），便于外部整理、分享与审阅。
+          将当前搜索/筛选/排序结果导出为清单文件（CSV 可用 Excel 打开，Markdown
+          为表格， JSON 保留结构化字段与推荐参数），便于外部整理、分享与审阅。
         </span>
       </div>
       <div class="setting-actions">
-        <button class="btn" :disabled="exportListBusy" @click="onExportList('csv')">CSV（Excel）…</button>
-        <button class="btn" :disabled="exportListBusy" @click="onExportList('markdown')">Markdown 表格…</button>
-        <button class="btn" :disabled="exportListBusy" @click="onExportList('json')">JSON 数据…</button>
+        <button
+          class="btn"
+          :disabled="exportListBusy"
+          @click="onExportList('csv')"
+        >
+          CSV（Excel）…
+        </button>
+        <button
+          class="btn"
+          :disabled="exportListBusy"
+          @click="onExportList('markdown')"
+        >
+          Markdown 表格…
+        </button>
+        <button
+          class="btn"
+          :disabled="exportListBusy"
+          @click="onExportList('json')"
+        >
+          JSON 数据…
+        </button>
       </div>
     </div>
 
@@ -323,7 +368,11 @@ async function onImportBackup() {
         </span>
       </div>
       <div class="setting-actions">
-        <button class="btn" :disabled="healthBusy || healthRepairing" @click="onCheckHealth">
+        <button
+          class="btn"
+          :disabled="healthBusy || healthRepairing"
+          @click="onCheckHealth"
+        >
           {{ healthBusy ? '检查中…' : '检查模型库' }}
         </button>
       </div>
@@ -333,7 +382,8 @@ async function onImportBackup() {
       <div class="health-report-head">
         <span>体检结果</span>
         <span class="health-counts">
-          模型 {{ healthReport.totalModels }} · 封面引用 {{ healthReport.totalCoverRefs }}
+          模型 {{ healthReport.totalModels }} · 封面引用
+          {{ healthReport.totalCoverRefs }}
         </span>
       </div>
       <div v-if="healthExamples.length === 0" class="health-ok">
@@ -349,10 +399,20 @@ async function onImportBackup() {
         <button
           class="btn btn-danger"
           :disabled="!canRepairHealth || healthRepairing || healthBusy"
-          :title="canRepairHealth ? '修复前会自动备份 store.json' : '没有可安全自动修复的问题'"
+          :title="
+            canRepairHealth
+              ? '修复前会自动备份 store.json'
+              : '没有可安全自动修复的问题'
+          "
           @click="onRepairHealth"
-        >{{ healthRepairing ? '修复中…' : '一键修复' }}</button>
-        <button class="btn" :disabled="healthBusy || healthRepairing" @click="healthReport = null">
+        >
+          {{ healthRepairing ? '修复中…' : '一键修复' }}
+        </button>
+        <button
+          class="btn"
+          :disabled="healthBusy || healthRepairing"
+          @click="healthReport = null"
+        >
           关闭结果
         </button>
       </div>
@@ -370,9 +430,15 @@ async function onImportBackup() {
         <button
           class="btn btn-danger"
           :disabled="clearingCovers || modelsWithCovers === 0"
-          :title="modelsWithCovers === 0 ? '当前模型库没有可清理的示例图' : '移除当前模型库全部模型的示例图'"
+          :title="
+            modelsWithCovers === 0
+              ? '当前模型库没有可清理的示例图'
+              : '移除当前模型库全部模型的示例图'
+          "
           @click="onClearAllCovers"
-        >{{ clearingCovers ? '清理中…' : '移除全部' }}</button>
+        >
+          {{ clearingCovers ? '清理中…' : '移除全部' }}
+        </button>
       </div>
     </div>
   </div>

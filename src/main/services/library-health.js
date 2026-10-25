@@ -11,7 +11,7 @@ import {
   getDataDir,
   getDataFilePath,
   resolveCover,
-  toRelKey
+  toRelKey,
 } from './store-paths'
 import {
   flushStoreSave,
@@ -20,7 +20,7 @@ import {
   getReferencedCovers,
   removeModelMeta,
   setModelMeta,
-  wasDataReset
+  wasDataReset,
 } from './store-meta'
 
 /**
@@ -135,47 +135,62 @@ async function collectHealth(root) {
         rel,
         // 文件 mtime 与缓存不一致时哈希可能已过期，不参与重复判定
         hash:
-          meta.hash && (!meta.hashMtime || Math.abs(stat.mtimeMs - meta.hashMtime) < 2000)
+          meta.hash &&
+          (!meta.hashMtime || Math.abs(stat.mtimeMs - meta.hashMtime) < 2000)
             ? meta.hash
-            : ''
+            : '',
       })
 
-      const refs = [...new Set([...(meta.covers || []), meta.cover].filter(Boolean))]
+      const refs = [
+        ...new Set([...(meta.covers || []), meta.cover].filter(Boolean)),
+      ]
       for (const coverRel of refs) {
         totalCoverRefs += 1
         if (!isManagedCoverRel(coverRel)) {
-          brokenCovers.push({ model: rel, cover: coverRel, reason: 'invalid-path' })
+          brokenCovers.push({
+            model: rel,
+            cover: coverRel,
+            reason: 'invalid-path',
+          })
           continue
         }
         const absCover = resolveCover(coverRel)
         const outcome = await statOutcome(absCover)
         if (outcome.stat) continue
         if (isMissingCode(outcome.code)) {
-          brokenCovers.push({ model: rel, cover: coverRel, reason: 'missing-file' })
+          brokenCovers.push({
+            model: rel,
+            cover: coverRel,
+            reason: 'missing-file',
+          })
         } else {
-          inaccessibleCovers.push({ model: rel, cover: coverRel, code: outcome.code })
+          inaccessibleCovers.push({
+            model: rel,
+            cover: coverRel,
+            code: outcome.code,
+          })
         }
       }
     },
-    HEALTH_IO_CONCURRENCY
+    HEALTH_IO_CONCURRENCY,
   )
 
   missingFiles.sort((a, b) => a.rel.localeCompare(b.rel))
   inaccessibleFiles.sort((a, b) => a.rel.localeCompare(b.rel))
   brokenCovers.sort(
-    (a, b) => a.model.localeCompare(b.model) || a.cover.localeCompare(b.cover)
+    (a, b) => a.model.localeCompare(b.model) || a.cover.localeCompare(b.cover),
   )
   inaccessibleCovers.sort(
-    (a, b) => a.model.localeCompare(b.model) || a.cover.localeCompare(b.cover)
+    (a, b) => a.model.localeCompare(b.model) || a.cover.localeCompare(b.cover),
   )
 
   // 孤儿封面：文件存在但没有任何元数据引用
   const coversDir = getCoversDir()
   let coverEntries = []
   try {
-    coverEntries = (await fs.readdir(coversDir, { withFileTypes: true })).filter((e) =>
-      e.isFile()
-    )
+    coverEntries = (
+      await fs.readdir(coversDir, { withFileTypes: true })
+    ).filter((e) => e.isFile())
   } catch (err) {
     if (err.code !== 'ENOENT') throw err
   }
@@ -212,8 +227,10 @@ async function collectHealth(root) {
       inaccessible: inaccessibleFiles.length + inaccessibleCovers.length,
       // 元数据曾被损坏重置时，孤儿封面清理跳过（沿用既有安全策略）
       repairable:
-        missingFiles.length + brokenCovers.length + (dataReset ? 0 : orphanCovers.length)
-    }
+        missingFiles.length +
+        brokenCovers.length +
+        (dataReset ? 0 : orphanCovers.length),
+    },
   }
 }
 
@@ -229,7 +246,10 @@ async function backupStoreFile(root) {
   const backups = (await fs.readdir(dir))
     .filter((name) => name.startsWith('store-health-'))
     .sort()
-  for (const old of backups.slice(0, Math.max(0, backups.length - MAX_HEALTH_BACKUPS))) {
+  for (const old of backups.slice(
+    0,
+    Math.max(0, backups.length - MAX_HEALTH_BACKUPS),
+  )) {
     await fs.rm(path.join(dir, old), { force: true }).catch(() => {})
   }
   return dest
@@ -244,7 +264,10 @@ async function moveOrphansToTrash(root, names) {
   let moved = 0
   for (const name of names) {
     try {
-      await fs.rename(path.join(getCoversDir(), name), path.join(trashDir, name))
+      await fs.rename(
+        path.join(getCoversDir(), name),
+        path.join(trashDir, name),
+      )
       moved += 1
     } catch (err) {
       logger.warn(`孤儿封面移入回收目录失败（${name}）: ${err.message}`)
@@ -279,7 +302,8 @@ async function repairBrokenCovers(root, brokenCovers) {
       meta.cover && !brokenSet.has(meta.cover) && keep.includes(meta.cover)
         ? meta.cover
         : keep[0] || ''
-    if (cover === meta.cover && keep.length === (meta.covers || []).length) continue
+    if (cover === meta.cover && keep.length === (meta.covers || []).length)
+      continue
     setModelMeta(abs, { ...meta, covers: keep, cover })
     fixedModels += 1
   }
@@ -295,7 +319,7 @@ export async function checkLibraryHealth() {
   if (!root) return { error: '尚未设置模型文件夹' }
   try {
     return await runMaintenance('health', root, async () => ({
-      report: await collectHealth(root)
+      report: await collectHealth(root),
     }))
   } catch (err) {
     if (err?.code === 'EBUSY') return { error: err.message }
@@ -323,10 +347,10 @@ export async function repairLibraryHealth() {
             removedMetadata: 0,
             fixedCoverModels: 0,
             removedCoverRefs: 0,
-            movedOrphanCovers: 0
+            movedOrphanCovers: 0,
           },
           backupPath: '',
-          dataResetSkipped: report.dataReset
+          dataResetSkipped: report.dataReset,
         }
       }
 
@@ -347,8 +371,8 @@ export async function repairLibraryHealth() {
         const coversDir = getCoversDir()
         let entries = []
         try {
-          entries = (await fs.readdir(coversDir)).filter((name) =>
-            !referenced.has(`${DATA_DIR}/${COVERS_DIR}/${name}`)
+          entries = (await fs.readdir(coversDir)).filter(
+            (name) => !referenced.has(`${DATA_DIR}/${COVERS_DIR}/${name}`),
           )
         } catch (err) {
           if (err.code !== 'ENOENT') throw err
@@ -363,10 +387,10 @@ export async function repairLibraryHealth() {
         removedMetadata,
         fixedCoverModels: coverResult.fixedModels,
         removedCoverRefs: coverResult.removedRefs,
-        movedOrphanCovers
+        movedOrphanCovers,
       }
       logger.info(
-        `模型库体检修复完成: 移除元数据 ${removedMetadata} / 修正封面 ${coverResult.fixedModels} / 移动孤儿封面 ${movedOrphanCovers}`
+        `模型库体检修复完成: 移除元数据 ${removedMetadata} / 修正封面 ${coverResult.fixedModels} / 移动孤儿封面 ${movedOrphanCovers}`,
       )
       return { report, repaired, backupPath, dataResetSkipped }
     })

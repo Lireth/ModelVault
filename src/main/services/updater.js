@@ -6,7 +6,7 @@ import {
   fetchAllowedUpdateUrl,
   findUpdateAssets,
   isSafeUpdateVersion,
-  setPendingUpdate
+  setPendingUpdate,
 } from './update-download'
 
 /**
@@ -36,8 +36,12 @@ const STARTUP_CHECK_DELAY_MS = 15000
  * @returns {number} a > b 返回 1，a < b 返回 -1，相等返回 0
  */
 export function compareVersions(a, b) {
-  const pa = String(a).split('.').map((s) => Number.parseInt(s, 10) || 0)
-  const pb = String(b).split('.').map((s) => Number.parseInt(s, 10) || 0)
+  const pa = String(a)
+    .split('.')
+    .map((s) => Number.parseInt(s, 10) || 0)
+  const pb = String(b)
+    .split('.')
+    .map((s) => Number.parseInt(s, 10) || 0)
   const len = Math.max(pa.length, pb.length)
   for (let i = 0; i < len; i++) {
     const va = pa[i] || 0
@@ -62,10 +66,10 @@ export async function checkForUpdate() {
       {
         headers: {
           'User-Agent': `ModelVault/${current}`,
-          Accept: 'application/vnd.github+json'
+          Accept: 'application/vnd.github+json',
         },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-      }
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      },
     )
     if (response.status === 404) {
       // 仓库尚无任何 release：视为已是最新
@@ -77,18 +81,25 @@ export async function checkForUpdate() {
     let data
     try {
       data = JSON.parse(
-        await readResponseTextLimited(response, MAX_UPDATE_JSON_BYTES, '更新信息')
+        await readResponseTextLimited(
+          response,
+          MAX_UPDATE_JSON_BYTES,
+          '更新信息',
+        ),
       )
     } catch (err) {
       return { error: `更新信息解析失败: ${err.message}`, current }
     }
-    const latest = typeof data?.tag_name === 'string' ? data.tag_name.replace(/^v/, '') : ''
+    const latest =
+      typeof data?.tag_name === 'string' ? data.tag_name.replace(/^v/, '') : ''
     if (!latest) {
       return { error: '更新信息格式异常（缺少版本号）', current }
     }
     // V-06：版本号参与更新包文件名，必须限定纯数字三段
     if (!isSafeUpdateVersion(latest)) {
-      logger.warn(`更新信息版本号非法，已忽略: ${String(data?.tag_name).slice(0, 80)}`)
+      logger.warn(
+        `更新信息版本号非法，已忽略: ${String(data?.tag_name).slice(0, 80)}`,
+      )
       return { error: '更新信息格式异常（版本号非法）', current }
     }
     // 下载页地址必须命中外链白名单（B3）：API 响应不可信时不得把用户
@@ -97,7 +108,9 @@ export async function checkForUpdate() {
     if (isAllowedExternalUrl(data?.html_url)) {
       releaseUrl = data.html_url
     } else if (typeof data?.html_url === 'string' && data.html_url) {
-      logger.warn(`更新检查返回的下载页地址不在白名单，已忽略: ${data.html_url.slice(0, 200)}`)
+      logger.warn(
+        `更新检查返回的下载页地址不在白名单，已忽略: ${data.html_url.slice(0, 200)}`,
+      )
     }
     const releaseNotes =
       typeof data?.body === 'string' && data.body ? data.body.slice(0, 500) : ''
@@ -108,7 +121,7 @@ export async function checkForUpdate() {
     setPendingUpdate(hasUpdate ? assets : null, latest)
     logger.info(
       `更新检查完成: 当前 ${current} / 最新 ${latest}${hasUpdate ? '（有更新）' : ''}` +
-        `${assets ? '，支持应用内下载' : ''}`
+        `${assets ? '，支持应用内下载' : ''}`,
     )
     return {
       current,
@@ -117,10 +130,13 @@ export async function checkForUpdate() {
       releaseUrl,
       releaseNotes,
       canDownload: hasUpdate && assets !== null,
-      downloadSize: assets ? assets.size : 0
+      downloadSize: assets ? assets.size : 0,
     }
   } catch (err) {
-    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+    if (
+      err instanceof Error &&
+      (err.name === 'TimeoutError' || err.name === 'AbortError')
+    ) {
       return { error: '更新检查超时，请检查网络后重试', current }
     }
     return { error: `更新检查失败: ${err.message}`, current }
@@ -151,7 +167,7 @@ export async function runStartupUpdateCheck(settings, check, notify) {
     releaseUrl: result.releaseUrl || '',
     releaseNotes: result.releaseNotes || '',
     canDownload: result.canDownload === true,
-    downloadSize: result.downloadSize || 0
+    downloadSize: result.downloadSize || 0,
   })
   return true
 }
@@ -180,9 +196,11 @@ export function scheduleStartupUpdateCheck(delayMs = STARTUP_CHECK_DELAY_MS) {
   if (startupCheckTimer) clearTimeout(startupCheckTimer)
   startupCheckTimer = setTimeout(() => {
     startupCheckTimer = null
-    runStartupUpdateCheck(getSettings(), checkForUpdate, broadcastUpdateAvailable).catch(
-      (err) => logger.warn(`启动自动检查更新失败: ${err.message}`)
-    )
+    runStartupUpdateCheck(
+      getSettings(),
+      checkForUpdate,
+      broadcastUpdateAvailable,
+    ).catch((err) => logger.warn(`启动自动检查更新失败: ${err.message}`))
   }, delayMs)
   // 不阻止进程退出：延迟窗口内用户关窗时，flush 链完成后 app.quit 正常终止
   // （与其他后台定时器的 unref 规范一致，避免持有闭包拖延退出）

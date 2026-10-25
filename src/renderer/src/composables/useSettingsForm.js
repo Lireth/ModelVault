@@ -4,7 +4,7 @@ import {
   applyTheme,
   closeSettings,
   confirmDialog,
-  state
+  state,
 } from '../store/appStore'
 
 /**
@@ -33,7 +33,7 @@ export function useSettingsForm() {
     showParams: true,
     civitaiEnabled: true,
     nsfwBlur: true,
-    hashWarmup: 'candidates'
+    hashWarmup: 'candidates',
   })
 
   let savedTheme = 'dark'
@@ -89,7 +89,7 @@ export function useSettingsForm() {
       showParams: form.showParams,
       civitaiEnabled: form.civitaiEnabled,
       nsfwBlur: form.nsfwBlur,
-      hashWarmup: form.hashWarmup
+      hashWarmup: form.hashWarmup,
     }
   }
 
@@ -112,7 +112,10 @@ export function useSettingsForm() {
       form.nsfwBlur !== s.nsfwBlur ||
       form.hashWarmup !== s.hashWarmup ||
       form.scanExtensions.length !== s.scanExtensions.length ||
-      form.scanExtensions.slice().sort().some((e, i) => e !== s.scanExtensions[i])
+      form.scanExtensions
+        .slice()
+        .sort()
+        .some((e, i) => e !== s.scanExtensions[i])
     )
   })
 
@@ -121,7 +124,7 @@ export function useSettingsForm() {
     () => form.theme,
     (theme) => {
       if (state.settingsOpen) applyTheme(theme)
-    }
+    },
   )
 
   // 强调色实时预览（applyTheme 内部会按有效主题重应用强调色，此处直接应用即可）
@@ -129,20 +132,23 @@ export function useSettingsForm() {
     () => form.accentColor,
     (color) => {
       if (state.settingsOpen) applyAccent(color)
-    }
+    },
   )
 
   watch(
     () => form.cardSize,
     (size) => {
       if (state.settingsOpen) state.settings.cardSize = size
-    }
+    },
   )
 
   /** 关闭设置页面：还原预览，回到已保存的设置。
    *  有未保存修改时先经确认层确认放弃（A9：修复 ESC 静默丢弃全部修改的问题） */
   async function onCancel() {
-    if (settingsDirty.value && !(await confirmDialog('设置有未保存的修改，放弃修改并关闭？'))) {
+    if (
+      settingsDirty.value &&
+      !(await confirmDialog('设置有未保存的修改，放弃修改并关闭？'))
+    ) {
       return
     }
     applyTheme(savedTheme)
@@ -153,12 +159,14 @@ export function useSettingsForm() {
 
   /** 将排除目录文本解析为去重后的目录名数组 */
   function parseExcludeDirs() {
-    return [...new Set(
-      form.excludeText
-        .split(/[\n,;，；]/)
-        .map((s) => s.trim().replace(/^[\\/]+|[\\/]+$/g, ''))
-        .filter(Boolean)
-    )]
+    return [
+      ...new Set(
+        form.excludeText
+          .split(/[\n,;，；]/)
+          .map((s) => s.trim().replace(/^[\\/]+|[\\/]+$/g, ''))
+          .filter(Boolean),
+      ),
+    ]
   }
 
   return {
@@ -166,6 +174,6 @@ export function useSettingsForm() {
     fillForm,
     settingsDirty,
     onCancel,
-    parseExcludeDirs
+    parseExcludeDirs,
   }
 }

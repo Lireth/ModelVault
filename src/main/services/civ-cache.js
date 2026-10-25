@@ -59,7 +59,7 @@ const EXT_MIME = {
   '.webp': 'image/webp',
   '.gif': 'image/gif',
   '.bmp': 'image/bmp',
-  '.avif': 'image/avif'
+  '.avif': 'image/avif',
 }
 
 /** 缓存条目的响应 Content-Type（未知扩展名留空，交由浏览器嗅探） */
@@ -90,7 +90,8 @@ export async function getCivImageFromCache(url) {
  * @returns {Promise<void>} 写入失败仅记日志（缓存是 best-effort）
  */
 export async function saveCivImageCache(url, buf) {
-  if (!Buffer.isBuffer(buf) || buf.length === 0 || buf.length > MAX_ENTRY_BYTES) return
+  if (!Buffer.isBuffer(buf) || buf.length === 0 || buf.length > MAX_ENTRY_BYTES)
+    return
   const dir = getCacheDir()
   if (!dir) return
   const file = path.join(dir, cacheFileName(url))
@@ -114,7 +115,9 @@ export async function saveCivImageCache(url, buf) {
 export async function removeCivImageCache(url) {
   const dir = getCacheDir()
   if (!dir) return
-  await fs.rm(path.join(dir, cacheFileName(url)), { force: true }).catch(() => {})
+  await fs
+    .rm(path.join(dir, cacheFileName(url)), { force: true })
+    .catch(() => {})
 }
 
 /** 缓存条目文件路径（测试定位用）；未选择模型库时返回空串 */
@@ -159,7 +162,9 @@ async function pruneCivImageCache() {
       removed += 1
     }
     if (removed > 0) {
-      logger.info(`civimg 缓存清理完成：删除 ${removed} 个最旧条目（超 ${MAX_CACHE_BYTES / 1024 / 1024}MB 水位）`)
+      logger.info(
+        `civimg 缓存清理完成：删除 ${removed} 个最旧条目（超 ${MAX_CACHE_BYTES / 1024 / 1024}MB 水位）`,
+      )
     }
   } finally {
     pruning = false

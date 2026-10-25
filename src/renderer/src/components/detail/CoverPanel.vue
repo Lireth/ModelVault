@@ -11,7 +11,7 @@ import {
   setDefaultCover,
   toast,
   typeInfo,
-  uploadCover
+  uploadCover,
 } from '../../store/appStore'
 
 /**
@@ -97,7 +97,9 @@ async function onDropCover(e) {
   }
 }
 
-const info = computed(() => (selectedModel.value ? typeInfo(selectedModel.value.type) : null))
+const info = computed(() =>
+  selectedModel.value ? typeInfo(selectedModel.value.type) : null,
+)
 
 /** 多封面列表（{ rel, path, url }），首页卡片默认显示其中的默认封面 */
 const covers = computed(() => selectedModel.value?.covers || [])
@@ -129,7 +131,7 @@ watch(
   () => covers.value.map((c) => c.path).join('|'),
   () => {
     failedThumbs.value = new Set()
-  }
+  },
 )
 
 /** 封面是否为默认显示（与模型当前默认封面路径比对） */
@@ -199,7 +201,7 @@ async function onClearAllCovers() {
   const count = model?.covers?.length || 0
   if (!model || count === 0) return
   const ok = await confirmDialog(
-    `确定移除全部 ${count} 张示例图吗？图片文件将被删除，该操作不可恢复。`
+    `确定移除全部 ${count} 张示例图吗？图片文件将被删除，该操作不可恢复。`,
   )
   if (!ok) return
   busy.value = true
@@ -235,7 +237,11 @@ onBeforeUnmount(() => {
     <div
       class="detail-cover"
       :class="{ 'drop-active': dropActive, 'can-zoom': covers.length > 0 }"
-      :title="covers.length > 0 ? '点击进入全屏画廊；也可直接拖入图片文件作为预览图' : '可直接拖入图片文件作为预览图'"
+      :title="
+        covers.length > 0
+          ? '点击进入全屏画廊；也可直接拖入图片文件作为预览图'
+          : '可直接拖入图片文件作为预览图'
+      "
       @dragover="onDragOver"
       @dragleave="onDragLeave"
       @drop="onDropCover"
@@ -251,7 +257,9 @@ onBeforeUnmount(() => {
       <div v-else class="cover-placeholder">
         <span class="cover-ext">{{ selectedModel.ext }}</span>
       </div>
-      <span class="type-badge" :style="{ background: info.color }">{{ info.label }}</span>
+      <span class="type-badge" :style="{ background: info.color }">{{
+        info.label
+      }}</span>
       <span v-if="dropActive" class="drop-hint">松开导入</span>
     </div>
     <!-- 上传/粘贴两按钮并排，压缩纵向空间 -->
@@ -259,10 +267,13 @@ onBeforeUnmount(() => {
       <button class="btn btn-primary" :disabled="busy" @click="onUploadCover">
         {{ covers.length ? '上传图片' : '上传封面图片' }}
       </button>
-      <button class="btn" :disabled="busy" @click="onPasteCover">粘贴 (Ctrl+V)</button>
+      <button class="btn" :disabled="busy" @click="onPasteCover">
+        粘贴 (Ctrl+V)
+      </button>
     </div>
     <p class="cover-hint">
-      也可直接拖入图片文件；支持 png / jpg / webp / gif / bmp 多张预览图，点击缩略图设为默认显示
+      也可直接拖入图片文件；支持 png / jpg / webp / gif / bmp
+      多张预览图，点击缩略图设为默认显示
     </p>
 
     <!-- 多封面缩略图区：头部计数 + 一键移除全部 -->
@@ -275,7 +286,9 @@ onBeforeUnmount(() => {
           :disabled="busy"
           title="移除全部示例图（图片文件一并删除，不可恢复）"
           @click="onClearAllCovers"
-        >移除全部</button>
+        >
+          移除全部
+        </button>
       </div>
       <div class="cover-thumbs">
         <div
@@ -302,7 +315,20 @@ onBeforeUnmount(() => {
             aria-label="删除这张预览图"
             type="button"
             @click.stop="onDeleteCover(c)"
-          ><svg viewBox="0 0 16 16" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg></button>
+          >
+            <svg
+              viewBox="0 0 16 16"
+              width="9"
+              height="9"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              aria-hidden="true"
+            >
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
+          </button>
         </div>
       </div>
     </div>
@@ -416,7 +442,9 @@ onBeforeUnmount(() => {
   padding: 2px 6px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
 }
 
 .thumbs-clear:hover:not(:disabled) {
@@ -444,7 +472,9 @@ onBeforeUnmount(() => {
   border: 1px solid var(--glass-border);
   background: var(--bg);
   cursor: pointer;
-  transition: border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out),
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out);
 }
 
@@ -473,7 +503,11 @@ onBeforeUnmount(() => {
   justify-content: center;
   font-size: 11px;
   color: var(--text-muted);
-  background: repeating-linear-gradient(45deg, var(--bg) 0 8px, var(--bg-card) 8px 16px);
+  background: repeating-linear-gradient(
+    45deg,
+    var(--bg) 0 8px,
+    var(--bg-card) 8px 16px
+  );
 }
 
 .thumb-badge {

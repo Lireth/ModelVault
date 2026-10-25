@@ -66,7 +66,7 @@ function serializeIndexTask(task) {
   const run = indexChain.then(task, task)
   indexChain = run.then(
     () => {},
-    () => {}
+    () => {},
   )
   return run
 }
@@ -131,19 +131,26 @@ export async function readLibraryIndex(root) {
       return null
     }
     const parsed = JSON.parse(await fs.readFile(file, 'utf-8'))
-    if (!parsed || parsed.version !== INDEX_VERSION || !sameRoot(parsed.root, root)) {
+    if (
+      !parsed ||
+      parsed.version !== INDEX_VERSION ||
+      !sameRoot(parsed.root, root)
+    ) {
       logger.info(`本地索引版本/根目录不匹配，已忽略: ${file}`)
       return null
     }
     if (!Array.isArray(parsed.models)) return null
-    const models = parsed.models.filter(isUsableModel).slice(0, MAX_INDEX_MODELS)
+    const models = parsed.models
+      .filter(isUsableModel)
+      .slice(0, MAX_INDEX_MODELS)
     return {
       models,
       savedAt: Number.isFinite(parsed.savedAt) ? parsed.savedAt : 0,
-      durationMs: Number.isFinite(parsed.durationMs) ? parsed.durationMs : 0
+      durationMs: Number.isFinite(parsed.durationMs) ? parsed.durationMs : 0,
     }
   } catch (err) {
-    if (err.code !== 'ENOENT') logger.warn(`本地索引读取失败（忽略）: ${err.message}`)
+    if (err.code !== 'ENOENT')
+      logger.warn(`本地索引读取失败（忽略）: ${err.message}`)
     return null
   }
 }
@@ -164,7 +171,9 @@ export async function writeLibraryIndex(root, payload) {
   // 全量扫描结果是完整快照，优先于此前排队的局部更新；清掉同根待合并项，
   // 避免旧局部 affectedDirs 在完整索引写入后又删除新记录
   clearQueuedIndexUpdates(root)
-  const durationMs = Number.isFinite(payload.durationMs) ? payload.durationMs : 0
+  const durationMs = Number.isFinite(payload.durationMs)
+    ? payload.durationMs
+    : 0
   return serializeIndexTask(() => writeIndexBody(root, models, durationMs))
 }
 
@@ -199,7 +208,7 @@ async function serializeIndexModels(root, models) {
   return {
     text,
     bytes: Buffer.byteLength(text, 'utf-8'),
-    hash: createHash('sha256').update(hashPrefix).update(text).digest('hex')
+    hash: createHash('sha256').update(hashPrefix).update(text).digest('hex'),
   }
 }
 
@@ -270,16 +279,18 @@ export function queueLibraryIndexUpdate(root, payload = {}) {
       removeIds: new Set(),
       affectedDirs: null,
       timer: null,
-      firstQueuedAt: Date.now()
+      firstQueuedAt: Date.now(),
     }
     pendingIndexUpdates.set(key, entry)
   }
   const removeSet = new Set(
     (Array.isArray(payload.removeIds) ? payload.removeIds : [])
       .map((id) => String(id).toLowerCase())
-      .filter(Boolean)
+      .filter(Boolean),
   )
-  for (const model of Array.isArray(payload.upsertModels) ? payload.upsertModels : []) {
+  for (const model of Array.isArray(payload.upsertModels)
+    ? payload.upsertModels
+    : []) {
     if (!isUsableModel(model)) continue
     const idLower = String(/** @type {{id: string}} */ (model).id).toLowerCase()
     entry.upserts.set(idLower, model)
@@ -297,7 +308,10 @@ export function queueLibraryIndexUpdate(root, payload = {}) {
   }
   if (entry.timer) clearTimeout(entry.timer)
   const elapsed = Date.now() - entry.firstQueuedAt
-  const delay = Math.max(0, Math.min(indexUpdateDebounceMs, INDEX_UPDATE_MAX_WAIT_MS - elapsed))
+  const delay = Math.max(
+    0,
+    Math.min(indexUpdateDebounceMs, INDEX_UPDATE_MAX_WAIT_MS - elapsed),
+  )
   entry.timer = setTimeout(() => {
     entry.timer = null
     pendingIndexUpdates.delete(key)
@@ -312,7 +326,7 @@ function payloadFromEntry(entry) {
   return {
     upsertModels: [...entry.upserts.values()],
     removeIds: [...entry.removeIds],
-    affectedDirs: entry.affectedDirs ? [...entry.affectedDirs] : null
+    affectedDirs: entry.affectedDirs ? [...entry.affectedDirs] : null,
   }
 }
 
@@ -361,19 +375,25 @@ export async function updateLibraryIndex(root, payload = {}) {
       const removeSet = new Set(
         (Array.isArray(payload.removeIds) ? payload.removeIds : [])
           .map((id) => String(id).toLowerCase())
-          .filter(Boolean)
+          .filter(Boolean),
       )
       const upserts = /** @type {any[]} */ (
-        (Array.isArray(payload.upsertModels) ? payload.upsertModels : []).filter(isUsableModel)
+        (Array.isArray(payload.upsertModels)
+          ? payload.upsertModels
+          : []
+        ).filter(isUsableModel)
       )
       const upsertIds = new Set(upserts.map((m) => String(m.id).toLowerCase()))
-      const affectedDirs = Array.isArray(payload.affectedDirs) ? payload.affectedDirs : null
+      const affectedDirs = Array.isArray(payload.affectedDirs)
+        ? payload.affectedDirs
+        : null
       const existingModels = /** @type {any[]} */ (existing.models)
       const kept = existingModels.filter((m) => {
         const idLower = String(m.id).toLowerCase()
         if (removeSet.has(idLower) || upsertIds.has(idLower)) return false
         if (!affectedDirs) return true
-        const relDir = typeof m.relDir === 'string' ? m.relDir : relDirFromId(root, m.id)
+        const relDir =
+          typeof m.relDir === 'string' ? m.relDir : relDirFromId(root, m.id)
         return !isRelDirInScope(relDir, affectedDirs)
       })
       const models = kept.concat(upserts)

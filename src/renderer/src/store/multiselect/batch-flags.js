@@ -25,18 +25,19 @@ async function batchApplyFlags(patch, label) {
     const results = await mapWithConcurrency(
       ids,
       (id) => window.api.models.setMetaFlags({ id, ...patch }),
-      16
+      16,
     )
     const metaMap = new Map()
     let fail = 0
     results.forEach((r, i) => {
-      if (r.status === 'fulfilled' && r.value?.meta) metaMap.set(ids[i], r.value.meta)
+      if (r.status === 'fulfilled' && r.value?.meta)
+        metaMap.set(ids[i], r.value.meta)
       else fail += 1
     })
     const ok = applyMetaUpdates(metaMap, (meta) => ({
       favorite: meta.favorite === true,
       nsfw: meta.nsfw === true,
-      rating: meta.rating || 0
+      rating: meta.rating || 0,
     }))
     if (fail === 0) toast('success', `已为 ${ok} 个模型${label}`)
     else toast('warn', `${label}完成：成功 ${ok} 个，失败 ${fail} 个`)

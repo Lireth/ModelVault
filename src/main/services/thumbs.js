@@ -47,7 +47,11 @@ function getThumbsDir() {
 
 /** 缩略图文件名：源图路径哈希（小写化，兼容 Windows 大小写）+ mtime */
 function thumbFileName(absCover, mtimeMs) {
-  const hash = crypto.createHash('md5').update(absCover.toLowerCase()).digest('hex').slice(0, 16)
+  const hash = crypto
+    .createHash('md5')
+    .update(absCover.toLowerCase())
+    .digest('hex')
+    .slice(0, 16)
   return `${hash}-${Math.round(mtimeMs)}.jpg`
 }
 
@@ -67,7 +71,7 @@ async function generateThumb(absCover, thumbPath) {
   const result = await renderThumbFromPath(toImageUrl(absCover), {
     thumbWidth: THUMB_WIDTH,
     minSourceWidth: MIN_SOURCE_WIDTH,
-    quality: JPEG_QUALITY / 100
+    quality: JPEG_QUALITY / 100,
   })
   if ('small' in result) return ''
   await fs.mkdir(getThumbsDir(), { recursive: true })
@@ -92,7 +96,10 @@ export async function getThumbPathDeferred(absCover) {
   if (!absCover || typeof absCover !== 'string' || !getCurrentRoot()) return ''
   try {
     const stat = await fs.stat(absCover)
-    const thumbPath = path.join(getThumbsDir(), thumbFileName(absCover, stat.mtimeMs))
+    const thumbPath = path.join(
+      getThumbsDir(),
+      thumbFileName(absCover, stat.mtimeMs),
+    )
     try {
       await fs.access(thumbPath)
       return thumbPath
@@ -129,13 +136,19 @@ export function clearDeferredJobs() {
  * @param {(absCover: string, thumbPath: string) => void} onGenerated 生成成功回调
  * @param {number} [concurrency] 并发 worker 数
  */
-export async function drainDeferredThumbs(onGenerated, concurrency = THUMB_GEN_CONCURRENCY) {
+export async function drainDeferredThumbs(
+  onGenerated,
+  concurrency = THUMB_GEN_CONCURRENCY,
+) {
   const jobs = [...deferredJobs.values()]
   deferredJobs.clear()
   await runWithConcurrency(
     jobs,
     async ({ absCover, mtimeMs }) => {
-      const thumbPath = path.join(getThumbsDir(), thumbFileName(absCover, mtimeMs))
+      const thumbPath = path.join(
+        getThumbsDir(),
+        thumbFileName(absCover, mtimeMs),
+      )
       try {
         const generated = await generateThumb(absCover, thumbPath)
         if (generated) onGenerated(absCover, generated)
@@ -143,7 +156,7 @@ export async function drainDeferredThumbs(onGenerated, concurrency = THUMB_GEN_C
         logger.warn(`后台缩略图生成失败（回退原图）: ${err.message}`)
       }
     },
-    concurrency
+    concurrency,
   )
 }
 
@@ -168,7 +181,7 @@ export async function pruneThumbs(keepNames) {
     await runWithConcurrency(
       stale,
       (n) => fs.rm(path.join(dir, n), { force: true }),
-      16
+      16,
     )
     logger.info(`已清理 ${stale.length} 个失效缩略图`)
   } catch (err) {
@@ -185,22 +198,29 @@ export async function pruneThumbs(keepNames) {
  */
 export async function removeThumbsForSources(absCovers) {
   const list = (Array.isArray(absCovers) ? absCovers : []).filter(
-    (p) => typeof p === 'string' && p
+    (p) => typeof p === 'string' && p,
   )
   if (list.length === 0 || !getCurrentRoot()) return
   try {
     const dir = getThumbsDir()
     const prefixes = new Set(
-      list.map(
-        (p) =>
-          crypto.createHash('md5').update(p.toLowerCase()).digest('hex').slice(0, 16)
-      )
+      list.map((p) =>
+        crypto
+          .createHash('md5')
+          .update(p.toLowerCase())
+          .digest('hex')
+          .slice(0, 16),
+      ),
     )
     const entries = await fs.readdir(dir)
     // 缩略图文件名为「<16 位路径哈希>-<mtime>.jpg」，前缀匹配即命中同一源图
     const stale = entries.filter((n) => prefixes.has(n.slice(0, 16)))
     if (stale.length === 0) return
-    await runWithConcurrency(stale, (n) => fs.rm(path.join(dir, n), { force: true }), 16)
+    await runWithConcurrency(
+      stale,
+      (n) => fs.rm(path.join(dir, n), { force: true }),
+      16,
+    )
     logger.info(`已清理 ${stale.length} 个移除封面对应的缩略图`)
   } catch (err) {
     if (err.code !== 'ENOENT') logger.warn(`缩略图清理失败: ${err.message}`)

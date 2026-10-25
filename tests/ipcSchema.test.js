@@ -13,7 +13,7 @@ import {
   vObj,
   vVoid,
   DEFAULT_MAX_OBJECT_KEYS,
-  DEFAULT_MAX_ARRAY_ITEMS
+  DEFAULT_MAX_ARRAY_ITEMS,
 } from '../src/shared/ipc-schema'
 
 /**
@@ -30,7 +30,7 @@ import {
 function extractPreloadInvokeChannels() {
   const source = fs.readFileSync(
     path.resolve(__dirname, '../src/preload/index.js'),
-    'utf-8'
+    'utf-8',
   )
   return [...source.matchAll(/invokeValidated\(\s*'([^']+)'/g)].map((m) => m[1])
 }
@@ -39,7 +39,7 @@ function extractPreloadInvokeChannels() {
 function extractPreloadSubscribeChannels() {
   const source = fs.readFileSync(
     path.resolve(__dirname, '../src/preload/index.js'),
-    'utf-8'
+    'utf-8',
   )
   return [...source.matchAll(/subscribe\(\s*'([^']+)'/g)].map((m) => m[1])
 }
@@ -92,19 +92,23 @@ describe('IPC schema 校验器（validateValue）', () => {
     expect(validateValue(['a', 'bb'], rule, 'f')).toBe('')
     expect(validateValue(['a', 'b', 'c'], rule, 'f')).toBe('f 数量超限（≤2）')
     expect(validateValue([1], rule, 'f')).toBe('f[0] 须为字符串')
-    expect(validateValue(['ok', 'toolong'], rule, 'f')).toBe('f[1] 长度超限（≤5）')
+    expect(validateValue(['ok', 'toolong'], rule, 'f')).toBe(
+      'f[1] 长度超限（≤5）',
+    )
     expect(validateValue('x', rule, 'f')).toBe('f 须为数组')
   })
 
   it('object：键数上限 / 声明字段 / 严格模式拒绝未知字段', () => {
     const rule = vObj({
       max: 2,
-      fields: { a: vStr({ required: true }), b: vStr() }
+      fields: { a: vStr({ required: true }), b: vStr() },
     })
     expect(validateValue({ a: 'x' }, rule, 'f')).toBe('')
     // 默认 loose：未知字段放行（handler 只解构已知字段）
     expect(validateValue({ a: 'x', extra: 1 }, rule, 'f')).toBe('')
-    expect(validateValue({ a: 'x', b: 'y', c: 1, d: 2 }, rule, 'f')).toBe('f 字段数超限（≤2）')
+    expect(validateValue({ a: 'x', b: 'y', c: 1, d: 2 }, rule, 'f')).toBe(
+      'f 字段数超限（≤2）',
+    )
     // 声明字段的错误信息带完整路径前缀
     expect(validateValue({ a: 3 }, rule, 'f')).toBe('f.a 须为字符串')
     expect(validateValue({}, rule, 'f')).toBe('f.a 缺失')
@@ -112,7 +116,9 @@ describe('IPC schema 校验器（validateValue）', () => {
     // loose=false：未知字段拒绝
     const strict = vObj({ loose: false, fields: { a: vStr() } })
     expect(validateValue({ a: 'x' }, strict, 'f')).toBe('')
-    expect(validateValue({ a: 'x', bad: 1 }, strict, 'f')).toBe('f 包含未知字段: bad')
+    expect(validateValue({ a: 'x', bad: 1 }, strict, 'f')).toBe(
+      'f 包含未知字段: bad',
+    )
   })
 
   it('void：仅缺省（undefined/null）放行，任何传参拒绝', () => {
@@ -135,18 +141,25 @@ describe('IPC schema 校验器（validateValue）', () => {
 
     // 未声明 max 的数组：默认元素数上限收口（无 items 时值走宽松兜底）
     const arr = vArr()
-    expect(validateValue(new Array(DEFAULT_MAX_ARRAY_ITEMS).fill('x'), arr, 'f')).toBe('')
     expect(
-      validateValue(new Array(DEFAULT_MAX_ARRAY_ITEMS + 1).fill('x'), arr, 'f')
+      validateValue(new Array(DEFAULT_MAX_ARRAY_ITEMS).fill('x'), arr, 'f'),
+    ).toBe('')
+    expect(
+      validateValue(new Array(DEFAULT_MAX_ARRAY_ITEMS + 1).fill('x'), arr, 'f'),
     ).toBe('f 数量超限（≤1024）')
 
     // 显式声明始终优先（可大于默认值）：exportBackup ids 声明 20000
     const ids = new Array(1500).fill('C:/m/a.safetensors')
-    expect(validateIpcPayload('models:exportBackup', { mode: 'selected', ids })).toBe('')
+    expect(
+      validateIpcPayload('models:exportBackup', { mode: 'selected', ids }),
+    ).toBe('')
     const over = new Array(20001).fill('C:/m/a.safetensors')
-    expect(validateIpcPayload('models:exportBackup', { mode: 'selected', ids: over })).toBe(
-      'ids 数量超限（≤20000）'
-    )
+    expect(
+      validateIpcPayload('models:exportBackup', {
+        mode: 'selected',
+        ids: over,
+      }),
+    ).toBe('ids 数量超限（≤20000）')
   })
 
   it('默认深度上限与宽松区域兜底（params 值 / loose 未知键 / 声明路径深度）', () => {
@@ -158,34 +171,43 @@ describe('IPC schema 校验器（validateValue）', () => {
       node = node.a
     }
     expect(
-      validateIpcPayload('models:saveModelData', { id: 'C:/m/a.safetensors', params: deep })
+      validateIpcPayload('models:saveModelData', {
+        id: 'C:/m/a.safetensors',
+        params: deep,
+      }),
     ).toContain('嵌套层级超限')
 
     // 正常扁平 params 放行
     expect(
       validateIpcPayload('models:saveModelData', {
         id: 'C:/m/a.safetensors',
-        params: { steps: 28, sampler: 'euler' }
-      })
+        params: { steps: 28, sampler: 'euler' },
+      }),
     ).toBe('')
 
     // params 值中的超宽对象（单键但子键 65 个）按默认键数兜底拒绝
     const wide = { a: {} }
     for (let i = 0; i < DEFAULT_MAX_OBJECT_KEYS + 1; i++) wide.a[`k${i}`] = 1
     expect(
-      validateIpcPayload('models:saveModelData', { id: 'C:/m/a.safetensors', params: wide })
+      validateIpcPayload('models:saveModelData', {
+        id: 'C:/m/a.safetensors',
+        params: wide,
+      }),
     ).toContain('字段数超限')
 
     // loose 通道未知键中的深嵌套同样被兜底（handler 不消费该键）
     expect(
-      validateIpcPayload('models:popupMenu', { id: 'C:/m/a.safetensors', evil: deep })
+      validateIpcPayload('models:popupMenu', {
+        id: 'C:/m/a.safetensors',
+        evil: deep,
+      }),
     ).toContain('嵌套层级超限')
 
     // 声明路径的合法深度不受影响：savedViews 结构（根→数组→条目→字段 = 4 层）
     expect(
       validateIpcPayload('settings:update', {
-        savedViews: [{ id: 'v1', name: 'n', search: '', typeFilter: 'lora' }]
-      })
+        savedViews: [{ id: 'v1', name: 'n', search: '', typeFilter: 'lora' }],
+      }),
     ).toBe('')
   })
 })
@@ -193,95 +215,142 @@ describe('IPC schema 校验器（validateValue）', () => {
 describe('IPC payload 通道校验（validateIpcPayload）', () => {
   it('O1 fail-closed：未登记 schema 的通道一律拒绝', () => {
     expect(validateIpcPayload('app:nonexistent', undefined)).toBe(
-      '通道未登记入参 schema: app:nonexistent'
+      '通道未登记入参 schema: app:nonexistent',
     )
     expect(validateIpcPayload('models:nonexistent', {})).toBe(
-      '通道未登记入参 schema: models:nonexistent'
+      '通道未登记入参 schema: models:nonexistent',
     )
   })
 
   it('无参通道（vVoid）：缺省调用放行，传参一律拒绝', () => {
     expect(validateIpcPayload('models:loadStore', undefined)).toBe('')
     expect(validateIpcPayload('models:loadStore', null)).toBe('')
-    expect(validateIpcPayload('models:chooseFolder', {})).toBe('该通道不接受参数')
-    expect(validateIpcPayload('models:cancelScan', 'x')).toBe('该通道不接受参数')
+    expect(validateIpcPayload('models:chooseFolder', {})).toBe(
+      '该通道不接受参数',
+    )
+    expect(validateIpcPayload('models:cancelScan', 'x')).toBe(
+      '该通道不接受参数',
+    )
     // FN-08 起 exportBackup 接受可选 { mode, ids }，非对象 payload 被拒绝
-    expect(validateIpcPayload('models:exportBackup', [1])).toBe('参数无效: payload 须为对象')
+    expect(validateIpcPayload('models:exportBackup', [1])).toBe(
+      '参数无效: payload 须为对象',
+    )
   })
 
   it('app:reportError：宽松结构门禁（字段可选，提供时校验类型与长度）', () => {
-    expect(validateIpcPayload('app:reportError', { message: 'boom', stack: 'at x' })).toBe('')
+    expect(
+      validateIpcPayload('app:reportError', { message: 'boom', stack: 'at x' }),
+    ).toBe('')
     expect(validateIpcPayload('app:reportError', {})).toBe('')
     expect(validateIpcPayload('app:reportError', undefined)).toBe('')
-    expect(validateIpcPayload('app:reportError', 'boom')).toBe('参数无效: payload 须为对象')
-    expect(validateIpcPayload('app:reportError', { message: 42 })).toBe('message 须为字符串')
+    expect(validateIpcPayload('app:reportError', 'boom')).toBe(
+      '参数无效: payload 须为对象',
+    )
+    expect(validateIpcPayload('app:reportError', { message: 42 })).toBe(
+      'message 须为字符串',
+    )
     expect(
-      validateIpcPayload('app:reportError', { stack: 's'.repeat(8001) })
+      validateIpcPayload('app:reportError', { stack: 's'.repeat(8001) }),
     ).toBe('stack 长度超限（≤8000）')
   })
 
   it('payload 非对象时拒绝', () => {
-    expect(validateIpcPayload('models:scan', 'D:\\x')).toBe('参数无效: payload 须为对象')
-    expect(validateIpcPayload('models:scan', [1])).toBe('参数无效: payload 须为对象')
+    expect(validateIpcPayload('models:scan', 'D:\\x')).toBe(
+      '参数无效: payload 须为对象',
+    )
+    expect(validateIpcPayload('models:scan', [1])).toBe(
+      '参数无效: payload 须为对象',
+    )
   })
 
   it('models:scan：folder 类型与长度', () => {
     expect(validateIpcPayload('models:scan', { folder: 'D:\\models' })).toBe('')
     expect(validateIpcPayload('models:scan', {})).toBe('')
-    expect(validateIpcPayload('models:scan', { folder: 42 })).toBe('folder 须为字符串')
+    expect(validateIpcPayload('models:scan', { folder: 42 })).toBe(
+      'folder 须为字符串',
+    )
   })
 
   it('models:partialScan：dirs 数量与元素类型（业务上限由 handler 收敛，schema 仅设硬上限）', () => {
-    expect(validateIpcPayload('models:partialScan', { folder: 'D:\\m', dirs: ['a', ''] })).toBe('')
+    expect(
+      validateIpcPayload('models:partialScan', {
+        folder: 'D:\\m',
+        dirs: ['a', ''],
+      }),
+    ).toBe('')
     // O3：超过业务上限（200）仍允许进入 handler，由其收敛或全量回退
     expect(
-      validateIpcPayload('models:partialScan', { dirs: Array.from({ length: 201 }, () => 'a') })
+      validateIpcPayload('models:partialScan', {
+        dirs: Array.from({ length: 201 }, () => 'a'),
+      }),
     ).toBe('')
     expect(
-      validateIpcPayload('models:partialScan', { dirs: Array.from({ length: 1001 }, () => 'a') })
+      validateIpcPayload('models:partialScan', {
+        dirs: Array.from({ length: 1001 }, () => 'a'),
+      }),
     ).toBe('dirs 数量超限（≤1000）')
-    expect(
-      validateIpcPayload('models:partialScan', { dirs: [123] })
-    ).toBe('dirs[0] 须为字符串')
+    expect(validateIpcPayload('models:partialScan', { dirs: [123] })).toBe(
+      'dirs[0] 须为字符串',
+    )
   })
 
   it('models:saveModelData：合法 payload 通过，超长字符串拒绝，params 允许 null', () => {
     const valid = {
       id: 'D:\\m\\LoRA\\a.safetensors',
       alias: '别名',
-      params: { steps: 28, cfgMin: 4, cfgMax: 7, sampler: 'euler', scheduler: 'karras' },
+      params: {
+        steps: 28,
+        cfgMin: 4,
+        cfgMax: 7,
+        sampler: 'euler',
+        scheduler: 'karras',
+      },
       note: '备注',
       subCategory: 'style',
-      triggerWords: 'x, y'
+      triggerWords: 'x, y',
     }
     expect(validateIpcPayload('models:saveModelData', valid)).toBe('')
     expect(
-      validateIpcPayload('models:saveModelData', { id: 'x', params: null })
+      validateIpcPayload('models:saveModelData', { id: 'x', params: null }),
     ).toBe('')
     expect(
-      validateIpcPayload('models:saveModelData', { id: 'x', alias: 'a'.repeat(201) })
+      validateIpcPayload('models:saveModelData', {
+        id: 'x',
+        alias: 'a'.repeat(201),
+      }),
     ).toBe('alias 长度超限（≤200）')
     expect(
-      validateIpcPayload('models:saveModelData', { id: 'x', note: 'n'.repeat(20001) })
+      validateIpcPayload('models:saveModelData', {
+        id: 'x',
+        note: 'n'.repeat(20001),
+      }),
     ).toBe('note 长度超限（≤20000）')
-    expect(validateIpcPayload('models:saveModelData', { id: 99 })).toBe('id 须为字符串')
+    expect(validateIpcPayload('models:saveModelData', { id: 99 })).toBe(
+      'id 须为字符串',
+    )
   })
 
   it('models:setMetaFlags：类型在 schema fail-fast，范围语义留在 handler', () => {
-    expect(validateIpcPayload('models:setMetaFlags', { id: 'x', favorite: true })).toBe('')
+    expect(
+      validateIpcPayload('models:setMetaFlags', { id: 'x', favorite: true }),
+    ).toBe('')
     // favorite 非布尔值在结构门禁拒绝（O9）
-    expect(validateIpcPayload('models:setMetaFlags', { id: 'x', favorite: 'yes' })).toBe(
-      'favorite 须为布尔值'
-    )
-    expect(validateIpcPayload('models:setMetaFlags', { id: 'x', nsfw: 1 })).toBe(
-      'nsfw 须为布尔值'
-    )
+    expect(
+      validateIpcPayload('models:setMetaFlags', { id: 'x', favorite: 'yes' }),
+    ).toBe('favorite 须为布尔值')
+    expect(
+      validateIpcPayload('models:setMetaFlags', { id: 'x', nsfw: 1 }),
+    ).toBe('nsfw 须为布尔值')
     // 整数通过 schema；0-5 范围与文案由 handler 校验（既有测试锁定）
-    expect(validateIpcPayload('models:setMetaFlags', { id: 'x', rating: 6 })).toBe('')
-    expect(validateIpcPayload('models:setMetaFlags', { id: 'x', rating: 4.5 })).toBe(
-      'rating 须为整数'
+    expect(
+      validateIpcPayload('models:setMetaFlags', { id: 'x', rating: 6 }),
+    ).toBe('')
+    expect(
+      validateIpcPayload('models:setMetaFlags', { id: 'x', rating: 4.5 }),
+    ).toBe('rating 须为整数')
+    expect(validateIpcPayload('models:setMetaFlags', { id: 42 })).toBe(
+      'id 须为字符串',
     )
-    expect(validateIpcPayload('models:setMetaFlags', { id: 42 })).toBe('id 须为字符串')
   })
 
   it('settings:update：字段白名单与未知字段拒绝（O9）', () => {
@@ -296,7 +365,7 @@ describe('IPC payload 通道校验（validateIpcPayload）', () => {
       showFavoritesOnly: false,
       showDuplicatesOnly: false,
       sortBy: 'name',
-      sortAsc: true
+      sortAsc: true,
     }
     const valid = {
       autoScan: false,
@@ -305,67 +374,100 @@ describe('IPC payload 通道校验（validateIpcPayload）', () => {
       scanExtensions: ['.safetensors'],
       sortBy: 'mtime',
       sortAsc: false,
-      savedViews: [view]
+      savedViews: [view],
     }
     expect(validateIpcPayload('settings:update', valid)).toBe('')
     expect(validateIpcPayload('settings:update', { bogusField: 1 })).toBe(
-      '参数 包含未知字段: bogusField'
+      '参数 包含未知字段: bogusField',
     )
     expect(validateIpcPayload('settings:update', { autoScan: 'yes' })).toBe(
-      'autoScan 须为布尔值'
+      'autoScan 须为布尔值',
     )
     expect(
-      validateIpcPayload('settings:update', { savedViews: [{ ...view, extra: 1 }] })
+      validateIpcPayload('settings:update', {
+        savedViews: [{ ...view, extra: 1 }],
+      }),
     ).toBe('savedViews[0] 包含未知字段: extra')
     expect(
-      validateIpcPayload('settings:update', { savedViews: [{ ...view, name: 'x'.repeat(31) }] })
+      validateIpcPayload('settings:update', {
+        savedViews: [{ ...view, name: 'x'.repeat(31) }],
+      }),
     ).toBe('savedViews[0].name 长度超限（≤30）')
   })
 
   it('models:toggleDisabled：disabled 须为布尔值', () => {
-    expect(validateIpcPayload('models:toggleDisabled', { id: 'x', disabled: true })).toBe('')
-    expect(validateIpcPayload('models:toggleDisabled', { id: 'x', disabled: 'yes' })).toBe(
-      'disabled 须为布尔值'
-    )
+    expect(
+      validateIpcPayload('models:toggleDisabled', { id: 'x', disabled: true }),
+    ).toBe('')
+    expect(
+      validateIpcPayload('models:toggleDisabled', { id: 'x', disabled: 'yes' }),
+    ).toBe('disabled 须为布尔值')
   })
 
   it('models:organizeByTags：moves 规模与条目结构', () => {
-    expect(validateIpcPayload('models:organizeByTags', { moves: [{ id: 'x', subCategory: '' }] })).toBe('')
-    expect(validateIpcPayload('models:organizeByTags', { moves: [{ id: 'x' }] })).toBe('')
-    expect(validateIpcPayload('models:organizeByTags', { moves: 'x' })).toBe('moves 须为数组')
     expect(
-      validateIpcPayload('models:organizeByTags', { moves: Array.from({ length: 10001 }, (_, i) => ({ id: String(i) })) })
+      validateIpcPayload('models:organizeByTags', {
+        moves: [{ id: 'x', subCategory: '' }],
+      }),
+    ).toBe('')
+    expect(
+      validateIpcPayload('models:organizeByTags', { moves: [{ id: 'x' }] }),
+    ).toBe('')
+    expect(validateIpcPayload('models:organizeByTags', { moves: 'x' })).toBe(
+      'moves 须为数组',
+    )
+    expect(
+      validateIpcPayload('models:organizeByTags', {
+        moves: Array.from({ length: 10001 }, (_, i) => ({ id: String(i) })),
+      }),
     ).toBe('moves 数量超限（≤10000）')
     expect(
-      validateIpcPayload('models:organizeByTags', { moves: [{ id: 1 }] })
+      validateIpcPayload('models:organizeByTags', { moves: [{ id: 1 }] }),
     ).toBe('moves[0].id 须为字符串')
   })
 
   it('models:civitaiImportImages：images 数量上限 20 与条目 url 类型', () => {
     expect(
-      validateIpcPayload('models:civitaiImportImages', { id: 'x', images: [{ url: 'https://civitai.com/a.png' }] })
+      validateIpcPayload('models:civitaiImportImages', {
+        id: 'x',
+        images: [{ url: 'https://civitai.com/a.png' }],
+      }),
     ).toBe('')
     expect(
       validateIpcPayload('models:civitaiImportImages', {
         id: 'x',
-        images: Array.from({ length: 21 }, () => ({ url: 'u' }))
-      })
+        images: Array.from({ length: 21 }, () => ({ url: 'u' })),
+      }),
     ).toBe('images 数量超限（≤20）')
     expect(
-      validateIpcPayload('models:civitaiImportImages', { id: 'x', images: [{ url: 5 }] })
+      validateIpcPayload('models:civitaiImportImages', {
+        id: 'x',
+        images: [{ url: 5 }],
+      }),
     ).toBe('images[0].url 须为字符串')
   })
 
   it('models:reveal / models:importCover：字段类型', () => {
-    expect(validateIpcPayload('models:reveal', { path: 'D:\\m\\a.safetensors' })).toBe('')
-    expect(validateIpcPayload('models:reveal', { path: 7 })).toBe('path 须为字符串')
-    expect(validateIpcPayload('models:importCover', { id: 'x', path: 'D:\\pic.png' })).toBe('')
+    expect(
+      validateIpcPayload('models:reveal', { path: 'D:\\m\\a.safetensors' }),
+    ).toBe('')
+    expect(validateIpcPayload('models:reveal', { path: 7 })).toBe(
+      'path 须为字符串',
+    )
+    expect(
+      validateIpcPayload('models:importCover', {
+        id: 'x',
+        path: 'D:\\pic.png',
+      }),
+    ).toBe('')
   })
 
   it('window:setTheme：theme 必填字符串', () => {
     expect(validateIpcPayload('window:setTheme', { theme: 'dark' })).toBe('')
     expect(validateIpcPayload('window:setTheme', {})).toBe('theme 缺失')
-    expect(validateIpcPayload('window:setTheme', { theme: 3 })).toBe('theme 须为字符串')
+    expect(validateIpcPayload('window:setTheme', { theme: 3 })).toBe(
+      'theme 须为字符串',
+    )
   })
 })
 

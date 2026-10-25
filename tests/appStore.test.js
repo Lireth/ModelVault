@@ -58,7 +58,7 @@ import {
   transferState,
   transferTargets,
   typeCounts,
-  updateAvailable
+  updateAvailable,
 } from '../src/renderer/src/store/appStore'
 
 /**
@@ -106,11 +106,11 @@ function makeApiMock() {
       onWarmupProgress: vi.fn(() => () => {}),
       onMenuAction: vi.fn(() => () => {}),
       onThumbsReady: vi.fn(() => () => {}),
-      onStoreError: vi.fn(() => () => {})
+      onStoreError: vi.fn(() => () => {}),
     },
     settings: { update: vi.fn() },
     window: { setTheme: vi.fn(() => Promise.resolve()) },
-    app: { getInfo: vi.fn() }
+    app: { getInfo: vi.fn() },
   }
 }
 
@@ -122,7 +122,10 @@ beforeEach(() => {
   vi.stubGlobal('window', { api })
   // applyTheme/applyAccent（saveSettings/主题与强调色切换）会触碰 document
   vi.stubGlobal('document', {
-    documentElement: { classList: { toggle: vi.fn() }, style: { setProperty: vi.fn() } }
+    documentElement: {
+      classList: { toggle: vi.fn() },
+      style: { setProperty: vi.fn() },
+    },
   })
   // 重置模块级单例状态，用例间互不污染
   state.folder = ''
@@ -147,13 +150,24 @@ beforeEach(() => {
   state.detailDirty = false
   state.settingsOpen = false
   // O3：multiSelect 为内嵌深响应集合，就地表合并复位（含批量取消标志）
-  Object.assign(state.multiSelect, { active: false, ids: [], busy: false, progress: '', cancelRequested: false })
+  Object.assign(state.multiSelect, {
+    active: false,
+    ids: [],
+    busy: false,
+    progress: '',
+    cancelRequested: false,
+  })
   state.toasts.splice(0, state.toasts.length)
   if (state.confirm.resolve) state.confirm.resolve(false)
   // O3：state 为 shallowReactive，confirm 是内嵌深响应集合，就地表合并复位
   Object.assign(state.confirm, { visible: false, text: '', resolve: null })
   // 跨库传输浮层与启动更新提示均为模块级单例：用例间复位
-  Object.assign(transferState, { visible: false, ids: [], mode: 'copy', busy: false })
+  Object.assign(transferState, {
+    visible: false,
+    ids: [],
+    mode: 'copy',
+    busy: false,
+  })
   updateAvailable.value = null
 })
 
@@ -166,15 +180,24 @@ describe('partialScanModels 增量合并（A-03）', () => {
   it('新模型并入列表，子树外模型保持不动', async () => {
     setGrid([
       makeModel('D:\\models\\keep.safetensors', { name: 'keep', relDir: '' }),
-      makeModel('D:\\models\\lora\\a.safetensors', { name: 'a', relDir: 'lora' })
+      makeModel('D:\\models\\lora\\a.safetensors', {
+        name: 'a',
+        relDir: 'lora',
+      }),
     ])
     api.models.partialScan.mockResolvedValue({
       models: [
-        makeModel('D:\\models\\lora\\a.safetensors', { name: 'a', relDir: 'lora' }),
-        makeModel('D:\\models\\lora\\b.safetensors', { name: 'b', relDir: 'lora' })
+        makeModel('D:\\models\\lora\\a.safetensors', {
+          name: 'a',
+          relDir: 'lora',
+        }),
+        makeModel('D:\\models\\lora\\b.safetensors', {
+          name: 'b',
+          relDir: 'lora',
+        }),
       ],
       dirs: ['lora'],
-      relinked: 0
+      relinked: 0,
     })
 
     await partialScanModels(['lora'])
@@ -185,15 +208,25 @@ describe('partialScanModels 增量合并（A-03）', () => {
     expect(ids).toContain('D:\\models\\lora\\b.safetensors') // 新增
     expect(state.models).toHaveLength(3)
     // IPC 入参透传子树
-    expect(api.models.partialScan).toHaveBeenCalledWith({ folder: 'D:\\models', dirs: ['lora'] })
+    expect(api.models.partialScan).toHaveBeenCalledWith({
+      folder: 'D:\\models',
+      dirs: ['lora'],
+    })
   })
 
   it('子树内消失的模型从列表移除，子树外模型保留', async () => {
     setGrid([
-      makeModel('D:\\models\\lora\\gone.safetensors', { name: 'gone', relDir: 'lora' }),
-      makeModel('D:\\models\\keep.safetensors', { name: 'keep', relDir: '' })
+      makeModel('D:\\models\\lora\\gone.safetensors', {
+        name: 'gone',
+        relDir: 'lora',
+      }),
+      makeModel('D:\\models\\keep.safetensors', { name: 'keep', relDir: '' }),
     ])
-    api.models.partialScan.mockResolvedValue({ models: [], dirs: ['lora'], relinked: 0 })
+    api.models.partialScan.mockResolvedValue({
+      models: [],
+      dirs: ['lora'],
+      relinked: 0,
+    })
 
     await partialScanModels(['lora'])
 
@@ -204,10 +237,20 @@ describe('partialScanModels 增量合并（A-03）', () => {
 
   it('dirs 含根目录空串时影响根直属模型，但不影响子目录模型', async () => {
     setGrid([
-      makeModel('D:\\models\\root-file.safetensors', { name: 'root-file', relDir: '' }),
-      makeModel('D:\\models\\lora\\deep.safetensors', { name: 'deep', relDir: 'lora' })
+      makeModel('D:\\models\\root-file.safetensors', {
+        name: 'root-file',
+        relDir: '',
+      }),
+      makeModel('D:\\models\\lora\\deep.safetensors', {
+        name: 'deep',
+        relDir: 'lora',
+      }),
     ])
-    api.models.partialScan.mockResolvedValue({ models: [], dirs: [''], relinked: 0 })
+    api.models.partialScan.mockResolvedValue({
+      models: [],
+      dirs: [''],
+      relinked: 0,
+    })
 
     await partialScanModels([''])
 
@@ -218,12 +261,22 @@ describe('partialScanModels 增量合并（A-03）', () => {
 
   it('合并后同步清理多选选区中已消失的 id', async () => {
     setGrid([
-      makeModel('D:\\models\\lora\\gone.safetensors', { name: 'gone', relDir: 'lora' }),
-      makeModel('D:\\models\\keep.safetensors', { name: 'keep', relDir: '' })
+      makeModel('D:\\models\\lora\\gone.safetensors', {
+        name: 'gone',
+        relDir: 'lora',
+      }),
+      makeModel('D:\\models\\keep.safetensors', { name: 'keep', relDir: '' }),
     ])
     state.multiSelect.active = true
-    state.multiSelect.ids = ['D:\\models\\lora\\gone.safetensors', 'D:\\models\\keep.safetensors']
-    api.models.partialScan.mockResolvedValue({ models: [], dirs: ['lora'], relinked: 0 })
+    state.multiSelect.ids = [
+      'D:\\models\\lora\\gone.safetensors',
+      'D:\\models\\keep.safetensors',
+    ]
+    api.models.partialScan.mockResolvedValue({
+      models: [],
+      dirs: ['lora'],
+      relinked: 0,
+    })
 
     await partialScanModels(['lora'])
 
@@ -231,9 +284,18 @@ describe('partialScanModels 增量合并（A-03）', () => {
   })
 
   it('子树内当前打开详情的模型消失时关闭详情', async () => {
-    setGrid([makeModel('D:\\models\\lora\\gone.safetensors', { name: 'gone', relDir: 'lora' })])
+    setGrid([
+      makeModel('D:\\models\\lora\\gone.safetensors', {
+        name: 'gone',
+        relDir: 'lora',
+      }),
+    ])
     state.selectedId = 'D:\\models\\lora\\gone.safetensors'
-    api.models.partialScan.mockResolvedValue({ models: [], dirs: ['lora'], relinked: 0 })
+    api.models.partialScan.mockResolvedValue({
+      models: [],
+      dirs: ['lora'],
+      relinked: 0,
+    })
 
     await partialScanModels(['lora'])
 
@@ -243,7 +305,10 @@ describe('partialScanModels 增量合并（A-03）', () => {
   it('dirs 为空/缺省时回退全量扫描（防御 watcher 载荷异常）', async () => {
     setGrid([])
     api.models.scan.mockResolvedValue({ models: [makeModel('m1')], errors: [] })
-    api.models.partialScan.mockResolvedValue({ models: [makeModel('m2')], dirs: [] })
+    api.models.partialScan.mockResolvedValue({
+      models: [makeModel('m2')],
+      dirs: [],
+    })
 
     await partialScanModels([])
 
@@ -263,81 +328,115 @@ describe('partialScanModels 增量合并（A-03）', () => {
 
   it('O3：子树超过上限时收敛为一级目录后发送，不静默截断', async () => {
     setGrid([])
-    api.models.partialScan.mockResolvedValue({ models: [], dirs: ['bulk'], relinked: 0 })
+    api.models.partialScan.mockResolvedValue({
+      models: [],
+      dirs: ['bulk'],
+      relinked: 0,
+    })
     const dirs = Array.from({ length: 205 }, (_, i) => `bulk/item-${i}`)
 
     await partialScanModels(dirs)
 
     expect(api.models.partialScan).toHaveBeenCalledWith({
       folder: 'D:\\models',
-      dirs: ['bulk']
+      dirs: ['bulk'],
     })
   })
 
   it('O3：一级目录仍超过上限时降级全量扫描', async () => {
     setGrid([makeModel('keep-id')])
-    api.models.scan.mockResolvedValue({ models: [makeModel('keep-id')], errors: [] })
+    api.models.scan.mockResolvedValue({
+      models: [makeModel('keep-id')],
+      errors: [],
+    })
     const dirs = Array.from({ length: 205 }, (_, i) => `top${i}`)
 
     await partialScanModels(dirs)
 
     expect(api.models.partialScan).not.toHaveBeenCalled()
     expect(api.models.scan).toHaveBeenCalled()
-    expect(state.toasts.some((t) => t.type === 'warn' && t.text.includes('变更目录过多'))).toBe(
-      true
-    )
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'warn' && t.text.includes('变更目录过多'),
+      ),
+    ).toBe(true)
   })
 
   it('O3：主进程返回 fullScanRequired 时降级全量扫描', async () => {
     setGrid([makeModel('keep-id')])
     api.models.partialScan.mockResolvedValue({ fullScanRequired: true })
-    api.models.scan.mockResolvedValue({ models: [makeModel('keep-id')], errors: [] })
+    api.models.scan.mockResolvedValue({
+      models: [makeModel('keep-id')],
+      errors: [],
+    })
 
     await partialScanModels(['lora'])
     // fallback 全量扫描在 finalize 中异步发起
     await new Promise((resolve) => setImmediate(resolve))
 
     expect(api.models.scan).toHaveBeenCalled()
-    expect(state.toasts.some((t) => t.type === 'warn' && t.text.includes('变更目录过多'))).toBe(
-      true
-    )
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'warn' && t.text.includes('变更目录过多'),
+      ),
+    ).toBe(true)
   })
 
   it('请求发出后切库：旧根响应丢弃，不覆盖新库列表（B-01）', async () => {
-    setGrid([makeModel('D:\\models\\lora\\a.safetensors', { name: 'a', relDir: 'lora' })])
+    setGrid([
+      makeModel('D:\\models\\lora\\a.safetensors', {
+        name: 'a',
+        relDir: 'lora',
+      }),
+    ])
     let resolveRequest
     api.models.partialScan.mockReturnValue(
       new Promise((resolve) => {
         resolveRequest = resolve
-      })
+      }),
     )
 
     const pending = partialScanModels(['lora'])
     // 模拟切库：根与列表已换成新库
     state.folder = 'D:\\other'
-    replaceModels([makeModel('D:\\other\\new.safetensors', { name: 'new', relDir: '' })])
+    replaceModels([
+      makeModel('D:\\other\\new.safetensors', { name: 'new', relDir: '' }),
+    ])
     resolveRequest({
-      models: [makeModel('D:\\models\\lora\\b.safetensors', { name: 'b', relDir: 'lora' })],
+      models: [
+        makeModel('D:\\models\\lora\\b.safetensors', {
+          name: 'b',
+          relDir: 'lora',
+        }),
+      ],
       dirs: ['lora'],
-      relinked: 0
+      relinked: 0,
     })
     await pending
 
-    expect(state.models.map((m) => m.id)).toEqual(['D:\\other\\new.safetensors'])
+    expect(state.models.map((m) => m.id)).toEqual([
+      'D:\\other\\new.safetensors',
+    ])
     expect(state.partialScanning).toBe(false)
   })
 
   it('并发局部扫描串行化：在途变更合并后补扫一次（B-01）', async () => {
-    setGrid([makeModel('D:\\models\\keep.safetensors', { name: 'keep', relDir: '' })])
+    setGrid([
+      makeModel('D:\\models\\keep.safetensors', { name: 'keep', relDir: '' }),
+    ])
     let resolveFirst
     api.models.partialScan.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveFirst = resolve
-      })
+      }),
     )
 
     const first = partialScanModels(['lora'])
-    api.models.partialScan.mockResolvedValue({ models: [], dirs: ['vae'], relinked: 0 })
+    api.models.partialScan.mockResolvedValue({
+      models: [],
+      dirs: ['vae'],
+      relinked: 0,
+    })
     // 在途期间的新变更不并发发起，合并入队
     await partialScanModels(['vae'])
     expect(api.models.partialScan).toHaveBeenCalledTimes(1)
@@ -349,14 +448,16 @@ describe('partialScanModels 增量合并（A-03）', () => {
     expect(api.models.partialScan).toHaveBeenCalledTimes(2)
     expect(api.models.partialScan.mock.calls[1][0]).toEqual({
       folder: 'D:\\models',
-      dirs: ['vae']
+      dirs: ['vae'],
     })
     expect(state.partialScanning).toBe(false)
   })
 
   it('局部扫描失败降级全量扫描时，不会因锁标志被自身拦截（B-01）', async () => {
     setGrid([])
-    api.models.partialScan.mockResolvedValue({ error: '该目录不在模型库列表中' })
+    api.models.partialScan.mockResolvedValue({
+      error: '该目录不在模型库列表中',
+    })
     api.models.scan.mockResolvedValue({ models: [makeModel('m1')], errors: [] })
 
     await partialScanModels(['lora'])
@@ -373,7 +474,11 @@ describe('scanModels 重关联提示（A-02）', () => {
   })
 
   it('扫描响应含 relinked>0 时成功提示追加「自动重新关联 N 个」', async () => {
-    api.models.scan.mockResolvedValue({ models: [makeModel('m1')], errors: [], relinked: 2 })
+    api.models.scan.mockResolvedValue({
+      models: [makeModel('m1')],
+      errors: [],
+      relinked: 2,
+    })
     await scanModels()
     const notice = state.toasts.find((t) => t.type === 'success')
     expect(notice.text).toContain('发现 1 个模型')
@@ -391,7 +496,7 @@ describe('scanModels 重关联提示（A-02）', () => {
     api.models.scan.mockResolvedValue({
       models: [makeModel('m1')],
       errors: [{ dir: 'x', message: 'denied' }],
-      relinked: 1
+      relinked: 1,
     })
     await scanModels()
     const notice = state.toasts.find((t) => t.type === 'warn')
@@ -407,13 +512,15 @@ describe('切库状态机（V-02）', () => {
     api.models.scan.mockResolvedValue({
       root: 'D:\\other',
       models: [makeModel('D:\\other\\new.safetensors')],
-      errors: []
+      errors: [],
     })
 
     await switchRoot('D:\\other')
 
     expect(state.folder).toBe('D:\\other')
-    expect(state.models.map((m) => m.id)).toEqual(['D:\\other\\new.safetensors'])
+    expect(state.models.map((m) => m.id)).toEqual([
+      'D:\\other\\new.safetensors',
+    ])
   })
 
   it('目标库扫描失败时保持原库与旧列表', async () => {
@@ -424,7 +531,9 @@ describe('切库状态机（V-02）', () => {
     await switchRoot('D:\\other')
 
     expect(state.folder).toBe('D:\\models')
-    expect(state.models.map((m) => m.id)).toEqual(['D:\\models\\old.safetensors'])
+    expect(state.models.map((m) => m.id)).toEqual([
+      'D:\\models\\old.safetensors',
+    ])
     expect(state.toasts.some((t) => t.type === 'error')).toBe(true)
   })
 
@@ -436,7 +545,9 @@ describe('切库状态机（V-02）', () => {
     await switchRoot('D:\\other')
 
     expect(state.folder).toBe('D:\\models')
-    expect(state.models.map((m) => m.id)).toEqual(['D:\\models\\old.safetensors'])
+    expect(state.models.map((m) => m.id)).toEqual([
+      'D:\\models\\old.safetensors',
+    ])
   })
 })
 
@@ -448,9 +559,13 @@ describe('F2 模型导入', () => {
       renamed: 1,
       failed: [],
       warnings: [],
-      targetRelDir: 'lora'
+      targetRelDir: 'lora',
     })
-    api.models.partialScan.mockResolvedValue({ models: [], dirs: ['lora'], relinked: 0 })
+    api.models.partialScan.mockResolvedValue({
+      models: [],
+      dirs: ['lora'],
+      relinked: 0,
+    })
 
     const ok = await importModels('copy')
 
@@ -458,11 +573,13 @@ describe('F2 模型导入', () => {
     expect(api.models.importModels).toHaveBeenCalledWith('copy')
     expect(api.models.partialScan).toHaveBeenCalledWith({
       folder: 'D:\\models',
-      dirs: ['lora']
+      dirs: ['lora'],
     })
-    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('2 个模型'))).toBe(
-      true
-    )
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'success' && t.text.includes('2 个模型'),
+      ),
+    ).toBe(true)
     expect(state.importing).toBe(false)
   })
 
@@ -473,11 +590,15 @@ describe('F2 模型导入', () => {
       renamed: 0,
       failed: [{ source: 'x', error: '不支持' }],
       warnings: [],
-      targetRelDir: ''
+      targetRelDir: '',
     })
     expect(await importModels('copy')).toBe(false)
     expect(api.models.partialScan).not.toHaveBeenCalled()
-    expect(state.toasts.some((t) => t.type === 'warn' && t.text.includes('导入失败'))).toBe(true)
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'warn' && t.text.includes('导入失败'),
+      ),
+    ).toBe(true)
 
     state.scanning = true
     expect(await importModels('copy')).toBe(false)
@@ -497,30 +618,40 @@ describe('F1 本地索引：秒切库与后台校验', () => {
       cached: true,
       durationMs: 5,
       models: [makeModel('D:\\other\\cached.safetensors')],
-      settings: { modelsFolder: 'D:\\other', autoScan: true }
+      settings: { modelsFolder: 'D:\\other', autoScan: true },
     })
     let releaseScan
-    api.models.scan.mockReturnValue(new Promise((resolve) => { releaseScan = resolve }))
+    api.models.scan.mockReturnValue(
+      new Promise((resolve) => {
+        releaseScan = resolve
+      }),
+    )
 
     await switchRoot('D:\\other')
 
     expect(state.folder).toBe('D:\\other')
-    expect(state.models.map((m) => m.id)).toEqual(['D:\\other\\cached.safetensors'])
+    expect(state.models.map((m) => m.id)).toEqual([
+      'D:\\other\\cached.safetensors',
+    ])
     expect(state.backgroundScanning).toBe(true)
-    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('秒开本地索引'))).toBe(
-      true
-    )
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'success' && t.text.includes('秒开本地索引'),
+      ),
+    ).toBe(true)
     expect(api.models.scan).toHaveBeenCalledWith('D:\\other')
 
     releaseScan({
       root: 'D:\\other',
       models: [makeModel('D:\\other\\fresh.safetensors')],
       errors: [],
-      durationMs: 10
+      durationMs: 10,
     })
     await tick()
     expect(state.backgroundScanning).toBe(false)
-    expect(state.models.map((m) => m.id)).toEqual(['D:\\other\\fresh.safetensors'])
+    expect(state.models.map((m) => m.id)).toEqual([
+      'D:\\other\\fresh.safetensors',
+    ])
   })
 
   it('后台校验失败时保留缓存列表且不进入全屏错误态', async () => {
@@ -530,18 +661,22 @@ describe('F1 本地索引：秒切库与后台校验', () => {
       root: 'D:\\other',
       cached: true,
       models: [makeModel('D:\\other\\cached.safetensors')],
-      settings: { modelsFolder: 'D:\\other', autoScan: true }
+      settings: { modelsFolder: 'D:\\other', autoScan: true },
     })
     api.models.scan.mockResolvedValue({ error: '磁盘读取失败' })
 
     await switchRoot('D:\\other')
     await tick()
 
-    expect(state.models.map((m) => m.id)).toEqual(['D:\\other\\cached.safetensors'])
+    expect(state.models.map((m) => m.id)).toEqual([
+      'D:\\other\\cached.safetensors',
+    ])
     expect(state.scanError).toBe('')
     expect(state.backgroundScanning).toBe(false)
     expect(
-      state.toasts.some((t) => t.type === 'warn' && t.text.includes('后台校验失败'))
+      state.toasts.some(
+        (t) => t.type === 'warn' && t.text.includes('后台校验失败'),
+      ),
     ).toBe(true)
   })
 
@@ -550,22 +685,37 @@ describe('F1 本地索引：秒切库与后台校验', () => {
     api.models.loadStore.mockResolvedValue({
       settings: { modelsFolder: 'D:\\lib', autoScan: true },
       models: {},
-      cachedIndex: { models: [makeModel('D:\\lib\\cached.safetensors')], durationMs: 3 }
+      cachedIndex: {
+        models: [makeModel('D:\\lib\\cached.safetensors')],
+        durationMs: 3,
+      },
     })
     let releaseScan
-    api.models.scan.mockReturnValue(new Promise((resolve) => { releaseScan = resolve }))
+    api.models.scan.mockReturnValue(
+      new Promise((resolve) => {
+        releaseScan = resolve
+      }),
+    )
 
     await initApp()
 
     expect(state.booting).toBe(false)
     expect(state.folder).toBe('D:\\lib')
-    expect(state.models.map((m) => m.id)).toEqual(['D:\\lib\\cached.safetensors'])
+    expect(state.models.map((m) => m.id)).toEqual([
+      'D:\\lib\\cached.safetensors',
+    ])
     expect(state.backgroundScanning).toBe(true)
 
-    releaseScan({ root: 'D:\\lib', models: [makeModel('D:\\lib\\fresh.safetensors')], errors: [] })
+    releaseScan({
+      root: 'D:\\lib',
+      models: [makeModel('D:\\lib\\fresh.safetensors')],
+      errors: [],
+    })
     await tick()
     expect(state.backgroundScanning).toBe(false)
-    expect(state.models.map((m) => m.id)).toEqual(['D:\\lib\\fresh.safetensors'])
+    expect(state.models.map((m) => m.id)).toEqual([
+      'D:\\lib\\fresh.safetensors',
+    ])
   })
 
   it('initApp autoScan=false 且有缓存：展示缓存但不触发扫描', async () => {
@@ -573,13 +723,18 @@ describe('F1 本地索引：秒切库与后台校验', () => {
     api.models.loadStore.mockResolvedValue({
       settings: { modelsFolder: 'D:\\lib', autoScan: false },
       models: {},
-      cachedIndex: { models: [makeModel('D:\\lib\\cached.safetensors')], durationMs: 3 }
+      cachedIndex: {
+        models: [makeModel('D:\\lib\\cached.safetensors')],
+        durationMs: 3,
+      },
     })
 
     await initApp()
 
     expect(state.booting).toBe(false)
-    expect(state.models.map((m) => m.id)).toEqual(['D:\\lib\\cached.safetensors'])
+    expect(state.models.map((m) => m.id)).toEqual([
+      'D:\\lib\\cached.safetensors',
+    ])
     expect(state.backgroundScanning).toBe(false)
     expect(api.models.scan).not.toHaveBeenCalled()
   })
@@ -595,8 +750,8 @@ describe('库路径失效闭环（F1-offline）', () => {
       folderMissing: true,
       rootStatuses: [
         { folder: 'D:\\gone', exists: false },
-        { folder: 'E:\\fine', exists: true }
-      ]
+        { folder: 'E:\\fine', exists: true },
+      ],
     })
 
     await initApp()
@@ -613,9 +768,14 @@ describe('库路径失效闭环（F1-offline）', () => {
   it('initApp：无 folderMissing 字段（旧响应形态）时保持原有自动扫描流程', async () => {
     state.booting = true
     api.models.loadStore.mockResolvedValue({
-      settings: { modelsFolder: 'D:\\lib', autoScan: true }
+      settings: { modelsFolder: 'D:\\lib', autoScan: true },
     })
-    api.models.scan.mockResolvedValue({ root: 'D:\\lib', models: [], errors: [], durationMs: 1 })
+    api.models.scan.mockResolvedValue({
+      root: 'D:\\lib',
+      models: [],
+      errors: [],
+      durationMs: 1,
+    })
 
     await initApp()
 
@@ -628,7 +788,7 @@ describe('库路径失效闭环（F1-offline）', () => {
     state.folder = 'D:\\gone'
     api.models.scan.mockResolvedValue({
       error: '模型文件夹不存在或不是目录',
-      folderMissing: true
+      folderMissing: true,
     })
 
     const ok = await scanModels()
@@ -648,7 +808,7 @@ describe('库路径失效闭环（F1-offline）', () => {
       root: 'D:\\back',
       models: [makeModel('D:\\back\\a.safetensors')],
       errors: [],
-      durationMs: 1
+      durationMs: 1,
     })
 
     const ok = await scanModels()
@@ -676,14 +836,16 @@ describe('库路径失效闭环（F1-offline）', () => {
     replaceModels([makeModel('D:\\gone\\a.safetensors')])
     api.models.partialScan.mockResolvedValue({
       error: '模型文件夹不存在或不是目录',
-      folderMissing: true
+      folderMissing: true,
     })
 
     await partialScanModels(['lora'])
 
     expect(state.folderMissing).toBe(true)
     expect(api.models.scan).not.toHaveBeenCalled()
-    expect(state.toasts.some((t) => t.text.includes('增量刷新失败'))).toBe(false)
+    expect(state.toasts.some((t) => t.text.includes('增量刷新失败'))).toBe(
+      false,
+    )
     expect(state.partialScanning).toBe(false)
   })
 
@@ -692,7 +854,7 @@ describe('库路径失效闭环（F1-offline）', () => {
     replaceModels([makeModel('D:\\libA\\a.safetensors')])
     api.models.openLibrary.mockResolvedValue({
       error: '模型文件夹不存在或不是目录',
-      folderMissing: true
+      folderMissing: true,
     })
 
     await switchRoot('D:\\goneB')
@@ -714,9 +876,14 @@ describe('库路径失效闭环（F1-offline）', () => {
       cached: true,
       models: [makeModel('D:\\fine\\cached.safetensors')],
       settings: { modelsFolder: 'D:\\fine', autoScan: false },
-      durationMs: 3
+      durationMs: 3,
     })
-    api.models.scan.mockResolvedValue({ root: 'D:\\fine', models: [], errors: [], durationMs: 1 })
+    api.models.scan.mockResolvedValue({
+      root: 'D:\\fine',
+      models: [],
+      errors: [],
+      durationMs: 1,
+    })
 
     await switchRoot('D:\\fine')
     await tick()
@@ -745,19 +912,21 @@ describe('库路径失效闭环（F1-offline）', () => {
     state.settings.modelsFolders = ['D:\\gone', 'E:\\other']
     api.models.chooseFolder.mockResolvedValue('F:\\new-home')
     api.settings.update.mockImplementation((patch) =>
-      Promise.resolve({ settings: { ...state.settings, ...patch } })
+      Promise.resolve({ settings: { ...state.settings, ...patch } }),
     )
     api.models.scan.mockResolvedValue({
       root: 'F:\\new-home',
       models: [makeModel('F:\\new-home\\a.safetensors')],
       errors: [],
-      durationMs: 1
+      durationMs: 1,
     })
 
     await relocateFolder()
 
     // 立即清理死条目（不等扫描结果）
-    expect(api.settings.update).toHaveBeenCalledWith({ modelsFolders: ['E:\\other'] })
+    expect(api.settings.update).toHaveBeenCalledWith({
+      modelsFolders: ['E:\\other'],
+    })
     expect(api.models.scan).toHaveBeenCalledWith('F:\\new-home')
     // 扫描成功：离线态清除，新路径成为激活库
     expect(state.folder).toBe('F:\\new-home')
@@ -775,7 +944,7 @@ describe('库路径失效闭环（F1-offline）', () => {
       root: 'F:\\new-home',
       models: [],
       errors: [],
-      durationMs: 1
+      durationMs: 1,
     })
 
     await relocateFolder()
@@ -802,7 +971,7 @@ function makeModel(id, overrides = {}) {
     note: '',
     subCategory: '',
     triggerWords: '',
-    ...overrides
+    ...overrides,
   }
 }
 
@@ -829,7 +998,7 @@ describe('确认层（U4）', () => {
     const changes = []
     const stop = watch(
       () => state.confirm.visible,
-      (v) => changes.push(v)
+      (v) => changes.push(v),
     )
     // 第一轮确认：acceptConfirm 曾用原始对象整体替换 state.confirm，
     // shallowReactive 不深代理 → 后续逐字段赋值失去响应性，弹窗不再显示
@@ -875,9 +1044,28 @@ describe('formatSize', () => {
 describe('筛选与排序（filteredModels）', () => {
   beforeEach(() => {
     state.models = [
-      makeModel('a', { name: '动漫风格', type: 'lora', favorite: true, rating: 4, size: 300, mtimeMs: 30 }),
-      makeModel('b', { name: '写实大模型', type: 'checkpoint', rating: 5, size: 900, mtimeMs: 10 }),
-      makeModel('c', { name: 'quick-fix', type: 'vae', size: 600, mtimeMs: 20, alias: '快速修复' })
+      makeModel('a', {
+        name: '动漫风格',
+        type: 'lora',
+        favorite: true,
+        rating: 4,
+        size: 300,
+        mtimeMs: 30,
+      }),
+      makeModel('b', {
+        name: '写实大模型',
+        type: 'checkpoint',
+        rating: 5,
+        size: 900,
+        mtimeMs: 10,
+      }),
+      makeModel('c', {
+        name: 'quick-fix',
+        type: 'vae',
+        size: 600,
+        mtimeMs: 20,
+        alias: '快速修复',
+      }),
     ]
   })
 
@@ -917,9 +1105,13 @@ describe('筛选与排序（filteredModels）', () => {
     state.models = [
       makeModel('lora1', {
         name: '神秘模型',
-        autoInfo: { baseModel: 'sd_xl_base_1.0', author: 'KohyaStyle', triggerCandidates: ['masterpiece', 'best quality'] }
+        autoInfo: {
+          baseModel: 'sd_xl_base_1.0',
+          author: 'KohyaStyle',
+          triggerCandidates: ['masterpiece', 'best quality'],
+        },
       }),
-      makeModel('lora2', { name: '普通模型', autoInfo: null })
+      makeModel('lora2', { name: '普通模型', autoInfo: null }),
     ]
     // 按基底模型搜（「那个 SDXL 的 LoRA 在哪」；真实头部值形如 sd_xl_base_1.0，
     // 搜索为子串匹配——搜「sd_xl」或「xl_base」均可命中）
@@ -941,7 +1133,7 @@ describe('筛选与排序（filteredModels）', () => {
     state.models = [
       makeModel('a', { type: 'lora', tags: ['赛博朋克', '服装'] }),
       makeModel('b', { type: 'checkpoint', tags: ['赛博朋克'] }),
-      makeModel('c', { type: 'vae', tags: [] })
+      makeModel('c', { type: 'vae', tags: [] }),
     ]
     // 标签池：按使用次数降序
     expect(allTags.value).toEqual(['赛博朋克', '服装'])
@@ -968,7 +1160,7 @@ describe('筛选与排序（filteredModels）', () => {
     state.models = [
       makeModel('x', { name: 'a', favorite: false }),
       makeModel('y', { name: 'b', favorite: true }),
-      makeModel('z', { name: 'c', favorite: true })
+      makeModel('z', { name: 'c', favorite: true }),
     ]
     state.sortBy = 'favorite'
     expect(filteredModels.value.map((m) => m.id)).toEqual(['y', 'z', 'x'])
@@ -980,7 +1172,7 @@ describe('筛选与排序（filteredModels）', () => {
     state.models = [
       makeModel('a', { name: 'a', rating: 4 }),
       makeModel('b', { name: 'b', rating: 5 }),
-      makeModel('c', { name: 'c', rating: 0 })
+      makeModel('c', { name: 'c', rating: 0 }),
     ]
     state.sortBy = 'rating'
     expect(filteredModels.value.map((m) => m.id)).toEqual(['b', 'a', 'c'])
@@ -1021,11 +1213,14 @@ describe('toggleFavorite（A6 错误可见性）', () => {
   it('成功时以返回的 meta 同步本地状态', async () => {
     state.models = [makeModel('m1', { favorite: false })]
     api.models.setMetaFlags.mockResolvedValue({
-      meta: { favorite: true, nsfw: false, rating: 0 }
+      meta: { favorite: true, nsfw: false, rating: 0 },
     })
     const ok = await toggleFavorite('m1')
     expect(ok).toBe(true)
-    expect(api.models.setMetaFlags).toHaveBeenCalledWith({ id: 'm1', favorite: true })
+    expect(api.models.setMetaFlags).toHaveBeenCalledWith({
+      id: 'm1',
+      favorite: true,
+    })
     expect(state.models[0].favorite).toBe(true)
   })
 
@@ -1052,10 +1247,10 @@ describe('标注操作响应传播（shallowReactive 回归）', () => {
     // 与真实扫描一致：列表经 replaceModels 装配（数组为 shallowReactive 代理）
     replaceModels([
       makeModel('m1', { name: '甲', favorite: false }),
-      makeModel('m2', { name: '乙' })
+      makeModel('m2', { name: '乙' }),
     ])
     api.models.setMetaFlags.mockResolvedValue({
-      meta: { favorite: true, nsfw: true, rating: 3 }
+      meta: { favorite: true, nsfw: true, rating: 3 },
     })
     state.selectedId = 'm1'
     expect(selectedModel.value.favorite).toBe(false)
@@ -1079,7 +1274,7 @@ describe('标注操作响应传播（shallowReactive 回归）', () => {
     state.selectedId = 'm1'
     expect(selectedModel.value.favorite).toBe(false) // 先读一次，建立派生缓存
     api.models.setMetaFlags.mockResolvedValue({
-      meta: { favorite: true, nsfw: false, rating: 0 }
+      meta: { favorite: true, nsfw: false, rating: 0 },
     })
     await toggleFavorite('m1')
     expect(state.models[0].favorite).toBe(true)
@@ -1096,12 +1291,15 @@ describe('快速连点竞态（A5）', () => {
       sentPayloads.push(payload)
       // 第一次调用挂起：模拟 IPC 在途窗口
       return new Promise((resolve) => {
-        releaseFirst = () => resolve({ meta: { favorite: true, nsfw: false, rating: 0 } })
+        releaseFirst = () =>
+          resolve({ meta: { favorite: true, nsfw: false, rating: 0 } })
       })
     })
     api.models.setMetaFlags.mockImplementationOnce((payload) => {
       sentPayloads.push(payload)
-      return Promise.resolve({ meta: { favorite: payload.favorite, nsfw: false, rating: 0 } })
+      return Promise.resolve({
+        meta: { favorite: payload.favorite, nsfw: false, rating: 0 },
+      })
     })
 
     const first = toggleFavorite('m1') // 不 await：构造连点场景
@@ -1112,7 +1310,7 @@ describe('快速连点竞态（A5）', () => {
     // 串行化后：第一次读旧值 false -> true；第二次读新值 true -> false
     expect(sentPayloads).toEqual([
       { id: 'm1', favorite: true },
-      { id: 'm1', favorite: false }
+      { id: 'm1', favorite: false },
     ])
     // 净效果翻两次，回到 false（未串行化时两次都发 true，第二次点击看起来失效）
     expect(state.models[0].favorite).toBe(false)
@@ -1122,7 +1320,7 @@ describe('快速连点竞态（A5）', () => {
     state.models = [makeModel('m1', { favorite: false })]
     api.models.setMetaFlags.mockRejectedValueOnce(new Error('IPC 断开'))
     api.models.setMetaFlags.mockResolvedValueOnce({
-      meta: { favorite: true, nsfw: false, rating: 0 }
+      meta: { favorite: true, nsfw: false, rating: 0 },
     })
 
     const ok1 = await toggleFavorite('m1')
@@ -1141,10 +1339,13 @@ describe('快速连点竞态（A5）', () => {
       if (payload.id === 'm1') {
         m1Started = true
         return new Promise((resolve) => {
-          releaseFirst = () => resolve({ meta: { favorite: true, nsfw: false, rating: 0 } })
+          releaseFirst = () =>
+            resolve({ meta: { favorite: true, nsfw: false, rating: 0 } })
         })
       }
-      return Promise.resolve({ meta: { favorite: true, nsfw: false, rating: 0 } })
+      return Promise.resolve({
+        meta: { favorite: true, nsfw: false, rating: 0 },
+      })
     })
 
     const p1 = toggleFavorite('m1')
@@ -1163,11 +1364,15 @@ describe('批量操作单次状态合并（O2）', () => {
     state.models = [makeModel('a'), makeModel('b'), makeModel('c')]
     state.multiSelect.ids = ['a', 'b', 'c']
     api.models.setMetaFlags.mockResolvedValue({
-      meta: { favorite: true, nsfw: false, rating: 0 }
+      meta: { favorite: true, nsfw: false, rating: 0 },
     })
     await batchFavorite(true)
     expect(state.models.map((m) => m.favorite)).toEqual([true, true, true])
-    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已为 3 个模型收藏'))).toBe(true)
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'success' && t.text.includes('已为 3 个模型收藏'),
+      ),
+    ).toBe(true)
   })
 
   it('批量收藏按统一限流执行：同时在途 IPC 不超过上限', async () => {
@@ -1197,22 +1402,33 @@ describe('批量操作单次状态合并（O2）', () => {
     api.models.setMetaFlags.mockImplementation(({ id }) =>
       id === 'b'
         ? Promise.reject(new Error('IPC 断开'))
-        : Promise.resolve({ meta: { favorite: true, nsfw: false, rating: 0 } })
+        : Promise.resolve({ meta: { favorite: true, nsfw: false, rating: 0 } }),
     )
     await batchFavorite(true)
     expect(state.models.find((m) => m.id === 'a').favorite).toBe(true)
     expect(state.models.find((m) => m.id === 'b').favorite).toBe(false)
     expect(state.models.find((m) => m.id === 'c').favorite).toBe(true)
-    expect(state.toasts.some((t) => t.type === 'warn' && t.text.includes('成功 2 个，失败 1 个'))).toBe(true)
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'warn' && t.text.includes('成功 2 个，失败 1 个'),
+      ),
+    ).toBe(true)
   })
 
   it('一键分配标签：确认后逐个按 Civitai 分类分配并单趟同步标签字段', async () => {
-    state.models = [makeModel('a', { type: 'lora' }), makeModel('b', { type: 'lora' })]
+    state.models = [
+      makeModel('a', { type: 'lora' }),
+      makeModel('b', { type: 'lora' }),
+    ]
     state.multiSelect.ids = ['a', 'b']
     api.models.civitaiCategory.mockImplementation((id) =>
       id === 'a'
-        ? Promise.resolve({ found: true, subCategory: 'role', meta: { subCategory: 'role' } })
-        : Promise.resolve({ skipped: true })
+        ? Promise.resolve({
+            found: true,
+            subCategory: 'role',
+            meta: { subCategory: 'role' },
+          })
+        : Promise.resolve({ skipped: true }),
     )
     const p = batchAssignCivitaiTags()
     acceptConfirm()
@@ -1220,21 +1436,38 @@ describe('批量操作单次状态合并（O2）', () => {
     expect(api.models.civitaiCategory).toHaveBeenCalledTimes(2)
     expect(state.models.find((m) => m.id === 'a').subCategory).toBe('role')
     expect(
-      state.toasts.some((t) => t.type === 'success' && t.text.includes('成功 1 个') && t.text.includes('无 Civitai 链接 1 个'))
+      state.toasts.some(
+        (t) =>
+          t.type === 'success' &&
+          t.text.includes('成功 1 个') &&
+          t.text.includes('无 Civitai 链接 1 个'),
+      ),
     ).toBe(true)
   })
 
   it('一键分配标签：非 LoRA 模型不发起 IPC 且计入汇总', async () => {
-    state.models = [makeModel('a', { type: 'lora' }), makeModel('b', { type: 'checkpoint' })]
+    state.models = [
+      makeModel('a', { type: 'lora' }),
+      makeModel('b', { type: 'checkpoint' }),
+    ]
     state.multiSelect.ids = ['a', 'b']
-    api.models.civitaiCategory.mockResolvedValue({ found: true, subCategory: 'role', meta: { subCategory: 'role' } })
+    api.models.civitaiCategory.mockResolvedValue({
+      found: true,
+      subCategory: 'role',
+      meta: { subCategory: 'role' },
+    })
     const p = batchAssignCivitaiTags()
     acceptConfirm()
     await p
     expect(api.models.civitaiCategory).toHaveBeenCalledTimes(1)
     expect(api.models.civitaiCategory).toHaveBeenCalledWith('a')
     expect(
-      state.toasts.some((t) => t.type === 'success' && t.text.includes('成功 1 个') && t.text.includes('非 LoRA 1 个'))
+      state.toasts.some(
+        (t) =>
+          t.type === 'success' &&
+          t.text.includes('成功 1 个') &&
+          t.text.includes('非 LoRA 1 个'),
+      ),
     ).toBe(true)
   })
 
@@ -1259,19 +1492,27 @@ describe('批量操作单次状态合并（O2）', () => {
     state.models = [
       makeModel('a', { type: 'lora', subCategory: 'role' }),
       makeModel('b', { type: 'lora', subCategory: '' }),
-      makeModel('c', { type: 'checkpoint', subCategory: 'base' })
+      makeModel('c', { type: 'checkpoint', subCategory: 'base' }),
     ]
     state.multiSelect.ids = ['a', 'b', 'c']
     state.scanning = true // 跳过移动后的整表重扫（该链路由 scanner/watcher 测试覆盖）
-    api.models.organizeByTags.mockResolvedValue({ moved: 2, failed: [], skipped: [] })
+    api.models.organizeByTags.mockResolvedValue({
+      moved: 2,
+      failed: [],
+      skipped: [],
+    })
     const p = batchOrganizeByTags()
     acceptConfirm()
     await p
     expect(api.models.organizeByTags).toHaveBeenCalledWith([
       { id: 'a', subCategory: 'role' },
-      { id: 'b', subCategory: '' }
+      { id: 'b', subCategory: '' },
     ])
-    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已移动 2 个 LoRA 模型'))).toBe(true)
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'success' && t.text.includes('已移动 2 个 LoRA 模型'),
+      ),
+    ).toBe(true)
   })
 
   it('一键移动文件：选中模型均非 LoRA 时提示且不发起 IPC', async () => {
@@ -1296,7 +1537,12 @@ describe('批量操作单次状态合并（O2）', () => {
     // 选区仅移除已删除 id，多选模式保持
     expect(state.multiSelect.active).toBe(true)
     expect(state.multiSelect.ids).toEqual([])
-    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已将 2 个模型移入回收站'))).toBe(true)
+    expect(
+      state.toasts.some(
+        (t) =>
+          t.type === 'success' && t.text.includes('已将 2 个模型移入回收站'),
+      ),
+    ).toBe(true)
   })
 
   it('批量删除按文件操作并发上限执行：同时在途 IPC 不超过上限', async () => {
@@ -1326,14 +1572,18 @@ describe('批量操作单次状态合并（O2）', () => {
     state.models = [makeModel('a'), makeModel('b')]
     state.multiSelect.ids = ['a', 'b']
     api.models.deleteModel.mockImplementation((id) =>
-      id === 'a' ? Promise.resolve({ ok: true }) : Promise.resolve({ error: '文件被占用' })
+      id === 'a'
+        ? Promise.resolve({ ok: true })
+        : Promise.resolve({ error: '文件被占用' }),
     )
     const p = batchDeleteModels()
     acceptConfirm()
     await p
     expect(state.models.map((m) => m.id)).toEqual(['b'])
     expect(state.multiSelect.ids).toEqual(['b'])
-    expect(state.toasts.some((t) => t.text.includes('成功 1 个，失败 1 个'))).toBe(true)
+    expect(
+      state.toasts.some((t) => t.text.includes('成功 1 个，失败 1 个')),
+    ).toBe(true)
   })
 
   it('批量删除：确认取消时不调用删除 IPC', async () => {
@@ -1356,7 +1606,7 @@ describe('批量操作单次状态合并（O2）', () => {
       () =>
         new Promise((resolve) => {
           resolvers.push(resolve)
-        })
+        }),
     )
 
     const first = batchFavorite(true) // 不 await：构造在途窗口（busy 同步置位）
@@ -1367,7 +1617,8 @@ describe('批量操作单次状态合并（O2）', () => {
     expect(api.models.setMetaFlags).toHaveBeenCalledTimes(2)
     expect(state.multiSelect.busy).toBe(true) // 首批在途，按钮应保持禁用
 
-    for (const resolve of resolvers) resolve({ meta: { favorite: true, nsfw: false, rating: 0 } })
+    for (const resolve of resolvers)
+      resolve({ meta: { favorite: true, nsfw: false, rating: 0 } })
     await first
     expect(state.multiSelect.busy).toBe(false) // 完成后恢复可用
     expect(state.models.map((m) => m.favorite)).toEqual([true, true])
@@ -1382,7 +1633,7 @@ describe('批量操作单次状态合并（O2）', () => {
       () =>
         new Promise((resolve) => {
           release = () => resolve({ ok: true })
-        })
+        }),
     )
 
     const first = batchDeleteModels()
@@ -1402,13 +1653,18 @@ describe('批量操作单次状态合并（O2）', () => {
 
   it('批量填入自动触发词（F3）：仅填空触发词且有候选的模型，绝不覆盖已有标注', async () => {
     state.models = [
-      makeModel('fresh', { autoInfo: { triggerCandidates: ['tag-a', 'tag-b'] } }),
-      makeModel('owned', { triggerWords: '已有词', autoInfo: { triggerCandidates: ['tag-x'] } }),
-      makeModel('nocand', { autoInfo: null })
+      makeModel('fresh', {
+        autoInfo: { triggerCandidates: ['tag-a', 'tag-b'] },
+      }),
+      makeModel('owned', {
+        triggerWords: '已有词',
+        autoInfo: { triggerCandidates: ['tag-x'] },
+      }),
+      makeModel('nocand', { autoInfo: null }),
     ]
     state.multiSelect.ids = ['fresh', 'owned', 'nocand']
     api.models.saveModelData.mockImplementation(({ triggerWords }) =>
-      Promise.resolve({ meta: { triggerWords, triggerWordsSource: '' } })
+      Promise.resolve({ meta: { triggerWords, triggerWordsSource: '' } }),
     )
 
     await batchApplyTriggers()
@@ -1417,13 +1673,20 @@ describe('批量操作单次状态合并（O2）', () => {
     expect(api.models.saveModelData).toHaveBeenCalledTimes(1)
     expect(api.models.saveModelData.mock.calls[0][0]).toEqual({
       id: 'fresh',
-      triggerWords: 'tag-a, tag-b'
+      triggerWords: 'tag-a, tag-b',
     })
     // 本地列表同步填入结果，其余模型不受影响
     expect(state.models[0].triggerWords).toBe('tag-a, tag-b')
     expect(state.models[1].triggerWords).toBe('已有词')
-    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已为 1 个模型填入触发词'))).toBe(true)
-    expect(state.toasts.some((t) => t.text.includes('2 个已有触发词或无候选'))).toBe(true)
+    expect(
+      state.toasts.some(
+        (t) =>
+          t.type === 'success' && t.text.includes('已为 1 个模型填入触发词'),
+      ),
+    ).toBe(true)
+    expect(
+      state.toasts.some((t) => t.text.includes('2 个已有触发词或无候选')),
+    ).toBe(true)
   })
 
   it('批量填入触发词按统一限流执行：同时在途 IPC 不超过上限', async () => {
@@ -1431,8 +1694,8 @@ describe('批量操作单次状态合并（O2）', () => {
     state.models = ids.map((id) =>
       makeModel(id, {
         autoInfo: { triggerCandidates: ['tag'] },
-        triggerWords: ''
-      })
+        triggerWords: '',
+      }),
     )
     state.multiSelect.ids = ids
     let inFlight = 0
@@ -1457,27 +1720,41 @@ describe('批量操作单次状态合并（O2）', () => {
     state.multiSelect.ids = ['owned']
     await batchApplyTriggers()
     expect(api.models.saveModelData).not.toHaveBeenCalled()
-    expect(state.toasts.some((t) => t.text.includes('均已有触发词或无自动解析候选'))).toBe(true)
+    expect(
+      state.toasts.some((t) => t.text.includes('均已有触发词或无自动解析候选')),
+    ).toBe(true)
   })
 
   it('批量 Civitai 识别：串行逐个调用，未收录不算失败，civitaiUrl 单趟同步', async () => {
     state.models = [makeModel('a'), makeModel('b'), makeModel('c')]
     state.multiSelect.ids = ['a', 'b', 'c']
     api.models.civitaiIdentify.mockImplementation((id) => {
-      if (id === 'a') return Promise.resolve({ found: true, meta: { civitaiUrl: 'https://civitai.com/models/1' } })
+      if (id === 'a')
+        return Promise.resolve({
+          found: true,
+          meta: { civitaiUrl: 'https://civitai.com/models/1' },
+        })
       if (id === 'b') return Promise.resolve({ found: false })
       return Promise.reject(new Error('网络断开'))
     })
     await batchCivitaiIdentify()
     // 逐个串行调用（而非并发）
     expect(api.models.civitaiIdentify).toHaveBeenCalledTimes(3)
-    expect(api.models.civitaiIdentify.mock.calls.map((c) => c[0])).toEqual(['a', 'b', 'c'])
+    expect(api.models.civitaiIdentify.mock.calls.map((c) => c[0])).toEqual([
+      'a',
+      'b',
+      'c',
+    ])
     // 识别成功者同步 civitaiUrl，未收录/失败者保持空串
     expect(state.models[0].civitaiUrl).toBe('https://civitai.com/models/1')
     expect(state.models[1].civitaiUrl).toBeUndefined()
     expect(state.models[2].civitaiUrl).toBeUndefined()
     // 汇总提示含未收录与失败统计
-    expect(state.toasts.some((t) => t.type === 'warn' && t.text.includes('成功 1 个'))).toBe(true)
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'warn' && t.text.includes('成功 1 个'),
+      ),
+    ).toBe(true)
     expect(state.toasts.some((t) => t.text.includes('未收录 1 个'))).toBe(true)
     expect(state.toasts.some((t) => t.text.includes('失败 1 个'))).toBe(true)
     // 批量结束后忙碌与进度复位
@@ -1502,12 +1779,15 @@ describe('批量操作单次状态合并（O2）', () => {
       cover: 'D:\\m\\.modelvault\\covers\\1.png',
       coverUrl: 'mvimg:///1.png',
       covers: [
-        { rel: 'covers/1.png', path: 'D:\\m\\1.png', url: 'mvimg:///1.png' }
-      ]
+        { rel: 'covers/1.png', path: 'D:\\m\\1.png', url: 'mvimg:///1.png' },
+      ],
     }
     state.models = [
       makeModel('nocover'),
-      makeModel('hascover', { hasManualCover: true, covers: [{ rel: 'covers/x.png' }] })
+      makeModel('hascover', {
+        hasManualCover: true,
+        covers: [{ rel: 'covers/x.png' }],
+      }),
     ]
     state.multiSelect.ids = ['nocover', 'hascover']
     api.models.civitaiIdentify.mockImplementation((id) =>
@@ -1515,9 +1795,18 @@ describe('批量操作单次状态合并（O2）', () => {
         ? Promise.resolve({
             found: true,
             meta: { civitaiUrl: 'https://civitai.com/models/9' },
-            info: { images: [{ url: 'u1' }, { url: 'u2' }, { url: 'u3' }, { url: 'u4' }, { url: 'u5' }, { url: 'u6' }] }
+            info: {
+              images: [
+                { url: 'u1' },
+                { url: 'u2' },
+                { url: 'u3' },
+                { url: 'u4' },
+                { url: 'u5' },
+                { url: 'u6' },
+              ],
+            },
           })
-        : Promise.resolve({ found: false })
+        : Promise.resolve({ found: false }),
     )
     api.models.civitaiImportImages.mockResolvedValue({ added: 4, ...coversRsp })
 
@@ -1529,7 +1818,10 @@ describe('批量操作单次状态合并（O2）', () => {
     // 单模型最多取前 4 张（BATCH_CIVITAI_IMAGES_PER_MODEL）
     expect(api.models.civitaiImportImages).toHaveBeenCalledTimes(1)
     expect(api.models.civitaiImportImages).toHaveBeenCalledWith('nocover', [
-      { url: 'u1' }, { url: 'u2' }, { url: 'u3' }, { url: 'u4' }
+      { url: 'u1' },
+      { url: 'u2' },
+      { url: 'u3' },
+      { url: 'u4' },
     ])
     // 封面结果与 civitaiUrl 同步到本地列表
     const m = state.models.find((mm) => mm.id === 'nocover')
@@ -1537,12 +1829,25 @@ describe('批量操作单次状态合并（O2）', () => {
     expect(m.cover).toBe(coversRsp.cover)
     expect(m.covers).toEqual(coversRsp.covers)
     expect(m.civitaiUrl).toBe('https://civitai.com/models/9')
-    expect(state.toasts.some((t) => t.type === 'success' && t.text.includes('已为 1 个模型添加共 4 张示例图'))).toBe(true)
-    expect(state.toasts.some((t) => t.text.includes('已有示例图跳过 1 个'))).toBe(true)
+    expect(
+      state.toasts.some(
+        (t) =>
+          t.type === 'success' &&
+          t.text.includes('已为 1 个模型添加共 4 张示例图'),
+      ),
+    ).toBe(true)
+    expect(
+      state.toasts.some((t) => t.text.includes('已有示例图跳过 1 个')),
+    ).toBe(true)
   })
 
   it('批量获取示例图：选中模型均已有封面时提示且零 IPC', async () => {
-    state.models = [makeModel('a', { hasManualCover: true, covers: [{ rel: 'covers/a.png' }] })]
+    state.models = [
+      makeModel('a', {
+        hasManualCover: true,
+        covers: [{ rel: 'covers/a.png' }],
+      }),
+    ]
     state.multiSelect.ids = ['a']
     await batchCivitaiImages()
     expect(api.models.civitaiIdentify).not.toHaveBeenCalled()
@@ -1578,7 +1883,9 @@ describe('批量取消（Esc 请求取消，串行批量提前收尾）', () => 
     expect(calls).toBe(1) // 第二轮循环顶部检查取消标志，提前 break
     expect(state.multiSelect.busy).toBe(false)
     expect(state.multiSelect.cancelRequested).toBe(false)
-    expect(state.toasts.some((t) => t.text.includes('已取消（完成 1/3）'))).toBe(true)
+    expect(
+      state.toasts.some((t) => t.text.includes('已取消（完成 1/3）')),
+    ).toBe(true)
   })
 
   it('批量识别进行中请求取消：已完成部分保存并提示进度', async () => {
@@ -1588,24 +1895,36 @@ describe('批量取消（Esc 请求取消，串行批量提前收尾）', () => 
     api.models.civitaiIdentify.mockImplementation(() => {
       calls += 1
       if (calls === 2) requestBatchCancel() // 识别完第二个后请求取消
-      return Promise.resolve({ found: true, meta: { civitaiUrl: 'https://civitai.com/models/x' } })
+      return Promise.resolve({
+        found: true,
+        meta: { civitaiUrl: 'https://civitai.com/models/x' },
+      })
     })
 
     await batchCivitaiIdentify()
 
     expect(calls).toBe(2)
     expect(state.multiSelect.cancelRequested).toBe(false)
-    expect(state.toasts.some((t) => t.text.includes('识别已取消（完成 2/3）'))).toBe(true)
+    expect(
+      state.toasts.some((t) => t.text.includes('识别已取消（完成 2/3）')),
+    ).toBe(true)
     // 已识别部分已保存：a/b 的 civitaiUrl 已写入
-    expect(state.models.find((m) => m.id === 'a').civitaiUrl).toBe('https://civitai.com/models/x')
-    expect(state.models.find((m) => m.id === 'b').civitaiUrl).toBe('https://civitai.com/models/x')
+    expect(state.models.find((m) => m.id === 'a').civitaiUrl).toBe(
+      'https://civitai.com/models/x',
+    )
+    expect(state.models.find((m) => m.id === 'b').civitaiUrl).toBe(
+      'https://civitai.com/models/x',
+    )
   })
 })
 
 describe('启动引导态（B8）', () => {
   it('initApp 完成后清除 booting：异步恢复 folder 期间不闪现引导页', async () => {
     state.booting = true
-    api.models.loadStore.mockResolvedValue({ settings: { modelsFolder: '' }, models: {} })
+    api.models.loadStore.mockResolvedValue({
+      settings: { modelsFolder: '' },
+      models: {},
+    })
     // 无 folder：不触发扫描，initApp 直接完成
     await initApp()
     expect(state.folder).toBe('')
@@ -1614,8 +1933,16 @@ describe('启动引导态（B8）', () => {
 
   it('已配置过文件夹时 initApp 后扫描完成，引导页全程不出现', async () => {
     state.booting = true
-    api.models.loadStore.mockResolvedValue({ settings: { modelsFolder: 'D:\\lib' }, models: {} })
-    api.models.scan.mockResolvedValue({ models: [], errors: [], byType: {}, durationMs: 1 })
+    api.models.loadStore.mockResolvedValue({
+      settings: { modelsFolder: 'D:\\lib' },
+      models: {},
+    })
+    api.models.scan.mockResolvedValue({
+      models: [],
+      errors: [],
+      byType: {},
+      durationMs: 1,
+    })
     await initApp()
     expect(state.folder).toBe('D:\\lib')
     expect(state.scanning).toBe(false)
@@ -1627,7 +1954,11 @@ describe('启动引导态（B8）', () => {
     api.models.loadStore.mockRejectedValue(new Error('IPC 断开'))
     await initApp()
     expect(state.booting).toBe(false)
-    expect(state.toasts.some((t) => t.type === 'error' && t.text.includes('初始化失败'))).toBe(true)
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'error' && t.text.includes('初始化失败'),
+      ),
+    ).toBe(true)
   })
 })
 
@@ -1690,7 +2021,9 @@ describe('deleteModel', () => {
 
 describe('saveSettings', () => {
   it('成功时更新本地设置', async () => {
-    api.settings.update.mockResolvedValue({ settings: { ...state.settings, sortBy: 'mtime' } })
+    api.settings.update.mockResolvedValue({
+      settings: { ...state.settings, sortBy: 'mtime' },
+    })
     const ok = await saveSettings({ sortBy: 'mtime' })
     expect(ok).toBe(true)
     expect(state.settings.sortBy).toBe('mtime')
@@ -1704,21 +2037,28 @@ describe('saveSettings', () => {
   })
 
   it('业务错误（res.error）时 toast 提示且不更新本地设置', async () => {
-    api.settings.update.mockResolvedValue({ error: '模型文件夹不存在或不是目录' })
+    api.settings.update.mockResolvedValue({
+      error: '模型文件夹不存在或不是目录',
+    })
     const ok = await saveSettings({ modelsFolder: 'D:/no-such-dir' })
     expect(ok).toBe(false)
-    expect(state.toasts.some((t) => t.text.includes('模型文件夹不存在'))).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('模型文件夹不存在'))).toBe(
+      true,
+    )
   })
 })
 
 describe('applyThumbUpdates', () => {
   it('按 id 写入展示覆盖；模型对象保持引用与字段不变', () => {
-    state.models = [makeModel('m1', { coverUrl: 'orig' }), makeModel('m2', { coverUrl: 'orig2' })]
+    state.models = [
+      makeModel('m1', { coverUrl: 'orig' }),
+      makeModel('m2', { coverUrl: 'orig2' }),
+    ]
     const before = state.models[0]
     applyThumbUpdates([
       { id: 'm1', coverUrl: 'thumb1' },
       { id: 'missing', coverUrl: 'x' },
-      { id: 'm2', coverUrl: '' }
+      { id: 'm2', coverUrl: '' },
     ])
     expect(modelCoverUrl(state.models[0])).toBe('thumb1')
     expect(state.models[1].coverUrl).toBe('orig2')
@@ -1735,20 +2075,26 @@ describe('applyThumbUpdates', () => {
         coverUrl: 'orig',
         covers: [
           { rel: 'a.png', path: 'p-a', url: 'u-a' },
-          { rel: 'b.png', path: 'p-b', url: 'u-b' }
-        ]
-      })
+          { rel: 'b.png', path: 'p-b', url: 'u-b' },
+        ],
+      }),
     ]
     // 仅 coverThumb：默认封面 URL 不变，目标 covers 条目的展示缩略图走覆盖
-    applyThumbUpdates([{ id: 'm1', coverThumb: { path: 'p-b', thumbUrl: 't-b' } }])
+    applyThumbUpdates([
+      { id: 'm1', coverThumb: { path: 'p-b', thumbUrl: 't-b' } },
+    ])
     expect(modelCoverUrl(state.models[0])).toBe('orig')
     expect(coverThumbUrl(state.models[0].covers[0])).toBe('')
     expect(coverThumbUrl(state.models[0].covers[1])).toBe('t-b')
     expect(state.models[0].covers[1].thumbUrl).toBeUndefined()
     // coverUrl 与 coverThumb 同时携带时一并生效；未知 path 静默忽略
     applyThumbUpdates([
-      { id: 'm1', coverUrl: 'thumb1', coverThumb: { path: 'p-a', thumbUrl: 't-a' } },
-      { id: 'm1', coverThumb: { path: 'p-missing', thumbUrl: 't-x' } }
+      {
+        id: 'm1',
+        coverUrl: 'thumb1',
+        coverThumb: { path: 'p-a', thumbUrl: 't-a' },
+      },
+      { id: 'm1', coverThumb: { path: 'p-missing', thumbUrl: 't-x' } },
     ])
     expect(modelCoverUrl(state.models[0])).toBe('thumb1')
     expect(coverThumbUrl(state.models[0].covers[0])).toBe('t-a')
@@ -1779,15 +2125,15 @@ describe('applyThumbUpdates', () => {
         coverUrl: 'orig',
         covers: [
           { rel: 'a.png', path: 'p-a', url: 'u-a' },
-          { rel: 'b.png', path: 'p-b', url: 'u-b' }
-        ]
-      })
+          { rel: 'b.png', path: 'p-b', url: 'u-b' },
+        ],
+      }),
     ])
     const before = state.models[0]
     applyThumbUpdates([
       { id: 'm1', coverUrl: 't-default' },
       { id: 'm1', coverThumb: { path: 'p-a', thumbUrl: 't-a' } },
-      { id: 'm1', coverThumb: { path: 'p-b', thumbUrl: 't-b' } }
+      { id: 'm1', coverThumb: { path: 'p-b', thumbUrl: 't-b' } },
     ])
 
     expect(state.models[0]).toBe(before)
@@ -1801,11 +2147,21 @@ describe('重复模型检测与筛选（FEAT-1）', () => {
    * 须经 replaceModels 注入（包 shallowReactive）；s 与 A 组同大小，便于回填同哈希后入组 */
   function seedDupes() {
     replaceModels([
-      makeModel('p1', { hash: 'a'.repeat(64), size: 100, mtimeMs: 1, rating: 0 }),
-      makeModel('p2', { hash: 'a'.repeat(64), size: 100, mtimeMs: 2, rating: 4 }),
+      makeModel('p1', {
+        hash: 'a'.repeat(64),
+        size: 100,
+        mtimeMs: 1,
+        rating: 0,
+      }),
+      makeModel('p2', {
+        hash: 'a'.repeat(64),
+        size: 100,
+        mtimeMs: 2,
+        rating: 4,
+      }),
       makeModel('q1', { hash: 'b'.repeat(64), size: 50, mtimeMs: 1 }),
       makeModel('q2', { hash: 'b'.repeat(64), size: 50, mtimeMs: 2 }),
-      makeModel('s', { hash: '', size: 100 })
+      makeModel('s', { hash: '', size: 100 }),
     ])
   }
 
@@ -1814,9 +2170,12 @@ describe('重复模型检测与筛选（FEAT-1）', () => {
     expect(duplicateGroups.value).toHaveLength(2)
     expect(duplicateGroups.value[0]).toMatchObject({
       hash: 'a'.repeat(64),
-      wastedBytes: 100
+      wastedBytes: 100,
     })
-    expect(duplicateGroups.value[0].models.map((m) => m.id)).toEqual(['p1', 'p2'])
+    expect(duplicateGroups.value[0].models.map((m) => m.id)).toEqual([
+      'p1',
+      'p2',
+    ])
     // 无哈希的独立模型不入组
     expect(duplicateIdSet.value.has('s')).toBe(false)
     expect(duplicateWastedBytes.value).toBe(150)
@@ -1825,15 +2184,32 @@ describe('重复模型检测与筛选（FEAT-1）', () => {
   it('重复筛选：仅保留组内成员；哈希回填后分组即时出现（渐进可用）', () => {
     seedDupes()
     state.showDuplicatesOnly = true
-    expect(filteredModels.value.map((m) => m.id)).toEqual(['p1', 'p2', 'q1', 'q2'])
+    expect(filteredModels.value.map((m) => m.id)).toEqual([
+      'p1',
+      'p2',
+      'q1',
+      'q2',
+    ])
 
     // 独立模型的哈希经预热完成事件回填为与 p1 相同 → 立即进入重复组
     applyHashUpdate({ active: false, id: 's', hash: 'a'.repeat(64) })
-    expect(effectiveModelHash(state.models.find((m) => m.id === 's'))).toBe('a'.repeat(64))
-    expect(duplicateGroups.value[0].models.map((m) => m.id)).toEqual(['p1', 'p2', 's'])
+    expect(effectiveModelHash(state.models.find((m) => m.id === 's'))).toBe(
+      'a'.repeat(64),
+    )
+    expect(duplicateGroups.value[0].models.map((m) => m.id)).toEqual([
+      'p1',
+      'p2',
+      's',
+    ])
     // a 组 3 成员冗余 2×100，b 组 2 成员冗余 1×50
     expect(duplicateWastedBytes.value).toBe(250)
-    expect(filteredModels.value.map((m) => m.id)).toEqual(['p1', 'p2', 's', 'q1', 'q2'])
+    expect(filteredModels.value.map((m) => m.id)).toEqual([
+      'p1',
+      'p2',
+      's',
+      'q1',
+      'q2',
+    ])
   })
 
   it('重复筛选下按哈希稳定排序聚拢同组（组内保持既有排序结果）', () => {
@@ -1847,11 +2223,16 @@ describe('重复模型检测与筛选（FEAT-1）', () => {
       makeModel('p1', { hash: 'a'.repeat(64), size: 100, mtimeMs: 1 }),
       makeModel('p2', { hash: 'a'.repeat(64), size: 100, mtimeMs: 2 }),
       makeModel('q1', { hash: 'b'.repeat(64), size: 50, mtimeMs: 1.5 }),
-      makeModel('q2', { hash: 'b'.repeat(64), size: 50, mtimeMs: 3 })
+      makeModel('q2', { hash: 'b'.repeat(64), size: 50, mtimeMs: 3 }),
     ])
     state.sortBy = 'mtime'
     state.sortAsc = true
-    expect(filteredModels.value.map((m) => m.id)).toEqual(['p2', 'p1', 'q2', 'q1'])
+    expect(filteredModels.value.map((m) => m.id)).toEqual([
+      'p2',
+      'p1',
+      'q2',
+      'q1',
+    ])
   })
 
   it('applyHashUpdate：写覆盖映射且对象引用不变；进行中/未知/同值安全跳过', () => {
@@ -1885,8 +2266,8 @@ describe('重复模型检测与筛选（FEAT-1）', () => {
       completions: [
         { id: 'p1', hash: 'c'.repeat(64) },
         { id: 'no-such', hash: 'd'.repeat(64) },
-        { id: 'p2', hash: 'a'.repeat(64) } // 同值
-      ]
+        { id: 'p2', hash: 'a'.repeat(64) }, // 同值
+      ],
     })
 
     expect(state.models[0]).toBe(beforeP1)
@@ -1927,15 +2308,27 @@ describe('清空全部示例图（OPT-01）', () => {
       makeModel('m1', {
         cover: 'covers/a.png',
         coverUrl: 'mvimg://local/covers/a.png',
-        covers: [{ rel: 'covers/a.png', path: 'D:\\models\\.modelvault\\covers\\a.png', url: 'mvimg://local/covers/a.png' }],
-        hasManualCover: true
+        covers: [
+          {
+            rel: 'covers/a.png',
+            path: 'D:\\models\\.modelvault\\covers\\a.png',
+            url: 'mvimg://local/covers/a.png',
+          },
+        ],
+        hasManualCover: true,
       }),
       makeModel('m2', {
         cover: 'covers/b.png',
         coverUrl: 'mvimg://local/covers/b.png',
-        covers: [{ rel: 'covers/b.png', path: 'D:\\models\\.modelvault\\covers\\b.png', url: 'mvimg://local/covers/b.png' }],
-        hasManualCover: true
-      })
+        covers: [
+          {
+            rel: 'covers/b.png',
+            path: 'D:\\models\\.modelvault\\covers\\b.png',
+            url: 'mvimg://local/covers/b.png',
+          },
+        ],
+        hasManualCover: true,
+      }),
     ])
     state.selectedId = 'm1'
     const before = state.models[0]
@@ -1967,9 +2360,9 @@ describe('批量拖拽导入封面（OPT-9）', () => {
       covers: Array.from({ length: n }, (_, i) => ({
         rel: `c${i + 1}`,
         path: `p${i + 1}`,
-        url: `u${i + 1}`
+        url: `u${i + 1}`,
       })),
-      meta: {}
+      meta: {},
     }
   }
 
@@ -1996,9 +2389,13 @@ describe('批量拖拽导入封面（OPT-9）', () => {
     api.models.importCover.mockImplementation((id, path) =>
       path === 'bad.png'
         ? Promise.resolve({ error: '文件内容不是有效的图片，已拒绝导入' })
-        : Promise.resolve(coverRes(1))
+        : Promise.resolve(coverRes(1)),
     )
-    const res = await importCoversFromDrop('m1', ['ok1.png', 'bad.png', 'ok2.png'])
+    const res = await importCoversFromDrop('m1', [
+      'ok1.png',
+      'bad.png',
+      'ok2.png',
+    ])
     expect(api.models.importCover).toHaveBeenCalledTimes(3)
     expect(res.ok).toBe(true)
     expect(res.total).toBe(3)
@@ -2011,7 +2408,9 @@ describe('批量拖拽导入封面（OPT-9）', () => {
   it('IPC reject 同样计入失败且不中断后续文件', async () => {
     state.models = [makeModel('m1', { covers: [] })]
     api.models.importCover.mockImplementation((id, path) =>
-      path === 'boom.png' ? Promise.reject(new Error('通道异常')) : Promise.resolve(coverRes(1))
+      path === 'boom.png'
+        ? Promise.reject(new Error('通道异常'))
+        : Promise.resolve(coverRes(1)),
     )
     const res = await importCoversFromDrop('m1', ['boom.png', 'ok.png'])
     expect(res.failed).toBe(1)
@@ -2041,7 +2440,12 @@ describe('跨库传输编排（F-3）', () => {
   beforeEach(() => {
     state.folder = 'D:\\models\\A'
     state.settings.modelsFolders = ['D:\\models\\A', 'D:\\models\\B']
-    api.models.scan.mockResolvedValue({ models: [], errors: [], byType: {}, durationMs: 1 })
+    api.models.scan.mockResolvedValue({
+      models: [],
+      errors: [],
+      byType: {},
+      durationMs: 1,
+    })
   })
 
   it('可选目标库排除当前库；无其他库时不打开浮层并提示', () => {
@@ -2052,7 +2456,9 @@ describe('跨库传输编排（F-3）', () => {
     openTransferToLibrary('D:\\models\\A\\x.safetensors')
 
     expect(transferState.visible).toBe(false)
-    expect(state.toasts.some((t) => t.text.includes('当前只有这一个模型库'))).toBe(true)
+    expect(
+      state.toasts.some((t) => t.text.includes('当前只有这一个模型库')),
+    ).toBe(true)
   })
 
   it('单模型默认移动、多模型默认复制；空输入不改变浮层', () => {
@@ -2060,12 +2466,16 @@ describe('跨库传输编排（F-3）', () => {
     expect(transferState).toMatchObject({
       visible: true,
       mode: 'move',
-      ids: ['D:\\models\\A\\x.safetensors']
+      ids: ['D:\\models\\A\\x.safetensors'],
     })
 
     closeTransfer()
     openTransferToLibrary(['a', 'b'])
-    expect(transferState).toMatchObject({ visible: true, mode: 'copy', ids: ['a', 'b'] })
+    expect(transferState).toMatchObject({
+      visible: true,
+      mode: 'copy',
+      ids: ['a', 'b'],
+    })
 
     closeTransfer()
     openTransferToLibrary([])
@@ -2096,7 +2506,7 @@ describe('跨库传输编排（F-3）', () => {
       transferred: 2,
       mode: 'copy',
       skipped: [],
-      failed: []
+      failed: [],
     })
 
     await confirmTransfer('D:\\models\\B')
@@ -2104,12 +2514,15 @@ describe('跨库传输编排（F-3）', () => {
     expect(api.models.transferToLibrary).toHaveBeenCalledWith({
       ids: ['a', 'b'],
       targetRoot: 'D:\\models\\B',
-      mode: 'copy'
+      mode: 'copy',
     })
     expect(transferState.visible).toBe(false)
     expect(transferState.ids).toEqual([])
     expect(
-      state.toasts.some((t) => t.type === 'success' && t.text.includes('跨库传输完成：复制 2 个'))
+      state.toasts.some(
+        (t) =>
+          t.type === 'success' && t.text.includes('跨库传输完成：复制 2 个'),
+      ),
     ).toBe(true)
     expect(api.models.scan).toHaveBeenCalledTimes(1)
   })
@@ -2120,12 +2533,14 @@ describe('跨库传输编排（F-3）', () => {
       transferred: 1,
       mode: 'copy',
       skipped: [{ id: 'b', reason: 'exists' }],
-      failed: [{ id: 'c', error: '磁盘错误' }]
+      failed: [{ id: 'c', error: '磁盘错误' }],
     })
 
     await confirmTransfer('D:\\models\\B')
 
-    const warn = state.toasts.find((t) => t.type === 'warn' && t.text.includes('跨库传输完成'))
+    const warn = state.toasts.find(
+      (t) => t.type === 'warn' && t.text.includes('跨库传输完成'),
+    )
     expect(warn.text).toContain('跳过 1 个')
     expect(warn.text).toContain('失败 1 个')
 
@@ -2135,13 +2550,15 @@ describe('跨库传输编排（F-3）', () => {
       transferred: 0,
       mode: 'move',
       skipped: [{ id: 'a', reason: 'exists' }],
-      failed: []
+      failed: [],
     })
     await confirmTransfer('D:\\models\\B')
 
-    expect(state.toasts.some((t) => t.type === 'info' && t.text.includes('未传输任何模型'))).toBe(
-      true
-    )
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'info' && t.text.includes('未传输任何模型'),
+      ),
+    ).toBe(true)
     expect(transferState.visible).toBe(false)
   })
 
@@ -2153,9 +2570,11 @@ describe('跨库传输编排（F-3）', () => {
 
     expect(transferState.visible).toBe(true)
     expect(transferState.busy).toBe(false)
-    expect(state.toasts.some((t) => t.type === 'error' && t.text.includes('目标库不可用'))).toBe(
-      true
-    )
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'error' && t.text.includes('目标库不可用'),
+      ),
+    ).toBe(true)
     expect(api.models.scan).not.toHaveBeenCalled()
   })
 
@@ -2166,9 +2585,11 @@ describe('跨库传输编排（F-3）', () => {
     await confirmTransfer('D:\\models\\B')
 
     expect(transferState.busy).toBe(false)
-    expect(state.toasts.some((t) => t.type === 'error' && t.text.includes('跨库传输失败'))).toBe(
-      true
-    )
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'error' && t.text.includes('跨库传输失败'),
+      ),
+    ).toBe(true)
   })
 
   it('缺少目标库 / 无待传输项 / busy 时不发 IPC', async () => {
@@ -2200,7 +2621,7 @@ describe('启动自动检查更新结果（O-3）', () => {
       hasUpdate: true,
       current: '0.4.0',
       latest: '0.5.0',
-      releaseUrl: 'https://github.com/Lireth/ModelVault/releases/tag/v0.5.0'
+      releaseUrl: 'https://github.com/Lireth/ModelVault/releases/tag/v0.5.0',
     }
 
     applyUpdateAvailable(payload)
@@ -2224,12 +2645,19 @@ describe('启动自动检查更新结果（O-3）', () => {
 describe('文件操作编排（F10/F11）', () => {
   beforeEach(() => {
     state.folder = 'D:\\models'
-    api.models.scan.mockResolvedValue({ models: [], errors: [], byType: {}, durationMs: 1 })
+    api.models.scan.mockResolvedValue({
+      models: [],
+      errors: [],
+      byType: {},
+      durationMs: 1,
+    })
   })
 
   it('setModelTags 成功同步标签；业务错误保留原值并提示', async () => {
     replaceModels([makeModel('m1', { tags: ['旧标签'] })])
-    api.models.setModelTags.mockResolvedValue({ meta: { tags: ['新A', '新B'] } })
+    api.models.setModelTags.mockResolvedValue({
+      meta: { tags: ['新A', '新B'] },
+    })
 
     expect(await setModelTags('m1', ['新A', '新B'])).toBe(true)
     expect(state.models[0].tags).toEqual(['新A', '新B'])
@@ -2251,7 +2679,9 @@ describe('文件操作编排（F10/F11）', () => {
   })
 
   it('toggleDisabledModel 成功提示并重扫；扫描进行中不重扫', async () => {
-    api.models.toggleDisabled.mockResolvedValue({ path: 'D:\\models\\a.safetensors.disabled' })
+    api.models.toggleDisabled.mockResolvedValue({
+      path: 'D:\\models\\a.safetensors.disabled',
+    })
 
     expect(await toggleDisabledModel('a', true)).toBe(true)
     expect(state.toasts.some((t) => t.text.includes('已禁用'))).toBe(true)
@@ -2268,14 +2698,18 @@ describe('文件操作编排（F10/F11）', () => {
     expect(await moveModelTo('a')).toBe(false)
     expect(api.models.scan).not.toHaveBeenCalled()
 
-    api.models.moveModelTo.mockResolvedValue({ path: 'D:\\models\\LoRA\\a.safetensors' })
+    api.models.moveModelTo.mockResolvedValue({
+      path: 'D:\\models\\LoRA\\a.safetensors',
+    })
     expect(await moveModelTo('a')).toBe(true)
     expect(state.toasts.some((t) => t.text.includes('已移动到'))).toBe(true)
     expect(api.models.scan).toHaveBeenCalledTimes(1)
 
     api.models.moveModelTo.mockResolvedValue({ error: '目标目录不可写' })
     expect(await moveModelTo('a')).toBe(false)
-    expect(state.toasts.some((t) => t.text.includes('目标目录不可写'))).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('目标目录不可写'))).toBe(
+      true,
+    )
   })
 
   it('showContextMenu 调用原生菜单；IPC 异常时提示错误', async () => {
@@ -2285,7 +2719,9 @@ describe('文件操作编排（F10/F11）', () => {
 
     api.models.popupMenu.mockRejectedValue(new Error('窗口已关闭'))
     await showContextMenu('m1')
-    expect(state.toasts.some((t) => t.text.includes('打开右键菜单失败'))).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('打开右键菜单失败'))).toBe(
+      true,
+    )
   })
 
   it('renameModel 成功：关闭详情、提示并重扫；未变化时提示且不重扫', async () => {
@@ -2294,17 +2730,22 @@ describe('文件操作编排（F10/F11）', () => {
     api.models.renameModel.mockResolvedValue({
       path: 'D:\\models\\b.safetensors',
       renamedSidecars: 2,
-      sidecarWarnings: []
+      sidecarWarnings: [],
     })
 
     expect(await renameModel('m1', ' b ')).toBe(true)
     expect(api.models.renameModel).toHaveBeenCalledWith('m1', 'b')
     expect(state.selectedId).toBeNull()
-    expect(state.toasts.some((t) => t.text.includes('已重命名为「b」'))).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('已重命名为「b」'))).toBe(
+      true,
+    )
     expect(api.models.scan).toHaveBeenCalledTimes(1)
 
     api.models.scan.mockClear()
-    api.models.renameModel.mockResolvedValue({ path: 'm1', sidecarWarnings: [] })
+    api.models.renameModel.mockResolvedValue({
+      path: 'm1',
+      sidecarWarnings: [],
+    })
     expect(await renameModel('m1', 'm1')).toBe(true)
     expect(state.toasts.some((t) => t.text.includes('文件名未变化'))).toBe(true)
     expect(api.models.scan).not.toHaveBeenCalled()
@@ -2313,12 +2754,14 @@ describe('文件操作编排（F10/F11）', () => {
   it('renameModel sidecar 未迁移时以 warn 提示', async () => {
     api.models.renameModel.mockResolvedValue({
       path: 'D:\\models\\b.safetensors',
-      sidecarWarnings: ['a.txt 的目标已存在，已跳过']
+      sidecarWarnings: ['a.txt 的目标已存在，已跳过'],
     })
 
     expect(await renameModel('m1', 'b')).toBe(true)
     expect(
-      state.toasts.some((t) => t.type === 'warn' && t.text.includes('1 个 sidecar 未迁移'))
+      state.toasts.some(
+        (t) => t.type === 'warn' && t.text.includes('1 个 sidecar 未迁移'),
+      ),
     ).toBe(true)
   })
 
@@ -2331,7 +2774,9 @@ describe('文件操作编排（F10/F11）', () => {
 
     api.models.renameModel.mockResolvedValue({ error: '目标文件名已存在' })
     expect(await renameModel('m1', 'b')).toBe(false)
-    expect(state.toasts.some((t) => t.text.includes('目标文件名已存在'))).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('目标文件名已存在'))).toBe(
+      true,
+    )
 
     api.models.renameModel.mockRejectedValue(new Error('通道断开'))
     expect(await renameModel('m1', 'b')).toBe(false)

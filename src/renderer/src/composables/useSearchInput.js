@@ -33,7 +33,7 @@ export function useSearchInput() {
         clearTimeout(searchTimer)
         searchInput.value = value
       }
-    }
+    },
   )
 
   function clearSearch() {

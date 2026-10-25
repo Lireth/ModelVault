@@ -13,7 +13,7 @@ const rendererCspPlugin = {
   enforce: 'post',
   transformIndexHtml(html, ctx) {
     return ctx.server ? html : applyProductionCsp(html)
-  }
+  },
 }
 
 export default defineConfig({
@@ -26,9 +26,9 @@ export default defineConfig({
     // 退化为仅 SHA256 校验。
     define: {
       __MODELVAULT_SIGNER_THUMBPRINT__: JSON.stringify(
-        process.env.MODELVAULT_SIGNER_THUMBPRINT || ''
-      )
-    }
+        process.env.MODELVAULT_SIGNER_THUMBPRINT || '',
+      ),
+    },
   },
   // 预加载脚本：应用主 preload 与缩略图隐藏窗口专用 preload（OPT-01）
   preload: {
@@ -36,18 +36,22 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          index: fileURLToPath(new URL('./src/preload/index.js', import.meta.url)),
-          'thumb-preload': fileURLToPath(new URL('./src/preload/thumb-preload.js', import.meta.url))
-        }
-      }
-    }
+          index: fileURLToPath(
+            new URL('./src/preload/index.js', import.meta.url),
+          ),
+          'thumb-preload': fileURLToPath(
+            new URL('./src/preload/thumb-preload.js', import.meta.url),
+          ),
+        },
+      },
+    },
   },
   // 渲染进程：集成 Vue 3，支持 HMR 热重载
   renderer: {
     plugins: [vue(), rendererCspPlugin],
     server: {
       port: 5173,
-      strictPort: true
+      strictPort: true,
     },
     // OP-01：框架运行时单独成 chunk，与业务代码分离，利于浏览器缓存与
     // 首屏并行解析；设置页/统计页经 defineAsyncComponent 自动形成按需 chunk。
@@ -55,10 +59,10 @@ export default defineConfig({
       rollupOptions: {
         output: {
           manualChunks: {
-            vue: ['vue']
-          }
-        }
-      }
-    }
-  }
+            vue: ['vue'],
+          },
+        },
+      },
+    },
+  },
 })

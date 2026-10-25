@@ -21,7 +21,7 @@ vi.mock('electron', () => ({
   ipcMain: { handle: vi.fn() },
   nativeImage: { createFromPath: vi.fn() },
   net: { fetch: vi.fn() },
-  protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() }
+  protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
 }))
 
 import { registerMiscHandlers } from '../src/main/ipc/models/misc'
@@ -42,7 +42,10 @@ describe('models:exportModelList', () => {
   it('将渲染层文本原子写入用户选择的路径', async () => {
     const target = path.join(os.tmpdir(), `modelvault-list-${Date.now()}.csv`)
     files.push(target)
-    vi.mocked(dialog.showSaveDialog).mockResolvedValue({ canceled: false, filePath: target })
+    vi.mocked(dialog.showSaveDialog).mockResolvedValue({
+      canceled: false,
+      filePath: target,
+    })
 
     const handler = getRegisteredHandler('models:exportModelList')
     const content = '\uFEFF名称,别名\r\na.safetensors,别名\r\n'

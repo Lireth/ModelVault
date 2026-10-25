@@ -24,6 +24,6 @@ export function applyUpdateAvailable(payload) {
   toast(
     'success',
     `发现新版本 v${payload.latest}（当前 v${payload.current || ''}），可在设置页下载更新`,
-    6000
+    6000,
   )
 }

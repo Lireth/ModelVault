@@ -26,29 +26,29 @@ vi.mock('electron', () => ({
     getPath: vi.fn(() => fakeUserData),
     isPackaged: true,
     quit,
-    exit
-  }
+    exit,
+  },
 }))
 
 vi.mock('../src/main/logger', () => ({
-  default: { info: loggerInfo, warn: loggerWarn, error: vi.fn() }
+  default: { info: loggerInfo, warn: loggerWarn, error: vi.fn() },
 }))
 
 vi.mock('../src/main/services/store', () => ({
   flushStoreSave,
-  flushSettingsSave
+  flushSettingsSave,
 }))
 
 vi.mock('../src/main/services/library-index', () => ({
-  flushIndexWrites
+  flushIndexWrites,
 }))
 
 vi.mock('../src/main/services/watcher', () => ({
-  stopWatcher
+  stopWatcher,
 }))
 
 vi.mock('../src/main/windows/mainWindow', () => ({
-  flushWindowStateSave
+  flushWindowStateSave,
 }))
 
 /** 每个用例以全新模块实例运行（超时定时器为模块级状态，跨用例需复位） */
@@ -62,7 +62,9 @@ beforeEach(() => {
   timeline.length = 0
   vi.clearAllMocks()
   flushStoreSave.mockImplementation(async () => timeline.push('flushStore'))
-  flushWindowStateSave.mockImplementation(async () => timeline.push('flushWindow'))
+  flushWindowStateSave.mockImplementation(async () =>
+    timeline.push('flushWindow'),
+  )
   flushIndexWrites.mockImplementation(async () => timeline.push('flushIndex'))
   quit.mockImplementation(() => timeline.push('quit'))
   exit.mockImplementation(() => timeline.push('exit'))
@@ -79,7 +81,13 @@ describe('quitAfterFlush', () => {
     quitAfterFlush()
 
     await vi.waitFor(() => expect(quit).toHaveBeenCalledTimes(1))
-    expect(timeline).toEqual(['stopWatcher', 'flushStore', 'flushWindow', 'flushIndex', 'quit'])
+    expect(timeline).toEqual([
+      'stopWatcher',
+      'flushStore',
+      'flushWindow',
+      'flushIndex',
+      'quit',
+    ])
     expect(flushSettingsSave).toHaveBeenCalledTimes(1)
     expect(flushIndexWrites).toHaveBeenCalledTimes(1)
     expect(loggerInfo).toHaveBeenCalledWith(expect.stringContaining('应用退出'))
@@ -112,7 +120,9 @@ describe('quitAfterFlush', () => {
     quitAfterFlush()
 
     await vi.waitFor(() => expect(quit).toHaveBeenCalledTimes(1))
-    expect(loggerWarn).toHaveBeenCalledWith(expect.stringContaining('未完全成功'))
+    expect(loggerWarn).toHaveBeenCalledWith(
+      expect.stringContaining('未完全成功'),
+    )
     expect(exit).not.toHaveBeenCalled()
   })
 
@@ -124,7 +134,7 @@ describe('quitAfterFlush', () => {
       () =>
         new Promise((resolve) => {
           releaseFlush = resolve
-        })
+        }),
     )
     flushWindowStateSave.mockImplementation(() => new Promise(() => {}))
 

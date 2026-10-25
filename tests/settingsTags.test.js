@@ -2,7 +2,12 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import SettingsTags from '../src/renderer/src/components/settings/SettingsTags.vue'
-import { acceptConfirm, rejectConfirm, replaceModels, state } from '../src/renderer/src/store/appStore'
+import {
+  acceptConfirm,
+  rejectConfirm,
+  replaceModels,
+  state,
+} from '../src/renderer/src/store/appStore'
 import { setupComponentTest, settle } from './helpers/componentTest'
 
 /**
@@ -20,7 +25,7 @@ function seed() {
   replaceModels([
     { id: 'a', name: 'a.safetensors', tags: ['角色', '废弃'] },
     { id: 'b', name: 'b.safetensors', tags: ['废弃'] },
-    { id: 'c', name: 'c.safetensors', tags: ['风格'] }
+    { id: 'c', name: 'c.safetensors', tags: ['风格'] },
   ])
 }
 
@@ -50,8 +55,13 @@ describe('SettingsTags 标签管理面板', () => {
     seed()
     window.api.models.renameTag = vi.fn(() => Promise.resolve({ changed: 2 }))
     const wrapper = mountPanel()
-    const row = wrapper.findAll('.setting-row').find((r) => r.text().includes('角色'))
-    await row.findAll('button').find((b) => b.text().includes('重命名')).trigger('click')
+    const row = wrapper
+      .findAll('.setting-row')
+      .find((r) => r.text().includes('角色'))
+    await row
+      .findAll('button')
+      .find((b) => b.text().includes('重命名'))
+      .trigger('click')
     const input = wrapper.find('.tag-edit-input')
     expect(input.exists()).toBe(true)
     await input.setValue('主要角色')
@@ -70,8 +80,13 @@ describe('SettingsTags 标签管理面板', () => {
     window.api.models.renameTag = vi.fn(() => Promise.resolve({ changed: 2 }))
     const wrapper = mountPanel()
     // 重命名「风格」（1 个模型）→「角色」（已存在）
-    const styleRow = wrapper.findAll('.setting-row').find((r) => r.text().includes('风格'))
-    await styleRow.findAll('button').find((b) => b.text().includes('重命名')).trigger('click')
+    const styleRow = wrapper
+      .findAll('.setting-row')
+      .find((r) => r.text().includes('风格'))
+    await styleRow
+      .findAll('button')
+      .find((b) => b.text().includes('重命名'))
+      .trigger('click')
     await wrapper.find('.tag-edit-input').setValue('角色')
     await findButton(wrapper, '保存').trigger('click')
     await settle()
@@ -93,8 +108,13 @@ describe('SettingsTags 标签管理面板', () => {
     seed()
     window.api.models.renameTag = vi.fn(() => Promise.resolve({ changed: 2 }))
     const wrapper = mountPanel()
-    const styleRow = wrapper.findAll('.setting-row').find((r) => r.text().includes('风格'))
-    await styleRow.findAll('button').find((b) => b.text().includes('重命名')).trigger('click')
+    const styleRow = wrapper
+      .findAll('.setting-row')
+      .find((r) => r.text().includes('风格'))
+    await styleRow
+      .findAll('button')
+      .find((b) => b.text().includes('重命名'))
+      .trigger('click')
     await wrapper.find('.tag-edit-input').setValue('角色')
     await findButton(wrapper, '保存').trigger('click')
     await settle()
@@ -113,8 +133,13 @@ describe('SettingsTags 标签管理面板', () => {
     seed()
     window.api.models.removeTag = vi.fn(() => Promise.resolve({ changed: 2 }))
     const wrapper = mountPanel()
-    const row = wrapper.findAll('.setting-row').find((r) => r.text().includes('废弃'))
-    await row.findAll('button').find((b) => b.text().includes('移除')).trigger('click')
+    const row = wrapper
+      .findAll('.setting-row')
+      .find((r) => r.text().includes('废弃'))
+    await row
+      .findAll('button')
+      .find((b) => b.text().includes('移除'))
+      .trigger('click')
     await settle()
     expect(state.confirm.text).toContain('2 个模型')
     acceptConfirm()

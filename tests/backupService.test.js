@@ -14,10 +14,19 @@ import {
   parseBackupManifest,
   safeCoverName,
   unzipBackupAsync,
-  zipBackupAsync
+  zipBackupAsync,
 } from '../src/main/services/backup'
-import { DATA_DIR, getModelMeta, loadData, setDataRoot, setModelMeta } from '../src/main/services/store'
-import { releaseMaintenance, tryAcquireMaintenance } from '../src/main/services/maintenance-lock'
+import {
+  DATA_DIR,
+  getModelMeta,
+  loadData,
+  setDataRoot,
+  setModelMeta,
+} from '../src/main/services/store'
+import {
+  releaseMaintenance,
+  tryAcquireMaintenance,
+} from '../src/main/services/maintenance-lock'
 import logger from '../src/main/logger'
 
 /**
@@ -35,19 +44,19 @@ const { dialogMock, userData } = vi.hoisted(() => ({
   dialogMock: {
     showSaveDialog: vi.fn(),
     showOpenDialog: vi.fn(),
-    showMessageBox: vi.fn()
+    showMessageBox: vi.fn(),
   },
   // 临时用户数据目录（绝对路径；由 atomicWriteFile 按需创建）
-  userData: `${process.env.TEMP || process.env.TMPDIR || '/tmp'}/modelvault-backup-ud-${process.pid}-${Date.now()}`
+  userData: `${process.env.TEMP || process.env.TMPDIR || '/tmp'}/modelvault-backup-ud-${process.pid}-${Date.now()}`,
 }))
 
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn(() => userData),
     getVersion: vi.fn(() => '0.1.0'),
-    isPackaged: true
+    isPackaged: true,
   },
-  dialog: dialogMock
+  dialog: dialogMock,
 }))
 
 /** 本文件产生的临时目录（测试结束后统一清理） */
@@ -71,9 +80,9 @@ function makeLibrary() {
       version: 1,
       models: {
         'a.safetensors': { cover: '.modelvault/covers/c1.png' },
-        'b.safetensors': {}
-      }
-    })
+        'b.safetensors': {},
+      },
+    }),
   )
   fs.writeFileSync(path.join(dataDir, 'covers', 'c1.png'), 'img1')
   fs.writeFileSync(path.join(dataDir, 'covers', 'c2.png'), 'img2')
@@ -82,7 +91,10 @@ function makeLibrary() {
 }
 
 /** 构造备份 zip 文件 */
-function makeBackupZip(filePath, { withLibrary = true, evilEntry = false } = {}) {
+function makeBackupZip(
+  filePath,
+  { withLibrary = true, evilEntry = false } = {},
+) {
   const files = {
     'manifest.json': strToU8(
       JSON.stringify({
@@ -90,14 +102,18 @@ function makeBackupZip(filePath, { withLibrary = true, evilEntry = false } = {})
         version: BACKUP_VERSION,
         createdAt: new Date().toISOString(),
         settings: true,
-        library: withLibrary ? { root: 'D:\\old-lib', models: 1, covers: 1 } : undefined
-      })
+        library: withLibrary
+          ? { root: 'D:\\old-lib', models: 1, covers: 1 }
+          : undefined,
+      }),
     ),
-    'settings.json': strToU8(JSON.stringify({ theme: 'light', sortBy: 'size' }))
+    'settings.json': strToU8(
+      JSON.stringify({ theme: 'light', sortBy: 'size' }),
+    ),
   }
   if (withLibrary) {
     files['library/store.json'] = strToU8(
-      JSON.stringify({ version: 1, models: { 'x.safetensors': {} } })
+      JSON.stringify({ version: 1, models: { 'x.safetensors': {} } }),
     )
     files['library/covers/ok.png'] = strToU8('coverdata')
     if (evilEntry) files['library/covers/../evil.png'] = strToU8('evil')
@@ -129,8 +145,8 @@ function makeDuplicateCoverZip(filePath) {
         app: BACKUP_FORMAT,
         version: BACKUP_VERSION,
         settings: true,
-        library: { root: 'D:\\old-lib', models: 1, covers: 1 }
-      })
+        library: { root: 'D:\\old-lib', models: 1, covers: 1 },
+      }),
     )
     addText('library/store.json', JSON.stringify({ version: 1, models: {} }))
     addText('library/covers/dup.png', 'one')
@@ -140,7 +156,10 @@ function makeDuplicateCoverZip(filePath) {
 }
 
 /** 构造选择性/元数据备份 zip（FN-08） */
-function makePartialZip(filePath, { mode = 'selected', models = {}, covers = {} } = {}) {
+function makePartialZip(
+  filePath,
+  { mode = 'selected', models = {}, covers = {} } = {},
+) {
   const files = {
     'manifest.json': strToU8(
       JSON.stringify({
@@ -150,11 +169,15 @@ function makePartialZip(filePath, { mode = 'selected', models = {}, covers = {} 
         settings: true,
         mode,
         partial: true,
-        library: { root: 'D:\\source', models: Object.keys(models).length, covers: Object.keys(covers).length }
-      })
+        library: {
+          root: 'D:\\source',
+          models: Object.keys(models).length,
+          covers: Object.keys(covers).length,
+        },
+      }),
     ),
     'settings.json': strToU8(JSON.stringify({ theme: 'light' })),
-    'library/store.json': strToU8(JSON.stringify({ version: 1, models }))
+    'library/store.json': strToU8(JSON.stringify({ version: 1, models })),
   }
   for (const [name, data] of Object.entries(covers)) {
     files[`library/covers/${name}`] = strToU8(data)
@@ -199,7 +222,9 @@ describe('备份异步压缩/解压（A-01）', () => {
     // 同步实现会在函数调用栈内一次跑完（1ms 探测时已完成），
     // 异步分片实现则在压缩进行中仍能响应定时器
     const files = {
-      'library/covers/big.png': new Uint8Array(crypto.randomBytes(12 * 1024 * 1024))
+      'library/covers/big.png': new Uint8Array(
+        crypto.randomBytes(12 * 1024 * 1024),
+      ),
     }
 
     let done = false
@@ -218,7 +243,7 @@ describe('备份异步压缩/解压（A-01）', () => {
   it('异步解压与同步实现内容一致（往返正确）', async () => {
     const files = {
       'a.txt': strToU8('hello-备份'),
-      'b.bin': new Uint8Array([1, 2, 3, 4])
+      'b.bin': new Uint8Array([1, 2, 3, 4]),
     }
     const unzipped = await unzipBackupAsync(zipSync(files))
     expect(new TextDecoder().decode(unzipped['a.txt'])).toBe('hello-备份')
@@ -233,21 +258,28 @@ describe('备份异步压缩/解压（A-01）', () => {
 describe('parseBackupManifest', () => {
   it('接受当前版本的有效清单', () => {
     const res = parseBackupManifest(
-      strToU8(JSON.stringify({ app: BACKUP_FORMAT, version: BACKUP_VERSION }))
+      strToU8(JSON.stringify({ app: BACKUP_FORMAT, version: BACKUP_VERSION })),
     )
     expect(res.ok).toBe(true)
     expect(res.manifest.app).toBe(BACKUP_FORMAT)
   })
 
   it('拒绝非本应用格式与缺失/损坏内容', () => {
-    expect(parseBackupManifest(strToU8(JSON.stringify({ app: 'other' }))).ok).toBe(false)
+    expect(
+      parseBackupManifest(strToU8(JSON.stringify({ app: 'other' }))).ok,
+    ).toBe(false)
     expect(parseBackupManifest(null).error).toContain('manifest.json')
     expect(parseBackupManifest(strToU8('not-json')).ok).toBe(false)
   })
 
   it('拒绝高于当前版本的备份（提示升级应用）', () => {
     const res = parseBackupManifest(
-      strToU8(JSON.stringify({ app: BACKUP_FORMAT, version: PARTIAL_BACKUP_VERSION + 1 }))
+      strToU8(
+        JSON.stringify({
+          app: BACKUP_FORMAT,
+          version: PARTIAL_BACKUP_VERSION + 1,
+        }),
+      ),
     )
     expect(res.ok).toBe(false)
     expect(res.error).toContain('版本过新')
@@ -256,7 +288,9 @@ describe('parseBackupManifest', () => {
 
 describe('safeCoverName', () => {
   it('接受普通文件名', () => {
-    expect(safeCoverName('library/covers/1728-cover.png')).toBe('1728-cover.png')
+    expect(safeCoverName('library/covers/1728-cover.png')).toBe(
+      '1728-cover.png',
+    )
   })
 
   it('拒绝路径穿越、子目录、驱动器前缀与非 covers 条目', () => {
@@ -274,7 +308,10 @@ describe('exportBackup', () => {
     setDataRoot(root)
     await loadData()
     const outZip = path.join(mkTmp('modelvault-out-'), 'backup.zip')
-    dialogMock.showSaveDialog.mockResolvedValue({ canceled: false, filePath: outZip })
+    dialogMock.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: outZip,
+    })
 
     const res = await exportBackup(null)
 
@@ -302,11 +339,14 @@ describe('exportBackup', () => {
     setDataRoot(root)
     await loadData()
     const outZip = path.join(mkTmp('modelvault-out-'), 'backup.zip')
-    dialogMock.showSaveDialog.mockResolvedValue({ canceled: false, filePath: outZip })
+    dialogMock.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: outZip,
+    })
 
     const res = await exportBackup(null, {
       mode: 'selected',
-      ids: [path.join(root, 'a.safetensors')]
+      ids: [path.join(root, 'a.safetensors')],
     })
 
     expect(res.error).toBeUndefined()
@@ -319,7 +359,9 @@ describe('exportBackup', () => {
     expect(manifest.version).toBe(PARTIAL_BACKUP_VERSION)
     expect(manifest.partial).toBe(true)
     expect(manifest.library.models).toBe(1)
-    expect(Object.keys(JSON.parse(zip['library/store.json']).models)).toEqual(['a.safetensors'])
+    expect(Object.keys(JSON.parse(zip['library/store.json']).models)).toEqual([
+      'a.safetensors',
+    ])
     expect(zip['library/covers/c1.png']).toBe('img1')
     expect(zip['library/covers/c2.png']).toBeUndefined()
   })
@@ -329,7 +371,10 @@ describe('exportBackup', () => {
     setDataRoot(root)
     await loadData()
     const outZip = path.join(mkTmp('modelvault-out-'), 'backup.zip')
-    dialogMock.showSaveDialog.mockResolvedValue({ canceled: false, filePath: outZip })
+    dialogMock.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: outZip,
+    })
 
     const res = await exportBackup(null, { mode: 'metadata' })
 
@@ -338,8 +383,12 @@ describe('exportBackup', () => {
     expect(res.models).toBe(2)
     expect(res.covers).toBe(0)
     const zip = readZip(outZip)
-    expect(Object.keys(JSON.parse(zip['library/store.json']).models)).toHaveLength(2)
-    expect(Object.keys(zip).some((k) => k.startsWith('library/covers/'))).toBe(false)
+    expect(
+      Object.keys(JSON.parse(zip['library/store.json']).models),
+    ).toHaveLength(2)
+    expect(Object.keys(zip).some((k) => k.startsWith('library/covers/'))).toBe(
+      false,
+    )
   })
 
   it('selected 模式筛选结果无标注时返回明确错误', async () => {
@@ -347,11 +396,14 @@ describe('exportBackup', () => {
     setDataRoot(root)
     await loadData()
     const outZip = path.join(mkTmp('modelvault-out-'), 'backup.zip')
-    dialogMock.showSaveDialog.mockResolvedValue({ canceled: false, filePath: outZip })
+    dialogMock.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: outZip,
+    })
 
     const res = await exportBackup(null, {
       mode: 'selected',
-      ids: [path.join(root, 'missing.safetensors')]
+      ids: [path.join(root, 'missing.safetensors')],
     })
 
     expect(res.error).toContain('没有可备份的模型标注')
@@ -365,7 +417,10 @@ describe('exportBackup', () => {
     setDataRoot(root)
     await loadData()
     const outZip = path.join(mkTmp('modelvault-out-'), 'backup.zip')
-    dialogMock.showSaveDialog.mockResolvedValue({ canceled: false, filePath: outZip })
+    dialogMock.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: outZip,
+    })
 
     const res = await exportBackup(null)
 
@@ -380,7 +435,10 @@ describe('exportBackup', () => {
     setDataRoot(root)
     await loadData()
     const outZip = path.join(mkTmp('modelvault-out-'), 'backup.zip')
-    dialogMock.showSaveDialog.mockResolvedValue({ canceled: false, filePath: outZip })
+    dialogMock.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: outZip,
+    })
 
     const res = await exportBackup(null)
 
@@ -407,7 +465,10 @@ describe('exportBackup', () => {
     // 防抖窗口内（500ms 未到）立即导出：不 flush 时备份读到旧磁盘内容
     setModelMeta(path.join(root, 'a.safetensors'), { note: '刚修改的备注' })
     const outZip = path.join(mkTmp('modelvault-out-'), 'backup.zip')
-    dialogMock.showSaveDialog.mockResolvedValue({ canceled: false, filePath: outZip })
+    dialogMock.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: outZip,
+    })
 
     const res = await exportBackup(null)
 
@@ -421,12 +482,15 @@ describe('exportBackup', () => {
     fs.mkdirSync(path.join(root, '.modelvault'), { recursive: true })
     fs.writeFileSync(
       path.join(root, '.modelvault', 'store.json'),
-      JSON.stringify({ version: 1, models: { 'a.safetensors': {} } })
+      JSON.stringify({ version: 1, models: { 'a.safetensors': {} } }),
     )
     setDataRoot(root)
     await loadData()
     const outZip = path.join(mkTmp('modelvault-out-'), 'backup.zip')
-    dialogMock.showSaveDialog.mockResolvedValue({ canceled: false, filePath: outZip })
+    dialogMock.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: outZip,
+    })
 
     const res = await exportBackup(null)
 
@@ -438,10 +502,15 @@ describe('exportBackup', () => {
   it('关联存储读取失败时返回明确错误，不产出半成品备份', async () => {
     const root = mkTmp('modelvault-lib-')
     // store.json 为目录：readFile 必然失败（EISDIR），触发导出前的读取兜底
-    fs.mkdirSync(path.join(root, '.modelvault', 'store.json'), { recursive: true })
+    fs.mkdirSync(path.join(root, '.modelvault', 'store.json'), {
+      recursive: true,
+    })
     setDataRoot(root)
     const outZip = path.join(mkTmp('modelvault-out-'), 'backup.zip')
-    dialogMock.showSaveDialog.mockResolvedValue({ canceled: false, filePath: outZip })
+    dialogMock.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: outZip,
+    })
 
     const res = await exportBackup(null)
 
@@ -455,7 +524,10 @@ describe('exportBackup', () => {
     await loadData()
     // 保存路径指向已存在目录：createWriteStream 必然报错（EISDIR/EPERM）
     const badPath = mkTmp('modelvault-out-')
-    dialogMock.showSaveDialog.mockResolvedValue({ canceled: false, filePath: badPath })
+    dialogMock.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: badPath,
+    })
 
     const res = await exportBackup(null)
 
@@ -471,16 +543,22 @@ describe('importBackup', () => {
     setModelMeta(path.join(root, 'a.safetensors'), { note: '旧备注' })
     setModelMeta(path.join(root, 'b.safetensors'), { note: '保留备注' })
 
-    const zipPath = makePartialZip(path.join(mkTmp('modelvault-out-'), 'selected.zip'), {
-      mode: 'selected',
-      models: {
-        'a.safetensors': { note: '新备注' },
-        'c.safetensors': { note: '新增备注' }
+    const zipPath = makePartialZip(
+      path.join(mkTmp('modelvault-out-'), 'selected.zip'),
+      {
+        mode: 'selected',
+        models: {
+          'a.safetensors': { note: '新备注' },
+          'c.safetensors': { note: '新增备注' },
+        },
+        covers: { 'new.png': 'new-cover' },
       },
-      covers: { 'new.png': 'new-cover' }
-    })
+    )
     dialogMock.showOpenDialog.mockReset()
-    dialogMock.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [zipPath] })
+    dialogMock.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: [zipPath],
+    })
     dialogMock.showMessageBox.mockResolvedValue({ response: 1 })
 
     const res = await importBackup(null)
@@ -491,36 +569,52 @@ describe('importBackup', () => {
     expect(res.libraryRestored.updated).toBe(1)
     expect(res.libraryRestored.covers).toBe(1)
     expect(getModelMeta(path.join(root, 'a.safetensors'))?.note).toBe('新备注')
-    expect(getModelMeta(path.join(root, 'c.safetensors'))?.note).toBe('新增备注')
-    // 原有其他模型保留
-    expect(getModelMeta(path.join(root, 'b.safetensors'))?.note).toBe('保留备注')
-    // 新封面写入当前库，且未做目录交换（无 .bak）
-    expect(fs.readFileSync(path.join(root, DATA_DIR, 'covers', 'new.png'), 'utf8')).toBe(
-      'new-cover'
+    expect(getModelMeta(path.join(root, 'c.safetensors'))?.note).toBe(
+      '新增备注',
     )
-    expect(fs.readdirSync(root).some((n) => n.startsWith('.modelvault.bak-'))).toBe(false)
+    // 原有其他模型保留
+    expect(getModelMeta(path.join(root, 'b.safetensors'))?.note).toBe(
+      '保留备注',
+    )
+    // 新封面写入当前库，且未做目录交换（无 .bak）
+    expect(
+      fs.readFileSync(path.join(root, DATA_DIR, 'covers', 'new.png'), 'utf8'),
+    ).toBe('new-cover')
+    expect(
+      fs.readdirSync(root).some((n) => n.startsWith('.modelvault.bak-')),
+    ).toBe(false)
     // 恢复前快照写入 backups/
-    expect(fs.readdirSync(path.join(root, DATA_DIR, 'backups')).length).toBeGreaterThan(0)
+    expect(
+      fs.readdirSync(path.join(root, DATA_DIR, 'backups')).length,
+    ).toBeGreaterThan(0)
     // 部分恢复不覆盖库设置
-    expect(fs.existsSync(path.join(root, DATA_DIR, 'settings.json'))).toBe(false)
+    expect(fs.existsSync(path.join(root, DATA_DIR, 'settings.json'))).toBe(
+      false,
+    )
   })
 
   it('metadata 备份合并时清空封面引用，避免指向不存在的文件（FN-08）', async () => {
     const root = makeLibrary()
     setDataRoot(root)
     await loadData()
-    const zipPath = makePartialZip(path.join(mkTmp('modelvault-out-'), 'metadata.zip'), {
-      mode: 'metadata',
-      models: {
-        'a.safetensors': {
-          note: '仅标注',
-          cover: '.modelvault/covers/c1.png',
-          covers: ['.modelvault/covers/c1.png']
-        }
-      }
-    })
+    const zipPath = makePartialZip(
+      path.join(mkTmp('modelvault-out-'), 'metadata.zip'),
+      {
+        mode: 'metadata',
+        models: {
+          'a.safetensors': {
+            note: '仅标注',
+            cover: '.modelvault/covers/c1.png',
+            covers: ['.modelvault/covers/c1.png'],
+          },
+        },
+      },
+    )
     dialogMock.showOpenDialog.mockReset()
-    dialogMock.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [zipPath] })
+    dialogMock.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: [zipPath],
+    })
     dialogMock.showMessageBox.mockResolvedValue({ response: 1 })
 
     const res = await importBackup(null)
@@ -536,17 +630,25 @@ describe('importBackup', () => {
     const root = makeLibrary()
     setDataRoot(root)
     await loadData()
-    const zipPath = makePartialZip(path.join(mkTmp('modelvault-out-'), 'cancel.zip'), {
-      models: { 'a.safetensors': { note: '不应写入' } }
-    })
+    const zipPath = makePartialZip(
+      path.join(mkTmp('modelvault-out-'), 'cancel.zip'),
+      {
+        models: { 'a.safetensors': { note: '不应写入' } },
+      },
+    )
     dialogMock.showOpenDialog.mockReset()
-    dialogMock.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [zipPath] })
+    dialogMock.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: [zipPath],
+    })
     dialogMock.showMessageBox.mockResolvedValue({ response: 0 })
 
     const res = await importBackup(null)
 
     expect(res.error).toContain('已取消合并恢复')
-    expect(getModelMeta(path.join(root, 'a.safetensors'))?.note || '').not.toBe('不应写入')
+    expect(getModelMeta(path.join(root, 'a.safetensors'))?.note || '').not.toBe(
+      '不应写入',
+    )
   })
 
   it('选择性备份缺少库元数据时拒绝，并清理本次写入的封面（FN-08）', async () => {
@@ -564,25 +666,32 @@ describe('importBackup', () => {
             settings: true,
             partial: true,
             mode: 'selected',
-            library: { root: 'D:\\x', models: 1, covers: 1 }
-          })
+            library: { root: 'D:\\x', models: 1, covers: 1 },
+          }),
         ),
-        'library/covers/leak.png': strToU8('leak')
-      })
+        'library/covers/leak.png': strToU8('leak'),
+      }),
     )
     dialogMock.showOpenDialog.mockReset()
-    dialogMock.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [zipPath] })
+    dialogMock.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: [zipPath],
+    })
     dialogMock.showMessageBox.mockResolvedValue({ response: 1 })
 
     const res = await importBackup(null)
 
     expect(res.error).toContain('备份缺少库元数据')
     // 失败时删除本次写入的封面，不在库内留半成品
-    expect(fs.existsSync(path.join(root, DATA_DIR, 'covers', 'leak.png'))).toBe(false)
+    expect(fs.existsSync(path.join(root, DATA_DIR, 'covers', 'leak.png'))).toBe(
+      false,
+    )
   })
 
   it('恢复设置与库数据到目标文件夹', async () => {
-    const zipPath = makeBackupZip(path.join(mkTmp('modelvault-out-'), 'backup.zip'))
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+    )
     const target = mkTmp('modelvault-target-')
     dialogMock.showOpenDialog
       .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
@@ -597,15 +706,21 @@ describe('importBackup', () => {
     expect(res.libraryRestored.covers).toBe(1)
     // 库数据落盘
     const store = JSON.parse(
-      fs.readFileSync(path.join(target, '.modelvault', 'store.json'), 'utf8')
+      fs.readFileSync(path.join(target, '.modelvault', 'store.json'), 'utf8'),
     )
     expect(store.models['x.safetensors']).toBeDefined()
     expect(
-      fs.readFileSync(path.join(target, '.modelvault', 'covers', 'ok.png'), 'utf8')
+      fs.readFileSync(
+        path.join(target, '.modelvault', 'covers', 'ok.png'),
+        'utf8',
+      ),
     ).toBe('coverdata')
     // 库设置随备份恢复（写入目标库 .modelvault/settings.json，引导字段不入包）
     const saved = JSON.parse(
-      fs.readFileSync(path.join(target, '.modelvault', 'settings.json'), 'utf8')
+      fs.readFileSync(
+        path.join(target, '.modelvault', 'settings.json'),
+        'utf8',
+      ),
     )
     expect(saved.theme).toBe('light')
     expect(saved.sortBy).toBe('size')
@@ -625,16 +740,16 @@ describe('importBackup', () => {
             app: BACKUP_FORMAT,
             version: BACKUP_VERSION,
             settings: true,
-            library: { root: 'D:\\old-lib', models: 1, covers: 2 }
-          })
+            library: { root: 'D:\\old-lib', models: 1, covers: 2 },
+          }),
         ),
         'settings.json': strToU8(JSON.stringify({ theme: 'light' })),
         'library/store.json': strToU8(
-          JSON.stringify({ version: 1, models: { 'x.safetensors': {} } })
+          JSON.stringify({ version: 1, models: { 'x.safetensors': {} } }),
         ),
         'library/covers/big.png': [new Uint8Array(big), { level: 0 }],
-        'library/covers/empty.png': [new Uint8Array(0), { level: 0 }]
-      })
+        'library/covers/empty.png': [new Uint8Array(0), { level: 0 }],
+      }),
     )
     const target = mkTmp('modelvault-target-')
     dialogMock.showOpenDialog
@@ -646,12 +761,16 @@ describe('importBackup', () => {
     expect(res.error).toBeUndefined()
     expect(res.libraryRestored.covers).toBe(2)
     const coversDir = path.join(target, '.modelvault', 'covers')
-    expect(fs.readFileSync(path.join(coversDir, 'big.png')).equals(big)).toBe(true)
+    expect(fs.readFileSync(path.join(coversDir, 'big.png')).equals(big)).toBe(
+      true,
+    )
     expect(fs.statSync(path.join(coversDir, 'empty.png')).size).toBe(0)
   })
 
   it('目标已有 .modelvault 时确认后覆盖并留存 .bak', async () => {
-    const zipPath = makeBackupZip(path.join(mkTmp('modelvault-out-'), 'backup.zip'))
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+    )
     const target = mkTmp('modelvault-target-')
     const dataDir = path.join(target, '.modelvault')
     fs.mkdirSync(dataDir, { recursive: true })
@@ -664,11 +783,17 @@ describe('importBackup', () => {
     const res = await importBackup(null)
 
     expect(res.libraryRestored.root).toBe(target)
-    const store = JSON.parse(fs.readFileSync(path.join(dataDir, 'store.json'), 'utf8'))
+    const store = JSON.parse(
+      fs.readFileSync(path.join(dataDir, 'store.json'), 'utf8'),
+    )
     expect(store.models['x.safetensors']).toBeDefined()
-    const baks = fs.readdirSync(target).filter((n) => n.startsWith('.modelvault.bak-'))
+    const baks = fs
+      .readdirSync(target)
+      .filter((n) => n.startsWith('.modelvault.bak-'))
     expect(baks).toHaveLength(1)
-    expect(fs.readFileSync(path.join(target, baks[0], 'store.json'), 'utf8')).toBe('OLD')
+    expect(
+      fs.readFileSync(path.join(target, baks[0], 'store.json'), 'utf8'),
+    ).toBe('OLD')
   })
 
   it('恢复到当前激活根时，恢复前的在途防抖保存不覆盖恢复结果（B1）', async () => {
@@ -677,9 +802,13 @@ describe('importBackup', () => {
     setDataRoot(target)
     await loadData()
     // 恢复前的最后一次修改：防抖 500ms 后才落盘（恢复流程中最危险的在途写入）
-    setModelMeta(path.join(target, 'stale.safetensors'), { note: '恢复前的旧数据' })
+    setModelMeta(path.join(target, 'stale.safetensors'), {
+      note: '恢复前的旧数据',
+    })
 
-    const zipPath = makeBackupZip(path.join(mkTmp('modelvault-out-'), 'backup.zip'))
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+    )
     dialogMock.showOpenDialog
       .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
       .mockResolvedValueOnce({ canceled: false, filePaths: [target] })
@@ -693,7 +822,7 @@ describe('importBackup', () => {
     // 原子覆盖刚恢复的 store.json（恢复被静默回滚）
     await new Promise((resolve) => setTimeout(resolve, 700))
     const store = JSON.parse(
-      fs.readFileSync(path.join(target, '.modelvault', 'store.json'), 'utf8')
+      fs.readFileSync(path.join(target, '.modelvault', 'store.json'), 'utf8'),
     )
     expect(store.models['x.safetensors']).toBeDefined()
     expect(store.models['stale.safetensors']).toBeUndefined()
@@ -703,7 +832,9 @@ describe('importBackup', () => {
   })
 
   it('覆盖确认取消时保留现有数据（设置与库数据均未恢复）', async () => {
-    const zipPath = makeBackupZip(path.join(mkTmp('modelvault-out-'), 'backup.zip'))
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+    )
     const target = mkTmp('modelvault-target-')
     const dataDir = path.join(target, '.modelvault')
     fs.mkdirSync(dataDir, { recursive: true })
@@ -718,14 +849,19 @@ describe('importBackup', () => {
     expect(res.error).toContain('已取消覆盖恢复')
     // 库设置随库恢复：未发生目录交换，设置同样未落盘
     expect(res.settingsRestored).toBe(false)
-    expect(fs.readFileSync(path.join(dataDir, 'store.json'), 'utf8')).toBe('OLD')
+    expect(fs.readFileSync(path.join(dataDir, 'store.json'), 'utf8')).toBe(
+      'OLD',
+    )
     expect(fs.existsSync(path.join(dataDir, 'settings.json'))).toBe(false)
   })
 
   it('跳过路径穿越的封面条目（恢复后目标目录外无文件写入）', async () => {
-    const zipPath = makeBackupZip(path.join(mkTmp('modelvault-out-'), 'backup.zip'), {
-      evilEntry: true
-    })
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+      {
+        evilEntry: true,
+      },
+    )
     const target = mkTmp('modelvault-target-')
     dialogMock.showOpenDialog
       .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
@@ -736,9 +872,13 @@ describe('importBackup', () => {
     expect(res.libraryRestored.covers).toBe(1)
     expect(res.libraryRestored.skipped).toBe(1)
     expect(fs.existsSync(path.join(target, 'evil.png'))).toBe(false)
-    expect(fs.existsSync(path.join(path.dirname(target), 'evil.png'))).toBe(false)
+    expect(fs.existsSync(path.join(path.dirname(target), 'evil.png'))).toBe(
+      false,
+    )
     // 恢复用的临时目录已清理
-    expect(fs.readdirSync(target).some((n) => n.includes('.restore-'))).toBe(false)
+    expect(fs.readdirSync(target).some((n) => n.includes('.restore-'))).toBe(
+      false,
+    )
   })
 
   it('备份中的危险元数据键被清洗，不写入目标库（B-04）', async () => {
@@ -751,14 +891,14 @@ describe('importBackup', () => {
             app: BACKUP_FORMAT,
             version: BACKUP_VERSION,
             settings: true,
-            library: { root: 'D:\\old-lib', models: 2, covers: 0 }
-          })
+            library: { root: 'D:\\old-lib', models: 2, covers: 0 },
+          }),
         ),
         'library/store.json': strToU8(
           '{"version":1,"models":{"__proto__":{"alias":"pwn"},' +
-            '"ok.safetensors":{"note":"ok"}}}'
-        )
-      })
+            '"ok.safetensors":{"note":"ok"}}}',
+        ),
+      }),
     )
     const target = mkTmp('modelvault-target-')
     dialogMock.showOpenDialog
@@ -771,9 +911,11 @@ describe('importBackup', () => {
     // 危险键被剔除，只保留合法条目
     expect(res.libraryRestored.models).toBe(1)
     const disk = JSON.parse(
-      fs.readFileSync(path.join(target, '.modelvault', 'store.json'), 'utf8')
+      fs.readFileSync(path.join(target, '.modelvault', 'store.json'), 'utf8'),
     )
-    expect(Object.prototype.hasOwnProperty.call(disk.models, '__proto__')).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(disk.models, '__proto__')).toBe(
+      false,
+    )
     expect(disk.models['ok.safetensors'].note).toBe('ok')
     expect({}.alias).toBeUndefined()
   })
@@ -793,12 +935,14 @@ describe('importBackup', () => {
             app: BACKUP_FORMAT,
             version: BACKUP_VERSION,
             settings: true,
-            library: { root: 'D:\\old-lib', models: 0, covers: 1 }
-          })
+            library: { root: 'D:\\old-lib', models: 0, covers: 1 },
+          }),
         ),
-        'library/store.json': strToU8(JSON.stringify({ version: 1, models: {} })),
-        'library/covers/huge.png': [huge, { level: 0 }]
-      })
+        'library/store.json': strToU8(
+          JSON.stringify({ version: 1, models: {} }),
+        ),
+        'library/covers/huge.png': [huge, { level: 0 }],
+      }),
     )
     const target = mkTmp('modelvault-target-')
     // 流式恢复先确认目标目录，再在维护锁内解压；超限错误发生在临时目录阶段
@@ -813,7 +957,9 @@ describe('importBackup', () => {
   })
 
   it('维护操作进行中时拒绝恢复，不触碰目标目录（V-02）', async () => {
-    const zipPath = makeBackupZip(path.join(mkTmp('modelvault-out-'), 'backup.zip'))
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+    )
     const target = mkTmp('modelvault-target-')
     dialogMock.showOpenDialog
       .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
@@ -836,7 +982,7 @@ describe('importBackup', () => {
     fs.writeFileSync(noManifest, zipSync({ 'readme.txt': strToU8('hi') }))
     dialogMock.showOpenDialog.mockResolvedValueOnce({
       canceled: false,
-      filePaths: [noManifest]
+      filePaths: [noManifest],
     })
     const res1 = await importBackup(null)
     expect(res1.error).toContain('备份文件缺少 manifest.json')
@@ -845,11 +991,15 @@ describe('importBackup', () => {
     const wrongFormat = path.join(mkTmp('modelvault-out-'), 'wrong-format.zip')
     fs.writeFileSync(
       wrongFormat,
-      zipSync({ 'manifest.json': strToU8(JSON.stringify({ app: 'other-app', version: 1 })) })
+      zipSync({
+        'manifest.json': strToU8(
+          JSON.stringify({ app: 'other-app', version: 1 }),
+        ),
+      }),
     )
     dialogMock.showOpenDialog.mockResolvedValueOnce({
       canceled: false,
-      filePaths: [wrongFormat]
+      filePaths: [wrongFormat],
     })
     const res2 = await importBackup(null)
     expect(res2.error).toContain('不是有效的 ModelVault 备份文件')
@@ -864,10 +1014,16 @@ describe('importBackup', () => {
   it('仅含设置的备份：写入当前激活库，不弹出目标文件夹选择', async () => {
     const lib = makeLibrary()
     setDataRoot(lib)
-    const zipPath = makeBackupZip(path.join(mkTmp('modelvault-out-'), 'backup.zip'), {
-      withLibrary: false
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+      {
+        withLibrary: false,
+      },
+    )
+    dialogMock.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [zipPath],
     })
-    dialogMock.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
 
     const res = await importBackup(null)
 
@@ -878,7 +1034,7 @@ describe('importBackup', () => {
     expect(dialogMock.showOpenDialog).toHaveBeenCalledTimes(1)
     // 库设置随库落盘（引导字段剥离）
     const saved = JSON.parse(
-      fs.readFileSync(path.join(lib, '.modelvault', 'settings.json'), 'utf8')
+      fs.readFileSync(path.join(lib, '.modelvault', 'settings.json'), 'utf8'),
     )
     expect(saved.theme).toBe('light')
     expect(saved.sortBy).toBe('size')
@@ -887,7 +1043,10 @@ describe('importBackup', () => {
 
   it('备份文件无法读取时返回读取失败原因（不进入解压）', async () => {
     const missing = path.join(mkTmp('modelvault-out-'), 'not-here.zip')
-    dialogMock.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [missing] })
+    dialogMock.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [missing],
+    })
 
     const res = await importBackup(null)
 
@@ -895,7 +1054,9 @@ describe('importBackup', () => {
   })
 
   it('含库数据但取消选择目标文件夹时不做任何恢复', async () => {
-    const zipPath = makeBackupZip(path.join(mkTmp('modelvault-out-'), 'backup.zip'))
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+    )
     dialogMock.showOpenDialog
       .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
       .mockResolvedValueOnce({ canceled: true })
@@ -917,11 +1078,11 @@ describe('importBackup', () => {
             app: BACKUP_FORMAT,
             version: BACKUP_VERSION,
             settings: true,
-            library: { root: 'D:\\old-lib', models: 1, covers: 0 }
-          })
+            library: { root: 'D:\\old-lib', models: 1, covers: 0 },
+          }),
         ),
-        'settings.json': strToU8(JSON.stringify({ theme: 'light' }))
-      })
+        'settings.json': strToU8(JSON.stringify({ theme: 'light' })),
+      }),
     )
     const target = mkTmp('modelvault-target-')
     dialogMock.showOpenDialog
@@ -936,7 +1097,7 @@ describe('importBackup', () => {
 
   it('封面条目重复时拒绝恢复（同名条目会产生覆盖歧义）', async () => {
     const zipPath = await makeDuplicateCoverZip(
-      path.join(mkTmp('modelvault-out-'), 'dup.zip')
+      path.join(mkTmp('modelvault-out-'), 'dup.zip'),
     )
     const target = mkTmp('modelvault-target-')
     dialogMock.showOpenDialog
@@ -952,18 +1113,28 @@ describe('importBackup', () => {
   it('仅设置的备份：封面条目连解压都跳过', async () => {
     const lib = makeLibrary()
     setDataRoot(lib)
-    const zipPath = path.join(mkTmp('modelvault-out-'), 'settings-with-cover.zip')
+    const zipPath = path.join(
+      mkTmp('modelvault-out-'),
+      'settings-with-cover.zip',
+    )
     fs.writeFileSync(
       zipPath,
       zipSync({
         'manifest.json': strToU8(
-          JSON.stringify({ app: BACKUP_FORMAT, version: BACKUP_VERSION, settings: true })
+          JSON.stringify({
+            app: BACKUP_FORMAT,
+            version: BACKUP_VERSION,
+            settings: true,
+          }),
         ),
         'settings.json': strToU8(JSON.stringify({ theme: 'light' })),
-        'library/covers/ignored.png': strToU8('not-needed')
-      })
+        'library/covers/ignored.png': strToU8('not-needed'),
+      }),
     )
-    dialogMock.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
+    dialogMock.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [zipPath],
+    })
 
     const res = await importBackup(null)
 
@@ -978,12 +1149,19 @@ describe('importBackup', () => {
       zipPath,
       zipSync({
         'manifest.json': strToU8(
-          JSON.stringify({ app: BACKUP_FORMAT, version: BACKUP_VERSION, settings: true })
+          JSON.stringify({
+            app: BACKUP_FORMAT,
+            version: BACKUP_VERSION,
+            settings: true,
+          }),
         ),
-        'settings.json': strToU8('not-json')
-      })
+        'settings.json': strToU8('not-json'),
+      }),
     )
-    dialogMock.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
+    dialogMock.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [zipPath],
+    })
 
     const res = await importBackup(null)
 
@@ -993,10 +1171,16 @@ describe('importBackup', () => {
   it('仅设置的备份在当前无激活库时不恢复设置', async () => {
     setDataRoot(null)
     await loadData()
-    const zipPath = makeBackupZip(path.join(mkTmp('modelvault-out-'), 'backup.zip'), {
-      withLibrary: false
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+      {
+        withLibrary: false,
+      },
+    )
+    dialogMock.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [zipPath],
     })
-    dialogMock.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
 
     const res = await importBackup(null)
 
@@ -1012,7 +1196,10 @@ describe('importBackup 残留治理（OPT-18）', () => {
     const spy = vi.spyOn(fsp, 'rename').mockImplementation(async (from, to) => {
       // 仅拦截 .restore-* → .modelvault 的上位 rename；
       // 回滚（.bak-* → .modelvault）与 settings 等写入不受影响
-      if (String(from).includes('.restore-') && String(to).endsWith(`${path.sep}${DATA_DIR}`)) {
+      if (
+        String(from).includes('.restore-') &&
+        String(to).endsWith(`${path.sep}${DATA_DIR}`)
+      ) {
         throw new Error('磁盘错误')
       }
       return originalRename(from, to)
@@ -1021,7 +1208,9 @@ describe('importBackup 残留治理（OPT-18）', () => {
   }
 
   it('恢复失败时清理本次临时目录，不在模型目录留垃圾', async () => {
-    const zipPath = makeBackupZip(path.join(mkTmp('modelvault-out-'), 'backup.zip'))
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+    )
     const target = mkTmp('modelvault-target-')
     dialogMock.showOpenDialog
       .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
@@ -1039,7 +1228,9 @@ describe('importBackup 残留治理（OPT-18）', () => {
   })
 
   it('交换上位失败时回滚既有数据并清理临时目录', async () => {
-    const zipPath = makeBackupZip(path.join(mkTmp('modelvault-out-'), 'backup.zip'))
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+    )
     const target = mkTmp('modelvault-target-')
     const dataDir = path.join(target, DATA_DIR)
     fs.mkdirSync(dataDir, { recursive: true })
@@ -1055,7 +1246,9 @@ describe('importBackup 残留治理（OPT-18）', () => {
 
     expect(res.error).toContain('库数据恢复失败')
     // 既有数据经回滚完好无损
-    expect(fs.readFileSync(path.join(dataDir, 'store.json'), 'utf8')).toBe('OLD')
+    expect(fs.readFileSync(path.join(dataDir, 'store.json'), 'utf8')).toBe(
+      'OLD',
+    )
     // 无 .bak 残留（已随回滚改回）、无 .restore 残留
     const left = fs.readdirSync(target)
     expect(left.some((n) => n.startsWith(`${DATA_DIR}.bak-`))).toBe(false)
@@ -1086,12 +1279,18 @@ describe('importBackup 残留治理（OPT-18）', () => {
     const res = await importBackup(null)
 
     expect(res.libraryRestored.root).toBe(target)
-    const baks = fs.readdirSync(target).filter((n) => n.startsWith(`${DATA_DIR}.bak-`))
+    const baks = fs
+      .readdirSync(target)
+      .filter((n) => n.startsWith(`${DATA_DIR}.bak-`))
     expect(baks).toHaveLength(1)
     // 留存的是第二次恢复生成的 .bak（内容为改动后的 OLD-2）
-    expect(fs.readFileSync(path.join(target, baks[0], 'store.json'), 'utf8')).toBe('OLD-2')
+    expect(
+      fs.readFileSync(path.join(target, baks[0], 'store.json'), 'utf8'),
+    ).toBe('OLD-2')
     // 当前生效数据为恢复内容
-    const store = JSON.parse(fs.readFileSync(path.join(dataDir, 'store.json'), 'utf8'))
+    const store = JSON.parse(
+      fs.readFileSync(path.join(dataDir, 'store.json'), 'utf8'),
+    )
     expect(store.models['x.safetensors']).toBeDefined()
   })
 
@@ -1101,7 +1300,9 @@ describe('importBackup 残留治理（OPT-18）', () => {
     const stale = path.join(target, `${DATA_DIR}.restore-111`)
     fs.mkdirSync(path.join(stale, 'covers'), { recursive: true })
     fs.writeFileSync(path.join(stale, 'store.json'), '残留')
-    const zipPath = makeBackupZip(path.join(mkTmp('modelvault-out-'), 'backup.zip'))
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+    )
     dialogMock.showOpenDialog
       .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
       .mockResolvedValueOnce({ canceled: false, filePaths: [target] })

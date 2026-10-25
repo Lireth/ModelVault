@@ -8,7 +8,7 @@ import { formatSize, openDetail } from '../../store/appStore'
 
 defineProps({
   /** TOP 行（StatsSection 的 topSize computed：{ id, name, size, pct }） */
-  rows: { type: Array, required: true }
+  rows: { type: Array, required: true },
 })
 </script>
 
@@ -16,7 +16,13 @@ defineProps({
   <div class="stats-block">
     <h4>最占空间 TOP 5</h4>
     <ol class="top-list">
-      <li v-for="t in rows" :key="t.id" class="top-row" title="打开模型详情" @click="openDetail(t.id)">
+      <li
+        v-for="t in rows"
+        :key="t.id"
+        class="top-row"
+        title="打开模型详情"
+        @click="openDetail(t.id)"
+      >
         <span class="top-name">{{ t.name }}</span>
         <div class="top-bar">
           <div class="top-fill" :style="{ width: `${t.pct}%` }"></div>

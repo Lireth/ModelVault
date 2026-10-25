@@ -80,7 +80,9 @@ export async function removeTagGlobally(tag) {
     toast('error', res.error)
     return res
   }
-  const changed = applyTagEdit((tags) => (tags.includes(tag) ? tags.filter((t) => t !== tag) : tags))
+  const changed = applyTagEdit((tags) =>
+    tags.includes(tag) ? tags.filter((t) => t !== tag) : tags,
+  )
   toast('success', `已移除标签「${tag}」（${changed} 个模型）`)
   return res
 }

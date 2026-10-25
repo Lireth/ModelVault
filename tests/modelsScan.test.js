@@ -1,10 +1,22 @@
-import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  afterAll,
+} from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { BrowserWindow, dialog, nativeImage } from 'electron'
 import { fakeUserData } from './setup'
-import { getRegisteredHandler, makeEvent, makeWindow } from './helpers/modelsIpc'
+import {
+  getRegisteredHandler,
+  makeEvent,
+  makeWindow,
+} from './helpers/modelsIpc'
 
 /**
  * models 域扫描与存储 handler 特征测试（D1，先测后拆基线）：
@@ -20,7 +32,7 @@ vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
   BrowserWindow: Object.assign(vi.fn(), {
     fromWebContents: vi.fn(),
-    getAllWindows: vi.fn(() => [])
+    getAllWindows: vi.fn(() => []),
   }),
   clipboard: { read: vi.fn(), writeText: vi.fn() },
   dialog: { showOpenDialog: vi.fn() },
@@ -29,7 +41,7 @@ vi.mock('electron', () => ({
   shell: { trashItem: vi.fn(), showItemInFolder: vi.fn() },
   net: { fetch: vi.fn() },
   nativeImage: { createFromBuffer: vi.fn(), createFromPath: vi.fn() },
-  protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() }
+  protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
 }))
 
 vi.mock('../src/main/services/scanner.js', async (importOriginal) => {
@@ -45,7 +57,7 @@ vi.mock('../src/main/services/watcher.js', async (importOriginal) => {
     ...actual,
     syncWatcher: vi.fn(),
     refreshWatcherBaseline: vi.fn(),
-    setWatcherScanning: vi.fn()
+    setWatcherScanning: vi.fn(),
   }
 })
 
@@ -53,26 +65,33 @@ vi.mock('../src/main/services/watcher.js', async (importOriginal) => {
 vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([])
 
 import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
-import { flushIndexWrites, readLibraryIndex, writeLibraryIndex } from '../src/main/services/library-index'
+import {
+  flushIndexWrites,
+  readLibraryIndex,
+  writeLibraryIndex,
+} from '../src/main/services/library-index'
 import { scanModels } from '../src/main/services/scanner'
 import {
   refreshWatcherBaseline,
   setWatcherScanning,
-  syncWatcher
+  syncWatcher,
 } from '../src/main/services/watcher'
 import {
   getCurrentRoot,
   loadData,
   loadSettings,
   setDataRoot,
-  updateSettings
+  updateSettings,
 } from '../src/main/services/store'
 import {
   MAX_PARTIAL_SCAN_DIRS,
   collapseDirsToTopLevel,
-  normalizePartialScanDirs
+  normalizePartialScanDirs,
 } from '../src/shared/scan-dirs'
-import { drainDeferredThumbs, getThumbPathDeferred } from '../src/main/services/thumbs'
+import {
+  drainDeferredThumbs,
+  getThumbPathDeferred,
+} from '../src/main/services/thumbs'
 import { decorateModels } from '../src/main/ipc/models/decorate'
 
 const settingsFile = path.join(fakeUserData, 'settings.json')
@@ -83,13 +102,16 @@ let releaseScan
 /** 将 scanModels mock 挂起（返回手动释放的 Promise），释放时可指定正常返回或 AbortError */
 function hangScanModels() {
   releaseScan = null
-  vi.mocked(scanModels).mockImplementation((_rootDir, _onProgress, opts) =>
-    new Promise((resolve, reject) => {
-      releaseScan = () =>
-        opts?.signal?.aborted
-          ? reject(Object.assign(new Error('扫描已取消'), { name: 'AbortError' }))
-          : resolve({ models: [], errors: [], dirCount: 0 })
-    })
+  vi.mocked(scanModels).mockImplementation(
+    (_rootDir, _onProgress, opts) =>
+      new Promise((resolve, reject) => {
+        releaseScan = () =>
+          opts?.signal?.aborted
+            ? reject(
+                Object.assign(new Error('扫描已取消'), { name: 'AbortError' }),
+              )
+            : resolve({ models: [], errors: [], dirCount: 0 })
+      }),
   )
 }
 
@@ -168,7 +190,11 @@ describe('models:partialScan（A-03）', () => {
   it('合法子树局部扫描成功（mock 扫描器返回局部模型）', async () => {
     const partial = getRegisteredHandler('models:partialScan')
     await registerLibrary(root)
-    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 1,
+    })
     const res = await partial(makeEvent(), { folder: root, dirs: ['lora'] })
     expect(res.error).toBeUndefined()
     expect(res.dirs).toEqual(['lora'])
@@ -177,7 +203,9 @@ describe('models:partialScan（A-03）', () => {
   })
 
   it('目录不存在时局部扫描返回失效标志（F1-offline：渲染层据此置位离线态且不降级全扫）', async () => {
-    const gone = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-partial-gone-'))
+    const gone = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-partial-gone-'),
+    )
     roots.push(gone)
     await registerLibrary(gone)
     // 注册后删除目录，模拟会话中途失效（盘符断开/文件夹被移动）
@@ -185,7 +213,10 @@ describe('models:partialScan（A-03）', () => {
     const partial = getRegisteredHandler('models:partialScan')
     const scanCallsBefore = vi.mocked(scanModels).mock.calls.length
     const res = await partial(makeEvent(), { folder: gone, dirs: ['lora'] })
-    expect(res).toEqual({ error: '模型文件夹不存在或不是目录', folderMissing: true })
+    expect(res).toEqual({
+      error: '模型文件夹不存在或不是目录',
+      folderMissing: true,
+    })
     // 扫描器未被调用（存在性校验前置短路）
     expect(vi.mocked(scanModels).mock.calls.length).toBe(scanCallsBefore)
   })
@@ -202,7 +233,7 @@ describe('models:partialScan（A-03）', () => {
       folder: root,
       type: 'lora',
       size: 1,
-      mtimeMs: 1
+      mtimeMs: 1,
     }
     // 该测试文件不经过 loadStore 链路；显式加载当前根元数据，使 sidecar
     // 导入的 setModelMeta 能落到内存存储（与生产启动时序一致）
@@ -211,13 +242,17 @@ describe('models:partialScan（A-03）', () => {
     await decorateModels([model])
     await fs.writeFile(
       path.join(root, 'late-sidecar.civitai.info'),
-      JSON.stringify({ trainedWords: ['late-tag'] })
+      JSON.stringify({ trainedWords: ['late-tag'] }),
     )
-    vi.mocked(scanModels).mockResolvedValue({ models: [model], errors: [], dirCount: 1 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [model],
+      errors: [],
+      dirCount: 1,
+    })
 
     const res = await getRegisteredHandler('models:partialScan')(makeEvent(), {
       folder: root,
-      dirs: ['']
+      dirs: [''],
     })
 
     // 模型 mtime 未变，仍必须重新检查 sidecar（forceRefresh 由局部扫描传入）
@@ -228,19 +263,29 @@ describe('models:partialScan（A-03）', () => {
     const partial = getRegisteredHandler('models:partialScan')
     await registerLibrary(root)
     await updateSettings({ scanExtensions: ['.safetensors'] })
-    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 1,
+    })
 
     const res = await partial(makeEvent(), { folder: root, dirs: [''] })
     expect(res.error).toBeUndefined()
     // 此前局部扫描落回默认全集：用户排除的扩展名（如 .ckpt）会在 watcher
     // 触发一次增量重扫后“复活”，局部结果与全量结果不一致
-    expect(vi.mocked(scanModels).mock.calls.at(-1)[2].extensions).toEqual(['.safetensors'])
+    expect(vi.mocked(scanModels).mock.calls.at(-1)[2].extensions).toEqual([
+      '.safetensors',
+    ])
   })
 
   it('未改设置时局部扫描透传规范化的全量扩展名（非 undefined 全集）', async () => {
     const partial = getRegisteredHandler('models:partialScan')
     await registerLibrary(root)
-    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 1,
+    })
 
     await partial(makeEvent(), { folder: root, dirs: [''] })
 
@@ -270,23 +315,34 @@ describe('models:partialScan（A-03）', () => {
   it('父子重叠与重复子树去重：只扫描祖先一次（B-01）', async () => {
     const partial = getRegisteredHandler('models:partialScan')
     await registerLibrary(root)
-    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 1,
+    })
 
     const res = await partial(makeEvent(), {
       folder: root,
-      dirs: ['lora', 'lora/sub', 'lora', 'vae/deep']
+      dirs: ['lora', 'lora/sub', 'lora', 'vae/deep'],
     })
 
     expect(res.error).toBeUndefined()
     // 后代 lora/sub 被祖先 lora 覆盖；精确重复只保留一份
     expect(res.dirs).toEqual(['lora', 'vae/deep'])
-    expect(vi.mocked(scanModels).mock.calls.at(-1)[2].subDirs).toEqual(['lora', 'vae/deep'])
+    expect(vi.mocked(scanModels).mock.calls.at(-1)[2].subDirs).toEqual([
+      'lora',
+      'vae/deep',
+    ])
   })
 
   it('O3：子树超过业务上限时收敛为一级目录后继续局部扫描（不截断）', async () => {
     const partial = getRegisteredHandler('models:partialScan')
     await registerLibrary(root)
-    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 1,
+    })
     const dirs = Array.from({ length: 205 }, (_, i) => `bulk/item-${i}`)
 
     const res = await partial(makeEvent(), { folder: root, dirs })
@@ -298,7 +354,11 @@ describe('models:partialScan（A-03）', () => {
   it('O3：一级目录仍超过业务上限时返回 fullScanRequired，不执行局部扫描', async () => {
     const partial = getRegisteredHandler('models:partialScan')
     await registerLibrary(root)
-    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 1,
+    })
     const callsBefore = vi.mocked(scanModels).mock.calls.length
     const dirs = Array.from({ length: 205 }, (_, i) => `top${i}`)
 
@@ -311,7 +371,11 @@ describe('models:partialScan（A-03）', () => {
   it('根直属空串与子树并存时两者都保留（语义不重叠）', async () => {
     const partial = getRegisteredHandler('models:partialScan')
     await registerLibrary(root)
-    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 1,
+    })
 
     const res = await partial(makeEvent(), { folder: root, dirs: ['', 'lora'] })
 
@@ -321,14 +385,18 @@ describe('models:partialScan（A-03）', () => {
   it('参数非法时释放扫描锁，后续合法请求可正常进入（B-01）', async () => {
     const partial = getRegisteredHandler('models:partialScan')
     await registerLibrary(root)
-    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 1,
+    })
 
-    expect((await partial(makeEvent(), { folder: root, dirs: ['../escape'] })).error).toBe(
-      '变更子树参数无效'
-    )
-    expect((await partial(makeEvent(), { folder: root, dirs: ['C:/abs'] })).error).toBe(
-      '变更子树参数无效'
-    )
+    expect(
+      (await partial(makeEvent(), { folder: root, dirs: ['../escape'] })).error,
+    ).toBe('变更子树参数无效')
+    expect(
+      (await partial(makeEvent(), { folder: root, dirs: ['C:/abs'] })).error,
+    ).toBe('变更子树参数无效')
     const ok = await partial(makeEvent(), { folder: root, dirs: ['lora'] })
     expect(ok.error).toBeUndefined()
   })
@@ -342,7 +410,7 @@ describe('models:partialScan（A-03）', () => {
       ext: '.safetensors',
       size: 1,
       mtimeMs: 1,
-      relDir: ''
+      relDir: '',
     }
     const oldLora = {
       id: path.join(root, 'lora', 'old.safetensors'),
@@ -351,9 +419,12 @@ describe('models:partialScan（A-03）', () => {
       ext: '.safetensors',
       size: 1,
       mtimeMs: 1,
-      relDir: 'lora'
+      relDir: 'lora',
     }
-    await writeLibraryIndex(root, { models: [rootModel, oldLora], durationMs: 42 })
+    await writeLibraryIndex(root, {
+      models: [rootModel, oldLora],
+      durationMs: 42,
+    })
 
     const newLora = {
       id: path.join(root, 'lora', 'new.safetensors'),
@@ -362,15 +433,19 @@ describe('models:partialScan（A-03）', () => {
       ext: '.safetensors',
       size: 1,
       mtimeMs: 1,
-      relDir: 'lora'
+      relDir: 'lora',
     }
     await fs.mkdir(path.join(root, 'lora'), { recursive: true })
     await fs.writeFile(newLora.id, 'x')
-    vi.mocked(scanModels).mockResolvedValue({ models: [newLora], errors: [], dirCount: 1 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [newLora],
+      errors: [],
+      dirCount: 1,
+    })
 
     const res = await getRegisteredHandler('models:partialScan')(makeEvent(), {
       folder: root,
-      dirs: ['lora']
+      dirs: ['lora'],
     })
     expect(res.error).toBeUndefined()
     // P1-3：索引写已移出响应关键路径（void 排队串行链），落定后再断言
@@ -386,10 +461,16 @@ describe('models:partialScan（A-03）', () => {
   })
 
   it('请求根与当前根不一致时拒绝，绝不把主进程切回旧库（V-02）', async () => {
-    const rootB = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-partial-other-'))
+    const rootB = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-partial-other-'),
+    )
     roots.push(rootB)
     await updateSettings({ modelsFolder: root, modelsFolders: [root, rootB] })
-    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 1,
+    })
     const partial = getRegisteredHandler('models:partialScan')
     const callsBefore = vi.mocked(scanModels).mock.calls.length
 
@@ -403,32 +484,47 @@ describe('models:partialScan（A-03）', () => {
 
 describe('局部扫描子树超限（O3：不静默截断）', () => {
   it('超过上限时收敛为一级目录，语义等价覆盖全部变更子树', () => {
-    const dirs = Array.from({ length: MAX_PARTIAL_SCAN_DIRS + 1 }, (_, i) => `bulk/item-${i}`)
+    const dirs = Array.from(
+      { length: MAX_PARTIAL_SCAN_DIRS + 1 },
+      (_, i) => `bulk/item-${i}`,
+    )
     const res = normalizePartialScanDirs(dirs)
     expect(res).toEqual({ subDirs: ['bulk'], collapsed: true })
   })
 
   it('一级目录仍超过上限时返回 fullScanRequired，而不是丢弃部分子树', () => {
-    const dirs = Array.from({ length: MAX_PARTIAL_SCAN_DIRS + 1 }, (_, i) => `top${i}`)
+    const dirs = Array.from(
+      { length: MAX_PARTIAL_SCAN_DIRS + 1 },
+      (_, i) => `top${i}`,
+    )
     const res = normalizePartialScanDirs(dirs)
     expect(res).toEqual({ fullScanRequired: true })
     expect(collapseDirsToTopLevel(dirs)).toHaveLength(MAX_PARTIAL_SCAN_DIRS + 1)
   })
 
   it('校验全部条目：超限输入里的非法项不会被数量上限掩盖', () => {
-    const dirs = Array.from({ length: MAX_PARTIAL_SCAN_DIRS }, (_, i) => `bulk/item-${i}`)
+    const dirs = Array.from(
+      { length: MAX_PARTIAL_SCAN_DIRS },
+      (_, i) => `bulk/item-${i}`,
+    )
     dirs.push('../escape')
-    expect(normalizePartialScanDirs(dirs)).toEqual({ error: '变更子树参数无效' })
+    expect(normalizePartialScanDirs(dirs)).toEqual({
+      error: '变更子树参数无效',
+    })
   })
 
   it('去重与后代剔除后不超限时保持原始顺序', () => {
     expect(
-      normalizePartialScanDirs(['vae', 'lora', 'lora/sub', 'vae/deep', 'lora'])
+      normalizePartialScanDirs(['vae', 'lora', 'lora/sub', 'vae/deep', 'lora']),
     ).toEqual({ subDirs: ['vae', 'lora'] })
   })
 
   it('一级目录收敛保留根直属空串（不递归子目录，语义不重叠）', () => {
-    expect(collapseDirsToTopLevel(['', 'a/1', 'a/2', 'b/1'])).toEqual(['', 'a', 'b'])
+    expect(collapseDirsToTopLevel(['', 'a/1', 'a/2', 'b/1'])).toEqual([
+      '',
+      'a',
+      'b',
+    ])
   })
 })
 
@@ -442,7 +538,11 @@ describe('局部扫描不清理子树外缩略图（OPT-1 修复）', () => {
     const externalThumb = path.join(thumbsDir, 'external-1.jpg')
     await fs.writeFile(externalThumb, 'jpeg-bytes')
     // mock 扫描器返回空列表：局部装饰 usedThumbs 为空
-    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 1 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 1,
+    })
 
     const res = await partial(makeEvent(), { folder: root, dirs: ['lora'] })
     expect(res.error).toBeUndefined()
@@ -488,24 +588,34 @@ describe('切根扫描清空延迟缩略图队列（C5）', () => {
     vi.mocked(nativeImage.createFromBuffer).mockReturnValue({
       isEmpty: () => false,
       getSize: () => ({ width: 1200, height: 800 }),
-      resize() { return this },
-      toJPEG: () => Buffer.from('fake-jpeg')
+      resize() {
+        return this
+      },
+      toJPEG: () => Buffer.from('fake-jpeg'),
     })
 
     // 切换到新根目录扫描：切根分支应同步清空 deferredJobs/deferredOwners
     const rootB = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-b-'))
     roots.push(rootB)
     await registerLibrary(rootB)
-    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 0 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 0,
+    })
     const scan = getRegisteredHandler('models:scan')
     const res = await scan(makeEvent(), { folder: rootB })
     expect(res.root).toBe(rootB)
 
     // 队列已清空：手动 drain 不为旧根封面生成，新根 thumbs 目录不被写入
     const generated = []
-    await drainDeferredThumbs((absCover, thumbPath) => generated.push({ absCover, thumbPath }))
+    await drainDeferredThumbs((absCover, thumbPath) =>
+      generated.push({ absCover, thumbPath }),
+    )
     expect(generated).toHaveLength(0)
-    await expect(fs.readdir(path.join(rootB, '.modelvault', 'thumbs'))).rejects.toThrow()
+    await expect(
+      fs.readdir(path.join(rootB, '.modelvault', 'thumbs')),
+    ).rejects.toThrow()
   })
 })
 
@@ -526,7 +636,7 @@ describe('models:scan 进度推送（B4 守卫）', () => {
     expect(win.webContents.send).toHaveBeenCalledWith('models:scanProgress', {
       dirs: 1,
       found: 1,
-      current: 'a.safetensors'
+      current: 'a.safetensors',
     })
   })
 
@@ -547,10 +657,16 @@ describe('models:scan 进度推送（B4 守卫）', () => {
 
 describe('models:scan 模型库白名单（B1）', () => {
   it('拒绝扫描模型库列表之外的目录：未执行扫描、未创建 .modelvault', async () => {
-    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-outside-'))
+    const outside = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-scan-outside-'),
+    )
     roots.push(outside)
     // settings 为全新默认（modelsFolders 为空）：outside 是可写目录但不在白名单
-    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 0 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 0,
+    })
     const scan = getRegisteredHandler('models:scan')
     const res = await scan(makeEvent(), { folder: outside })
     expect(res).toEqual({ error: '该目录不在模型库列表中' })
@@ -560,7 +676,11 @@ describe('models:scan 模型库白名单（B1）', () => {
   })
 
   it('白名单内的目录正常扫描（Windows 大小写不敏感）', async () => {
-    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 0 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 0,
+    })
     await registerLibrary(root)
     const variant = process.platform === 'win32' ? root.toUpperCase() : root
     if (variant === root) return // 大小写不敏感平台上该用例无区分度
@@ -573,8 +693,13 @@ describe('models:scan 模型库白名单（B1）', () => {
 describe('models:scan 目录校验与回写（C6）', () => {
   it('不存在的目录拒绝扫描并携带失效标志（F1-offline）', async () => {
     const scan = getRegisteredHandler('models:scan')
-    const res = await scan(makeEvent(), { folder: path.join(root, 'no-such-dir') })
-    expect(res).toEqual({ error: '模型文件夹不存在或不是目录', folderMissing: true })
+    const res = await scan(makeEvent(), {
+      folder: path.join(root, 'no-such-dir'),
+    })
+    expect(res).toEqual({
+      error: '模型文件夹不存在或不是目录',
+      folderMissing: true,
+    })
   })
 
   it('路径为文件时拒绝扫描并携带失效标志（F1-offline）', async () => {
@@ -582,12 +707,19 @@ describe('models:scan 目录校验与回写（C6）', () => {
     await fs.writeFile(file, 'x')
     const scan = getRegisteredHandler('models:scan')
     const res = await scan(makeEvent(), { folder: file })
-    expect(res).toEqual({ error: '模型文件夹不存在或不是目录', folderMissing: true })
+    expect(res).toEqual({
+      error: '模型文件夹不存在或不是目录',
+      folderMissing: true,
+    })
   })
 
   it('正常扫描路径不携带 folderMissing 字段（F1-offline 契约边界）', async () => {
     await registerLibrary(root)
-    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 0 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 0,
+    })
     const scan = getRegisteredHandler('models:scan')
     const res = await scan(makeEvent(), { folder: root })
     expect(res.error).toBeUndefined()
@@ -596,10 +728,16 @@ describe('models:scan 目录校验与回写（C6）', () => {
 
   it('显式传入白名单内目录扫描成功后回写 settings.modelsFolder', async () => {
     // root 为当前激活库，rootB 同在白名单但非激活：扫描 rootB 后激活根应切到 rootB
-    const rootB = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-writeback-'))
+    const rootB = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-scan-writeback-'),
+    )
     roots.push(rootB)
     await updateSettings({ modelsFolder: root, modelsFolders: [root, rootB] })
-    vi.mocked(scanModels).mockResolvedValue({ models: [], errors: [], dirCount: 0 })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 0,
+    })
     const scan = getRegisteredHandler('models:scan')
     const res = await scan(makeEvent(), { folder: rootB })
     expect(res.root).toBe(rootB)
@@ -608,7 +746,9 @@ describe('models:scan 目录校验与回写（C6）', () => {
   })
 
   it('切库扫描失败时回滚主进程根目录，保持原激活库（V-02）', async () => {
-    const rootB = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-rollback-'))
+    const rootB = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-scan-rollback-'),
+    )
     roots.push(rootB)
     await updateSettings({ modelsFolder: root, modelsFolders: [root, rootB] })
     vi.mocked(scanModels).mockRejectedValue(new Error('磁盘错误'))
@@ -636,13 +776,20 @@ describe('扫描完成以最新设置同步目录监控（E8 竞态回归）', (
     const pending = scan(makeEvent(), { folder: root })
     await waitForScanStarted()
     await update(makeEvent(), { excludeDirs: ['temp-out'] })
-    expect(syncWatcher).toHaveBeenCalledWith(root, false, ['temp-out'], { nativeWatch: true })
+    expect(syncWatcher).toHaveBeenCalledWith(root, false, ['temp-out'], {
+      nativeWatch: true,
+    })
 
     // 扫描完成后的同步调用必须携带最新名单（旧实现回退为扫描前的 []）
     releaseScan()
     await pending
     const calls = vi.mocked(syncWatcher).mock.calls
-    expect(calls.at(-1)).toEqual([root, false, ['temp-out'], { nativeWatch: true }])
+    expect(calls.at(-1)).toEqual([
+      root,
+      false,
+      ['temp-out'],
+      { nativeWatch: true },
+    ])
   })
 })
 
@@ -655,7 +802,7 @@ describe('OPT-02 扫描/监控基线协同', () => {
       models: [],
       errors: [],
       dirCount: 1,
-      dirSnapshot: baseline
+      dirSnapshot: baseline,
     })
 
     const scan = getRegisteredHandler('models:scan')
@@ -663,7 +810,7 @@ describe('OPT-02 扫描/监控基线协同', () => {
     expect(res.error).toBeUndefined()
     expect(vi.mocked(syncWatcher).mock.calls.at(-1)?.[3]).toEqual({
       nativeWatch: true,
-      baseline
+      baseline,
     })
   })
 
@@ -676,13 +823,17 @@ describe('OPT-02 扫描/监控基线协同', () => {
       models: [],
       errors: [],
       dirCount: 1,
-      dirSnapshot: baseline
+      dirSnapshot: baseline,
     })
 
     const partial = getRegisteredHandler('models:partialScan')
     const res = await partial(makeEvent(), { folder: root, dirs: ['lora'] })
     expect(res.error).toBeUndefined()
-    expect(refreshWatcherBaseline).toHaveBeenCalledWith(root, ['lora'], baseline)
+    expect(refreshWatcherBaseline).toHaveBeenCalledWith(
+      root,
+      ['lora'],
+      baseline,
+    )
     expect(setWatcherScanning).toHaveBeenNthCalledWith(1, true)
     expect(setWatcherScanning).toHaveBeenLastCalledWith(false)
   })
@@ -717,7 +868,10 @@ describe('models:loadStore', () => {
 describe('models:chooseFolder', () => {
   it('对话框确认后加入库列表并返回所选目录，激活由扫描成功后提交（V-02）', async () => {
     const chooseFolder = getRegisteredHandler('models:chooseFolder')
-    vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [root] })
+    vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+      canceled: false,
+      filePaths: [root],
+    })
     expect(await chooseFolder(makeEvent())).toBe(root)
     const settings = await loadSettings()
     // 目录进入库列表（供后续 models:scan 白名单校验），但不提前成为激活库
@@ -727,7 +881,10 @@ describe('models:chooseFolder', () => {
 
   it('对话框取消返回 null 且不修改设置', async () => {
     const chooseFolder = getRegisteredHandler('models:chooseFolder')
-    vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: true, filePaths: [] })
+    vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+      canceled: true,
+      filePaths: [],
+    })
     expect(await chooseFolder(makeEvent())).toBeNull()
   })
 })
@@ -744,7 +901,9 @@ describe('settings:update', () => {
 
   it('变更 modelsFolder 为不存在的路径时拒绝且不落盘（任意目录写入防护）', async () => {
     const update = getRegisteredHandler('settings:update')
-    const res = await update(makeEvent(), { modelsFolder: path.join(root, 'no-such-dir') })
+    const res = await update(makeEvent(), {
+      modelsFolder: path.join(root, 'no-such-dir'),
+    })
     expect(res.error).toContain('模型文件夹不存在或不是目录')
     const { modelsFolder } = await loadSettings()
     expect(modelsFolder).toBe('')
@@ -761,7 +920,9 @@ describe('settings:update', () => {
   })
 
   it('变更 modelsFolder 为真实存在但未登记的目录时拒绝且不落盘（新增库只能走对话框）', async () => {
-    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-outside-'))
+    const outside = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-scan-outside-'),
+    )
     roots.push(outside)
     const update = getRegisteredHandler('settings:update')
     const res = await update(makeEvent(), { modelsFolder: outside })
@@ -772,10 +933,14 @@ describe('settings:update', () => {
   })
 
   it('modelsFolders 新增未登记目录时拒绝，移除现有库仍允许', async () => {
-    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-scan-outside-'))
+    const outside = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-scan-outside-'),
+    )
     roots.push(outside)
     const update = getRegisteredHandler('settings:update')
-    const rejected = await update(makeEvent(), { modelsFolders: [root, outside] })
+    const rejected = await update(makeEvent(), {
+      modelsFolders: [root, outside],
+    })
     expect(rejected.error).toContain('不在模型库列表')
 
     await updateSettings({ modelsFolder: root, modelsFolders: [root] })
@@ -790,7 +955,10 @@ describe('settings:update', () => {
     const update = getRegisteredHandler('settings:update')
     await updateSettings({ modelsFolder: root })
     await fs.rm(root, { recursive: true, force: true })
-    const res = await update(makeEvent(), { sortBy: 'mtime', modelsFolder: root })
+    const res = await update(makeEvent(), {
+      sortBy: 'mtime',
+      modelsFolder: root,
+    })
     expect(res.error).toBeUndefined()
     expect(res.settings.sortBy).toBe('mtime')
   })

@@ -1,5 +1,11 @@
 <script setup>
-import { cancelScan, chooseFolder, relocateFolder, scanModels, state } from '../store/appStore'
+import {
+  cancelScan,
+  chooseFolder,
+  relocateFolder,
+  scanModels,
+  state,
+} from '../store/appStore'
 
 /**
  * 库视图启动与空态五分支（O-5 自 App.vue 拆出）：
@@ -25,11 +31,28 @@ import { cancelScan, chooseFolder, relocateFolder, scanModels, state } from '../
   <!-- 未选择文件夹 -->
   <div v-else-if="!state.folder && !state.scanning" class="empty-state">
     <div class="empty-icon" aria-hidden="true">
-      <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" /></svg>
+      <svg
+        viewBox="0 0 24 24"
+        width="52"
+        height="52"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.3"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path
+          d="M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"
+        />
+      </svg>
     </div>
     <h2>开始使用</h2>
-    <p>选择存放 Stable Diffusion 模型、LoRA 等文件的文件夹，<br />模匣将自动识别并分类其中的模型。</p>
-    <button class="btn btn-primary btn-large" @click="chooseFolder">选择模型文件夹</button>
+    <p>
+      选择存放 Stable Diffusion 模型、LoRA 等文件的文件夹，<br />模匣将自动识别并分类其中的模型。
+    </p>
+    <button class="btn btn-primary btn-large" @click="chooseFolder">
+      选择模型文件夹
+    </button>
   </div>
 
   <!-- 扫描中 -->
@@ -37,7 +60,8 @@ import { cancelScan, chooseFolder, relocateFolder, scanModels, state } from '../
     <div class="spinner"></div>
     <h2>正在扫描模型…</h2>
     <p class="muted">
-      已扫描 {{ state.progress.dirs }} 个目录，发现 {{ state.progress.found }} 个模型
+      已扫描 {{ state.progress.dirs }} 个目录，发现
+      {{ state.progress.found }} 个模型
     </p>
     <p class="scan-current">{{ state.progress.current }}</p>
     <button class="btn" @click="cancelScan">取消扫描</button>
@@ -47,9 +71,27 @@ import { cancelScan, chooseFolder, relocateFolder, scanModels, state } from '../
        或网络盘断开。仅空库时占用全屏（有缓存模型时由 App.vue 顶部横幅承担）；
        提供「重新定位文件夹」（指向新位置，标注随 .modelvault/ 自动恢复）与
        「重新扫描」（盘符恢复场景）两个恢复入口 -->
-  <div v-else-if="state.folderMissing && state.models.length === 0" class="empty-state">
+  <div
+    v-else-if="state.folderMissing && state.models.length === 0"
+    class="empty-state"
+  >
     <div class="empty-icon" aria-hidden="true">
-      <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" /><path d="M12 10.5v3.5" /><circle cx="12" cy="16.6" r="0.4" fill="currentColor" stroke="none" /></svg>
+      <svg
+        viewBox="0 0 24 24"
+        width="52"
+        height="52"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.3"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path
+          d="M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"
+        />
+        <path d="M12 10.5v3.5" />
+        <circle cx="12" cy="16.6" r="0.4" fill="currentColor" stroke="none" />
+      </svg>
     </div>
     <h2>模型文件夹不可用</h2>
     <p class="offline-path">{{ state.folder }}</p>
@@ -58,7 +100,9 @@ import { cancelScan, chooseFolder, relocateFolder, scanModels, state } from '../
       标注与封面保存在库内 .modelvault/ 中，重新定位后扫描即可完整恢复。
     </p>
     <div class="offline-actions">
-      <button class="btn btn-primary btn-large" @click="relocateFolder">重新定位文件夹</button>
+      <button class="btn btn-primary btn-large" @click="relocateFolder">
+        重新定位文件夹
+      </button>
       <button class="btn btn-large" @click="scanModels()">重新扫描</button>
     </div>
   </div>
@@ -66,21 +110,48 @@ import { cancelScan, chooseFolder, relocateFolder, scanModels, state } from '../
   <!-- 扫描失败：展示错误详情并提供重试（B15） -->
   <div v-else-if="state.scanError" class="empty-state">
     <div class="empty-icon" aria-hidden="true">
-      <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 21.5 20h-19z" /><path d="M12 10v4.5" /><circle cx="12" cy="17.4" r="0.4" fill="currentColor" stroke="none" /></svg>
+      <svg
+        viewBox="0 0 24 24"
+        width="52"
+        height="52"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.3"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M12 4 21.5 20h-19z" />
+        <path d="M12 10v4.5" />
+        <circle cx="12" cy="17.4" r="0.4" fill="currentColor" stroke="none" />
+      </svg>
     </div>
     <h2>扫描失败</h2>
     <p class="muted scan-error-detail">{{ state.scanError }}</p>
-    <button class="btn btn-primary btn-large" @click="scanModels">重新扫描</button>
+    <button class="btn btn-primary btn-large" @click="scanModels">
+      重新扫描
+    </button>
   </div>
 
   <!-- 库中无任何模型（未应用筛选时；保留结果栏逻辑见插槽内容，避免筛选状态死锁） -->
   <div v-else-if="state.models.length === 0" class="empty-state">
     <div class="empty-icon" aria-hidden="true">
-      <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.3 15.3 20.5 20.5" /></svg>
+      <svg
+        viewBox="0 0 24 24"
+        width="52"
+        height="52"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.3"
+        stroke-linecap="round"
+      >
+        <circle cx="10.5" cy="10.5" r="6.5" />
+        <path d="M15.3 15.3 20.5 20.5" />
+      </svg>
     </div>
     <h2>没有匹配的模型</h2>
     <p class="muted">
-      当前文件夹中未发现支持的模型文件（.safetensors / .ckpt / .pt / .pth / .bin），可尝试点击侧边栏「重新扫描」。
+      当前文件夹中未发现支持的模型文件（.safetensors / .ckpt / .pt / .pth /
+      .bin），可尝试点击侧边栏「重新扫描」。
     </p>
   </div>
 

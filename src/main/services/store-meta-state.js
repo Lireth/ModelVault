@@ -45,7 +45,7 @@ export const metaState = {
    */
   saveSuppressed: false,
   /** 元数据是否因损坏被重置（为 true 时应跳过孤儿封面清理，避免误删） */
-  dataReset: false
+  dataReset: false,
 }
 
 /** 标记脏键并递增变更版本（所有元数据变更的唯一入口） */

@@ -52,14 +52,16 @@
   /* 卡片渐变（实色微渐变，模拟玻璃厚度；数量大不能用 backdrop-filter） */
   --card-grad: linear-gradient(165deg, #182130 0%, #121924 100%);
   /* 卡片 hover：下沉阴影 + 极光微光 */
-  --card-hover-shadow: 0 14px 34px rgba(0, 0, 0, 0.38),
+  --card-hover-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.38),
     0 0 24px color-mix(in srgb, var(--accent) 13%, transparent);
   /* 极光氛围（body::before 全局光晕）：左上强调色、右上第二端点、底部青 */
   --aurora-1: color-mix(in srgb, var(--accent) 15%, transparent);
   --aurora-2: color-mix(in srgb, var(--accent-2) 13%, transparent);
   --aurora-3: rgba(61, 220, 151, 0.07);
   /* 强调色光晕阴影：hover/激活态的外发光 */
-  --glow-accent: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent),
+  --glow-accent:
+    0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent),
     0 6px 24px color-mix(in srgb, var(--accent) 18%, transparent);
   --glow-favorite: 0 0 14px rgba(245, 179, 1, 0.35);
   /* ---------- 间距（4px 基数）：组件内 6/10/14/18px 就近归档到 8/12/16/20 ---------- */
@@ -132,13 +134,15 @@ html.light {
   --glass-border: rgba(35, 55, 85, 0.1);
   --glass-border-bright: rgba(35, 55, 85, 0.18);
   --card-grad: linear-gradient(165deg, #ffffff 0%, #f4f7fb 100%);
-  --card-hover-shadow: 0 12px 30px rgba(15, 23, 42, 0.13),
+  --card-hover-shadow:
+    0 12px 30px rgba(15, 23, 42, 0.13),
     0 0 22px color-mix(in srgb, var(--accent) 10%, transparent);
   /* 浅色极光：同源色相、更低强度，白底上仅作氛围 */
   --aurora-1: color-mix(in srgb, var(--accent) 10%, transparent);
   --aurora-2: color-mix(in srgb, var(--accent-2) 9%, transparent);
   --aurora-3: rgba(26, 143, 94, 0.05);
-  --glow-accent: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent),
+  --glow-accent:
+    0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent),
     0 6px 20px color-mix(in srgb, var(--accent) 14%, transparent);
   --glow-favorite: 0 0 14px rgba(185, 130, 0, 0.3);
   color-scheme: light;
@@ -248,7 +252,9 @@ body::before {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 
 .wc-btn:hover {
@@ -270,8 +276,11 @@ button {
   font-size: var(--font-sm);
   cursor: pointer;
   white-space: nowrap;
-  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
   -webkit-app-region: no-drag;
 }
 
@@ -476,7 +485,9 @@ textarea::placeholder {
   background: var(--border);
   position: relative;
   cursor: pointer;
-  transition: background var(--dur-fast), box-shadow var(--dur-fast);
+  transition:
+    background var(--dur-fast),
+    box-shadow var(--dur-fast);
   flex-shrink: 0;
 }
 
@@ -519,7 +530,9 @@ textarea::placeholder {
   color: var(--text-muted);
   font-size: var(--font-xs);
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 
 .seg-btn + .seg-btn {
@@ -550,7 +563,11 @@ textarea::placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: repeating-linear-gradient(45deg, var(--bg) 0 12px, var(--bg-card) 12px 24px);
+  background: repeating-linear-gradient(
+    45deg,
+    var(--bg) 0 12px,
+    var(--bg-card) 12px 24px
+  );
 }
 
 .cover-ext {
@@ -579,8 +596,11 @@ textarea::placeholder {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
 }
 
 .fav-filter:hover {
@@ -641,7 +661,9 @@ textarea::placeholder {
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
 }
 
 .sort-dir:hover,
@@ -663,7 +685,9 @@ textarea::placeholder {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
-  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
 }
 
 .view-toggle:hover,
@@ -697,7 +721,9 @@ textarea::placeholder {
 .empty-icon {
   color: color-mix(in srgb, var(--accent) 62%, var(--text-muted));
   display: inline-flex;
-  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 22%, transparent));
+  filter: drop-shadow(
+    0 0 18px color-mix(in srgb, var(--accent) 22%, transparent)
+  );
 }
 
 .empty-state h2 {

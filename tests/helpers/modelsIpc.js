@@ -25,7 +25,9 @@ export function getRegisteredHandler(channel) {
 }
 
 /** 最小 PNG 文件头（魔数校验所需字节 + 补足内容） */
-export const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
+export const PNG_MAGIC = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13,
+])
 
 /**
  * 构造带假窗口的 IPC event。
@@ -41,6 +43,6 @@ export function makeEvent(win = makeWindow()) {
 export function makeWindow({ destroyed = false } = {}) {
   return {
     isDestroyed: () => destroyed,
-    webContents: { send: vi.fn() }
+    webContents: { send: vi.fn() },
   }
 }

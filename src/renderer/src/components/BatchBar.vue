@@ -21,7 +21,7 @@ import {
   openCompare,
   openTransferToLibrary,
   state,
-  toggleSelectAllFiltered
+  toggleSelectAllFiltered,
 } from '../store/appStore'
 
 /**
@@ -35,12 +35,14 @@ import {
 
 /** 批量操作可用：有选中且无进行中的批量提交 */
 const batchReady = computed(
-  () => state.multiSelect.ids.length > 0 && !state.multiSelect.busy
+  () => state.multiSelect.ids.length > 0 && !state.multiSelect.busy,
 )
 
 /** 选中模型是否全部处于禁用态（决定菜单项显示「禁用」还是「启用」，F10） */
-const batchAllDisabled = computed(() =>
-  multiSelectedModels.value.length > 0 && multiSelectedModels.value.every((m) => m.disabled === true)
+const batchAllDisabled = computed(
+  () =>
+    multiSelectedModels.value.length > 0 &&
+    multiSelectedModels.value.every((m) => m.disabled === true),
 )
 
 /* ---------------- 「更多」下拉（低频操作收纳） ---------------- */
@@ -113,17 +115,27 @@ onUnmounted(() => {
         class="btn batch-select-all"
         :disabled="filteredModels.length === 0 || state.multiSelect.busy"
         @click="toggleSelectAllFiltered"
-      >{{ allFilteredSelected ? '取消全选' : '全选' }}</button>
+      >
+        {{ allFilteredSelected ? '取消全选' : '全选' }}
+      </button>
       <button
         class="btn batch-invert"
         :disabled="filteredModels.length === 0 || state.multiSelect.busy"
         title="当前筛选范围内选中态取反；筛选范围外的已选项保留"
         @click="invertSelectionFiltered"
-      >反选</button>
+      >
+        反选
+      </button>
       <span class="batch-count">已选 {{ state.multiSelect.ids.length }}</span>
-      <span v-if="state.multiSelect.busy" class="batch-busy">{{ state.multiSelect.progress || '处理中…' }}</span>
+      <span v-if="state.multiSelect.busy" class="batch-busy">{{
+        state.multiSelect.progress || '处理中…'
+      }}</span>
       <!-- 流动进度条（不定时长批量 IPC 的忙碌视觉反馈） -->
-      <div v-if="state.multiSelect.busy" class="batch-progress" aria-hidden="true">
+      <div
+        v-if="state.multiSelect.busy"
+        class="batch-progress"
+        aria-hidden="true"
+      >
         <div class="batch-progress-fill"></div>
       </div>
     </div>
@@ -132,10 +144,18 @@ onUnmounted(() => {
 
     <!-- 常用组：收藏 / NSFW / 评分 -->
     <div class="bb-group">
-      <button class="btn" :disabled="!batchReady" @click="batchFavorite(true)">收藏</button>
-      <button class="btn" :disabled="!batchReady" @click="batchFavorite(false)">取消收藏</button>
-      <button class="btn" :disabled="!batchReady" @click="batchNsfw(true)">标记 NSFW</button>
-      <button class="btn" :disabled="!batchReady" @click="batchNsfw(false)">取消 NSFW</button>
+      <button class="btn" :disabled="!batchReady" @click="batchFavorite(true)">
+        收藏
+      </button>
+      <button class="btn" :disabled="!batchReady" @click="batchFavorite(false)">
+        取消收藏
+      </button>
+      <button class="btn" :disabled="!batchReady" @click="batchNsfw(true)">
+        标记 NSFW
+      </button>
+      <button class="btn" :disabled="!batchReady" @click="batchNsfw(false)">
+        取消 NSFW
+      </button>
       <span class="batch-label">评分</span>
       <button
         v-for="i in 5"
@@ -144,14 +164,31 @@ onUnmounted(() => {
         :disabled="!batchReady"
         :title="`批量评 ${i} 星`"
         @click="batchRating(i)"
-      ><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z" /></svg></button>
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="14"
+          height="14"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path
+            d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z"
+          />
+        </svg>
+      </button>
       <!-- 模型对比（FN-03）：2~6 个模型并排比较参数/触发词/标签 -->
       <button
         class="btn"
         :disabled="state.multiSelect.ids.length < 2 || state.multiSelect.busy"
         title="并排对比最多 6 个模型的推荐参数、触发词、标签等"
         @click="openCompare(state.multiSelect.ids)"
-      >对比</button>
+      >
+        对比
+      </button>
     </div>
 
     <span class="batch-sep"></span>
@@ -164,7 +201,9 @@ onUnmounted(() => {
         aria-haspopup="menu"
         :aria-expanded="moreOpen"
         @click.stop="toggleMore"
-      >更多<span class="bb-caret" aria-hidden="true">▾</span></button>
+      >
+        更多<span class="bb-caret" aria-hidden="true">▾</span>
+      </button>
       <div v-if="moreOpen" class="bb-menu" role="menu">
         <button
           class="bb-menu-item"
@@ -172,7 +211,9 @@ onUnmounted(() => {
           :disabled="!batchReady"
           title="将各模型 safetensors 自动解析的训练标签候选批量填入触发词（已有触发词的模型不改动）"
           @click="runMore(batchApplyTriggers)"
-        >填触发词</button>
+        >
+          填触发词
+        </button>
         <!-- Civitai 批量操作：与详情页面板同一功能开关（设置页 civitaiEnabled） -->
         <template v-if="state.settings.civitaiEnabled">
           <button
@@ -181,21 +222,27 @@ onUnmounted(() => {
             :disabled="!batchReady"
             title="逐个按文件哈希在 Civitai 反查模型版本并保存链接（大文件哈希已预热缓存，未收录的自动跳过）"
             @click="runMore(batchCivitaiIdentify)"
-          >识别 Civitai</button>
+          >
+            识别 Civitai
+          </button>
           <button
             class="bb-menu-item"
             role="menuitem"
             :disabled="!batchReady"
             title="仅 LoRA 模型：按已保存的 Civitai 链接查询分类并分配分类标签（character→角色、style→风格、concept→概念、clothing→服饰、background→背景、pose→姿势、tool→工具；非 LoRA/无链接的模型跳过，已有标签会被覆盖）"
             @click="runMore(batchAssignCivitaiTags)"
-          >Civitai 分配标签</button>
+          >
+            Civitai 分配标签
+          </button>
           <button
             class="bb-menu-item"
             role="menuitem"
             :disabled="!batchReady"
             title="为没有示例图的选中模型从 Civitai 导入前 4 张示例图作为封面（已有示例图的模型跳过，避免重复导入）"
             @click="runMore(batchCivitaiImages)"
-          >获取示例图</button>
+          >
+            获取示例图
+          </button>
         </template>
         <div class="bb-menu-label">标签</div>
         <button
@@ -204,7 +251,9 @@ onUnmounted(() => {
           :disabled="!batchReady"
           title="为选中模型批量添加、移除或替换自由标签（支持从库内标签池点选，多标签按 AND 筛选）"
           @click="openTagEditor"
-        >批量编辑标签…</button>
+        >
+          批量编辑标签…
+        </button>
         <div class="bb-menu-label">文件</div>
         <button
           class="bb-menu-item"
@@ -212,21 +261,31 @@ onUnmounted(() => {
           :disabled="!batchReady"
           title="把选中的模型移动/复制到另一个已保存的模型库（保持相对路径，标注与封面一并迁移）"
           @click="runMore(openTransferToLibrary, [...state.multiSelect.ids])"
-        >跨库传输</button>
+        >
+          跨库传输
+        </button>
         <button
           class="bb-menu-item"
           role="menuitem"
           :disabled="!batchReady"
           title="在模型库根目录创建 LoRA 文件夹及其下 7 个分类子文件夹（已有的不动），把选中的 LoRA 模型移入对应分类子文件夹（未标注的移入 LoRA 根目录，元数据自动迁移）"
           @click="runMore(batchOrganizeByTags)"
-        >一键移动文件</button>
+        >
+          一键移动文件
+        </button>
         <button
           class="bb-menu-item"
           role="menuitem"
           :disabled="!batchReady"
-          :title="batchAllDisabled ? '去掉 .disabled 后缀，绘画工具恢复加载' : '加 .disabled 后缀，绘画工具不再加载（可随时恢复）'"
+          :title="
+            batchAllDisabled
+              ? '去掉 .disabled 后缀，绘画工具恢复加载'
+              : '加 .disabled 后缀，绘画工具不再加载（可随时恢复）'
+          "
           @click="runMore(batchToggleDisabled, !batchAllDisabled)"
-        >{{ batchAllDisabled ? '启用' : '禁用' }}</button>
+        >
+          {{ batchAllDisabled ? '启用' : '禁用' }}
+        </button>
       </div>
     </div>
 
@@ -234,8 +293,20 @@ onUnmounted(() => {
 
     <!-- 危险区：移入回收站（与常规操作物理隔离）+ 退出多选 -->
     <div class="bb-group">
-      <button class="btn btn-danger" :disabled="!batchReady" @click="batchDeleteModels">移入回收站</button>
-      <button class="btn" :disabled="state.multiSelect.busy" @click="exitMultiSelect">退出多选</button>
+      <button
+        class="btn btn-danger"
+        :disabled="!batchReady"
+        @click="batchDeleteModels"
+      >
+        移入回收站
+      </button>
+      <button
+        class="btn"
+        :disabled="state.multiSelect.busy"
+        @click="exitMultiSelect"
+      >
+        退出多选
+      </button>
     </div>
 
     <BatchTagEditor
@@ -346,7 +417,9 @@ onUnmounted(() => {
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  transition: color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
 
 .batch-star:hover:not(:disabled) {

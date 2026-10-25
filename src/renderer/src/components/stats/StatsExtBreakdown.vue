@@ -11,7 +11,7 @@ const props = defineProps({
   /** 格式行（StatsSection 的 extRows computed，含配色与占比） */
   rows: { type: Array, required: true },
   /** 全库总容量（字节），用于堆叠条占比换算 */
-  totalBytes: { type: Number, default: 0 }
+  totalBytes: { type: Number, default: 0 },
 })
 
 /** 容量占比（0-100 整数；总容量为零时返回 0，避免除零） */

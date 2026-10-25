@@ -21,7 +21,7 @@ function makeCovers(n) {
   return Array.from({ length: n }, (_, i) => ({
     rel: `c${i}.png`,
     path: `/lib/c${i}.png`,
-    url: `mvimg://local/c${i}.png`
+    url: `mvimg://local/c${i}.png`,
   }))
 }
 
@@ -32,18 +32,22 @@ function mountGallery(props = {}) {
       defaultPath: '/lib/c0.png',
       initialIndex: 0,
       busy: false,
-      ...props
+      ...props,
     },
     global: {
       // Teleport 桩：画廊内容保留在 wrapper 树内（生产仍 Teleport 到 body）
-      stubs: { teleport: true }
-    }
+      stubs: { teleport: true },
+    },
   })
 }
 
 /** 在 window 派发 keydown（组件经捕获阶段监听） */
 function pressKey(key) {
-  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+  const event = new KeyboardEvent('keydown', {
+    key,
+    bubbles: true,
+    cancelable: true,
+  })
   window.dispatchEvent(event)
   return event
 }
@@ -60,7 +64,9 @@ function fireMouse(el, type, init = {}) {
 describe('CoverGallery 渲染与切换', () => {
   it('按 initialIndex 展示当前图与索引', () => {
     const wrapper = mountGallery({ initialIndex: 1 })
-    expect(wrapper.find('.gallery-img').attributes('src')).toBe('mvimg://local/c1.png')
+    expect(wrapper.find('.gallery-img').attributes('src')).toBe(
+      'mvimg://local/c1.png',
+    )
     expect(wrapper.find('.gallery-index').text()).toBe('2 / 3')
     wrapper.unmount()
   })
@@ -69,11 +75,15 @@ describe('CoverGallery 渲染与切换', () => {
     const wrapper = mountGallery()
     pressKey('ArrowRight')
     await settle()
-    expect(wrapper.find('.gallery-img').attributes('src')).toBe('mvimg://local/c1.png')
+    expect(wrapper.find('.gallery-img').attributes('src')).toBe(
+      'mvimg://local/c1.png',
+    )
     pressKey('ArrowLeft')
     pressKey('ArrowLeft') // 0 → 循环到末位
     await settle()
-    expect(wrapper.find('.gallery-img').attributes('src')).toBe('mvimg://local/c2.png')
+    expect(wrapper.find('.gallery-img').attributes('src')).toBe(
+      'mvimg://local/c2.png',
+    )
     expect(wrapper.find('.gallery-index').text()).toBe('3 / 3')
     wrapper.unmount()
   })
@@ -82,7 +92,9 @@ describe('CoverGallery 渲染与切换', () => {
     const wrapper = mountGallery()
     expect(wrapper.find('.gallery-nav.prev').exists()).toBe(true)
     await wrapper.find('.gallery-nav.next').trigger('click')
-    expect(wrapper.find('.gallery-img').attributes('src')).toBe('mvimg://local/c1.png')
+    expect(wrapper.find('.gallery-img').attributes('src')).toBe(
+      'mvimg://local/c1.png',
+    )
     wrapper.unmount()
   })
 
@@ -194,11 +206,15 @@ describe('CoverGallery 缩放与平移', () => {
     fireMouse(el, 'pointerdown', { button: 0, clientX: 100, clientY: 100 })
     fireMouse(el, 'pointermove', { clientX: 160, clientY: 130 })
     await settle()
-    expect(wrapper.find('.gallery-img').attributes('style')).toContain('translate(60px, 30px)')
+    expect(wrapper.find('.gallery-img').attributes('style')).toContain(
+      'translate(60px, 30px)',
+    )
     fireMouse(el, 'pointerup')
     pressKey('ArrowRight')
     await settle()
-    expect(wrapper.find('.gallery-img').attributes('style')).toContain('translate(0px, 0px)')
+    expect(wrapper.find('.gallery-img').attributes('style')).toContain(
+      'translate(0px, 0px)',
+    )
     wrapper.unmount()
   })
 })

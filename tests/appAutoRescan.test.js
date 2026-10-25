@@ -1,5 +1,13 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach, beforeAll, beforeEach } from 'vitest'
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  afterEach,
+  beforeAll,
+  beforeEach,
+} from 'vitest'
 import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import App from '../src/renderer/src/App.vue'
@@ -32,9 +40,15 @@ let wrapper = null
 /** 挂载 App 并取出主进程推送 fsChanged 时注册的回调（fake timers 环境） */
 async function mountApp() {
   state.settings.autoRescan = true
-  window.api.models.loadStore.mockResolvedValue({ settings: { ...defaultSettings(), autoRescan: true } })
+  window.api.models.loadStore.mockResolvedValue({
+    settings: { ...defaultSettings(), autoRescan: true },
+  })
   window.api.models.scan.mockResolvedValue({ models: [], errors: [] })
-  window.api.models.partialScan.mockResolvedValue({ models: [], dirs: [], relinked: 0 })
+  window.api.models.partialScan.mockResolvedValue({
+    models: [],
+    dirs: [],
+    relinked: 0,
+  })
   wrapper = mount(App, { attachTo: document.body })
   await vi.runAllTimersAsync()
   state.folder = 'D:\\models'
@@ -72,7 +86,7 @@ describe('A-07a 扫描中目录变更不丢失', () => {
     expect(window.api.models.partialScan).toHaveBeenCalledTimes(1)
     expect(window.api.models.partialScan).toHaveBeenCalledWith({
       folder: 'D:\\models',
-      dirs: ['lora']
+      dirs: ['lora'],
     })
   })
 
@@ -131,7 +145,9 @@ describe('A-07a 扫描中目录变更不丢失', () => {
     expect(window.api.models.partialScan).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1100)
     expect(window.api.models.partialScan).toHaveBeenCalledTimes(1)
-    expect(window.api.models.partialScan.mock.calls[0][0].dirs).toEqual(['lora'])
+    expect(window.api.models.partialScan.mock.calls[0][0].dirs).toEqual([
+      'lora',
+    ])
   })
 
   it('载荷无 dirs（旧格式）时局部入口收到空数组，由 store 回退全量扫描', async () => {
@@ -171,7 +187,7 @@ describe('A-07a 扫描中目录变更不丢失', () => {
     expect(window.api.models.partialScan).toHaveBeenCalledTimes(1)
     expect(window.api.models.partialScan.mock.calls[0][0]).toEqual({
       folder: 'D:\\models',
-      dirs: ['vae']
+      dirs: ['vae'],
     })
   })
 })

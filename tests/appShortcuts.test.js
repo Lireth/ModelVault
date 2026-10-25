@@ -3,7 +3,12 @@ import { describe, it, expect, afterEach, beforeAll, beforeEach } from 'vitest'
 import { nextTick } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import App from '../src/renderer/src/App.vue'
-import { state, defaultSettings, rejectConfirm, replaceModels } from '../src/renderer/src/store/appStore'
+import {
+  state,
+  defaultSettings,
+  rejectConfirm,
+  replaceModels,
+} from '../src/renderer/src/store/appStore'
 import { setupComponentTest } from './helpers/componentTest'
 
 /**
@@ -59,7 +64,12 @@ beforeEach(() => {
   // 挂起的确认 Promise 先收敛，再就地表合并复位（O3 浅响应约定）
   if (state.confirm.resolve) state.confirm.resolve(false)
   Object.assign(state.confirm, { visible: false, text: '', resolve: null })
-  Object.assign(state.multiSelect, { active: false, ids: [], busy: false, cancelRequested: false })
+  Object.assign(state.multiSelect, {
+    active: false,
+    ids: [],
+    busy: false,
+    cancelRequested: false,
+  })
 })
 
 /** 挂载 App（initApp 经桩 loadStore 拿到默认设置，不触发扫描） */
@@ -90,8 +100,38 @@ async function setupGrid(wrapper) {
   state.folder = 'D:\\models'
   // O3：models 数组级更新须经 replaceModels（直接赋值落入 raw 数组丢响应）
   replaceModels([
-    { id: 'D:\\models\\a.safetensors', name: 'a', type: 'checkpoint', size: 10, mtimeMs: 1, favorite: false, nsfw: false, rating: 0, alias: '', note: '', subCategory: 'base', triggerWords: '', coverUrl: '', covers: [] },
-    { id: 'D:\\models\\b.safetensors', name: 'b', type: 'lora', size: 20, mtimeMs: 2, favorite: false, nsfw: false, rating: 0, alias: '', note: '', subCategory: '', triggerWords: '', coverUrl: '', covers: [] }
+    {
+      id: 'D:\\models\\a.safetensors',
+      name: 'a',
+      type: 'checkpoint',
+      size: 10,
+      mtimeMs: 1,
+      favorite: false,
+      nsfw: false,
+      rating: 0,
+      alias: '',
+      note: '',
+      subCategory: 'base',
+      triggerWords: '',
+      coverUrl: '',
+      covers: [],
+    },
+    {
+      id: 'D:\\models\\b.safetensors',
+      name: 'b',
+      type: 'lora',
+      size: 20,
+      mtimeMs: 2,
+      favorite: false,
+      nsfw: false,
+      rating: 0,
+      alias: '',
+      note: '',
+      subCategory: '',
+      triggerWords: '',
+      coverUrl: '',
+      covers: [],
+    },
   ])
   await nextTick()
   return wrapper.find('.search-box input').element
@@ -99,7 +139,12 @@ async function setupGrid(wrapper) {
 
 /** 在指定目标上派发 keydown（默认 window，即非输入态） */
 function press(key, { ctrlKey = false, target = window } = {}) {
-  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ctrlKey })
+  const event = new KeyboardEvent('keydown', {
+    key,
+    bubbles: true,
+    cancelable: true,
+    ctrlKey,
+  })
   target.dispatchEvent(event)
   return event
 }
@@ -243,7 +288,9 @@ describe('App 全局快捷键（B-03）', () => {
   it('Ctrl+D 多选时对全部选中项批量收藏', async () => {
     const wrapper = await mountApp()
     await setupGrid(wrapper)
-    window.api.models.setMetaFlags.mockResolvedValue({ meta: { favorite: true } })
+    window.api.models.setMetaFlags.mockResolvedValue({
+      meta: { favorite: true },
+    })
     press('a', { ctrlKey: true })
 
     press('d', { ctrlKey: true })
@@ -260,14 +307,16 @@ describe('App 全局快捷键（B-03）', () => {
     await setupGrid(wrapper)
     state.selectedId = 'D:\\models\\a.safetensors'
     window.api.models.setMetaFlags.mockResolvedValue({
-      meta: { favorite: true, nsfw: false, rating: 0 }
+      meta: { favorite: true, nsfw: false, rating: 0 },
     })
 
     press('d', { ctrlKey: true })
     await flushPromises()
 
     expect(window.api.models.setMetaFlags).toHaveBeenCalledTimes(1)
-    expect(window.api.models.setMetaFlags.mock.calls[0][0].id).toBe('D:\\models\\a.safetensors')
+    expect(window.api.models.setMetaFlags.mock.calls[0][0].id).toBe(
+      'D:\\models\\a.safetensors',
+    )
   })
 
   it('输入框内按 Delete 不触发删除确认', async () => {
@@ -284,7 +333,7 @@ describe('App 全局快捷键（B-03）', () => {
     const wrapper = await mountApp()
     await setupGrid(wrapper)
     window.api.settings.update.mockImplementation((patch) =>
-      Promise.resolve({ settings: { ...state.settings, ...patch } })
+      Promise.resolve({ settings: { ...state.settings, ...patch } }),
     )
     expect(state.viewMode).toBe('grid')
     expect(wrapper.find('.virtual-grid').exists()).toBe(true)
@@ -293,7 +342,9 @@ describe('App 全局快捷键（B-03）', () => {
     await flushPromises()
 
     expect(state.viewMode).toBe('list')
-    expect(window.api.settings.update).toHaveBeenCalledWith({ viewMode: 'list' })
+    expect(window.api.settings.update).toHaveBeenCalledWith({
+      viewMode: 'list',
+    })
     expect(wrapper.find('.virtual-list').exists()).toBe(true)
     expect(wrapper.find('.virtual-grid').exists()).toBe(false)
 

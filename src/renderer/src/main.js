@@ -16,7 +16,8 @@ const app = createApp(App)
  * 避免错误处理引发死循环。
  */
 const reporter = createErrorReporter({
-  report: (message, stack) => window.api.app.reportError(message, stack)?.catch(() => {})
+  report: (message, stack) =>
+    window.api.app.reportError(message, stack)?.catch(() => {}),
 })
 
 app.config.errorHandler = reporter.vueError

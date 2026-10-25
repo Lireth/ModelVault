@@ -24,7 +24,7 @@ async function mountSettings() {
     version: '0.1.0',
     electron: '44.0.0',
     node: '22.0.0',
-    platform: 'win32'
+    platform: 'win32',
   })
   const wrapper = mount(SettingsPage)
   await flushPromises()
@@ -49,7 +49,7 @@ describe('SettingsPage 应用内检查更新（A-15）', () => {
       latest: '0.2.0',
       hasUpdate: true,
       releaseUrl: 'https://github.com/Lireth/ModelVault/releases/tag/v0.2.0',
-      releaseNotes: '## v0.2.0\n- 新增更新说明展示\n- 修复若干问题'
+      releaseNotes: '## v0.2.0\n- 新增更新说明展示\n- 修复若干问题',
     })
 
     const box = wrapper.find('.update-row')
@@ -71,7 +71,7 @@ describe('SettingsPage 应用内检查更新（A-15）', () => {
       latest: '0.2.0',
       hasUpdate: true,
       releaseUrl: 'https://github.com/Lireth/ModelVault/releases/tag/v0.2.0',
-      releaseNotes: ''
+      releaseNotes: '',
     })
 
     expect(wrapper.find('.update-notes').exists()).toBe(false)
@@ -85,7 +85,7 @@ describe('SettingsPage 应用内检查更新（A-15）', () => {
       latest: '0.2.0',
       hasUpdate: true,
       releaseUrl: 'https://github.com/Lireth/ModelVault/releases/tag/v0.2.0',
-      releaseNotes: '<img src=x onerror=alert(1)>原样显示'
+      releaseNotes: '<img src=x onerror=alert(1)>原样显示',
     })
 
     // 不含真实 img 元素：远程文本按文本节点渲染
@@ -98,7 +98,9 @@ describe('SettingsPage 日志与诊断入口（B-04）', () => {
   it('「打开日志目录」按钮调用 app.openLogs IPC', async () => {
     window.api.app.openLogs = vi.fn().mockResolvedValue({ ok: true })
     const wrapper = await mountSettings()
-    const btn = wrapper.findAll('button').find((b) => b.text().includes('打开日志目录'))
+    const btn = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('打开日志目录'))
     expect(btn).toBeTruthy()
     await btn.trigger('click')
     expect(window.api.app.openLogs).toHaveBeenCalledTimes(1)
@@ -107,27 +109,37 @@ describe('SettingsPage 日志与诊断入口（B-04）', () => {
   it('打开失败时提示错误（不静默）', async () => {
     window.api.app.openLogs = vi.fn().mockResolvedValue({ error: '目录不存在' })
     const wrapper = await mountSettings()
-    const btn = wrapper.findAll('button').find((b) => b.text().includes('打开日志目录'))
+    const btn = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('打开日志目录'))
     await btn.trigger('click')
     await flushPromises()
-    expect(state.toasts.some((t) => t.type === 'error' && t.text.includes('目录不存在'))).toBe(true)
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'error' && t.text.includes('目录不存在'),
+      ),
+    ).toBe(true)
   })
 
   it('「导出诊断包」调用 app.exportDiagnostics 并提示成功（FN-05）', async () => {
     const exportDiagnostics = vi.fn().mockResolvedValue({
       ok: true,
       path: 'C:\\diag.zip',
-      logs: 2
+      logs: 2,
     })
     window.api.app.exportDiagnostics = exportDiagnostics
     const wrapper = await mountSettings()
-    const btn = wrapper.findAll('button').find((b) => b.text().includes('导出诊断包'))
+    const btn = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('导出诊断包'))
     expect(btn).toBeTruthy()
     await btn.trigger('click')
     await flushPromises()
     expect(exportDiagnostics).toHaveBeenCalledTimes(1)
     expect(
-      state.toasts.some((t) => t.type === 'success' && t.text.includes('诊断包已导出'))
+      state.toasts.some(
+        (t) => t.type === 'success' && t.text.includes('诊断包已导出'),
+      ),
     ).toBe(true)
   })
 
@@ -135,7 +147,9 @@ describe('SettingsPage 日志与诊断入口（B-04）', () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.assign(navigator, { clipboard: { writeText } })
     const wrapper = await mountSettings()
-    const btn = wrapper.findAll('button').find((b) => b.text().includes('复制诊断信息'))
+    const btn = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('复制诊断信息'))
     expect(btn).toBeTruthy()
     await btn.trigger('click')
     await flushPromises()
@@ -158,7 +172,9 @@ describe('SettingsPage 主题跟随系统与自定义强调色', () => {
 
   it('主题分段含「跟随系统」，点击后预览经解析应用（组件测试桩系统为深色）', async () => {
     const wrapper = await mountSettings()
-    const systemBtn = wrapper.findAll('.seg-btn').find((b) => b.text() === '跟随系统')
+    const systemBtn = wrapper
+      .findAll('.seg-btn')
+      .find((b) => b.text() === '跟随系统')
     expect(systemBtn).toBeTruthy()
     await systemBtn.trigger('click')
     await flushPromises()
@@ -172,22 +188,26 @@ describe('SettingsPage 主题跟随系统与自定义强调色', () => {
 
   it('点击预设色板实时预览并纳入保存载荷', async () => {
     window.api.settings.update.mockImplementation((patch) =>
-      Promise.resolve({ settings: { ...state.settings, ...patch } })
+      Promise.resolve({ settings: { ...state.settings, ...patch } }),
     )
     const wrapper = await mountSettings()
-    const violet = wrapper.findAll('.accent-swatch').find((b) => b.attributes('title') === '星云紫')
+    const violet = wrapper
+      .findAll('.accent-swatch')
+      .find((b) => b.attributes('title') === '星云紫')
     expect(violet).toBeTruthy()
     await violet.trigger('click')
     await flushPromises()
     // 实时预览：inline 令牌覆盖（深色变体）
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#a78bfa')
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe(
+      '#a78bfa',
+    )
     expect(violet.classes()).toContain('active')
     // 保存：accentColor 进入载荷
     const saveBtn = wrapper.findAll('button').find((b) => b.text() === '保存')
     await saveBtn.trigger('click')
     await flushPromises()
     expect(window.api.settings.update).toHaveBeenCalledWith(
-      expect.objectContaining({ accentColor: 'violet' })
+      expect.objectContaining({ accentColor: 'violet' }),
     )
     wrapper.unmount()
     resetDom()
@@ -195,10 +215,14 @@ describe('SettingsPage 主题跟随系统与自定义强调色', () => {
 
   it('放弃修改关闭时还原已保存的强调色', async () => {
     const wrapper = await mountSettings()
-    const violet = wrapper.findAll('.accent-swatch').find((b) => b.attributes('title') === '星云紫')
+    const violet = wrapper
+      .findAll('.accent-swatch')
+      .find((b) => b.attributes('title') === '星云紫')
     await violet.trigger('click')
     await flushPromises()
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#a78bfa')
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe(
+      '#a78bfa',
+    )
     // 有未保存修改 → 关闭需确认，确认后还原为默认 blue（关闭入口为右上角「×」）
     const cancelBtn = wrapper.find('button[title="关闭设置页面"]')
     expect(cancelBtn.exists()).toBe(true)
@@ -207,7 +231,9 @@ describe('SettingsPage 主题跟随系统与自定义强调色', () => {
     expect(state.confirm.visible).toBe(true)
     acceptConfirm()
     await flushPromises()
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#5aa3fa')
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe(
+      '#5aa3fa',
+    )
     expect(state.settingsOpen).toBe(false)
     wrapper.unmount()
     resetDom()
@@ -217,7 +243,7 @@ describe('SettingsPage 主题跟随系统与自定义强调色', () => {
 describe('SettingsPage 后台哈希预热策略（O1）', () => {
   it('切换策略后进入保存载荷（默认仅重复候选）', async () => {
     window.api.settings.update.mockImplementation((patch) =>
-      Promise.resolve({ settings: { ...state.settings, ...patch } })
+      Promise.resolve({ settings: { ...state.settings, ...patch } }),
     )
     state.settings.hashWarmup = 'candidates'
     const wrapper = await mountSettings()
@@ -231,7 +257,7 @@ describe('SettingsPage 后台哈希预热策略（O1）', () => {
     await saveBtn.trigger('click')
     await flushPromises()
     expect(window.api.settings.update).toHaveBeenCalledWith(
-      expect.objectContaining({ hashWarmup: 'full' })
+      expect.objectContaining({ hashWarmup: 'full' }),
     )
     wrapper.unmount()
   })
@@ -247,22 +273,30 @@ describe('SettingsPage 模型库体检（V-07）', () => {
       totalCoverRefs: 3,
       missingFiles: [{ rel: 'gone.safetensors' }],
       brokenCovers: [
-        { model: 'a.safetensors', cover: '.modelvault/covers/missing.jpg', reason: 'missing-file' }
+        {
+          model: 'a.safetensors',
+          cover: '.modelvault/covers/missing.jpg',
+          reason: 'missing-file',
+        },
       ],
       orphanCovers: [{ name: 'orphan.jpg', sizeBytes: 10 }],
-      duplicateHashes: [{ hash: 'a'.repeat(64), models: ['b.safetensors', 'c.safetensors'] }],
+      duplicateHashes: [
+        { hash: 'a'.repeat(64), models: ['b.safetensors', 'c.safetensors'] },
+      ],
       dataReset: false,
       summary: {
         missingFiles: 1,
         brokenCovers: 1,
         orphanCovers: 1,
         duplicateHashes: 1,
-        repairable: 3
-      }
+        repairable: 3,
+      },
     }
     window.api.models.checkHealth.mockResolvedValue({ report })
 
-    const checkBtn = wrapper.findAll('button').find((b) => b.text().includes('检查模型库'))
+    const checkBtn = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('检查模型库'))
     expect(checkBtn).toBeTruthy()
     await checkBtn.trigger('click')
     await flushPromises()
@@ -280,11 +314,13 @@ describe('SettingsPage 模型库体检（V-07）', () => {
         removedMetadata: 1,
         fixedCoverModels: 1,
         removedCoverRefs: 1,
-        movedOrphanCovers: 1
+        movedOrphanCovers: 1,
       },
-      backupPath: 'D:\\models\\.modelvault\\backups\\store-health.json'
+      backupPath: 'D:\\models\\.modelvault\\backups\\store-health.json',
     })
-    const repairBtn = wrapper.findAll('button').find((b) => b.text().includes('一键修复'))
+    const repairBtn = wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('一键修复'))
     expect(repairBtn).toBeTruthy()
     await repairBtn.trigger('click')
     await flushPromises()
@@ -315,7 +351,7 @@ describe('库统计页（F7，自设置页独立为 StatsPage）', () => {
       nsfw: false,
       rating: 0,
       suspect: false,
-      ...overrides
+      ...overrides,
     }
   }
 
@@ -329,8 +365,13 @@ describe('库统计页（F7，自设置页独立为 StatsPage）', () => {
 
   it('展示总模型数、分类行、标注覆盖率与最占空间 TOP-N', async () => {
     state.models = [
-      statModel('big', { name: '大模型', type: 'checkpoint', size: 3 * 1024 * 1024 * 1024, note: '有备注' }),
-      statModel('small', { name: '小模型', size: 512 })
+      statModel('big', {
+        name: '大模型',
+        type: 'checkpoint',
+        size: 3 * 1024 * 1024 * 1024,
+        note: '有备注',
+      }),
+      statModel('small', { name: '小模型', size: 512 }),
     ]
     const wrapper = await mountStats()
 
@@ -342,10 +383,18 @@ describe('库统计页（F7，自设置页独立为 StatsPage）', () => {
     // 分类行含 Checkpoint（带数量）
     const typeRows = wrapper.findAll('.type-stats li')
     expect(typeRows.length).toBeGreaterThanOrEqual(2)
-    expect(typeRows.some((r) => r.text().includes('Checkpoint') && r.text().includes('1'))).toBe(true)
+    expect(
+      typeRows.some(
+        (r) => r.text().includes('Checkpoint') && r.text().includes('1'),
+      ),
+    ).toBe(true)
     // 覆盖率行：有备注 50%
     const covRows = wrapper.findAll('.cov-row')
-    expect(covRows.some((r) => r.text().includes('有备注') && r.text().includes('50%'))).toBe(true)
+    expect(
+      covRows.some(
+        (r) => r.text().includes('有备注') && r.text().includes('50%'),
+      ),
+    ).toBe(true)
     // TOP 列表按容量降序：大模型在前
     const tops = wrapper.findAll('.top-list li')
     expect(tops).toHaveLength(2)
@@ -376,7 +425,7 @@ describe('库统计页（F7，自设置页独立为 StatsPage）', () => {
 describe('SettingsPage NSFW 示例图模糊开关', () => {
   it('开关默认开启；关闭后保存载荷携带 nsfwBlur: false', async () => {
     window.api.settings.update.mockImplementation((patch) =>
-      Promise.resolve({ settings: { ...state.settings, ...patch } })
+      Promise.resolve({ settings: { ...state.settings, ...patch } }),
     )
     const wrapper = await mountSettings()
     const row = wrapper
@@ -390,7 +439,7 @@ describe('SettingsPage NSFW 示例图模糊开关', () => {
     await saveBtn.trigger('click')
     await flushPromises()
     expect(window.api.settings.update).toHaveBeenCalledWith(
-      expect.objectContaining({ nsfwBlur: false })
+      expect.objectContaining({ nsfwBlur: false }),
     )
     wrapper.unmount()
   })
@@ -415,19 +464,23 @@ describe('SettingsPage 应用内更新下载与安装（F-6）', () => {
       hasUpdate: true,
       releaseUrl: 'https://github.com/Lireth/ModelVault/releases/tag/v0.2.0',
       releaseNotes: '',
-      canDownload: true
+      canDownload: true,
     })
 
-    const downloadBtn = wrapper.findAll('button').find((b) => b.text() === '下载更新')
+    const downloadBtn = wrapper
+      .findAll('button')
+      .find((b) => b.text() === '下载更新')
     expect(downloadBtn).toBeTruthy()
     window.api.app.downloadUpdate = vi.fn().mockResolvedValue({
       path: 'C:\\Users\\test\\AppData\\Roaming\\modelvault\\update\\ModelVault-0.2.0.exe',
-      size: 100
+      size: 100,
     })
     await downloadBtn.trigger('click')
     await flushPromises()
 
-    const installBtn = wrapper.findAll('button').find((b) => b.text() === '运行更新程序')
+    const installBtn = wrapper
+      .findAll('button')
+      .find((b) => b.text() === '运行更新程序')
     expect(installBtn).toBeTruthy()
     window.api.app.installUpdate = vi.fn().mockResolvedValue({ ok: true })
     await installBtn.trigger('click')
@@ -444,17 +497,21 @@ describe('SettingsPage 应用内更新下载与安装（F-6）', () => {
       hasUpdate: true,
       releaseUrl: 'https://github.com/Lireth/ModelVault/releases/tag/v0.2.0',
       releaseNotes: '',
-      canDownload: true
+      canDownload: true,
     })
-    window.api.app.downloadUpdate = vi
-      .fn()
-      .mockResolvedValue({ error: '校验和不匹配，下载可能损坏或被篡改，已放弃本次下载' })
-    const downloadBtn = wrapper.findAll('button').find((b) => b.text() === '下载更新')
+    window.api.app.downloadUpdate = vi.fn().mockResolvedValue({
+      error: '校验和不匹配，下载可能损坏或被篡改，已放弃本次下载',
+    })
+    const downloadBtn = wrapper
+      .findAll('button')
+      .find((b) => b.text() === '下载更新')
     await downloadBtn.trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('校验和不匹配')
-    expect(wrapper.findAll('button').some((b) => b.text() === '运行更新程序')).toBe(false)
+    expect(
+      wrapper.findAll('button').some((b) => b.text() === '运行更新程序'),
+    ).toBe(false)
     wrapper.unmount()
   })
 })

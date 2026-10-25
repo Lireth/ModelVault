@@ -16,7 +16,7 @@ vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
   BrowserWindow: Object.assign(vi.fn(), {
     fromWebContents: vi.fn(),
-    getAllWindows: vi.fn(() => [])
+    getAllWindows: vi.fn(() => []),
   }),
   clipboard: { read: vi.fn(), writeText: vi.fn() },
   dialog: { showOpenDialog: vi.fn() },
@@ -25,23 +25,26 @@ vi.mock('electron', () => ({
   shell: { trashItem: vi.fn(), showItemInFolder: vi.fn() },
   net: { fetch: vi.fn() },
   nativeImage: { createFromPath: vi.fn() },
-  protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() }
+  protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
 }))
 
 // OPT-19：loadStore 的 watcher 同步以 mock 观测，避免真实轮询定时器进入测试
 vi.mock('../src/main/services/watcher', () => ({
   syncWatcher: vi.fn(),
-  stopWatcher: vi.fn()
+  stopWatcher: vi.fn(),
 }))
 
 // 仅替换 computeFileHash：预热作废测试需要可控/可观测的哈希计算（避免真实
 // worker 线程参与）；civitai 其余导出保持原实现供依赖链使用
 vi.mock('../src/main/services/civitai', async (importOriginal) => ({
   ...(await importOriginal()),
-  computeFileHash: vi.fn()
+  computeFileHash: vi.fn(),
 }))
 
-import { paramSummaryFromMeta, sidecarFilesFor } from '../src/main/ipc/models/misc'
+import {
+  paramSummaryFromMeta,
+  sidecarFilesFor,
+} from '../src/main/ipc/models/misc'
 import { registerStoreHandlers } from '../src/main/ipc/models/store'
 import { syncWatcher } from '../src/main/services/watcher'
 import { computeFileHash } from '../src/main/services/civitai'
@@ -50,7 +53,7 @@ import {
   requestHashWarmup,
   resetHashWarmupForTests,
   resumeHashWarmup,
-  whenWarmupIdle
+  whenWarmupIdle,
 } from '../src/main/services/hash-warmup'
 import { getCurrentRoot, loadSettings } from '../src/main/services/store'
 import { getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
@@ -68,7 +71,9 @@ describe('sidecarFilesFor', () => {
   })
 
   it('文件名含多个点时仅按最后一个扩展名取基名', () => {
-    const files = sidecarFilesFor(path.join('D:', 'm', 'flux.1.dev.safetensors'))
+    const files = sidecarFilesFor(
+      path.join('D:', 'm', 'flux.1.dev.safetensors'),
+    )
     expect(files[0]).toBe(path.join('D:', 'm', 'flux.1.dev.txt'))
   })
 })
@@ -92,9 +97,11 @@ describe('paramSummaryFromMeta', () => {
       sampler: 'euler',
       scheduler: 'karras',
       resMin: 512,
-      resMax: 1024
+      resMax: 1024,
     })
-    expect(summary).toBe('Steps: 28, CFG: 4~12, Sampler: euler, Scheduler: karras, Size: 512x1024')
+    expect(summary).toBe(
+      'Steps: 28, CFG: 4~12, Sampler: euler, Scheduler: karras, Size: 512x1024',
+    )
   })
 })
 
@@ -107,7 +114,7 @@ describe('models:loadStore 目录监控启动路径（OPT-19）', () => {
     tmpRoots.push(root)
     fs.writeFileSync(
       path.join(fakeUserData, 'settings.json'),
-      JSON.stringify({ modelsFolder: root, modelsFolders: [root], ...patch })
+      JSON.stringify({ modelsFolder: root, modelsFolders: [root], ...patch }),
     )
     return root
   }
@@ -125,16 +132,24 @@ describe('models:loadStore 目录监控启动路径（OPT-19）', () => {
 
   it('autoScan 关闭但 autoRescan 开启时，loadStore 仍同步启动 watcher', async () => {
     // 复现缺陷场景：关闭启动自动扫描后，此前 watcher 永不启动（E8 静默失效）
-    const root = writeSettings({ autoScan: false, autoRescan: true, excludeDirs: ['temp'] })
+    const root = writeSettings({
+      autoScan: false,
+      autoRescan: true,
+      excludeDirs: ['temp'],
+    })
     const handler = getRegisteredHandler('models:loadStore')
     await handler(makeEvent())
-    expect(syncWatcher).toHaveBeenCalledWith(root, true, ['temp'], { nativeWatch: true })
+    expect(syncWatcher).toHaveBeenCalledWith(root, true, ['temp'], {
+      nativeWatch: true,
+    })
   })
 
   it('autoRescan 关闭时按禁用状态同步（不启动监控）', async () => {
     const root = writeSettings({ autoScan: false, autoRescan: false })
     await getRegisteredHandler('models:loadStore')(makeEvent())
-    expect(syncWatcher).toHaveBeenCalledWith(root, false, [], { nativeWatch: true })
+    expect(syncWatcher).toHaveBeenCalledWith(root, false, [], {
+      nativeWatch: true,
+    })
   })
 
   it('loadStore 用索引 size/mtime 播种预热：缓存有效且体积唯一的库启动零 stat 零哈希（P1-2）', async () => {
@@ -153,9 +168,9 @@ describe('models:loadStore 目录监控启动路径（OPT-19）', () => {
         version: 1,
         models: {
           'a.safetensors': { hash: 'a'.repeat(64), hashMtime: s1.mtimeMs },
-          'b.safetensors': { hash: 'b'.repeat(64), hashMtime: s2.mtimeMs }
-        }
-      })
+          'b.safetensors': { hash: 'b'.repeat(64), hashMtime: s2.mtimeMs },
+        },
+      }),
     )
     // 本地索引携带 size/mtime（上次扫描的装饰结果）
     fs.writeFileSync(
@@ -173,7 +188,7 @@ describe('models:loadStore 目录监控启动路径（OPT-19）', () => {
             ext: '.safetensors',
             size: s1.size,
             mtimeMs: s1.mtimeMs,
-            relDir: ''
+            relDir: '',
           },
           {
             id: id2,
@@ -182,10 +197,10 @@ describe('models:loadStore 目录监控启动路径（OPT-19）', () => {
             ext: '.safetensors',
             size: s2.size,
             mtimeMs: s2.mtimeMs,
-            relDir: ''
-          }
-        ]
-      })
+            relDir: '',
+          },
+        ],
+      }),
     )
     await loadSettings()
 
@@ -213,7 +228,7 @@ describe('models:openLibrary 秒切库（F1）', () => {
     tmpRoots.push(root)
     fs.writeFileSync(
       path.join(fakeUserData, 'settings.json'),
-      JSON.stringify({ modelsFolder: root, modelsFolders: [root], ...patch })
+      JSON.stringify({ modelsFolder: root, modelsFolders: [root], ...patch }),
     )
     return root
   }
@@ -228,8 +243,8 @@ describe('models:openLibrary 秒切库（F1）', () => {
         root,
         savedAt: 1,
         durationMs: 42,
-        models
-      })
+        models,
+      }),
     )
   }
 
@@ -253,7 +268,11 @@ describe('models:openLibrary 秒切库（F1）', () => {
     tmpRoots.push(rootA, rootB)
     fs.writeFileSync(
       path.join(fakeUserData, 'settings.json'),
-      JSON.stringify({ modelsFolder: rootA, modelsFolders: [rootA, rootB], autoScan: false })
+      JSON.stringify({
+        modelsFolder: rootA,
+        modelsFolders: [rootA, rootB],
+        autoScan: false,
+      }),
     )
     await loadSettings()
     // 库 A 激活为当前根（loadStore 的 ensureRootStore 路径）
@@ -275,7 +294,7 @@ describe('models:openLibrary 秒切库（F1）', () => {
         ext: '.safetensors',
         size: 16,
         mtimeMs: 1,
-        relDir: ''
+        relDir: '',
       },
       {
         id: idB2,
@@ -284,8 +303,8 @@ describe('models:openLibrary 秒切库（F1）', () => {
         ext: '.safetensors',
         size: 16,
         mtimeMs: 1,
-        relDir: ''
-      }
+        relDir: '',
+      },
     ])
 
     vi.mocked(computeFileHash).mockResolvedValue('a'.repeat(64))
@@ -293,7 +312,9 @@ describe('models:openLibrary 秒切库（F1）', () => {
     pauseHashWarmup()
     requestHashWarmup([idA], { mode: 'full', full: true, delayMs: 0 })
 
-    const res = await getRegisteredHandler('models:openLibrary')(makeEvent(), { folder: rootB })
+    const res = await getRegisteredHandler('models:openLibrary')(makeEvent(), {
+      folder: rootB,
+    })
     expect(res.cached).toBe(true)
     expect(getCurrentRoot()).toBe(rootB)
 
@@ -318,7 +339,7 @@ describe('models:openLibrary 秒切库（F1）', () => {
       ext: '.safetensors',
       size: 1,
       mtimeMs: 1,
-      relDir: ''
+      relDir: '',
     }
     writeIndex(root, [model])
     // 索引之后修改的标注应从当前元数据覆盖显示（F1）
@@ -326,11 +347,13 @@ describe('models:openLibrary 秒切库（F1）', () => {
       path.join(root, '.modelvault', 'store.json'),
       JSON.stringify({
         version: 1,
-        models: { 'a.safetensors': { favorite: true, note: '索引后修改' } }
-      })
+        models: { 'a.safetensors': { favorite: true, note: '索引后修改' } },
+      }),
     )
 
-    const res = await getRegisteredHandler('models:openLibrary')(makeEvent(), { folder: root })
+    const res = await getRegisteredHandler('models:openLibrary')(makeEvent(), {
+      folder: root,
+    })
 
     expect(res.error).toBeUndefined()
     expect(res.cached).toBe(true)
@@ -339,14 +362,18 @@ describe('models:openLibrary 秒切库（F1）', () => {
     expect(res.durationMs).toBe(42)
     expect(res.settings.modelsFolder).toBe(root)
     expect(getCurrentRoot()).toBe(root)
-    expect(syncWatcher).toHaveBeenCalledWith(root, false, [], { nativeWatch: true })
+    expect(syncWatcher).toHaveBeenCalledWith(root, false, [], {
+      nativeWatch: true,
+    })
   })
 
   it('无索引时不切换根目录，返回 cached=false 交由扫描链路', async () => {
     const root = writeSettings({})
     await loadSettings()
     const before = getCurrentRoot()
-    const res = await getRegisteredHandler('models:openLibrary')(makeEvent(), { folder: root })
+    const res = await getRegisteredHandler('models:openLibrary')(makeEvent(), {
+      folder: root,
+    })
 
     expect(res).toEqual({ root, cached: false })
     expect(getCurrentRoot()).toBe(before)
@@ -357,7 +384,11 @@ describe('models:openLibrary 秒切库（F1）', () => {
     await loadSettings()
     const outside = path.join(os.tmpdir(), 'modelvault-not-in-list')
     expect(
-      (await getRegisteredHandler('models:openLibrary')(makeEvent(), { folder: outside })).error
+      (
+        await getRegisteredHandler('models:openLibrary')(makeEvent(), {
+          folder: outside,
+        })
+      ).error,
     ).toBe('该目录不在模型库列表中')
 
     const missing = path.join(os.tmpdir(), 'modelvault-missing-root')
@@ -366,7 +397,11 @@ describe('models:openLibrary 秒切库（F1）', () => {
     // loadSettings 可能为目标库初始化 .modelvault；删除后模拟目录已不存在
     fs.rmSync(missing, { recursive: true, force: true })
     expect(
-      (await getRegisteredHandler('models:openLibrary')(makeEvent(), { folder: missing })).error
+      (
+        await getRegisteredHandler('models:openLibrary')(makeEvent(), {
+          folder: missing,
+        })
+      ).error,
     ).toContain('模型文件夹不存在')
   })
 
@@ -375,7 +410,9 @@ describe('models:openLibrary 秒切库（F1）', () => {
     writeSettings({ modelsFolder: missing, modelsFolders: [missing] })
     await loadSettings()
     fs.rmSync(missing, { recursive: true, force: true })
-    const res = await getRegisteredHandler('models:openLibrary')(makeEvent(), { folder: missing })
+    const res = await getRegisteredHandler('models:openLibrary')(makeEvent(), {
+      folder: missing,
+    })
     expect(res.error).toContain('模型文件夹不存在')
     expect(res.folderMissing).toBe(true)
   })
@@ -397,7 +434,10 @@ describe('models:loadStore 库路径失效检测（F1-offline）', () => {
 
   /** 直接写 settings.json（绕过服务层校验，允许指向不存在的路径） */
   function writeRawSettings(raw) {
-    fs.writeFileSync(path.join(fakeUserData, 'settings.json'), JSON.stringify(raw))
+    fs.writeFileSync(
+      path.join(fakeUserData, 'settings.json'),
+      JSON.stringify(raw),
+    )
   }
 
   it('激活库不存在时返回 folderMissing: true，rootStatuses 覆盖库列表全量', async () => {
@@ -413,7 +453,7 @@ describe('models:loadStore 库路径失效检测（F1-offline）', () => {
     expect(res.cachedIndex).toBeNull()
     expect(res.rootStatuses).toEqual([
       { folder: gone, exists: false },
-      { folder: existing, exists: true }
+      { folder: existing, exists: true },
     ])
     // 失效路径不得被重建 .modelvault（既有 C6/O5 防护保持）
     expect(fs.existsSync(path.join(gone, '.modelvault'))).toBe(false)
@@ -438,7 +478,7 @@ describe('models:loadStore 库路径失效检测（F1-offline）', () => {
     expect(res.folderMissing).toBe(false)
     expect(res.rootStatuses).toEqual([
       { folder: ok, exists: true },
-      { folder: goneOther, exists: false }
+      { folder: goneOther, exists: false },
     ])
   })
 })

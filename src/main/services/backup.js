@@ -17,7 +17,7 @@ export {
   BACKUP_VERSION,
   PARTIAL_BACKUP_VERSION,
   parseBackupManifest,
-  safeCoverName
+  safeCoverName,
 } from './backup-format'
 
 // ---------- 流式编解码层 ----------

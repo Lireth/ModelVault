@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { isEmptyModelMeta, planMetaRelinks, splitRelKey } from '../src/main/services/meta-relink'
+import {
+  isEmptyModelMeta,
+  planMetaRelinks,
+  splitRelKey,
+} from '../src/main/services/meta-relink'
 
 /**
  * 元数据重关联规划器单元测试（A-02）：
@@ -26,7 +30,7 @@ function newcomer(key, overrides = {}) {
     mtimeMs: 1000,
     ...splitRelKey(key),
     key,
-    ...overrides
+    ...overrides,
   }
 }
 
@@ -40,7 +44,7 @@ describe('splitRelKey（相对键解析）', () => {
     expect(splitRelKey('lora/style/a.safetensors')).toEqual({
       dir: 'lora/style',
       name: 'a',
-      ext: '.safetensors'
+      ext: '.safetensors',
     })
   })
 
@@ -53,10 +57,10 @@ describe('planMetaRelinks R1：移动不改名', () => {
   it('同名同扩展名且唯一时关联（无论目录如何变化）', () => {
     const result = planMetaRelinks(
       [orphan('old/sub/a.safetensors')],
-      [newcomer('new/place/a.safetensors')]
+      [newcomer('new/place/a.safetensors')],
     )
     expect(relinkMap(result)).toEqual({
-      'old/sub/a.safetensors': 'new/place/a.safetensors'
+      'old/sub/a.safetensors': 'new/place/a.safetensors',
     })
     expect(result.unmatchedOrphanKeys).toEqual([])
   })
@@ -64,7 +68,7 @@ describe('planMetaRelinks R1：移动不改名', () => {
   it('扩展名不同不关联（同名的 .ckpt 与 .safetensors 不是同一文件）', () => {
     const result = planMetaRelinks(
       [orphan('a.ckpt')],
-      [newcomer('a.safetensors')]
+      [newcomer('a.safetensors')],
     )
     expect(result.relinks).toEqual([])
     expect(result.unmatchedOrphanKeys).toEqual(['a.ckpt'])
@@ -73,7 +77,7 @@ describe('planMetaRelinks R1：移动不改名', () => {
   it('同名候选存在多个（歧义）时放弃，宁可不关联也不绑错', () => {
     const result = planMetaRelinks(
       [orphan('old/a.safetensors')],
-      [newcomer('new1/a.safetensors'), newcomer('new2/a.safetensors')]
+      [newcomer('new1/a.safetensors'), newcomer('new2/a.safetensors')],
     )
     expect(result.relinks).toEqual([])
     expect(result.unmatchedOrphanKeys).toEqual(['old/a.safetensors'])
@@ -82,7 +86,7 @@ describe('planMetaRelinks R1：移动不改名', () => {
   it('两个同名孤儿争夺唯一新候选时双方都不关联', () => {
     const result = planMetaRelinks(
       [orphan('d1/a.safetensors'), orphan('d2/a.safetensors')],
-      [newcomer('d3/a.safetensors')]
+      [newcomer('d3/a.safetensors')],
     )
     expect(result.relinks).toEqual([])
     expect(result.unmatchedOrphanKeys).toHaveLength(2)
@@ -93,17 +97,17 @@ describe('planMetaRelinks R2：同目录改名（1:1）', () => {
   it('同目录内恰有 1 个孤儿与 1 个新模型（名字不同）时关联', () => {
     const result = planMetaRelinks(
       [orphan('lora/old-name.safetensors')],
-      [newcomer('lora/new-name.safetensors')]
+      [newcomer('lora/new-name.safetensors')],
     )
     expect(relinkMap(result)).toEqual({
-      'lora/old-name.safetensors': 'lora/new-name.safetensors'
+      'lora/old-name.safetensors': 'lora/new-name.safetensors',
     })
   })
 
   it('同目录批量改动（多孤儿多新模型）无法一一对应，全部保留不关联', () => {
     const result = planMetaRelinks(
       [orphan('d/a.safetensors'), orphan('d/b.safetensors')],
-      [newcomer('d/a2.safetensors'), newcomer('d/b2.safetensors')]
+      [newcomer('d/a2.safetensors'), newcomer('d/b2.safetensors')],
     )
     expect(result.relinks).toEqual([])
     expect(result.unmatchedOrphanKeys).toHaveLength(2)
@@ -113,21 +117,31 @@ describe('planMetaRelinks R2：同目录改名（1:1）', () => {
 describe('planMetaRelinks R3：哈希履历 mtime', () => {
   it('移动并改名后，新文件 mtime 与哈希履历精确一致且唯一时关联', () => {
     const result = planMetaRelinks(
-      [orphan('lora/a.safetensors', { hash: 'h'.repeat(64), hashMtime: 1700000000000 })],
-      [newcomer('lora/renamed.safetensors', { mtimeMs: 1700000000000 })]
+      [
+        orphan('lora/a.safetensors', {
+          hash: 'h'.repeat(64),
+          hashMtime: 1700000000000,
+        }),
+      ],
+      [newcomer('lora/renamed.safetensors', { mtimeMs: 1700000000000 })],
     )
     expect(relinkMap(result)).toEqual({
-      'lora/a.safetensors': 'lora/renamed.safetensors'
+      'lora/a.safetensors': 'lora/renamed.safetensors',
     })
   })
 
   it('mtime 命中但有多个同 mtime 候选（歧义）时不关联', () => {
     const result = planMetaRelinks(
-      [orphan('a.safetensors', { hash: 'h'.repeat(64), hashMtime: 1700000000000 })],
+      [
+        orphan('a.safetensors', {
+          hash: 'h'.repeat(64),
+          hashMtime: 1700000000000,
+        }),
+      ],
       [
         newcomer('x.safetensors', { mtimeMs: 1700000000000 }),
-        newcomer('y.safetensors', { mtimeMs: 1700000000000 })
-      ]
+        newcomer('y.safetensors', { mtimeMs: 1700000000000 }),
+      ],
     )
     expect(result.relinks).toEqual([])
     expect(result.unmatchedOrphanKeys).toEqual(['a.safetensors'])
@@ -136,7 +150,7 @@ describe('planMetaRelinks R3：哈希履历 mtime', () => {
   it('无哈希履历（hashMtime=0）的孤儿不进入 R3（不同目录、不同名时三层皆不命中）', () => {
     const result = planMetaRelinks(
       [orphan('dir-a/a.safetensors')],
-      [newcomer('dir-b/b.safetensors', { mtimeMs: 0 })]
+      [newcomer('dir-b/b.safetensors', { mtimeMs: 0 })],
     )
     expect(result.relinks).toEqual([])
     expect(result.unmatchedOrphanKeys).toEqual(['dir-a/a.safetensors'])
@@ -148,22 +162,25 @@ describe('planMetaRelinks 分层协作', () => {
     const result = planMetaRelinks(
       [
         orphan('old/moved.safetensors'),
-        orphan('keep-dir/renamed-old.safetensors')
+        orphan('keep-dir/renamed-old.safetensors'),
       ],
       [
         newcomer('new/moved.safetensors'),
-        newcomer('keep-dir/renamed-new.safetensors')
-      ]
+        newcomer('keep-dir/renamed-new.safetensors'),
+      ],
     )
     expect(relinkMap(result)).toEqual({
       'old/moved.safetensors': 'new/moved.safetensors',
-      'keep-dir/renamed-old.safetensors': 'keep-dir/renamed-new.safetensors'
+      'keep-dir/renamed-old.safetensors': 'keep-dir/renamed-new.safetensors',
     })
     expect(result.unmatchedOrphanKeys).toEqual([])
   })
 
   it('空入参返回空结果', () => {
-    expect(planMetaRelinks([], [])).toEqual({ relinks: [], unmatchedOrphanKeys: [] })
+    expect(planMetaRelinks([], [])).toEqual({
+      relinks: [],
+      unmatchedOrphanKeys: [],
+    })
   })
 
   it('一个新模型不会被两个孤儿先后重复占用', () => {
@@ -172,11 +189,16 @@ describe('planMetaRelinks 分层协作', () => {
     const result = planMetaRelinks(
       [
         orphan('dir-a/same.safetensors'),
-        orphan('dir-b/other.safetensors', { hash: 'h'.repeat(64), hashMtime: 5000 })
+        orphan('dir-b/other.safetensors', {
+          hash: 'h'.repeat(64),
+          hashMtime: 5000,
+        }),
       ],
-      [newcomer('dir-c/same.safetensors', { mtimeMs: 5000 })]
+      [newcomer('dir-c/same.safetensors', { mtimeMs: 5000 })],
     )
-    expect(result.relinks).toEqual([['dir-a/same.safetensors', 'dir-c/same.safetensors']])
+    expect(result.relinks).toEqual([
+      ['dir-a/same.safetensors', 'dir-c/same.safetensors'],
+    ])
     expect(result.unmatchedOrphanKeys).toEqual(['dir-b/other.safetensors'])
   })
 })
@@ -203,8 +225,8 @@ describe('isEmptyModelMeta（失效空条目判定）', () => {
       scheduler: '',
       precision: '',
       resMin: null,
-      resMax: null
-    }
+      resMax: null,
+    },
   })
 
   it('全字段为空时判定为空条目（可安全清理）', () => {
@@ -224,7 +246,7 @@ describe('isEmptyModelMeta（失效空条目判定）', () => {
     ['hash', { hash: 'a'.repeat(64) }],
     ['noteSource', { noteSource: 'sidecar' }],
     ['params.steps', { params: { steps: 20 } }],
-    ['params.sampler', { params: { sampler: 'euler' } }]
+    ['params.sampler', { params: { sampler: 'euler' } }],
   ])('%s 有值时不视为空条目（必须保留）', (_key, overrides) => {
     const meta = empty()
     if (overrides.params) meta.params = { ...meta.params, ...overrides.params }

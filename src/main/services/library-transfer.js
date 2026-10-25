@@ -6,7 +6,12 @@ import { runMaintenance } from './maintenance-lock'
 import { sidecarFilesFor } from './scanner'
 import { getCurrentRoot, isInRoot, toRelKey } from './store-paths'
 import { isPathRealWithin, resolveRealPath } from '../utils'
-import { flushStoreSave, getModelMeta, normalizeStoreData, removeModelMeta } from './store-meta'
+import {
+  flushStoreSave,
+  getModelMeta,
+  normalizeStoreData,
+  removeModelMeta,
+} from './store-meta'
 import { getSettings } from './store-settings'
 
 /**
@@ -58,9 +63,13 @@ async function readTargetStore(targetRoot) {
 async function writeTargetStore(targetRoot, store) {
   const dataDir = path.join(targetRoot, '.modelvault')
   await fs.mkdir(dataDir, { recursive: true })
-  await atomicWriteFile(path.join(dataDir, 'store.json'), JSON.stringify(store, null, 2), {
-    createDirs: false
-  })
+  await atomicWriteFile(
+    path.join(dataDir, 'store.json'),
+    JSON.stringify(store, null, 2),
+    {
+      createDirs: false,
+    },
+  )
 }
 
 /**
@@ -105,14 +114,21 @@ async function moveFile(src, dest) {
 export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
   const currentRoot = getCurrentRoot()
   if (!currentRoot) return { error: '尚未设置模型文件夹' }
-  if (!Array.isArray(ids) || ids.length === 0) return { error: '没有可传输的模型' }
-  if (typeof targetRoot !== 'string' || !targetRoot) return { error: '无效的目标库' }
-  if (path.resolve(targetRoot).toLowerCase() === path.resolve(currentRoot).toLowerCase()) {
+  if (!Array.isArray(ids) || ids.length === 0)
+    return { error: '没有可传输的模型' }
+  if (typeof targetRoot !== 'string' || !targetRoot)
+    return { error: '无效的目标库' }
+  if (
+    path.resolve(targetRoot).toLowerCase() ===
+    path.resolve(currentRoot).toLowerCase()
+  ) {
     return { error: '目标库不能是当前模型库' }
   }
   // 目标必须是已保存的模型库（settings.modelsFolders），防止任意目录写入
   const saved = (getSettings().modelsFolders || []).some(
-    (f) => typeof f === 'string' && path.resolve(f).toLowerCase() === path.resolve(targetRoot).toLowerCase()
+    (f) =>
+      typeof f === 'string' &&
+      path.resolve(f).toLowerCase() === path.resolve(targetRoot).toLowerCase(),
   )
   if (!saved) {
     return { error: '目标文件夹不是已保存的模型库，请先在侧栏添加该库' }
@@ -127,7 +143,10 @@ export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
     return { error: '目标库文件夹不存在或不可访问' }
   }
   if (await hasPendingJournal(targetRoot)) {
-    return { error: '目标库有未完成的同步（上次会话异常退出），请先打开一次该模型库再试' }
+    return {
+      error:
+        '目标库有未完成的同步（上次会话异常退出），请先打开一次该模型库再试',
+    }
   }
 
   return runMaintenance('import', targetRoot, async () => {
@@ -171,7 +190,7 @@ export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
         if (!item.meta || typeof item.meta !== 'object') continue
         // 封面引用（.modelvault/covers/*）指向的文件复制到目标库（同名不覆盖）
         const coverRefs = [...(item.meta.covers || []), item.meta.cover].filter(
-          (rel) => typeof rel === 'string' && rel.startsWith('.modelvault/')
+          (rel) => typeof rel === 'string' && rel.startsWith('.modelvault/'),
         )
         for (const rel of coverRefs) {
           try {
@@ -225,7 +244,9 @@ export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
             copiedSidecars.push(sidecar)
           } catch (err) {
             // sidecar 传输失败不阻塞模型本体
-            logger.warn(`sidecar 跨库传输失败（不影响模型）: ${sidecar} ${err.message}`)
+            logger.warn(
+              `sidecar 跨库传输失败（不影响模型）: ${sidecar} ${err.message}`,
+            )
           }
         }
         item.copiedSidecars = copiedSidecars
@@ -249,7 +270,9 @@ export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
         for (const relKey of rollbackKeys) delete store.models[relKey]
         await writeTargetStore(targetRoot, store)
       } catch (err) {
-        logger.warn(`失败项元数据回滚失败（目标库健康检查可清理无效条目）: ${err.message}`)
+        logger.warn(
+          `失败项元数据回滚失败（目标库健康检查可清理无效条目）: ${err.message}`,
+        )
       }
     }
 
@@ -269,14 +292,14 @@ export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
 
     logger.info(
       `跨库${transferMode === 'move' ? '移动' : '复制'}完成: ${transferred.length} 个 → ${targetRoot}` +
-        `（跳过 ${skipped.length}，失败 ${failed.length}，元数据迁移 ${metaWritten} 条）`
+        `（跳过 ${skipped.length}，失败 ${failed.length}，元数据迁移 ${metaWritten} 条）`,
     )
     return {
       transferred: transferred.length,
       mode: transferMode,
       targetRoot,
       failed,
-      skipped
+      skipped,
     }
   })
 }

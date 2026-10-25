@@ -32,7 +32,7 @@ export function quitAfterFlush() {
     if (settled) return
     settled = true
     logger.warn(
-      `退出落盘等待超过 ${FLUSH_TIMEOUT_MS}ms 仍未完成，强制退出（数据可能未完整保存）`
+      `退出落盘等待超过 ${FLUSH_TIMEOUT_MS}ms 仍未完成，强制退出（数据可能未完整保存）`,
     )
     app.exit(0)
   }, FLUSH_TIMEOUT_MS)
@@ -40,7 +40,7 @@ export function quitAfterFlush() {
     flushStoreSave(),
     flushSettingsSave(),
     flushWindowStateSave(),
-    flushIndexWrites()
+    flushIndexWrites(),
   ])
     .catch((err) => {
       // 落盘失败不阻塞退出：flush* 内部已尽力保存并经通知链路告知用户

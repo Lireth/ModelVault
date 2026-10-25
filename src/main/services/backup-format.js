@@ -76,7 +76,10 @@ export function parseBackupManifest(bytes) {
   if (manifest?.app !== BACKUP_FORMAT) {
     return { ok: false, error: '不是有效的 ModelVault 备份文件' }
   }
-  if (!Number.isFinite(manifest.version) || manifest.version > PARTIAL_BACKUP_VERSION) {
+  if (
+    !Number.isFinite(manifest.version) ||
+    manifest.version > PARTIAL_BACKUP_VERSION
+  ) {
     return { ok: false, error: '备份文件版本过新，请升级应用后重试' }
   }
   return { ok: true, manifest }
@@ -90,7 +93,8 @@ export function parseBackupManifest(bytes) {
  * @returns {string} 安全的文件名；不合法返回 ''
  */
 export function safeCoverName(entryName) {
-  if (typeof entryName !== 'string' || !entryName.startsWith(LIB_COVERS_PREFIX)) return ''
+  if (typeof entryName !== 'string' || !entryName.startsWith(LIB_COVERS_PREFIX))
+    return ''
   const base = entryName.slice(LIB_COVERS_PREFIX.length)
   if (!base || base === '.' || base === '..') return ''
   if (base.includes('/') || base.includes('\\')) return ''

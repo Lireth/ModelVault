@@ -1,5 +1,11 @@
 <script setup>
-import { selectedModel, setNsfw, setRating, toast, toggleFavorite } from '../../store/appStore'
+import {
+  selectedModel,
+  setNsfw,
+  setRating,
+  toast,
+  toggleFavorite,
+} from '../../store/appStore'
 
 /**
  * 详情表单列「收藏 / 评分」行（OPT-01 自 MetaForm.vue 按域拆出）：
@@ -51,16 +57,35 @@ async function onSetRating(value) {
       :title="selectedModel.favorite ? '取消收藏' : '收藏该模型'"
       @click="onToggleFavorite"
     >
-      <svg viewBox="0 0 24 24" width="12" height="12" :fill="selectedModel.favorite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z" /></svg>
+      <svg
+        viewBox="0 0 24 24"
+        width="12"
+        height="12"
+        :fill="selectedModel.favorite ? 'currentColor' : 'none'"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path
+          d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z"
+        />
+      </svg>
       {{ selectedModel.favorite ? '已收藏' : '收藏' }}
     </button>
     <button
       class="nsfw-toggle"
       :class="{ active: selectedModel.nsfw }"
       type="button"
-      :title="selectedModel.nsfw ? '取消 NSFW 标记' : '标记为 NSFW（首页预览图将模糊展示，可在设置中关闭）'"
+      :title="
+        selectedModel.nsfw
+          ? '取消 NSFW 标记'
+          : '标记为 NSFW（首页预览图将模糊展示，可在设置中关闭）'
+      "
       @click="onToggleNsfw"
-    >NSFW</button>
+    >
+      NSFW
+    </button>
     <div class="rating" title="点击星标评分，再次点击当前星标清除">
       <span class="rating-label">评分</span>
       <button
@@ -70,7 +95,22 @@ async function onSetRating(value) {
         :class="{ on: i <= (selectedModel.rating || 0) }"
         type="button"
         @click="onSetRating(i)"
-      ><svg viewBox="0 0 24 24" width="16" height="16" :fill="i <= (selectedModel.rating || 0) ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z" /></svg></button>
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="16"
+          height="16"
+          :fill="i <= (selectedModel.rating || 0) ? 'currentColor' : 'none'"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path
+            d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z"
+          />
+        </svg>
+      </button>
     </div>
   </div>
 </template>
@@ -94,7 +134,9 @@ async function onSetRating(value) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out);
 }
 
@@ -119,7 +161,9 @@ async function onSetRating(value) {
   font-size: var(--font-xs);
   padding: 6px 16px;
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
 }
 
 .nsfw-toggle:hover {
@@ -155,7 +199,9 @@ async function onSetRating(value) {
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  transition: color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out),
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out),
     filter var(--dur-fast) var(--ease-out);
 }
 

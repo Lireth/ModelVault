@@ -4,7 +4,7 @@ import {
   MODEL_TYPES,
   SUB_MAP,
   sortDirectional,
-  effectiveModelHash
+  effectiveModelHash,
 } from './state'
 import { normalizeBaseModel } from '../../../shared/model-categories'
 import { matchSearchFilters, parseSearchQuery } from './search-query'
@@ -35,7 +35,13 @@ function searchHaystack(m) {
   let hay = searchHaystackCache.get(m)
   if (hay !== undefined) return hay
   // 基底模型取装饰层合成字段，兼容手工构造/旧数据仅带 autoInfo 的对象
-  const parts = [m.name, m.alias, m.note, m.triggerWords, m.baseModel || m.autoInfo?.baseModel]
+  const parts = [
+    m.name,
+    m.alias,
+    m.note,
+    m.triggerWords,
+    m.baseModel || m.autoInfo?.baseModel,
+  ]
   // 自由标签纳入搜索域（F-5）："那个赛博朋克风格的 LoRA" 直达
   if (Array.isArray(m.tags)) parts.push(...m.tags)
   if (m.subCategory) {
@@ -51,10 +57,7 @@ function searchHaystack(m) {
       parts.push(...m.autoInfo.triggerCandidates)
     }
   }
-  hay = parts
-    .filter(Boolean)
-    .join('\n')
-    .toLowerCase()
+  hay = parts.filter(Boolean).join('\n').toLowerCase()
   searchHaystackCache.set(m, hay)
   return hay
 }
@@ -78,7 +81,11 @@ export const duplicateGroups = computed(() => {
   const groups = []
   for (const [hash, models] of byHash) {
     if (models.length > 1) {
-      groups.push({ hash, models, wastedBytes: models[0].size * (models.length - 1) })
+      groups.push({
+        hash,
+        models,
+        wastedBytes: models[0].size * (models.length - 1),
+      })
     }
   }
   return groups
@@ -95,7 +102,7 @@ export const duplicateIdSet = computed(() => {
 
 /** 冗余副本可释放空间合计（各组 wastedBytes 之和） */
 export const duplicateWastedBytes = computed(() =>
-  duplicateGroups.value.reduce((sum, g) => sum + g.wastedBytes, 0)
+  duplicateGroups.value.reduce((sum, g) => sum + g.wastedBytes, 0),
 )
 
 /**
@@ -112,7 +119,14 @@ const filteredUnsorted = computed(() => {
   const { text, filters } = parseSearchQuery(state.search)
   const keyword = text.toLowerCase()
   const hasFilters = filters.length > 0
-  const { typeFilter, subFilter, baseFilter, tagFilters, showFavoritesOnly, showDuplicatesOnly } = state
+  const {
+    typeFilter,
+    subFilter,
+    baseFilter,
+    tagFilters,
+    showFavoritesOnly,
+    showDuplicatesOnly,
+  } = state
   // LoRA 分类筛选：仅选中 LoRA 分类且指定了子分类时生效
   const checkSub = typeFilter === 'lora' && subFilter
   // 基底模型家族筛选（F-2）：归一化比较（autoInfo 解析 + Civitai 回填双来源
@@ -126,7 +140,12 @@ const filteredUnsorted = computed(() => {
   for (const m of state.models) {
     if (typeFilter !== 'all' && m.type !== typeFilter) continue
     if (checkSub && m.subCategory !== subFilter) continue
-    if (checkBase && normalizeBaseModel(m.baseModel || m.autoInfo?.baseModel || '') !== checkBase) continue
+    if (
+      checkBase &&
+      normalizeBaseModel(m.baseModel || m.autoInfo?.baseModel || '') !==
+        checkBase
+    )
+      continue
     if (checkTags.length > 0) {
       const tags = m.tags || []
       if (!checkTags.every((t) => tags.includes(t))) continue
@@ -134,7 +153,8 @@ const filteredUnsorted = computed(() => {
     if (showFavoritesOnly && !m.favorite) continue
     if (dupes && !dupes.has(m.id)) continue
     if (keyword && !searchHaystack(m).includes(keyword)) continue
-    if (hasFilters && !matchSearchFilters(m, filters, effectiveModelHash)) continue
+    if (hasFilters && !matchSearchFilters(m, filters, effectiveModelHash))
+      continue
     list.push(m)
   }
   return list
@@ -154,16 +174,24 @@ export const filteredModels = computed(() => {
     case 'favorite':
       // 收藏优先，同组内按名称（U2）；固定语义排序，不响应方向翻转（O1）
       list.sort(
-        (a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0) || zhCollator.compare(a.name, b.name)
+        (a, b) =>
+          (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0) ||
+          zhCollator.compare(a.name, b.name),
       )
       break
     case 'rating':
       // 评分高优先，同分按名称（U2）；固定语义排序，不响应方向翻转（O1）
-      list.sort((a, b) => b.rating - a.rating || zhCollator.compare(a.name, b.name))
+      list.sort(
+        (a, b) => b.rating - a.rating || zhCollator.compare(a.name, b.name),
+      )
       break
     case 'type':
       // 按分类排序：遵循固定分类顺序（Checkpoint → TextEncoders → VAE → LoRA → 其他），同分类内按名称
-      list.sort((a, b) => TYPE_ORDER[a.type] - TYPE_ORDER[b.type] || zhCollator.compare(a.name, b.name))
+      list.sort(
+        (a, b) =>
+          TYPE_ORDER[a.type] - TYPE_ORDER[b.type] ||
+          zhCollator.compare(a.name, b.name),
+      )
       break
     default:
       list.sort((a, b) => zhCollator.compare(a.name, b.name))
@@ -207,7 +235,7 @@ export const allTags = computed(() =>
   [...tagCounts.value.entries()]
     .sort((a, b) => b[1] - a[1] || zhCollator.compare(a[0], b[0]))
     .slice(0, 50)
-    .map(([tag]) => tag)
+    .map(([tag]) => tag),
 )
 
 /**
@@ -229,5 +257,5 @@ watch(
   () => {
     state.subFilter = ''
     state.baseFilter = ''
-  }
+  },
 )

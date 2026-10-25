@@ -21,7 +21,7 @@ const KIND_LABELS = {
   restore: '恢复备份',
   health: '检查模型库',
   repair: '修复模型库',
-  import: '导入模型'
+  import: '导入模型',
 }
 
 /** 当前持锁操作（null 表示空闲） */
@@ -42,7 +42,7 @@ export function tryAcquireMaintenance(kind, root = null) {
     id: ++nextTokenId,
     kind,
     root: root || null,
-    startedAt: Date.now()
+    startedAt: Date.now(),
   }
   return { ...active }
 }
@@ -78,7 +78,9 @@ export function maintenanceBusyMessage() {
 export async function runMaintenance(kind, root, fn) {
   const token = tryAcquireMaintenance(kind, root)
   if (!token) {
-    const err = /** @type {Error & {code: string}} */ (new Error(maintenanceBusyMessage()))
+    const err = /** @type {Error & {code: string}} */ (
+      new Error(maintenanceBusyMessage())
+    )
     err.code = 'EBUSY'
     throw err
   }

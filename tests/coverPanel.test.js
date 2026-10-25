@@ -31,7 +31,7 @@ function selectModel(overrides = {}) {
     cover: '',
     coverUrl: '',
     covers: [],
-    ...overrides
+    ...overrides,
   }
   state.models = [m]
   state.selectedId = 'm1'
@@ -58,9 +58,9 @@ function coverRes(n) {
     covers: Array.from({ length: n }, (_, i) => ({
       rel: `c${i + 1}`,
       path: `p${i + 1}`,
-      url: `u${i + 1}`
+      url: `u${i + 1}`,
     })),
-    meta: {}
+    meta: {},
   }
 }
 
@@ -76,8 +76,14 @@ describe('CoverPanel 多文件拖入导入（OPT-9 回归）', () => {
     await dropFiles(wrapper, [dropFile('a.png'), dropFile('b.png')])
     await settle()
     expect(window.api.models.importCover).toHaveBeenCalledTimes(2)
-    expect(window.api.models.importCover).toHaveBeenCalledWith('m1', 'D:\\imgs\\a.png')
-    expect(window.api.models.importCover).toHaveBeenCalledWith('m1', 'D:\\imgs\\b.png')
+    expect(window.api.models.importCover).toHaveBeenCalledWith(
+      'm1',
+      'D:\\imgs\\a.png',
+    )
+    expect(window.api.models.importCover).toHaveBeenCalledWith(
+      'm1',
+      'D:\\imgs\\b.png',
+    )
     // 末尾单趟应用：covers 为最后一次响应的完整列表
     expect(state.models[0].covers).toHaveLength(2)
     expect(state.models[0].coverUrl).toBe('url-2')
@@ -92,10 +98,14 @@ describe('CoverPanel 多文件拖入导入（OPT-9 回归）', () => {
     window.api.models.importCover.mockImplementation((id, path) =>
       path === 'D:\\imgs\\bad.png'
         ? Promise.resolve({ error: '文件内容不是有效的图片，已拒绝导入' })
-        : Promise.resolve(coverRes(1))
+        : Promise.resolve(coverRes(1)),
     )
     const wrapper = mount(CoverPanel)
-    await dropFiles(wrapper, [dropFile('a.png'), dropFile('bad.png'), dropFile('b.png')])
+    await dropFiles(wrapper, [
+      dropFile('a.png'),
+      dropFile('bad.png'),
+      dropFile('b.png'),
+    ])
     await settle()
     // 关键回归点：旧实现第一张失败即中断，后续不再导入
     expect(window.api.models.importCover).toHaveBeenCalledTimes(3)
@@ -142,19 +152,24 @@ describe('CoverPanel 多文件拖入导入（OPT-9 回归）', () => {
     selectModel()
     let resolveIpc
     window.api.models.importCover.mockImplementation(
-      () => new Promise((resolve) => {
-        resolveIpc = resolve
-      })
+      () =>
+        new Promise((resolve) => {
+          resolveIpc = resolve
+        }),
     )
     const wrapper = mount(CoverPanel)
     const dropPromise = dropFiles(wrapper, [dropFile('a.png')])
     await settle()
     // IPC 在途：上传/粘贴按钮禁用
-    expect(wrapper.find('button.btn-primary').attributes('disabled')).toBeDefined()
+    expect(
+      wrapper.find('button.btn-primary').attributes('disabled'),
+    ).toBeDefined()
     resolveIpc(coverRes(1))
     await dropPromise
     await settle()
-    expect(wrapper.find('button.btn-primary').attributes('disabled')).toBeUndefined()
+    expect(
+      wrapper.find('button.btn-primary').attributes('disabled'),
+    ).toBeUndefined()
   })
 })
 
@@ -165,8 +180,8 @@ describe('CoverPanel 全屏画廊入口', () => {
       cover: 'p1',
       covers: [
         { rel: 'c1', path: 'p1', url: 'u1' },
-        { rel: 'c2', path: 'p2', url: 'u2' }
-      ]
+        { rel: 'c2', path: 'p2', url: 'u2' },
+      ],
     })
     const wrapper = mount(CoverPanel, { attachTo: document.body })
     await wrapper.find('.detail-cover').trigger('click')
@@ -180,7 +195,11 @@ describe('CoverPanel 全屏画廊入口', () => {
     expect(overlay).toBeTruthy()
     expect(overlay.querySelector('.gallery-index').textContent).toBe('1 / 2')
     window.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      }),
     )
     await settle()
     expect(document.body.querySelector('.gallery-overlay')).toBeNull()
@@ -191,7 +210,11 @@ describe('CoverPanel 全屏画廊入口', () => {
   it('画廊内 Delete 调出面板既有删除确认（不直接删除）', async () => {
     const wrapper = await mountWithGallery()
     window.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true })
+      new KeyboardEvent('keydown', {
+        key: 'Delete',
+        bubbles: true,
+        cancelable: true,
+      }),
     )
     await settle()
     expect(state.confirm.visible).toBe(true)

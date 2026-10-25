@@ -10,7 +10,7 @@ defineProps({
   /** 全库派生统计（StatsSection 的 stats computed） */
   stats: { type: Object, required: true },
   /** 单模型平均容量（字节） */
-  avgBytes: { type: Number, default: 0 }
+  avgBytes: { type: Number, default: 0 },
 })
 </script>
 

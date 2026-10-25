@@ -20,7 +20,7 @@ const TAG_IPC_CONCURRENCY = 16
 const MODE_LABELS = {
   add: '添加',
   remove: '移除',
-  replace: '替换'
+  replace: '替换',
 }
 const MODE_KEYS = new Set(Object.keys(MODE_LABELS))
 
@@ -68,7 +68,8 @@ function nextTagsFor(current, input, mode) {
     return next.length === current.length ? { unchanged: true } : { tags: next }
   }
   const replacesAll =
-    current.length === input.length && current.every((tag, i) => tag === input[i])
+    current.length === input.length &&
+    current.every((tag, i) => tag === input[i])
   return replacesAll ? { unchanged: true } : { tags: [...input] }
 }
 
@@ -118,7 +119,10 @@ export async function batchEditTags(options = {}) {
     const notes = []
     if (unchanged > 0) notes.push(`标签无变化 ${unchanged} 个`)
     if (overflow > 0) notes.push(`超过 ${MAX_TAGS} 个标签上限 ${overflow} 个`)
-    toast('info', `没有需要更新标签的模型${notes.length ? `（${notes.join('，')}）` : ''}`)
+    toast(
+      'info',
+      `没有需要更新标签的模型${notes.length ? `（${notes.join('，')}）` : ''}`,
+    )
     return false
   }
 
@@ -136,7 +140,7 @@ export async function batchEditTags(options = {}) {
         if (res?.error) throw new Error(res.error)
         return res
       },
-      TAG_IPC_CONCURRENCY
+      TAG_IPC_CONCURRENCY,
     )
 
     const metas = new Map()
@@ -157,7 +161,7 @@ export async function batchEditTags(options = {}) {
     })
 
     const ok = applyMetaUpdates(metas, (meta) => ({
-      tags: Array.isArray(meta.tags) ? meta.tags : []
+      tags: Array.isArray(meta.tags) ? meta.tags : [],
     }))
     const notes = []
     if (unchanged > 0) notes.push(`无变化 ${unchanged} 个`)
@@ -165,7 +169,10 @@ export async function batchEditTags(options = {}) {
     if (failed > 0) notes.push(`失败 ${failed} 个`)
     const suffix = notes.length ? `（${notes.join('，')}）` : ''
     if (canceled > 0) {
-      toast('warn', `标签${modeLabel}已取消：完成 ${ok}/${updates.length}，已完成部分已保存${suffix}`)
+      toast(
+        'warn',
+        `标签${modeLabel}已取消：完成 ${ok}/${updates.length}，已完成部分已保存${suffix}`,
+      )
     } else if (failed > 0) {
       toast('warn', `标签${modeLabel}完成：成功 ${ok} 个${suffix}`)
     } else {

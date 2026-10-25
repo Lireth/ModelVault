@@ -74,7 +74,7 @@ function indexEntry(root, record) {
     relPath: relativePathOf(root, record.id, name),
     name,
     size: Number.isFinite(record.size) ? record.size : 0,
-    hash: typeof record.hash === 'string' ? record.hash : ''
+    hash: typeof record.hash === 'string' ? record.hash : '',
   }
 }
 
@@ -86,7 +86,7 @@ function storeEntry(root, relKey, meta) {
     relPath: normalizedKey,
     name: path.basename(normalizedKey),
     size: 0,
-    hash: typeof meta?.hash === 'string' ? meta.hash : ''
+    hash: typeof meta?.hash === 'string' ? meta.hash : '',
   }
 }
 
@@ -127,10 +127,13 @@ async function readStoreEntries(root) {
     if (!stat.isFile() || stat.size > MAX_SOURCE_BYTES) return null
     const parsed = JSON.parse(await fs.readFile(file, 'utf-8'))
     const models = parsed?.models
-    if (!models || typeof models !== 'object' || Array.isArray(models)) return null
+    if (!models || typeof models !== 'object' || Array.isArray(models))
+      return null
     const rootLower = rootKeyOf(root)
     // 盘符根（D:\）已自带分隔符，拼接前缀时避免出现双分隔符导致全部误判为越界
-    const rootPrefix = rootLower.endsWith(path.sep) ? rootLower : `${rootLower}${path.sep}`
+    const rootPrefix = rootLower.endsWith(path.sep)
+      ? rootLower
+      : `${rootLower}${path.sep}`
     const entries = []
     for (const [relKey, meta] of Object.entries(models)) {
       if (!relKey || path.isAbsolute(relKey)) continue
@@ -142,7 +145,8 @@ async function readStoreEntries(root) {
     }
     return { entries, savedAt: stat.mtimeMs }
   } catch (err) {
-    if (err.code !== 'ENOENT') logger.warn(`跨库总览读取元数据失败（${root}）: ${err.message}`)
+    if (err.code !== 'ENOENT')
+      logger.warn(`跨库总览读取元数据失败（${root}）: ${err.message}`)
     return null
   }
 }
@@ -162,7 +166,7 @@ export function buildLibraryOverview(libraries, now = Date.now()) {
     exists: lib.exists !== false,
     source: lib.source || 'none',
     savedAt: Number.isFinite(lib.savedAt) ? lib.savedAt : 0,
-    models: Array.isArray(lib.models) ? lib.models.filter(Boolean) : []
+    models: Array.isArray(lib.models) ? lib.models.filter(Boolean) : [],
   }))
 
   // 全库按 hash 聚合；同一库内同一绝对路径只计一次（索引异常时防御）
@@ -184,7 +188,7 @@ export function buildLibraryOverview(libraries, now = Date.now()) {
         library: lib.name,
         relPath: model.relPath,
         name: model.name,
-        size: model.size
+        size: model.size,
       })
     }
   }
@@ -202,7 +206,7 @@ export function buildLibraryOverview(libraries, now = Date.now()) {
       libraries: roots.size,
       redundantCopies: group.members.length - 1,
       wastedBytes: size * (group.members.length - 1),
-      members: group.members
+      members: group.members,
     })
   }
 
@@ -214,7 +218,8 @@ export function buildLibraryOverview(libraries, now = Date.now()) {
       counts.set(member.rootKey, (counts.get(member.rootKey) || 0) + 1)
     }
     for (const [key, count] of counts) {
-      if (count > 1) localGroupCount.set(key, (localGroupCount.get(key) || 0) + 1)
+      if (count > 1)
+        localGroupCount.set(key, (localGroupCount.get(key) || 0) + 1)
     }
   }
 
@@ -237,12 +242,14 @@ export function buildLibraryOverview(libraries, now = Date.now()) {
       source: lib.source,
       savedAt: lib.savedAt,
       staleIndex:
-        lib.source === 'index' && lib.savedAt > 0 && now - lib.savedAt > STALE_INDEX_MS,
+        lib.source === 'index' &&
+        lib.savedAt > 0 &&
+        now - lib.savedAt > STALE_INDEX_MS,
       models,
       sizeKnownModels,
       totalBytes,
       hashedModels,
-      localDuplicateGroups: localGroupCount.get(lib.key) || 0
+      localDuplicateGroups: localGroupCount.get(lib.key) || 0,
     }
   })
   perLibrary.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
@@ -251,28 +258,39 @@ export function buildLibraryOverview(libraries, now = Date.now()) {
     .filter((group) => group.libraries > 1)
     .sort(
       (a, b) =>
-        b.wastedBytes - a.wastedBytes || b.copies - a.copies || a.hash.localeCompare(b.hash)
+        b.wastedBytes - a.wastedBytes ||
+        b.copies - a.copies ||
+        a.hash.localeCompare(b.hash),
     )
 
-  const redundantCopies = crossGroups.reduce((sum, group) => sum + group.redundantCopies, 0)
-  const wastedBytes = crossGroups.reduce((sum, group) => sum + group.wastedBytes, 0)
-  const unknownSizeGroups = crossGroups.filter((group) => !group.sizeKnown).length
+  const redundantCopies = crossGroups.reduce(
+    (sum, group) => sum + group.redundantCopies,
+    0,
+  )
+  const wastedBytes = crossGroups.reduce(
+    (sum, group) => sum + group.wastedBytes,
+    0,
+  )
+  const unknownSizeGroups = crossGroups.filter(
+    (group) => !group.sizeKnown,
+  ).length
 
   return {
     generatedAt: now,
     totals: {
       libraries: perLibrary.length,
-      availableLibraries: perLibrary.filter((lib) => lib.source !== 'none').length,
+      availableLibraries: perLibrary.filter((lib) => lib.source !== 'none')
+        .length,
       models: perLibrary.reduce((sum, lib) => sum + lib.models, 0),
       knownBytes: perLibrary.reduce((sum, lib) => sum + lib.totalBytes, 0),
       hashedModels: perLibrary.reduce((sum, lib) => sum + lib.hashedModels, 0),
       crossGroups: crossGroups.length,
       redundantCopies,
       wastedBytes,
-      unknownSizeGroups
+      unknownSizeGroups,
     },
     libraries: perLibrary,
-    crossLibraryGroups: crossGroups
+    crossLibraryGroups: crossGroups,
   }
 }
 
@@ -284,14 +302,17 @@ export async function collectLibraryOverview() {
   const settings = getSettings()
   const roots = normalizeLibraryRoots([
     ...(Array.isArray(settings.modelsFolders) ? settings.modelsFolders : []),
-    ...(getCurrentRoot() ? [getCurrentRoot()] : [])
+    ...(getCurrentRoot() ? [getCurrentRoot()] : []),
   ])
   const warnings = []
   const libraries = []
 
   // 顺序读取：单个索引可达数十 MB，并行读取会让内存峰值随库数量线性放大
   for (const root of roots) {
-    const exists = await fs.stat(root).then((s) => s.isDirectory()).catch(() => false)
+    const exists = await fs
+      .stat(root)
+      .then((s) => s.isDirectory())
+      .catch(() => false)
     let models = []
     let source = 'none'
     let savedAt = 0
@@ -317,18 +338,27 @@ export async function collectLibraryOverview() {
       }
     }
 
-    libraries.push({ root, name: libraryName(root), exists, source, savedAt, models })
+    libraries.push({
+      root,
+      name: libraryName(root),
+      exists,
+      source,
+      savedAt,
+      models,
+    })
   }
 
   const overview = buildLibraryOverview(libraries)
   const stale = overview.libraries.filter((lib) => lib.staleIndex)
   if (stale.length > 0) {
     warnings.push(
-      `以下库的本地索引超过 7 天未更新，结果可能滞后：${stale.map((lib) => lib.name).join('、')}`
+      `以下库的本地索引超过 7 天未更新，结果可能滞后：${stale.map((lib) => lib.name).join('、')}`,
     )
   }
   if (overview.totals.unknownSizeGroups > 0) {
-    warnings.push('部分跨库重复组的容量未知（元数据来源不含文件大小），仅统计副本数量')
+    warnings.push(
+      '部分跨库重复组的容量未知（元数据来源不含文件大小），仅统计副本数量',
+    )
   }
   if (overview.totals.crossGroups === 0 && roots.length > 0) {
     warnings.push('未发现跨库重复模型；库内重复请使用当前库的「重复」筛选')

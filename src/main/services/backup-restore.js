@@ -15,10 +15,14 @@ import {
   normalizeLibrarySettings,
   normalizeStoreData,
   saveLibrarySettings,
-  setModelMeta
+  setModelMeta,
 } from './store'
 import { LIB_PREFIX, parseBackupManifest } from './backup-format'
-import { readBackupManifest, streamBackupZip, unzipBackupEntries } from './backup-zip'
+import {
+  readBackupManifest,
+  streamBackupZip,
+  unzipBackupEntries,
+} from './backup-zip'
 
 /**
  * 备份恢复流程（O2 拆分）：
@@ -66,11 +70,14 @@ async function pruneRestoreArtifacts(root, keepBakName) {
   }
   for (const name of entries) {
     const isStaleTmp = name.startsWith(RESTORE_TMP_PREFIX)
-    const isOldBackup = name.startsWith(BACKUP_DIR_PREFIX) && name !== keepBakName
+    const isOldBackup =
+      name.startsWith(BACKUP_DIR_PREFIX) && name !== keepBakName
     if (!isStaleTmp && !isOldBackup) continue
-    await fs.rm(path.join(root, name), { recursive: true, force: true }).catch((err) => {
-      logger.warn(`清理恢复残留目录失败: ${err.message}`)
-    })
+    await fs
+      .rm(path.join(root, name), { recursive: true, force: true })
+      .catch((err) => {
+        logger.warn(`清理恢复残留目录失败: ${err.message}`)
+      })
   }
 }
 
@@ -87,11 +94,16 @@ async function pruneRestoreArtifacts(root, keepBakName) {
  * @returns {Promise<{root: string, models: number, covers: number, skipped: number,
  *   settingsRestored: boolean}>}
  */
-async function restoreLibrary(root, filePath, skippedCovers = 0, restoreSettings = true) {
+async function restoreLibrary(
+  root,
+  filePath,
+  skippedCovers = 0,
+  restoreSettings = true,
+) {
   // V-02：恢复会整体替换目标库的 .modelvault，必须与扫描/局部扫描/切库互斥。
   // 拿不到锁时抛出 EBUSY，由 importBackup 转换为「正在…，请稍候」
   return runMaintenance('restore', root, () =>
-    restoreLibraryLocked(root, filePath, skippedCovers, restoreSettings)
+    restoreLibraryLocked(root, filePath, skippedCovers, restoreSettings),
   )
 }
 
@@ -101,7 +113,12 @@ async function restoreLibrary(root, filePath, skippedCovers = 0, restoreSettings
  * @param {string} filePath 备份 zip 路径
  * @param {number} skippedCovers 解压阶段跳过的非法封面条目数
  */
-async function restoreLibraryLocked(root, filePath, skippedCovers = 0, restoreSettings = true) {
+async function restoreLibraryLocked(
+  root,
+  filePath,
+  skippedCovers = 0,
+  restoreSettings = true,
+) {
   // 静止两路写盘链（B1/B-02 修复配套）：在途的防抖/原子写完成于目录交换之后时，
   // 其 rename 会把恢复前的旧数据覆盖到刚恢复的 store.json / settings.json 上。
   // 恢复目标为当前激活根时风险最大；对其他根 flush 只是把当前根待落盘数据
@@ -125,7 +142,7 @@ async function restoreLibraryLocked(root, filePath, skippedCovers = 0, restoreSe
       coverWriter: async (name, data) => {
         await fs.writeFile(path.join(coversDir, name), data)
         covers += 1
-      }
+      },
     })
 
     const storeBytes = unzipped[`${LIB_PREFIX}${DATA_FILE}`]
@@ -137,12 +154,15 @@ async function restoreLibraryLocked(root, filePath, skippedCovers = 0, restoreSe
     const sanitized = normalizeStoreData(parsed)
     const sanitizedText = JSON.stringify(sanitized, null, 2)
     const sourceCount =
-      parsed && typeof parsed === 'object' && parsed.models && typeof parsed.models === 'object'
+      parsed &&
+      typeof parsed === 'object' &&
+      parsed.models &&
+      typeof parsed.models === 'object'
         ? Object.keys(parsed.models).length
         : 0
     if (Object.keys(sanitized.models).length !== sourceCount) {
       logger.warn(
-        `备份元数据已清洗: ${sourceCount} → ${Object.keys(sanitized.models).length} 条（剔除非法键/字段）`
+        `备份元数据已清洗: ${sourceCount} → ${Object.keys(sanitized.models).length} 条（剔除非法键/字段）`,
       )
     }
     await fs.writeFile(path.join(tmpDir, DATA_FILE), sanitizedText)
@@ -150,11 +170,13 @@ async function restoreLibraryLocked(root, filePath, skippedCovers = 0, restoreSe
     let settingsRestored = false
     if (restoreSettings && unzipped['settings.json']) {
       // 库设置随备份恢复（设置随模型库走）：写入临时目录，随目录交换原子生效
-      const parsedSettings = JSON.parse(decoder.decode(unzipped['settings.json']))
+      const parsedSettings = JSON.parse(
+        decoder.decode(unzipped['settings.json']),
+      )
       const normalizedSettings = normalizeLibrarySettings(parsedSettings)
       await fs.writeFile(
         path.join(tmpDir, LIB_SETTINGS_FILE),
-        JSON.stringify(normalizedSettings, null, 2)
+        JSON.stringify(normalizedSettings, null, 2),
       )
       settingsRestored = true
     }
@@ -181,7 +203,7 @@ async function restoreLibraryLocked(root, filePath, skippedCovers = 0, restoreSe
       models: Object.keys(sanitized.models).length,
       covers,
       skipped: stats.skippedCovers,
-      settingsRestored
+      settingsRestored,
     }
   } catch (err) {
     // 失败兜底：清理本次解出的临时目录，不在用户模型目录留垃圾
@@ -240,13 +262,13 @@ async function restorePartialLibrary(root, filePath, manifest) {
           const dest = path.join(coversDir, name)
           const exists = await fs.access(dest).then(
             () => true,
-            () => false
+            () => false,
           )
           if (exists) return
           await fs.writeFile(dest, data)
           writtenCovers.push(dest)
           covers += 1
-        }
+        },
       })
       const storeBytes = unzipped[`${LIB_PREFIX}${DATA_FILE}`]
       if (!storeBytes) throw new Error('备份缺少库元数据')
@@ -263,7 +285,9 @@ async function restorePartialLibrary(root, filePath, manifest) {
         const abs = path.join(root, relKey)
         const existed = Boolean(getModelMeta(abs))
         // metadata-only 备份不含封面：清空封面引用，避免恢复后指向不存在的文件
-        const incoming = metadataOnly ? { ...meta, covers: [], cover: '' } : meta
+        const incoming = metadataOnly
+          ? { ...meta, covers: [], cover: '' }
+          : meta
         const saved = setModelMeta(abs, incoming)
         if (!saved) {
           skipped += 1
@@ -274,7 +298,7 @@ async function restorePartialLibrary(root, filePath, manifest) {
       }
       await flushStoreSave()
       logger.info(
-        `选择性备份已合并: ${filePath} → ${root}（新增 ${added} / 更新 ${updated} / 跳过 ${skipped}）`
+        `选择性备份已合并: ${filePath} → ${root}（新增 ${added} / 更新 ${updated} / 跳过 ${skipped}）`,
       )
       return {
         root,
@@ -286,7 +310,7 @@ async function restorePartialLibrary(root, filePath, manifest) {
         mode: manifest.mode || 'selected',
         added,
         updated,
-        backupPath
+        backupPath,
       }
     } catch (err) {
       for (const file of writtenCovers) {
@@ -307,7 +331,7 @@ export async function importBackup(win) {
   const pick = await dialog.showOpenDialog(win, {
     title: '选择备份文件',
     properties: ['openFile'],
-    filters: [{ name: 'ModelVault 备份', extensions: ['zip'] }]
+    filters: [{ name: 'ModelVault 备份', extensions: ['zip'] }],
   })
   if (pick.canceled || !pick.filePaths[0]) return { canceled: true }
   const filePath = pick.filePaths[0]
@@ -319,7 +343,7 @@ export async function importBackup(win) {
     const fileStat = await fs.stat(filePath)
     if (fileStat.size > MAX_BACKUP_BYTES) {
       return {
-        error: `备份文件超过 ${Math.floor(MAX_BACKUP_BYTES / 1024 / 1024 / 1024)}GB，为避免内存占用过高已停止恢复；请手动复制 .modelvault 文件夹`
+        error: `备份文件超过 ${Math.floor(MAX_BACKUP_BYTES / 1024 / 1024 / 1024)}GB，为避免内存占用过高已停止恢复；请手动复制 .modelvault 文件夹`,
       }
     }
     // 第一遍：流式只读 manifest（B-04）。无效备份不进入完整解压。
@@ -339,7 +363,7 @@ export async function importBackup(win) {
       return {
         error: '选择性备份只能合并到当前激活的模型库，请先打开目标模型库',
         settingsRestored: false,
-        partial: true
+        partial: true,
       }
     }
     const count =
@@ -356,17 +380,21 @@ export async function importBackup(win) {
         '恢复前会自动快照 store.json（.modelvault/backups/）。',
       buttons: ['取消', '合并恢复'],
       defaultId: 0,
-      cancelId: 0
+      cancelId: 0,
     })
     if (choice.response !== 1) {
       return { error: '已取消合并恢复', settingsRestored: false, partial: true }
     }
     try {
-      const libraryRestored = await restorePartialLibrary(root, filePath, manifest)
+      const libraryRestored = await restorePartialLibrary(
+        root,
+        filePath,
+        manifest,
+      )
       return {
         settingsRestored: false,
         libraryRestored,
-        skipped: libraryRestored.skipped
+        skipped: libraryRestored.skipped,
       }
     } catch (err) {
       if (err?.code === 'EBUSY') {
@@ -376,7 +404,7 @@ export async function importBackup(win) {
       return {
         error: `选择性备份合并失败: ${err.message}`,
         settingsRestored: false,
-        partial: true
+        partial: true,
       }
     }
   }
@@ -389,13 +417,13 @@ export async function importBackup(win) {
   if (manifest.library) {
     const target = await dialog.showOpenDialog(win, {
       title: '选择要恢复到的模型文件夹',
-      properties: ['openDirectory']
+      properties: ['openDirectory'],
     })
     if (target.canceled || !target.filePaths[0]) {
       return {
         error: '已取消选择目标文件夹（设置与库数据均未恢复）',
         settingsRestored: false,
-        partial: true
+        partial: true,
       }
     }
     const root = target.filePaths[0]
@@ -408,13 +436,13 @@ export async function importBackup(win) {
           '恢复将覆盖其中的标注与封面。现有数据会先备份为 .modelvault.bak-<时间戳>（仅保留最新一份，更早的自动清理），确认无误后可手动删除。',
         buttons: ['取消', '覆盖恢复'],
         defaultId: 0,
-        cancelId: 0
+        cancelId: 0,
       })
       if (choice.response !== 1) {
         return {
           error: '已取消覆盖恢复（设置与库数据均未恢复）',
           settingsRestored: false,
-          partial: true
+          partial: true,
         }
       }
     }
@@ -423,19 +451,23 @@ export async function importBackup(win) {
         root,
         filePath,
         0,
-        manifest.settings === true
+        manifest.settings === true,
       )
       logger.info(
-        `备份已恢复: ${filePath} → ${root}（${libraryRestored.models} 模型 / ${libraryRestored.covers} 封面）`
+        `备份已恢复: ${filePath} → ${root}（${libraryRestored.models} 模型 / ${libraryRestored.covers} 封面）`,
       )
       return {
         settingsRestored: libraryRestored.settingsRestored,
         libraryRestored,
-        skipped: libraryRestored.skipped
+        skipped: libraryRestored.skipped,
       }
     } catch (err) {
       logger.warn(`备份恢复失败: ${err.message}`)
-      return { error: `库数据恢复失败: ${err.message}`, settingsRestored: false, partial: true }
+      return {
+        error: `库数据恢复失败: ${err.message}`,
+        settingsRestored: false,
+        partial: true,
+      }
     }
   }
 
@@ -451,7 +483,9 @@ export async function importBackup(win) {
   let settingsPayload = null
   if (manifest.settings && unpacked.files['settings.json']) {
     try {
-      const parsed = JSON.parse(new TextDecoder().decode(unpacked.files['settings.json']))
+      const parsed = JSON.parse(
+        new TextDecoder().decode(unpacked.files['settings.json']),
+      )
       settingsPayload = normalizeLibrarySettings(parsed)
     } catch (err) {
       return { error: `备份中的设置数据损坏: ${err.message}` }
@@ -461,7 +495,9 @@ export async function importBackup(win) {
     const root = getCurrentRoot()
     if (root) {
       // 与库恢复一致：设置写入也需与扫描/切库互斥（V-02）
-      await runMaintenance('restore', root, () => saveLibrarySettings(root, settingsPayload))
+      await runMaintenance('restore', root, () =>
+        saveLibrarySettings(root, settingsPayload),
+      )
       logger.info(`备份中的库设置已写入当前模型库: ${root}`)
       return { settingsRestored: true }
     }

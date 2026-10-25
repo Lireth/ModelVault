@@ -65,7 +65,7 @@ export const IPC_EVENT_CHANNELS = Object.freeze([
   'models:thumbsReady',
   'models:storeError',
   'models:fsChanged',
-  'models:warmupProgress'
+  'models:warmupProgress',
 ])
 
 /**
@@ -186,26 +186,35 @@ export function validateValue(value, rule, label, depth = 1) {
       return `${label} 不接受参数`
     case 'string': {
       if (typeof value !== 'string') return `${label} 须为字符串`
-      if (rule.max && value.length > rule.max) return `${label} 长度超限（≤${rule.max}）`
+      if (rule.max && value.length > rule.max)
+        return `${label} 长度超限（≤${rule.max}）`
       return ''
     }
     case 'boolean':
       return typeof value === 'boolean' ? '' : `${label} 须为布尔值`
     case 'int': {
       if (!Number.isInteger(value)) return `${label} 须为整数`
-      if (rule.min !== undefined && value < rule.min) return `${label} 超出允许范围`
-      if (rule.max !== undefined && value > rule.max) return `${label} 超出允许范围`
+      if (rule.min !== undefined && value < rule.min)
+        return `${label} 超出允许范围`
+      if (rule.max !== undefined && value > rule.max)
+        return `${label} 超出允许范围`
       return ''
     }
     case 'array': {
       if (!Array.isArray(value)) return `${label} 须为数组`
-      if (depth > DEFAULT_MAX_DEPTH) return `${label} 嵌套层级超限（≤${DEFAULT_MAX_DEPTH}）`
+      if (depth > DEFAULT_MAX_DEPTH)
+        return `${label} 嵌套层级超限（≤${DEFAULT_MAX_DEPTH}）`
       // 未声明 max 时取全局默认上限（显式声明始终优先，可大于默认值）
       const maxItems = rule.max ?? DEFAULT_MAX_ARRAY_ITEMS
       if (value.length > maxItems) return `${label} 数量超限（≤${maxItems}）`
       if (rule.items) {
         for (let i = 0; i < value.length; i++) {
-          const err = validateValue(value[i], rule.items, `${label}[${i}]`, depth + 1)
+          const err = validateValue(
+            value[i],
+            rule.items,
+            `${label}[${i}]`,
+            depth + 1,
+          )
           if (err) return err
         }
       } else {
@@ -218,8 +227,10 @@ export function validateValue(value, rule, label, depth = 1) {
       return ''
     }
     case 'object': {
-      if (typeof value !== 'object' || Array.isArray(value)) return `${label} 须为对象`
-      if (depth > DEFAULT_MAX_DEPTH) return `${label} 嵌套层级超限（≤${DEFAULT_MAX_DEPTH}）`
+      if (typeof value !== 'object' || Array.isArray(value))
+        return `${label} 须为对象`
+      if (depth > DEFAULT_MAX_DEPTH)
+        return `${label} 嵌套层级超限（≤${DEFAULT_MAX_DEPTH}）`
       const keys = Object.keys(value)
       // 未声明 max 时取全局默认上限（显式声明始终优先，可大于默认值）
       const maxKeys = rule.max ?? DEFAULT_MAX_OBJECT_KEYS
@@ -231,7 +242,7 @@ export function validateValue(value, rule, label, depth = 1) {
             value[name],
             child,
             label ? `${label}.${name}` : name,
-            depth + 1
+            depth + 1,
           )
           if (err) return err
         }
@@ -247,7 +258,7 @@ export function validateValue(value, rule, label, depth = 1) {
             const err = validateOpaque(
               value[key],
               label ? `${label}.${key}` : key,
-              depth + 1
+              depth + 1,
             )
             if (err) return err
           }
@@ -255,7 +266,11 @@ export function validateValue(value, rule, label, depth = 1) {
       } else {
         // 无 fields 规则（如 saveModelData.params）：值全量按默认上限兜底
         for (const key of keys) {
-          const err = validateOpaque(value[key], label ? `${label}.${key}` : key, depth + 1)
+          const err = validateOpaque(
+            value[key],
+            label ? `${label}.${key}` : key,
+            depth + 1,
+          )
           if (err) return err
         }
       }
@@ -286,8 +301,8 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'app:reportError': vObj({
     fields: {
       message: vStr({ max: 4000 }),
-      stack: vStr({ max: 8000 })
-    }
+      stack: vStr({ max: 8000 }),
+    },
   }),
   'app:checkUpdate': vVoid(),
   // F-6：URL 由主进程检查更新链路提供，渲染层不传任何参数
@@ -298,14 +313,14 @@ export const IPC_PAYLOAD_SCHEMAS = {
   // FN-05：诊断包导出（报告 + 最近日志 → zip），范围与内容固定，无渲染层入参
   'app:exportDiagnostics': vVoid(),
   'window:setTheme': vObj({
-    fields: { theme: vStr({ required: true, max: 32 }) }
+    fields: { theme: vStr({ required: true, max: 32 }) },
   }),
 
   // ---------- 存储域 ----------
   'models:loadStore': vVoid(),
   // F1：按路径打开已保存模型库（优先返回本地索引）
   'models:openLibrary': vObj({
-    fields: { folder: vStr({ required: true, max: 1000 }) }
+    fields: { folder: vStr({ required: true, max: 1000 }) },
   }),
   'models:chooseFolder': vVoid(),
   // FN-01：跨库存储总览（只读聚合，无渲染层入参）
@@ -358,29 +373,32 @@ export const IPC_PAYLOAD_SCHEMAS = {
             showFavoritesOnly: vBool(),
             showDuplicatesOnly: vBool(),
             sortBy: vStr({ max: 16 }),
-            sortAsc: vBool()
-          }
-        })
-      })
-    }
+            sortAsc: vBool(),
+          },
+        }),
+      }),
+    },
   }),
 
   // ---------- 扫描域 ----------
   'models:scan': vObj({
-    fields: { folder: vStr({ max: 1000 }) }
+    fields: { folder: vStr({ max: 1000 }) },
   }),
   'models:partialScan': vObj({
     fields: {
       folder: vStr({ max: 1000 }),
       // 子树语义校验（逃逸段/反斜杠）与超限收敛在 handler（shared/scan-dirs）；
       // 此处只设防御性硬上限，避免超大 payload 进入结构化克隆
-      dirs: vArr({ max: MAX_PARTIAL_SCAN_DIRS_INPUT, items: vStr({ max: 1000 }) })
-    }
+      dirs: vArr({
+        max: MAX_PARTIAL_SCAN_DIRS_INPUT,
+        items: vStr({ max: 1000 }),
+      }),
+    },
   }),
   'models:cancelScan': vVoid(),
   // F2：外部模型导入（复制/移动入台），mode 枚举语义在 handler
   'models:importModels': vObj({
-    fields: { mode: vStr({ required: true, max: 16 }) }
+    fields: { mode: vStr({ required: true, max: 16 }) },
   }),
 
   // ---------- 元数据域 ----------
@@ -393,8 +411,8 @@ export const IPC_PAYLOAD_SCHEMAS = {
       subCategory: vStr({ max: 64 }),
       triggerWords: vStr({ max: 4000 }),
       // params 允许显式 null（清空语义）；字段级数值/字符串规范化在 store-meta
-      params: vObj({ max: 30, nullable: true })
-    }
+      params: vObj({ max: 30, nullable: true }),
+    },
   }),
   // O9：类型在 schema fail-fast；取值范围（rating 0-5）与空更新语义仍由
   // handler 产出专属文案（既有测试锁定）
@@ -403,8 +421,8 @@ export const IPC_PAYLOAD_SCHEMAS = {
       id: ID,
       favorite: vBool(),
       nsfw: vBool(),
-      rating: vInt()
-    }
+      rating: vInt(),
+    },
   }),
   'models:popupMenu': vObj({ fields: { id: ID } }),
   // F-3 跨库传输：ids 为当前库内模型路径；targetRoot 必须是已保存的其他
@@ -415,35 +433,35 @@ export const IPC_PAYLOAD_SCHEMAS = {
     fields: {
       ids: vArr({ required: true, max: 500, items: vStr({ max: 1000 }) }),
       targetRoot: vStr({ required: true, max: 1000 }),
-      mode: vStr({ required: true, max: 8 })
-    }
+      mode: vStr({ required: true, max: 8 }),
+    },
   }),
   // 自由标签（F-5）：整体覆写语义；逐项去重/截断规范化在 store-meta
   'models:setModelTags': vObj({
     fields: {
       id: ID,
-      tags: vArr({ required: true, max: 20, items: vStr({ max: 32 }) })
-    }
+      tags: vArr({ required: true, max: 20, items: vStr({ max: 32 }) }),
+    },
   }),
   // 全库标签管理（F4）：重命名/合并与移除；长度上限与 normalizeTags 截断一致
   'models:renameTag': vObj({
     fields: {
       from: vStr({ required: true, max: 32 }),
-      to: vStr({ required: true, max: 32 })
-    }
+      to: vStr({ required: true, max: 32 }),
+    },
   }),
   'models:removeTag': vObj({
-    fields: { tag: vStr({ required: true, max: 32 }) }
+    fields: { tag: vStr({ required: true, max: 32 }) },
   }),
 
   // ---------- 封面域 ----------
   'models:uploadCover': vObj({ fields: { id: ID } }),
   'models:pasteCover': vObj({ fields: { id: ID } }),
   'models:setDefaultCover': vObj({
-    fields: { id: ID, cover: vStr({ max: 1000 }) }
+    fields: { id: ID, cover: vStr({ max: 1000 }) },
   }),
   'models:deleteCover': vObj({
-    fields: { id: ID, cover: vStr({ max: 1000 }) }
+    fields: { id: ID, cover: vStr({ max: 1000 }) },
   }),
   'models:clearCovers': vObj({ fields: { id: ID } }),
   'models:clearAllCovers': vVoid(), // 无 payload，清空范围以当前库为界
@@ -451,7 +469,7 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'models:checkHealth': vVoid(),
   'models:repairHealth': vVoid(),
   'models:importCover': vObj({
-    fields: { id: ID, path: vStr({ max: 2000 }) }
+    fields: { id: ID, path: vStr({ max: 2000 }) },
   }),
 
   // ---------- 备份域 ----------
@@ -459,8 +477,8 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'models:exportBackup': vObj({
     fields: {
       mode: vStr({ max: 16 }),
-      ids: vArr({ max: 20000, items: vStr({ max: 2000 }) })
-    }
+      ids: vArr({ max: 20000, items: vStr({ max: 2000 }) }),
+    },
   }),
   'models:importBackup': vVoid(),
 
@@ -470,21 +488,21 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'models:exportModelList': vObj({
     fields: {
       format: vStr({ required: true, max: 16 }),
-      content: vStr({ required: true, max: 16 * 1024 * 1024 })
-    }
+      content: vStr({ required: true, max: 16 * 1024 * 1024 }),
+    },
   }),
 
   // ---------- 文件操作域 ----------
   'models:deleteModel': vObj({ fields: { id: ID } }),
   'models:reveal': vObj({
-    fields: { path: vStr({ max: 2000 }) }
+    fields: { path: vStr({ max: 2000 }) },
   }),
   'models:toggleDisabled': vObj({
-    fields: { id: ID, disabled: vBool() }
+    fields: { id: ID, disabled: vBool() },
   }),
   // N1：模型文件重命名（name 为不含扩展名的新文件名；扩展名由 handler 保留）
   'models:renameModel': vObj({
-    fields: { id: ID, name: vStr({ required: true, max: 120 }) }
+    fields: { id: ID, name: vStr({ required: true, max: 120 }) },
   }),
   'models:moveModelTo': vObj({ fields: { id: ID } }),
   'models:organizeByTags': vObj({
@@ -494,10 +512,10 @@ export const IPC_PAYLOAD_SCHEMAS = {
         // 条目宽松：缺 id/非法标签的条目由 handler 逐项跳过（批量语义）
         items: vObj({
           max: 8,
-          fields: { id: vStr({ max: 2000 }), subCategory: vStr({ max: 64 }) }
-        })
-      })
-    }
+          fields: { id: vStr({ max: 2000 }), subCategory: vStr({ max: 64 }) },
+        }),
+      }),
+    },
   }),
 
   // ---------- Civitai 域 ----------
@@ -511,11 +529,11 @@ export const IPC_PAYLOAD_SCHEMAS = {
       // downloadCivitaiImage 内校验，此处只查类型与长度
       images: vArr({
         max: 20,
-        items: vObj({ max: 4, fields: { url: vStr({ max: 2000 }) } })
-      })
-    }
+        items: vObj({ max: 4, fields: { url: vStr({ max: 2000 }) } }),
+      }),
+    },
   }),
-  'models:warmupHash': vObj({ fields: { id: ID } })
+  'models:warmupHash': vObj({ fields: { id: ID } }),
 }
 
 /**

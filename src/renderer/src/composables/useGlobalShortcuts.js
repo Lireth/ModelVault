@@ -9,7 +9,7 @@ import {
   toast,
   toggleFavorite,
   toggleMultiSelectMode,
-  toggleSelectAllFiltered
+  toggleSelectAllFiltered,
 } from '../store/appStore'
 
 /**
@@ -59,7 +59,8 @@ export function useGlobalShortcuts(searchFieldEl, clearSearch) {
     }
 
     // 输入态保留原生编辑行为；确认层/面板打开时整键让位（F1 独占策略）
-    if (isEditableTarget(e) || state.confirm.visible || isOverlayPanelOpen()) return
+    if (isEditableTarget(e) || state.confirm.visible || isOverlayPanelOpen())
+      return
 
     const detailOpen = state.selectedId !== null
 
@@ -103,14 +104,23 @@ export function useGlobalShortcuts(searchFieldEl, clearSearch) {
       return
     }
 
-    if (ctrl && key === 'd' && state.multiSelect.active && state.multiSelect.ids.length > 0) {
+    if (
+      ctrl &&
+      key === 'd' &&
+      state.multiSelect.active &&
+      state.multiSelect.ids.length > 0
+    ) {
       e.preventDefault()
       batchFavorite(true)
       return
     }
 
     // Delete 仅在多选且有选中时触发（批量删除自带确认层，不会直接删文件）
-    if (e.key === 'Delete' && state.multiSelect.active && state.multiSelect.ids.length > 0) {
+    if (
+      e.key === 'Delete' &&
+      state.multiSelect.active &&
+      state.multiSelect.ids.length > 0
+    ) {
       e.preventDefault()
       batchDeleteModels()
     }

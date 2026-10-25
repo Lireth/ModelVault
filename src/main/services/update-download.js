@@ -41,7 +41,7 @@ const ALLOWED_UPDATE_HOSTS = new Set([
   'github.com',
   'objects.githubusercontent.com',
   'release-assets.githubusercontent.com',
-  'github-releases.githubusercontent.com'
+  'github-releases.githubusercontent.com',
 ])
 /** 重定向跟随上限（V-06：每一跳重新校验主机） */
 const MAX_REDIRECTS = 5
@@ -61,7 +61,10 @@ const SIGNATURE_CHECK_TIMEOUT_MS = 20000
  */
 const BUILD_SIGNER_THUMBPRINT = /** @type {string} */ (
   // @ts-ignore 构建期常量：release CI 经 Vite define 注入该全局标识符，类型层面不声明
-  typeof __MODELVAULT_SIGNER_THUMBPRINT__ === 'string' ? __MODELVAULT_SIGNER_THUMBPRINT__ : ''
+  typeof __MODELVAULT_SIGNER_THUMBPRINT__ === 'string'
+    ? // @ts-ignore 同一构建期全局标识符的条件分支引用
+      __MODELVAULT_SIGNER_THUMBPRINT__
+    : ''
 )
 
 /** 测试钩子：替换 PowerShell 查询结果（避免单测依赖真实证书/系统命令） */
@@ -94,7 +97,13 @@ export function isSafeUpdateVersion(version) {
 
 /** 是否为需要跟随的 HTTP 重定向状态 */
 function isRedirectStatus(status) {
-  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308
+  return (
+    status === 301 ||
+    status === 302 ||
+    status === 303 ||
+    status === 307 ||
+    status === 308
+  )
 }
 
 /** Electron 网络栈对 fetch manual 重定向不支持时的特征错误 */
@@ -110,7 +119,10 @@ function isRedirectCancelledError(err) {
 function isAllowedUpdateHost(url) {
   try {
     const parsed = new URL(String(url))
-    return parsed.protocol === 'https:' && ALLOWED_UPDATE_HOSTS.has(parsed.hostname.toLowerCase())
+    return (
+      parsed.protocol === 'https:' &&
+      ALLOWED_UPDATE_HOSTS.has(parsed.hostname.toLowerCase())
+    )
   } catch {
     return false
   }
@@ -143,7 +155,7 @@ function probeRedirectTarget(url, options) {
       url,
       redirect: 'manual',
       useSessionCookies: false,
-      headers: headersRecord
+      headers: headersRecord,
     })
     let settled = false
     const finish = (ok, value) => {
@@ -159,17 +171,20 @@ function probeRedirectTarget(url, options) {
       }
       return headers
     }
-    request.on('redirect', (statusCode, _method, redirectUrl, responseHeaders) => {
-      const headers = headersOf(responseHeaders)
-      // ClientRequest 的取消方法是 abort（无 cancel/destroy；用可选链防御
-      // Electron 版本 API 差异，避免事件处理器内抛错演变成主进程致命错误）
-      request.abort?.()
-      finish(true, {
-        status: statusCode,
-        location: headers.get('location') || redirectUrl || '',
-        headers
-      })
-    })
+    request.on(
+      'redirect',
+      (statusCode, _method, redirectUrl, responseHeaders) => {
+        const headers = headersOf(responseHeaders)
+        // ClientRequest 的取消方法是 abort（无 cancel/destroy；用可选链防御
+        // Electron 版本 API 差异，避免事件处理器内抛错演变成主进程致命错误）
+        request.abort?.()
+        finish(true, {
+          status: statusCode,
+          location: headers.get('location') || redirectUrl || '',
+          headers,
+        })
+      },
+    )
     request.on('response', (incoming) => {
       // 未发 redirect 事件直接拿到响应（3xx 且无跳转目标等）：按终态返回空体
       // （IncomingMessage 无 destroy 方法，经 request.abort 中止 body 传输）
@@ -177,7 +192,7 @@ function probeRedirectTarget(url, options) {
       finish(true, {
         status: incoming.statusCode || 0,
         location: '',
-        headers: headersOf(incoming.headers)
+        headers: headersOf(incoming.headers),
       })
     })
     request.on('error', (err) => finish(false, err))
@@ -188,10 +203,14 @@ function probeRedirectTarget(url, options) {
         finish(false, new DOMException('已终止', 'AbortError'))
         return
       }
-      signal.addEventListener('abort', () => {
-        request.abort?.()
-        finish(false, new DOMException('已终止', 'AbortError'))
-      }, { once: true })
+      signal.addEventListener(
+        'abort',
+        () => {
+          request.abort?.()
+          finish(false, new DOMException('已终止', 'AbortError'))
+        },
+        { once: true },
+      )
     }
     request.end()
   })
@@ -221,7 +240,10 @@ export async function fetchAllowedUpdateUrl(url, options) {
       const probe = await probeRedirectTarget(current, options)
       // 无跳转目标的 3xx 按终态响应处理（调用方按非 ok 分支报错，与
       // 规范的 manual 语义一致；body 恒为空——3xx 本就无有效载荷）
-      response = new Response('', { status: probe.status, headers: probe.headers })
+      response = new Response('', {
+        status: probe.status,
+        headers: probe.headers,
+      })
     }
     if (!isRedirectStatus(response.status)) return response
     const location = response.headers.get('location')
@@ -258,7 +280,7 @@ export function findUpdateAssets(data, latest) {
   return {
     downloadUrl: exe.browser_download_url,
     checksumUrl: sum.browser_download_url,
-    size: Number.isFinite(size) && size > 0 ? size : 0
+    size: Number.isFinite(size) && size > 0 ? size : 0,
   }
 }
 
@@ -311,7 +333,9 @@ async function updateHashFromFile(hash, filePath) {
 
 /** 证书指纹规范化：去分隔符并统一大写（Get-AuthenticodeSignature 输出带空格） */
 export function normalizeThumbprint(value) {
-  return String(value || '').replace(/[^a-fA-F0-9]/g, '').toUpperCase()
+  return String(value || '')
+    .replace(/[^a-fA-F0-9]/g, '')
+    .toUpperCase()
 }
 
 /** 当前签名者指纹原始值：测试覆盖 > 运行期环境变量 > 构建期注入 */
@@ -320,7 +344,7 @@ function signerThumbprintSetting() {
     signerThumbprintOverride ||
       process.env.MODELVAULT_SIGNER_THUMBPRINT ||
       BUILD_SIGNER_THUMBPRINT ||
-      ''
+      '',
   ).trim()
 }
 
@@ -335,21 +359,33 @@ function signerThumbprintSetting() {
  */
 export function evaluateUpdateSignature(info, expectedThumbprint) {
   if (!info) {
-    return { ok: false, required: true, error: '无法读取更新包数字签名（PowerShell 不可用或超时）' }
+    return {
+      ok: false,
+      required: true,
+      error: '无法读取更新包数字签名（PowerShell 不可用或超时）',
+    }
   }
   const status = String(info.status || 'Unknown')
   if (status !== 'Valid') {
-    return { ok: false, required: true, error: `更新包数字签名无效（${status}）` }
+    return {
+      ok: false,
+      required: true,
+      error: `更新包数字签名无效（${status}）`,
+    }
   }
   const thumbprint = normalizeThumbprint(info.thumbprint)
   if (!thumbprint || thumbprint !== expectedThumbprint) {
-    return { ok: false, required: true, error: '更新包签名者与预期发布者不一致' }
+    return {
+      ok: false,
+      required: true,
+      error: '更新包签名者与预期发布者不一致',
+    }
   }
   return {
     ok: true,
     required: true,
     thumbprint,
-    subject: typeof info.subject === 'string' ? info.subject : ''
+    subject: typeof info.subject === 'string' ? info.subject : '',
   }
 }
 
@@ -397,13 +433,13 @@ function queryAuthenticode(filePath) {
           '-ExecutionPolicy',
           'Bypass',
           '-Command',
-          AUTHENTICODE_QUERY_SCRIPT
+          AUTHENTICODE_QUERY_SCRIPT,
         ],
         {
           windowsHide: true,
           stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env, MODELVAULT_VERIFY_PATH: filePath }
-        }
+          env: { ...process.env, MODELVAULT_VERIFY_PATH: filePath },
+        },
       )
     } catch {
       finish(null)
@@ -438,12 +474,15 @@ function queryAuthenticode(filePath) {
     child.stderr?.on('data', (chunk) => {
       stderrTail = (stderrTail + chunk.toString()).slice(-2048)
     })
-    const recentStderr = () => stderrTail.trim().replace(/\s+/g, ' ').slice(0, 300)
+    const recentStderr = () =>
+      stderrTail.trim().replace(/\s+/g, ' ').slice(0, 300)
     child.once('error', () => finish(null))
     child.once('exit', (code) => {
       if (code !== 0) {
         if (stderrTail) {
-          logger.warn(`PowerShell 验签异常退出（code ${code}）: ${recentStderr()}`)
+          logger.warn(
+            `PowerShell 验签异常退出（code ${code}）: ${recentStderr()}`,
+          )
         }
         finish(null)
         return
@@ -494,7 +533,7 @@ export async function verifyUpdateSignature(filePath) {
     return {
       ok: false,
       required: true,
-      error: `更新包验签失败: ${err instanceof Error ? err.message : String(err)}`
+      error: `更新包验签失败: ${err instanceof Error ? err.message : String(err)}`,
     }
   }
 }
@@ -547,14 +586,17 @@ export async function downloadUpdatePackage(onProgress) {
     let expected
     try {
       const res = await fetchAllowedUpdateUrl(checksumUrl, {
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       })
       if (!res.ok) return { error: `校验和下载失败（HTTP ${res.status}）` }
       expected = parseChecksumHash(
-        await readResponseTextLimited(res, MAX_CHECKSUM_BYTES, '校验和文件')
+        await readResponseTextLimited(res, MAX_CHECKSUM_BYTES, '校验和文件'),
       )
     } catch (err) {
-      if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      if (
+        err instanceof Error &&
+        (err.name === 'TimeoutError' || err.name === 'AbortError')
+      ) {
         return { error: '校验和下载超时，请检查网络后重试' }
       }
       return { error: `校验和下载失败: ${err.message}` }
@@ -563,7 +605,10 @@ export async function downloadUpdatePackage(onProgress) {
 
     // 本地已有完整包（上次下载完成但未安装）：哈希命中且验签通过才复用
     try {
-      if ((await fsp.stat(target)).isFile() && (await hashFile(target)) === expected) {
+      if (
+        (await fsp.stat(target)).isFile() &&
+        (await hashFile(target)) === expected
+      ) {
         const signature = await verifyUpdateSignature(target)
         if (signature.ok) {
           downloadedFile = target
@@ -609,7 +654,7 @@ export async function downloadUpdatePackage(onProgress) {
     let writeFlag = resumeFrom > 0 ? 'a' : 'w'
     const response = await fetchAllowedUpdateUrl(downloadUrl, {
       signal: downloadAbort.signal,
-      ...(resumeFrom > 0 ? { headers: { Range: `bytes=${resumeFrom}-` } } : {})
+      ...(resumeFrom > 0 ? { headers: { Range: `bytes=${resumeFrom}-` } } : {}),
     })
     if (resumeFrom > 0 && response.status === 416) {
       await fsp.rm(partPath, { force: true }).catch(() => {})
@@ -635,7 +680,10 @@ export async function downloadUpdatePackage(onProgress) {
           ? size
           : resumeFrom + declared
         : declared || size
-    if (declared > MAX_UPDATE_BYTES || (Number.isFinite(total) && total > MAX_UPDATE_BYTES)) {
+    if (
+      declared > MAX_UPDATE_BYTES ||
+      (Number.isFinite(total) && total > MAX_UPDATE_BYTES)
+    ) {
       await fsp.rm(partPath, { force: true }).catch(() => {})
       return { error: '更新包体积异常（超过 600MB），已中止下载' }
     }
@@ -723,8 +771,13 @@ export async function installUpdatePackage() {
   if (!file) return { error: '尚未下载更新包，请先下载更新' }
   const dir = getUpdateDir()
   const resolved = path.resolve(file)
-  const inUpdateDir = resolved.toLowerCase().startsWith(`${dir.toLowerCase()}${path.sep}`)
-  if (!inUpdateDir || !/^ModelVault-\d{1,5}\.\d{1,5}\.\d{1,5}\.exe$/.test(path.basename(resolved))) {
+  const inUpdateDir = resolved
+    .toLowerCase()
+    .startsWith(`${dir.toLowerCase()}${path.sep}`)
+  if (
+    !inUpdateDir ||
+    !/^ModelVault-\d{1,5}\.\d{1,5}\.\d{1,5}\.exe$/.test(path.basename(resolved))
+  ) {
     logger.warn(`拒绝启动更新目录之外的更新包: ${resolved}`)
     return { error: '更新包路径异常，请重新下载更新' }
   }
@@ -745,7 +798,7 @@ export async function installUpdatePackage() {
     const child = spawn(resolved, [`--wait-for-pid=${process.pid}`], {
       windowsHide: true,
       detached: true,
-      stdio: 'ignore'
+      stdio: 'ignore',
     })
     child.once('error', (err) => {
       logger.warn(`更新程序启动失败: ${err.message}`)

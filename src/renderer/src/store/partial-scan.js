@@ -6,7 +6,7 @@ import {
   MAX_PARTIAL_SCAN_DIRS,
   collapseDirsToTopLevel,
   dedupeAndPruneDescendants,
-  isRelDirInScope
+  isRelDirInScope,
 } from '../../../shared/scan-dirs'
 
 /**
@@ -177,7 +177,10 @@ export async function partialScanModels(dirs) {
   }
 
   try {
-    const res = await window.api.models.partialScan({ folder: root, dirs: scanDirs })
+    const res = await window.api.models.partialScan({
+      folder: root,
+      dirs: scanDirs,
+    })
     if (res.canceled) {
       canceled = true
       return
@@ -210,7 +213,12 @@ export async function partialScanModels(dirs) {
       return
     }
     // 根 / 代际 / 数组身份三重校验（B-01）：切库或全量重扫后旧响应必须丢弃
-    if (root !== state.folder || token !== scanToken || state.models !== modelsRef) return
+    if (
+      root !== state.folder ||
+      token !== scanToken ||
+      state.models !== modelsRef
+    )
+      return
     // 全量扫描在途：其结果将整体覆盖列表，此时合并局部结果没有意义
     if (state.scanning) return
 
@@ -238,13 +246,15 @@ export async function partialScanModels(dirs) {
     replaceModels(untouched.concat(incoming))
     state.lastScan = {
       count: state.models.length,
-      durationMs: res.durationMs
+      durationMs: res.durationMs,
     }
 
     // 联动收敛：多选选区与打开的详情若指向已消失模型，同步清理
     if (state.multiSelect.ids.length > 0) {
       const removedSet = new Set(removedIds)
-      state.multiSelect.ids = state.multiSelect.ids.filter((id) => !removedSet.has(id))
+      state.multiSelect.ids = state.multiSelect.ids.filter(
+        (id) => !removedSet.has(id),
+      )
     }
     if (state.selectedId && removedIds.includes(state.selectedId)) {
       state.selectedId = null

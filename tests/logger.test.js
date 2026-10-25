@@ -68,7 +68,9 @@ describe('logger 单日体积上限（O-2）', () => {
     await flushStream()
     const main = path.join(logDir, `modelvault-${todayStr()}.log`)
     expect(fs.readFileSync(main, 'utf8')).toContain('常规日志')
-    expect(fs.existsSync(path.join(logDir, `modelvault-${todayStr()}.1.log`))).toBe(false)
+    expect(
+      fs.existsSync(path.join(logDir, `modelvault-${todayStr()}.1.log`)),
+    ).toBe(false)
   })
 
   it('主文件已达上限时滚动到当日分片，并保留本次日志', async () => {
@@ -96,7 +98,9 @@ describe('logger 单日体积上限（O-2）', () => {
     await flushStream()
 
     expect(fs.readdirSync(logDir).length).toBe(before)
-    const warned = consoleError.mock.calls.some((c) => String(c[0]).includes('单日体积上限'))
+    const warned = consoleError.mock.calls.some((c) =>
+      String(c[0]).includes('单日体积上限'),
+    )
     expect(warned).toBe(true)
   })
 
@@ -117,7 +121,7 @@ describe('logger 单日体积上限（O-2）', () => {
     for (const name of [
       `modelvault-${staleDate}.log`,
       `modelvault-${staleDate}.1.log`,
-      `modelvault-${staleDate}.2.log`
+      `modelvault-${staleDate}.2.log`,
     ]) {
       fs.writeFileSync(path.join(logDir, name), 'old')
     }
@@ -133,8 +137,12 @@ describe('logger 单日体积上限（O-2）', () => {
     for (let i = 0; i < 40 && fs.existsSync(staleShard); i++) {
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
-    expect(fs.existsSync(path.join(logDir, `modelvault-${staleDate}.log`))).toBe(false)
+    expect(
+      fs.existsSync(path.join(logDir, `modelvault-${staleDate}.log`)),
+    ).toBe(false)
     expect(fs.existsSync(staleShard)).toBe(false)
-    expect(fs.existsSync(path.join(logDir, `modelvault-${staleDate}.2.log`))).toBe(false)
+    expect(
+      fs.existsSync(path.join(logDir, `modelvault-${staleDate}.2.log`)),
+    ).toBe(false)
   })
 })

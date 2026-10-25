@@ -17,7 +17,7 @@ const props = defineProps({
   covers: { type: Array, required: true }, // [{ rel, path, url }]
   defaultPath: { type: String, default: '' },
   initialIndex: { type: Number, default: 0 },
-  busy: { type: Boolean, default: false }
+  busy: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['close', 'set-default', 'delete'])
@@ -25,10 +25,15 @@ const emit = defineEmits(['close', 'set-default', 'delete'])
 /* ---------------- 当前图片与切换 ---------------- */
 
 const index = ref(
-  Math.min(Math.max(0, props.initialIndex), Math.max(0, props.covers.length - 1))
+  Math.min(
+    Math.max(0, props.initialIndex),
+    Math.max(0, props.covers.length - 1),
+  ),
 )
 const current = computed(() => props.covers[index.value] || null)
-const isDefault = computed(() => current.value !== null && current.value.path === props.defaultPath)
+const isDefault = computed(
+  () => current.value !== null && current.value.path === props.defaultPath,
+)
 
 /** 加载失败的图片 path（展示失效占位，不阻断切换浏览） */
 const failedPaths = ref(new Set())
@@ -59,9 +64,10 @@ watch(
       emit('close')
       return
     }
-    if (index.value >= props.covers.length) index.value = props.covers.length - 1
+    if (index.value >= props.covers.length)
+      index.value = props.covers.length - 1
     preloadAround()
-  }
+  },
 )
 
 /** 预加载相邻图片（本地文件加载快，但多 MB 原图解码仍需时间） */
@@ -111,7 +117,7 @@ function stagePoint(e) {
   if (!rect) return { cx: 0, cy: 0 }
   return {
     cx: e.clientX - (rect.left + rect.width / 2),
-    cy: e.clientY - (rect.top + rect.height / 2)
+    cy: e.clientY - (rect.top + rect.height / 2),
   }
 }
 
@@ -261,44 +267,140 @@ onBeforeUnmount(() => {
       <!-- 顶部：索引 + 关闭 -->
       <div class="gallery-top">
         <span class="gallery-index">{{ index + 1 }} / {{ covers.length }}</span>
-        <button class="gallery-btn gallery-close" title="关闭（Esc）" aria-label="关闭画廊" @click="emit('close')">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+        <button
+          class="gallery-btn gallery-close"
+          title="关闭（Esc）"
+          aria-label="关闭画廊"
+          @click="emit('close')"
+        >
+          <svg
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            aria-hidden="true"
+          >
+            <path d="M4 4l8 8M12 4l-8 8" />
+          </svg>
         </button>
       </div>
 
       <!-- 左右切换（多图时） -->
       <template v-if="covers.length > 1">
-        <button class="gallery-btn gallery-nav prev" title="上一张（←）" aria-label="上一张" @click="go(-1)">
-          <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3L5 8l5 5" /></svg>
+        <button
+          class="gallery-btn gallery-nav prev"
+          title="上一张（←）"
+          aria-label="上一张"
+          @click="go(-1)"
+        >
+          <svg
+            viewBox="0 0 16 16"
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M10 3L5 8l5 5" />
+          </svg>
         </button>
-        <button class="gallery-btn gallery-nav next" title="下一张（→）" aria-label="下一张" @click="go(1)">
-          <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l5 5-5 5" /></svg>
+        <button
+          class="gallery-btn gallery-nav next"
+          title="下一张（→）"
+          aria-label="下一张"
+          @click="go(1)"
+        >
+          <svg
+            viewBox="0 0 16 16"
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M6 3l5 5-5 5" />
+          </svg>
         </button>
       </template>
 
       <!-- 底部工具栏：缩放控制 + 设默认 + 删除 -->
       <div class="gallery-toolbar">
-        <button class="gallery-btn" title="缩小（-）" aria-label="缩小" @click="zoomAt(0, 0, scale / 1.25)">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 8h10" /></svg>
+        <button
+          class="gallery-btn"
+          title="缩小（-）"
+          aria-label="缩小"
+          @click="zoomAt(0, 0, scale / 1.25)"
+        >
+          <svg
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            aria-hidden="true"
+          >
+            <path d="M3 8h10" />
+          </svg>
         </button>
-        <span class="gallery-zoom" title="滚轮缩放；双击图片在适应与 2.5 倍间切换">{{ Math.round(scale * 100) }}%</span>
-        <button class="gallery-btn" title="放大（+）" aria-label="放大" @click="zoomAt(0, 0, scale * 1.25)">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg>
+        <span
+          class="gallery-zoom"
+          title="滚轮缩放；双击图片在适应与 2.5 倍间切换"
+          >{{ Math.round(scale * 100) }}%</span
+        >
+        <button
+          class="gallery-btn"
+          title="放大（+）"
+          aria-label="放大"
+          @click="zoomAt(0, 0, scale * 1.25)"
+        >
+          <svg
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            aria-hidden="true"
+          >
+            <path d="M8 3v10M3 8h10" />
+          </svg>
         </button>
-        <button class="gallery-btn gallery-text-btn" title="复位缩放与平移（0）" @click="resetView">复位</button>
+        <button
+          class="gallery-btn gallery-text-btn"
+          title="复位缩放与平移（0）"
+          @click="resetView"
+        >
+          复位
+        </button>
         <span class="gallery-sep" aria-hidden="true"></span>
         <button
           class="gallery-btn gallery-text-btn"
           :disabled="busy || isDefault"
           :title="isDefault ? '当前已是默认显示' : '设为默认显示（D）'"
           @click="emit('set-default', current)"
-        >{{ isDefault ? '默认显示' : '设为默认' }}</button>
+        >
+          {{ isDefault ? '默认显示' : '设为默认' }}
+        </button>
         <button
           class="gallery-btn gallery-text-btn gallery-danger"
           :disabled="busy"
           title="删除这张预览图（Delete）"
           @click="emit('delete', current)"
-        >删除</button>
+        >
+          删除
+        </button>
       </div>
     </div>
   </Teleport>
@@ -361,8 +463,10 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   padding: 8px;
-  transition: background var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
 }
 
 .gallery-btn:hover:not(:disabled) {

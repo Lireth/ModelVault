@@ -17,7 +17,7 @@ vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
   BrowserWindow: Object.assign(vi.fn(), {
     fromWebContents: vi.fn(),
-    getAllWindows: vi.fn(() => [])
+    getAllWindows: vi.fn(() => []),
   }),
   clipboard: { read: vi.fn(), writeText: vi.fn() },
   dialog: { showOpenDialog: vi.fn() },
@@ -26,12 +26,20 @@ vi.mock('electron', () => ({
   shell: { trashItem: vi.fn(), showItemInFolder: vi.fn() },
   net: { fetch: vi.fn() },
   nativeImage: { createFromPath: vi.fn() },
-  protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() }
+  protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
 }))
 
 import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
-import { readLibraryIndex, writeLibraryIndex } from '../src/main/services/library-index'
-import { getModelMeta, loadData, setModelMeta, setDataRoot } from '../src/main/services/store'
+import {
+  readLibraryIndex,
+  writeLibraryIndex,
+} from '../src/main/services/library-index'
+import {
+  getModelMeta,
+  loadData,
+  setModelMeta,
+  setDataRoot,
+} from '../src/main/services/store'
 
 const roots = []
 let root
@@ -89,9 +97,9 @@ describe('models:deleteModel', () => {
           ext: '.safetensors',
           size: 1,
           mtimeMs: 1,
-          relDir: ''
-        }
-      ]
+          relDir: '',
+        },
+      ],
     })
 
     const handler = getRegisteredHandler('models:deleteModel')
@@ -103,20 +111,24 @@ describe('models:deleteModel', () => {
 
   it('无效模型标识拒绝', async () => {
     const handler = getRegisteredHandler('models:deleteModel')
-    expect(await handler(makeEvent(), { id: '' })).toEqual({ error: '无效的模型标识' })
+    expect(await handler(makeEvent(), { id: '' })).toEqual({
+      error: '无效的模型标识',
+    })
   })
 
   it('模型不在当前根目录内时拒绝', async () => {
     const outside = path.join(os.tmpdir(), 'modelvault-outside-x.safetensors')
     const handler = getRegisteredHandler('models:deleteModel')
     expect(await handler(makeEvent(), { id: outside })).toEqual({
-      error: '模型不在当前根目录内，无法删除'
+      error: '模型不在当前根目录内，无法删除',
     })
   })
 
   it('模型文件不存在时拒绝', async () => {
     const handler = getRegisteredHandler('models:deleteModel')
-    const res = await handler(makeEvent(), { id: path.join(root, 'missing.safetensors') })
+    const res = await handler(makeEvent(), {
+      id: path.join(root, 'missing.safetensors'),
+    })
     expect(res.error).toBe('模型文件不存在')
   })
 
@@ -132,7 +144,9 @@ describe('models:deleteModel', () => {
   })
 
   it('库内 junction 指向库外时拒绝删除（O6 realpath 归属）', async (ctx) => {
-    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-outside-'))
+    const outsideDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-outside-'),
+    )
     roots.push(outsideDir)
     const outsideFile = path.join(outsideDir, 'secret.safetensors')
     await fs.writeFile(outsideFile, 'x')
@@ -144,7 +158,9 @@ describe('models:deleteModel', () => {
     }
 
     const handler = getRegisteredHandler('models:deleteModel')
-    const res = await handler(makeEvent(), { id: path.join(link, 'secret.safetensors') })
+    const res = await handler(makeEvent(), {
+      id: path.join(link, 'secret.safetensors'),
+    })
 
     expect(res.error).toBe('模型不在当前根目录内，无法删除')
     expect(vi.mocked(shell.trashItem)).not.toHaveBeenCalled()
@@ -155,8 +171,13 @@ describe('models:deleteModel', () => {
 describe('models:reveal 越界校验（C6）', () => {
   it('根目录外的路径拒绝', async () => {
     const handler = getRegisteredHandler('models:reveal')
-    const outside = path.join(os.tmpdir(), 'modelvault-reveal-outside.safetensors')
-    expect(await handler(makeEvent(), { path: outside })).toEqual({ error: '无效的路径' })
+    const outside = path.join(
+      os.tmpdir(),
+      'modelvault-reveal-outside.safetensors',
+    )
+    expect(await handler(makeEvent(), { path: outside })).toEqual({
+      error: '无效的路径',
+    })
     expect(shell.showItemInFolder).not.toHaveBeenCalled()
   })
 
@@ -174,7 +195,9 @@ describe('models:reveal 越界校验（C6）', () => {
   })
 
   it('库内 junction 指向库外时拒绝定位（O6 realpath 归属）', async (ctx) => {
-    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-outside-'))
+    const outsideDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-outside-'),
+    )
     roots.push(outsideDir)
     const outsideFile = path.join(outsideDir, 'secret.safetensors')
     await fs.writeFile(outsideFile, 'x')
@@ -185,8 +208,12 @@ describe('models:reveal 越界校验（C6）', () => {
       ctx.skip()
     }
     const handler = getRegisteredHandler('models:reveal')
-    expect(await handler(makeEvent(), { path: path.join(link, 'secret.safetensors') })).toEqual({
-      error: '无效的路径'
+    expect(
+      await handler(makeEvent(), {
+        path: path.join(link, 'secret.safetensors'),
+      }),
+    ).toEqual({
+      error: '无效的路径',
     })
     expect(shell.showItemInFolder).not.toHaveBeenCalled()
   })

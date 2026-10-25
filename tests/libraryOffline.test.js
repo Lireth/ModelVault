@@ -41,7 +41,7 @@ function makeModel(id) {
     subCategory: '',
     triggerWords: '',
     coverUrl: '',
-    covers: []
+    covers: [],
   }
 }
 
@@ -78,7 +78,7 @@ describe('LibraryStates 离线分支（F1-offline）', () => {
       root: 'D:\\back-lib',
       models: [],
       errors: [],
-      durationMs: 1
+      durationMs: 1,
     })
     const wrapper = mount(LibraryStates)
     await wrapper.findAll('.offline-actions button').at(1).trigger('click')
@@ -118,7 +118,7 @@ describe('App 离线横幅（F1-offline）', () => {
     window.api.models.loadStore.mockResolvedValue({
       settings: { modelsFolder: 'D:\\gone-lib', autoScan: false },
       folderMissing: true,
-      rootStatuses: [{ folder: 'D:\\gone-lib', exists: false }]
+      rootStatuses: [{ folder: 'D:\\gone-lib', exists: false }],
     })
     const wrapper = mount(App)
     await flushPromises()
@@ -126,7 +126,10 @@ describe('App 离线横幅（F1-offline）', () => {
     const banner = wrapper.find('.offline-bar')
     expect(banner.exists()).toBe(true)
     expect(banner.text()).toContain('D:\\gone-lib')
-    expect(banner.findAll('button').map((b) => b.text())).toEqual(['重新定位', '重试'])
+    expect(banner.findAll('button').map((b) => b.text())).toEqual([
+      '重新定位',
+      '重试',
+    ])
     expect(wrapper.find('.scan-error-bar').exists()).toBe(false)
     // 两种离线形态都隐藏工具栏
     expect(wrapper.findComponent(LibraryToolbar).exists()).toBe(false)
@@ -142,7 +145,7 @@ describe('App 离线横幅（F1-offline）', () => {
     window.api.models.loadStore.mockResolvedValue({
       settings: { modelsFolder: 'D:\\lib', autoScan: false },
       folderMissing: false,
-      rootStatuses: [{ folder: 'D:\\lib', exists: true }]
+      rootStatuses: [{ folder: 'D:\\lib', exists: true }],
     })
     const wrapper = mount(App)
     await flushPromises()
@@ -160,13 +163,13 @@ describe('App 离线横幅（F1-offline）', () => {
     window.api.models.loadStore.mockResolvedValue({
       settings: { modelsFolder: 'D:\\back-lib', autoScan: false },
       folderMissing: true,
-      rootStatuses: []
+      rootStatuses: [],
     })
     window.api.models.scan.mockResolvedValue({
       root: 'D:\\back-lib',
       models: [makeModel('D:\\back-lib\\a.safetensors')],
       errors: [],
-      durationMs: 1
+      durationMs: 1,
     })
     const wrapper = mount(App)
     await flushPromises()
