@@ -205,7 +205,9 @@ export const state = shallowReactive({
   // 多选批量操作（E4/E6）：ids 为选中模型 id 数组；busy 表示批量 IPC
   // 批量提交进行中（B6），期间按钮禁用、防连点重复提交；
   // progress 为长耗时批量操作（批量识别/取示例图）的逐个进度文案，空串回退「处理中…」；
-  // cancelRequested 为用户请求取消当前串行批量（Esc 触发），串行循环每轮检查后提前收尾
+  // cancelRequested 为用户请求取消当前串行批量（Esc 触发），串行循环每轮检查后
+  // 提前收尾；所有批量操作（含不响应取消的并发型）结束时在 finally 统一复位，
+  // 保证标志位生命周期与批量执行严格重合（A3：防跨批量泄漏）
   multiSelect: reactive({
     active: false,
     ids: [],

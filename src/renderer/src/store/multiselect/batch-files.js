@@ -67,6 +67,7 @@ export async function batchOrganizeByTags() {
     else toast('info', `未移动任何模型：${parts.join('，') || '无需移动'}`)
   } finally {
     state.multiSelect.busy = false
+    state.multiSelect.cancelRequested = false
   }
 }
 
@@ -122,6 +123,7 @@ export async function batchApplyTriggers() {
       toast('warn', `触发词填入完成：成功 ${ok} 个，失败 ${fail} 个${suffix}`)
   } finally {
     state.multiSelect.busy = false
+    state.multiSelect.cancelRequested = false
   }
 }
 
@@ -212,5 +214,6 @@ export async function batchDeleteModels() {
     else toast('warn', `删除完成：成功 ${ok} 个，失败 ${fail} 个`)
   } finally {
     state.multiSelect.busy = false
+    state.multiSelect.cancelRequested = false
   }
 }

@@ -1916,6 +1916,56 @@ describe('批量取消（Esc 请求取消，串行批量提前收尾）', () => 
       'https://civitai.com/models/x',
     )
   })
+
+  it('并发批量（批量收藏）进行中请求取消：批量照常完成，结束后标志位复位（A3）', async () => {
+    state.models = [makeModel('a'), makeModel('b')]
+    state.multiSelect.ids = ['a', 'b']
+    state.multiSelect.busy = false
+    api.models.setMetaFlags.mockImplementation(async () => {
+      requestBatchCancel() // 并发型批量进行中按 Esc：置位但不响应
+      return { meta: { favorite: true, nsfw: false, rating: 0 } }
+    })
+
+    await batchFavorite(true)
+
+    expect(api.models.setMetaFlags).toHaveBeenCalledTimes(2)
+    // finally 统一复位：取消意图不得跨批量泄漏（A3 毒化根因）
+    expect(state.multiSelect.cancelRequested).toBe(false)
+  })
+
+  it('并发批量期间 Esc 不毒化后续串行批量（A3 回归）', async () => {
+    state.models = [makeModel('a'), makeModel('b')]
+    state.multiSelect.ids = ['a', 'b']
+    api.models.setMetaFlags.mockImplementation(async () => {
+      requestBatchCancel()
+      return { meta: { favorite: true, nsfw: false, rating: 0 } }
+    })
+    await batchFavorite(true)
+
+    // 修复前：遗留的 cancelRequested 使禁用批量首轮即收尾（「已取消（完成 0/2）」）
+    state.scanning = true // 跳过禁用后的整表重扫（该链路由 scanner/watcher 测试覆盖）
+    api.models.toggleDisabled.mockResolvedValue({ ok: true })
+    await batchToggleDisabled(true)
+
+    expect(api.models.toggleDisabled).toHaveBeenCalledTimes(2)
+    expect(state.toasts.some((t) => t.text.includes('已禁用 2 个模型'))).toBe(
+      true,
+    )
+  })
+
+  it('批量删除（并发型）进行中请求取消：照常完成且结束后标志位复位（A3）', async () => {
+    state.models = [makeModel('a'), makeModel('b')]
+    state.multiSelect.ids = ['a', 'b']
+    state.multiSelect.busy = false
+    api.models.deleteModel.mockResolvedValue({ ok: true })
+    const p = batchDeleteModels()
+    acceptConfirm() // 确认层通过后进入并发删除
+    requestBatchCancel() // 删除进行中按 Esc（置位但不响应）
+    await p
+
+    expect(api.models.deleteModel).toHaveBeenCalledTimes(2)
+    expect(state.multiSelect.cancelRequested).toBe(false)
+  })
 })
 
 describe('启动引导态（B8）', () => {

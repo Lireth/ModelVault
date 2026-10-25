@@ -184,7 +184,8 @@ export function selectRedundantDuplicates() {
  * 请求取消当前进行中的批量操作：仅 busy 期间生效，串行批量循环
  * （识别/示例图/禁用）每轮顶部检查后提前收尾；并发型批量
  * （收藏/评分等 Promise.allSettled）无中途取消点，不受影响。
- * 标志位由各批量操作的 finally 统一复位。
+ * 标志位由「所有」批量操作的 finally 统一复位——含不响应取消的并发型
+ * 批量，否则取消意图会跨批量泄漏，毒化下一次串行批量（A3）。
  */
 export function requestBatchCancel() {
   if (state.multiSelect.busy) state.multiSelect.cancelRequested = true

@@ -43,6 +43,9 @@ async function batchApplyFlags(patch, label) {
     else toast('warn', `${label}完成：成功 ${ok} 个，失败 ${fail} 个`)
   } finally {
     state.multiSelect.busy = false
+    // 并发型批量不响应取消，但 Esc 置位的标志必须在此复位：
+    // 否则取消意图泄漏到下一个串行批量，首轮即被误判为已取消
+    state.multiSelect.cancelRequested = false
   }
 }
 
