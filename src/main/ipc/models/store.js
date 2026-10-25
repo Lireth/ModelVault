@@ -25,6 +25,7 @@ import { awaitThumbDrain } from './model-state'
 import { wrapHandler, checkExistingDirectory } from '../handler'
 import { readLibraryIndex } from '../../services/library-index'
 import { collectLibraryOverview } from '../../services/library-overview'
+import { metaDisplayFields } from './meta-display'
 
 /**
  * 存储与设置链路：持久化数据加载、模型根目录选择、应用设置更新。
@@ -71,8 +72,10 @@ async function collectRootStatuses(folders) {
 
 /**
  * F1：用当前内存元数据覆盖索引中的用户标注字段。
- * 索引是上一次全量扫描的快照；收藏/评分/备注等可能在扫描后修改。
- * 覆盖标量标注保证秒开列表即刻准确；封面/缩略图仍由后台校验刷新。
+ * 索引是上一次全量扫描的快照；收藏/评分/备注/Civitai 识别回填等可能在
+ * 扫描后修改。覆盖标量标注保证秒开列表即刻准确；封面/缩略图仍由后台
+ * 校验刷新。字段合成与装饰路径共享 metaDisplayFields（OPT-06 单一来源，
+ * 此前索引路径漏 baseModel/civitaiUrl，识别回填要等下一次全量扫描才生效）。
  * @param {any[]} models 索引中的装饰模型
  * @returns {any[]} 合并后的模型列表
  */
@@ -81,23 +84,12 @@ function overlayCurrentMeta(models) {
   return models.map((m) => {
     const meta = getModelMeta(m.id)
     if (!meta) return m
+    // 索引快照的 baseModel 作为高优先级覆盖值传入：与装饰路径「autoInfo
+    // （文件头部）优先」的语义对齐——快照中的头部解析值不被空 meta 抹掉，
+    // meta 的 Civitai 回填仅在快照缺失时兜底
     return {
       ...m,
-      alias: meta.alias || '',
-      note: meta.note || '',
-      noteSource: meta.noteSource || '',
-      favorite: meta.favorite === true,
-      nsfw: meta.nsfw === true,
-      rating: meta.rating || 0,
-      params: meta.params || null,
-      tags: meta.tags || [],
-      triggerWords: meta.triggerWords || '',
-      triggerWordsSource: meta.triggerWordsSource || '',
-      subCategory:
-        (m.type === 'lora' && m.folderSubCategory) ||
-        meta.subCategory ||
-        (m.type === 'checkpoint' ? 'base' : ''),
-      hash: meta.hash || m.hash || '',
+      ...metaDisplayFields(m, meta, { baseModel: m.baseModel || '' }),
     }
   })
 }

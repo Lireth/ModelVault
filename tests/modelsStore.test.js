@@ -367,6 +367,66 @@ describe('models:openLibrary 秒切库（F1）', () => {
     })
   })
 
+  it('索引覆盖含 civitaiUrl/baseModel：识别回填即时生效，快照头部值不被抹掉（OPT-06）', async () => {
+    const root = writeSettings({})
+    await loadSettings()
+    const withSnapshot = {
+      id: path.join(root, 'snap.safetensors'),
+      name: 'snap',
+      type: 'lora',
+      ext: '.safetensors',
+      size: 1,
+      mtimeMs: 1,
+      relDir: '',
+      // 扫描装饰写入索引的文件头部解析值与哈希
+      baseModel: 'Flux.1',
+      hash: 'f'.repeat(64),
+    }
+    const withoutSnapshot = {
+      id: path.join(root, 'plain.ckpt'),
+      name: 'plain',
+      type: 'other',
+      ext: '.ckpt',
+      size: 1,
+      mtimeMs: 1,
+      relDir: '',
+    }
+    writeIndex(root, [withSnapshot, withoutSnapshot])
+    // 扫描后的 Civitai 识别回填（civitaiUrl/baseModel 均写入 meta）
+    fs.writeFileSync(
+      path.join(root, '.modelvault', 'store.json'),
+      JSON.stringify({
+        version: 1,
+        models: {
+          'snap.safetensors': {
+            civitaiUrl: 'https://civitai.com/models/1',
+            baseModel: 'Pony',
+          },
+          'plain.ckpt': {
+            civitaiUrl: 'https://civitai.com/models/2',
+            baseModel: 'Illustrious',
+          },
+        },
+      }),
+    )
+
+    const res = await getRegisteredHandler('models:openLibrary')(makeEvent(), {
+      folder: root,
+    })
+
+    expect(res.cached).toBe(true)
+    const [snap, plain] = res.models
+    // 识别回填的 civitaiUrl 即时生效（修复前索引路径不覆盖该字段，
+    // 要等下一次全量扫描才在秒开列表显示）
+    expect(snap.civitaiUrl).toBe('https://civitai.com/models/1')
+    expect(plain.civitaiUrl).toBe('https://civitai.com/models/2')
+    // baseModel 与装饰路径同语义：快照的头部解析值优先，meta 回填兜底
+    expect(snap.baseModel).toBe('Flux.1')
+    expect(plain.baseModel).toBe('Illustrious')
+    // 快照哈希保留（meta 无哈希时的兜底）
+    expect(snap.hash).toBe('f'.repeat(64))
+  })
+
   it('无索引时不切换根目录，返回 cached=false 交由扫描链路', async () => {
     const root = writeSettings({})
     await loadSettings()

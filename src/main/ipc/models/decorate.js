@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { getModelMeta, resolveCover, setModelMeta } from '../../services/store'
+import { metaDisplayFields } from './meta-display'
 import {
   civitaiImportPatch,
   findSidecarCivitaiInfo,
@@ -465,42 +466,18 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
       suspect = true
     }
   }
+  // meta → 展示字段统一合成（OPT-06 单一来源，与 loadStore 索引覆盖路径
+  // 共享）：safetensors 头部解析的 baseModel 作为高优先级覆盖值传入——
+  // 文件自身头部优先于 Civitai 识别回填
   const decorated = {
     ...model,
     cover,
     coverUrl,
     covers,
     hasManualCover: covers.length > 0,
-    params: meta.params || null,
-    alias: meta.alias || '',
-    note: meta.note || '',
-    // 备注来源（'sidecar' 时详情页显示自动导入提示）
-    noteSource: meta.noteSource || '',
-    favorite: meta.favorite === true,
-    // NSFW 标记：首页卡片预览图模糊展示（详情页正常展示）
-    nsfw: meta.nsfw === true,
-    rating: meta.rating || 0,
-    // 分类标签合成（自动标签，无手选入口）：
-    // 文件夹自动标签（仅 lora）> Civitai 分配/meta 值 > 大模型基底模型
-    subCategory:
-      (model.type === 'lora' && model.folderSubCategory) ||
-      meta.subCategory ||
-      (model.type === 'checkpoint' ? 'base' : ''),
-    triggerWords: meta.triggerWords || '',
-    // 触发词来源（'sidecar'/'civitai' 时详情页显示自动导入提示，F8）
-    triggerWordsSource: meta.triggerWordsSource || '',
+    ...metaDisplayFields(model, meta, { baseModel: autoInfo?.baseModel || '' }),
     // 结构疑似损坏（F6）：0 字节、头部不可解析或数据区越过文件末尾
     suspect,
-    // 文件 SHA256（F9）：空串表示尚未计算；已算值随装饰缓存复用，
-    // 渲染层据此做重复分组展示
-    hash: meta.hash || '',
-    // Civitai 在线识别结果：模型页面 URL（空串表示未识别）
-    civitaiUrl: meta.civitaiUrl || '',
-    // 基底模型（F-2 筛选数据源）：safetensors 头部解析优先，Civitai 识别
-    // 回填值兜底（.ckpt/.pt 等无头部元信息的模型经识别补全后同样可筛）
-    baseModel: autoInfo?.baseModel || meta.baseModel || '',
-    // 自由标签（F-5）：用户自定义多标签，卡片角标/筛选/搜索消费
-    tags: meta.tags || [],
     autoInfo,
   }
   // 写入装饰缓存（容量超限时按 LRU 顺序淘汰最旧条目，C4 共享工具）
