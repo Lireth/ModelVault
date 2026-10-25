@@ -316,6 +316,86 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
     expect(isCivitaiVideoUrl(null)).toBe(false)
   })
 
+  it('OPT-05：同 URL 并发请求共享一次回源（在途去重）', async () => {
+    let fetches = 0
+    vi.mocked(net.fetch).mockImplementation(async () => {
+      fetches += 1
+      // 模拟网络延迟，保证三个请求落在同一在途窗口内
+      await new Promise((r) => setTimeout(r, 20))
+      return new Response('img-bytes', {
+        status: 200,
+        headers: { 'Content-Type': 'image/jpeg' },
+      })
+    })
+    const target = 'https://image.civitai.com/dedupe/1.jpeg'
+    const [a, b, c] = await Promise.all([
+      civHandler(makeCivRequest(target)),
+      civHandler(makeCivRequest(target)),
+      civHandler(makeCivRequest(target)),
+    ])
+    // 画廊与批量导入选择器同屏渲染同一图：只回源一次
+    expect(fetches).toBe(1)
+    expect([a.status, b.status, c.status]).toEqual([200, 200, 200])
+    // 共享的 Buffer 结果可被各调用方独立消费
+    expect(await a.text()).toBe('img-bytes')
+    expect(await b.text()).toBe('img-bytes')
+    expect(await c.text()).toBe('img-bytes')
+  })
+
+  it('OPT-05：不同 URL 并发回源受上限约束（峰值 ≤6，FIFO 全部完成）', async () => {
+    let inFlight = 0
+    let peak = 0
+    vi.mocked(net.fetch).mockImplementation(async () => {
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      await new Promise((r) => setTimeout(r, 10))
+      inFlight -= 1
+      return new Response('img-bytes', {
+        status: 200,
+        headers: { 'Content-Type': 'image/jpeg' },
+      })
+    })
+    const urls = Array.from(
+      { length: 12 },
+      (_, i) => `https://image.civitai.com/conc/${i}.jpeg`,
+    )
+    const results = await Promise.all(
+      urls.map((u) => civHandler(makeCivRequest(u))),
+    )
+    // 被入侵的渲染进程一次塞数百个 civimg URL 的场景：并发 fetch 被收口
+    expect(peak).toBeLessThanOrEqual(6)
+    expect(results.every((r) => r.status === 200)).toBe(true)
+    expect(net.fetch).toHaveBeenCalledTimes(12)
+  })
+
+  it('OPT-05：视频槽位在响应头到达后即释放，不因 body 流未完成而阻塞图片回源', async () => {
+    vi.mocked(net.fetch).mockImplementation(async (url) => {
+      if (String(url).endsWith('.mp4')) {
+        // 头部立即到达，body 流永不结束（长播放形态）
+        return new Response(new ReadableStream({ start() {} }), {
+          status: 206,
+          headers: { 'Content-Length': '100', 'Accept-Ranges': 'bytes' },
+        })
+      }
+      return new Response('img-bytes', {
+        status: 200,
+        headers: { 'Content-Type': 'image/jpeg' },
+      })
+    })
+    const videoReq = makeCivRequest('https://image.civitai.com/x/slot.mp4')
+    videoReq.headers = new Headers()
+    const results = await Promise.all([
+      civHandler(videoReq),
+      ...Array.from({ length: 6 }, (_, i) =>
+        civHandler(makeCivRequest(`https://image.civitai.com/after/${i}.jpeg`)),
+      ),
+    ])
+    // 若视频槽位持有到 body 结束（永不），6 张图会占满剩余槽位且第 6 张饿死
+    expect(results.map((r) => r.status)).toEqual([
+      206, 200, 200, 200, 200, 200, 200,
+    ])
+  })
+
   it('图片代理响应头按白名单重建：Set-Cookie/Content-Disposition/X-* 不透传', async () => {
     vi.mocked(net.fetch).mockResolvedValue(
       new Response('upstream-error-page', {

@@ -273,7 +273,96 @@ function registerMvimgHandler() {
  * 且内容通过图片魔数校验时直接由磁盘服务（离线可回看、重复浏览零网络）；
  * 未命中经 net.fetch 拉取（与识别/下载同一网络栈，自动继承系统代理），
  * 目标 URL 强制命中 CDN 域名白名单，成功拉取的图片内容回写磁盘缓存。
+ *
+ * OPT-05 回源收敛：
+ * - 并发上限——civitai.js 的请求节流只覆盖 API 域，图片/视频 CDN 不受限；
+ *   被入侵的渲染进程可一次塞数百个 civimg URL，数百路并发 fetch + 磁盘写
+ *   会打满主进程与磁盘。统一以 FIFO 信号量收口（图片全程持槽，视频仅在
+ *   头部阶段持槽——body 流式回传由渲染进程驱动，不占并发额度）。
+ * - 在途去重——同 URL 并发请求（画廊与批量导入选择器同屏渲染同一图、
+ *   快速滚动）共享同一次上游拉取与磁盘缓存写入。
  */
+
+/** civimg 回源并发上限（OPT-05） */
+const CIVIMG_MAX_CONCURRENT = 6
+/** 在途并发计数与 FIFO 等待队列 */
+let civimgActive = 0
+const civimgWaitQueue = []
+
+/**
+ * 获取一个 civimg 回源槽位（FIFO 公平排队）。
+ * @returns {Promise<() => void>} 释放函数（重复调用安全）
+ */
+function acquireCivimgSlot() {
+  return new Promise((resolve) => {
+    const run = () => {
+      civimgActive += 1
+      let released = false
+      resolve(() => {
+        if (released) return
+        released = true
+        civimgActive -= 1
+        civimgWaitQueue.shift()?.()
+      })
+    }
+    if (civimgActive < CIVIMG_MAX_CONCURRENT) run()
+    else civimgWaitQueue.push(run)
+  })
+}
+
+/** 图片回源在途表：URL → 共享拉取 Promise（同 URL 只回源一次） */
+const civimgInflight = new Map()
+
+/**
+ * 图片共享回源（OPT-05 去重 + 并发约束）：
+ * 图片路径整体读入 Buffer，各调用方从共享结果自建 Response——上游拉取、
+ * 体积上限校验与磁盘缓存写入对同 URL 并发请求只发生一次；失败同样共享
+ * （缓存未写入，下一个请求自然重新回源）。
+ * @param {string} target 已通过白名单校验的图片 URL
+ * @returns {Promise<{buf?: Buffer, upstream?: Response, errorStatus?: number}>}
+ */
+function fetchCivImageShared(target) {
+  const existing = civimgInflight.get(target)
+  if (existing) return existing
+  const promise = (async () => {
+    const release = await acquireCivimgSlot()
+    try {
+      const upstream = await fetchCivitaiImage(target)
+      if (!upstream.ok) {
+        logger.warn(
+          `civimg 上游响应异常（HTTP ${upstream.status}）: ${target.slice(0, 200)}`,
+        )
+        return { errorStatus: 502 }
+      }
+      // 整体读入后回写磁盘缓存（best-effort，失败不影响返回）；仅缓存
+      // 真实图片内容——魔数不符的字节（上游异常页等）不入缓存。
+      // 读取受 50MB 上限约束（V-06），避免异常大响应打爆主进程堆
+      let buf
+      try {
+        buf = await readCivitaiImageBody(upstream)
+      } catch (err) {
+        logger.warn(`civimg 上游内容读取失败: ${err.message}`)
+        return { errorStatus: 502 }
+      }
+      if (isImageBuffer(buf)) {
+        await saveCivImageCache(target, buf)
+      }
+      return { buf, upstream }
+    } finally {
+      release()
+    }
+  })()
+  civimgInflight.set(target, promise)
+  // 清理链自身吞掉拒绝（网络层拒绝由各 await 方的处理层 catch 兜底），
+  // 防止后台清理派生的 promise 成为 unhandledRejection
+  promise
+    .finally(() => {
+      if (civimgInflight.get(target) === promise) civimgInflight.delete(target)
+    })
+    .catch(() => {})
+  return promise
+}
+
 function registerCivimgHandler() {
   protocol.handle(CIV_SCHEME, async (request) => {
     try {
@@ -298,7 +387,7 @@ function registerCivimgHandler() {
       }
       // FN-02：示例视频走流式代理（Range 透传），不进入图片磁盘缓存
       if (isCivitaiVideoUrl(target)) {
-        return proxyCivitaiVideo(target, request)
+        return proxyCivitaiVideo(target, request, acquireCivimgSlot)
       }
       // 缓存命中路径：魔数校验失败（半写/损坏/被篡改）时删除条目自愈并回源
       const cached = await getCivImageFromCache(target)
@@ -314,34 +403,20 @@ function registerCivimgHandler() {
         }
         await removeCivImageCache(target)
       }
-      const upstream = await fetchCivitaiImage(target)
-      if (!upstream.ok) {
-        logger.warn(
-          `civimg 上游响应异常（HTTP ${upstream.status}）: ${target.slice(0, 200)}`,
-        )
-        return new Response('Upstream Error', { status: 502 })
-      }
-      // 回源成功：整体读入后回写磁盘缓存（best-effort，失败不影响返回）。
-      // 仅缓存真实图片内容——魔数不符的字节（上游异常页等）不入缓存。
-      // 读取受 50MB 上限约束（V-06），避免异常大响应打爆主进程堆。
-      let buf
-      try {
-        buf = await readCivitaiImageBody(upstream)
-      } catch (err) {
-        logger.warn(`civimg 上游内容读取失败: ${err.message}`)
-        return new Response('Upstream Error', { status: 502 })
-      }
-      if (isImageBuffer(buf)) {
-        await saveCivImageCache(target, buf)
+      // 回源（在途去重 + 并发上限，OPT-05）
+      const shared = await fetchCivImageShared(target)
+      if (shared.errorStatus) {
+        return new Response('Upstream Error', { status: shared.errorStatus })
       }
       // 远程图内容一般不可变，按天缓存减轻 CDN 与代理压力。
       // 响应头按白名单重建（不透传上游 Set-Cookie 等）；响应体为完整
-      // Buffer，长度由 Response 自动计算，不继承上游可能失真的 Content-Length
-      const headers = proxyMediaHeaders(upstream)
+      // Buffer（经 Uint8Array 视图满足 BodyInit 类型，与缓存命中路径一致），
+      // 长度由 Response 自动计算，不继承上游可能失真的 Content-Length
+      const headers = proxyMediaHeaders(shared.upstream)
       headers.set('Cache-Control', 'public, max-age=86400')
-      return new Response(buf, {
-        status: upstream.status,
-        statusText: upstream.statusText,
+      return new Response(new Uint8Array(shared.buf), {
+        status: shared.upstream.status,
+        statusText: shared.upstream.statusText,
         headers,
       })
     } catch (err) {
@@ -368,11 +443,16 @@ export function isCivitaiVideoUrl(url) {
  * 透传渲染进程的 Range 请求头（拖动播放/分段加载），响应体直接流回，
  * 不在主进程聚合（视频可达数百 MB）；不写磁盘缓存，仅下发按天缓存头。
  * 域名白名单与图片代理一致（调用方已校验，fetchCivitaiVideo 内部再校验）。
+ * OPT-05 并发收口：acquireSlot 提供时仅在「头部阶段」持槽——响应头到达
+ * 即释放（body 流式回传由渲染进程驱动，不占并发额度，避免长播放饿死
+ * 图片回源）。
  * @param {string} target 白名单内的视频 URL
  * @param {Request} request 原始协议请求（读取 Range）
+ * @param {() => Promise<() => void>} [acquireSlot] 并发槽位获取器
  * @returns {Promise<Response>}
  */
-async function proxyCivitaiVideo(target, request) {
+async function proxyCivitaiVideo(target, request, acquireSlot) {
+  const release = acquireSlot ? await acquireSlot() : null
   try {
     const range = request?.headers?.get?.('range') || ''
     const upstream = await fetchCivitaiVideo(target, range)
@@ -394,6 +474,8 @@ async function proxyCivitaiVideo(target, request) {
   } catch (err) {
     logger.warn(`civimg 视频代理失败: ${err.message}`)
     return new Response('Upstream Error', { status: 502 })
+  } finally {
+    release?.()
   }
 }
 
