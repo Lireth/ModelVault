@@ -1,6 +1,6 @@
-import path from 'node:path'
 import { BrowserWindow } from 'electron'
 import logger from '../../logger'
+import { sameResolvedPathIgnoreCase } from '../../utils'
 import { exportBackup, importBackup } from '../../services/backup'
 import {
   getCurrentRoot,
@@ -57,8 +57,7 @@ export function registerBackupHandlers() {
       if (
         restoredRoot &&
         activeRoot &&
-        path.resolve(restoredRoot).toLowerCase() ===
-          path.resolve(activeRoot).toLowerCase()
+        sameResolvedPathIgnoreCase(restoredRoot, activeRoot)
       ) {
         await awaitThumbDrain()
         await reloadCurrentRootData()

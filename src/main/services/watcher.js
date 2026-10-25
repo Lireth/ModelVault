@@ -3,7 +3,11 @@ import fsSync from 'node:fs'
 import path from 'node:path'
 import { BrowserWindow } from 'electron'
 import logger from '../logger'
-import { relativeWithin, runWithConcurrency } from '../utils'
+import {
+  relativeWithin,
+  runWithConcurrency,
+  samePathIgnoreCase,
+} from '../utils'
 import {
   dedupeAndPruneDescendants,
   isRelDirInScope,
@@ -469,11 +473,6 @@ export function computeStatSnapshotDiff(root, oldSnap, newSnap) {
   for (const [dir, entries] of oldSnap) consider(dir, entries, newSnap.get(dir))
   for (const [dir, entries] of newSnap) consider(dir, entries, oldSnap.get(dir))
   return [...dirs].sort()
-}
-
-/** 根目录比较：Windows 大小写不敏感 */
-function sameRoot(a, b) {
-  return String(a).toLowerCase() === String(b).toLowerCase()
 }
 
 /**
@@ -957,7 +956,7 @@ export function setWatcherScanning(scanning) {
  */
 export function refreshWatcherBaseline(root, dirs, snapshot) {
   const w = watcher
-  if (!w || !w.enabled || !sameRoot(w.root, root)) return false
+  if (!w || !w.enabled || !samePathIgnoreCase(w.root, root)) return false
   // 空快照合法：本次扫描的子树已被删除，需要移除对应旧基线条目
   if (!(snapshot instanceof Map)) return false
   return applyPartialBaseline(w, dirs, snapshot)
@@ -984,7 +983,7 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
   const wantEnabled = enabled === true
   if (
     watcher &&
-    sameRoot(watcher.root, root) &&
+    samePathIgnoreCase(watcher.root, root) &&
     watcher.enabled === wantEnabled
   ) {
     // 同根同状态（如每次扫描完成后的重复同步）：刷新排除名单；若本次扫描

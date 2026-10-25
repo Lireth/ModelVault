@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
+import { samePathIgnoreCase } from '../utils'
 import { atomicWriteFile } from './atomic-write'
 import { serializeJsonOffThread } from './json-serializer'
 import { getIndexFilePath } from './store-paths'
@@ -47,11 +48,6 @@ const pendingIndexUpdates = new Map()
 let indexUpdateDebounceMs = INDEX_UPDATE_DEBOUNCE_MS
 /** worker 阈值（测试可注入 0 强制走 worker） */
 let indexWorkerThreshold = INDEX_WORKER_THRESHOLD
-
-/** 根目录比较：Windows 大小写不敏感 */
-function sameRoot(a, b) {
-  return String(a).toLowerCase() === String(b).toLowerCase()
-}
 
 /** 索引读改写串行链（O8）：全量覆盖与增量合并不得交错丢失更新 */
 let indexChain = Promise.resolve()
@@ -134,7 +130,7 @@ export async function readLibraryIndex(root) {
     if (
       !parsed ||
       parsed.version !== INDEX_VERSION ||
-      !sameRoot(parsed.root, root)
+      !samePathIgnoreCase(parsed.root, root)
     ) {
       logger.info(`本地索引版本/根目录不匹配，已忽略: ${file}`)
       return null

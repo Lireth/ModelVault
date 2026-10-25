@@ -260,6 +260,24 @@ describe('transferModelsToLibrary（F-3 跨库传输）', () => {
     ).rejects.toThrow()
   })
 
+  it('journal 目录不可读（非 ENOENT）按存在残留拒绝迁移（fail-closed）', async () => {
+    // 用同名文件占位 journal 目录路径：readdir 抛 ENOTDIR，
+    // 等价模拟杀毒/索引器占用导致的不可读——无法证明无残留即拒绝
+    await fsp.mkdir(path.join(targetRoot, '.modelvault'), { recursive: true })
+    await fsp.writeFile(path.join(targetRoot, '.modelvault', 'journal'), 'x')
+    const abs = await writeModel(sourceRoot, 'jr.safetensors', 'x')
+
+    const res = await transferModelsToLibrary({
+      ids: [abs],
+      targetRoot,
+      mode: 'copy',
+    })
+    expect(res.error).toContain('未完成的同步')
+    await expect(
+      fsp.access(path.join(targetRoot, 'jr.safetensors')),
+    ).rejects.toThrow()
+  })
+
   it('入口校验：目标为当前库/未注册库/不存在时拒绝', async () => {
     const abs = await writeModel(sourceRoot, 'v.safetensors', 'x')
     // 当前库

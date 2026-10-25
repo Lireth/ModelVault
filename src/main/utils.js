@@ -60,6 +60,38 @@ export function relativeWithin(absPath, baseDir) {
 }
 
 /**
+ * Windows 大小写不敏感的路径相等比较（原语层：不做 resolve）。
+ * 仅当两侧来自同一内部来源（如 getCurrentRoot() 的值与以其写入的键）时使用，
+ * 此时形态必然一致，原样比较即可；比较跨来源输入（设置文件 / 对话框 /
+ * IPC 传入）请改用 sameResolvedPathIgnoreCase，先消除尾斜杠、相对段与
+ * 分隔符差异。此前该比较在 watcher.js / library-index.js / scan.js /
+ * store-settings.js / store-meta-persist.js 各有一份同构内联实现——
+ * 根比较口径是安全判定（库归属/白名单）的一部分，收敛为单一实现防漂移。
+ * @param {unknown} a 路径（非字符串按 String 规整）
+ * @param {unknown} b 路径
+ * @returns {boolean}
+ */
+export function samePathIgnoreCase(a, b) {
+  return String(a).toLowerCase() === String(b).toLowerCase()
+}
+
+/**
+ * path.resolve 规范化后的大小写不敏感路径比较：两侧可能来自不同来源
+ * （设置文件 vs 主进程规范化 vs IPC 传入），先 resolve 再比较，消除
+ * 「同一目录的两种拼写」被误判为不同路径。此前 library-transfer.js 与
+ * ipc/models/backup.js 各有一份同构内联实现。
+ * @param {unknown} a 路径
+ * @param {unknown} b 路径
+ * @returns {boolean}
+ */
+export function sameResolvedPathIgnoreCase(a, b) {
+  return (
+    path.resolve(String(a)).toLowerCase() ===
+    path.resolve(String(b)).toLowerCase()
+  )
+}
+
+/**
  * 解析路径的真实路径（O6）：不存在/不可访问时返回空串。
  * @param {string} target 绝对路径
  * @returns {Promise<string>} realpath 或 ''

@@ -3,6 +3,7 @@ import logger from '../../logger'
 import {
   getCurrentRoot,
   getSettings,
+  isRegisteredLibrary,
   relinkScannedMeta,
   updateSettings,
 } from '../../services/store'
@@ -37,6 +38,7 @@ import {
   resetDecorateCache,
 } from './model-state'
 import { wrapHandler, checkExistingDirectory } from '../handler'
+import { samePathIgnoreCase } from '../../utils'
 import { normalizePartialScanDirs } from '../../../shared/scan-dirs'
 import {
   queueLibraryIndexUpdate,
@@ -54,25 +56,6 @@ const PROGRESS_INTERVAL = 120
 
 /** 当前扫描的取消控制器（null 表示无进行中的扫描） */
 let scanAbort = null
-
-/** 判断两个模型根目录是否相同（Windows 大小写不敏感） */
-function isSameRoot(a, b) {
-  return String(a).toLowerCase() === String(b).toLowerCase()
-}
-
-/**
- * 目录是否属于模型库白名单（B1）：settings.modelsFolders（上限 20）。
- * 列表条目只能经 models:chooseFolder（用户对话框确认）写入；主进程扫描成功
- * 链路只更新已登记库的激活根，不新增条目；settings:update 仅允许激活/移除/
- * 重排已登记库，不能再新增根目录。该列表是「.modelvault 写入点可以指向
- * 哪里」的唯一可信来源；渲染进程直接传入的任意路径不得成为关联存储根。
- * Windows 大小写不敏感比较。
- */
-function isKnownLibrary(dir) {
-  const list = getSettings().modelsFolders || []
-  const lower = dir.toLowerCase()
-  return list.some((f) => typeof f === 'string' && f.toLowerCase() === lower)
-}
 
 /** 注册扫描链路的 IPC 处理器 */
 export function registerScanHandlers() {
@@ -124,7 +107,7 @@ export function registerScanHandlers() {
         // 「路径可用」，不保证「用户想把这里当库」——无白名单时任意可写目录
         // 都能经 ensureRootStore 落 .modelvault，构成渲染可控的任意目录写入
         // 原语。新增库只能走 models:chooseFolder（用户对话框确认）
-        if (!isKnownLibrary(root)) {
+        if (!isRegisteredLibrary(root)) {
           logger.warn(`拒绝扫描模型库列表之外的目录: ${root}`)
           return { error: '该目录不在模型库列表中' }
         }
@@ -137,7 +120,8 @@ export function registerScanHandlers() {
         // 切换/加载该根目录的关联存储，并清理孤儿封面文件。
         // 维护锁由本扫描持有，传入令牌避免 ensureRootStore 再次加锁
         await ensureRootStore(root, { maintenanceToken: token })
-        rootSwitched = Boolean(previousRoot) && !isSameRoot(previousRoot, root)
+        rootSwitched =
+          Boolean(previousRoot) && !samePathIgnoreCase(previousRoot, root)
         await pruneOrphanCovers()
         // 切换根目录后装饰缓存全部失效；延迟缩略图队列同步清空——
         // 残留的旧根条目会被下一轮 drain 以「新根」的 thumbs 目录生成（跨根写文件），
@@ -328,7 +312,7 @@ export function registerScanHandlers() {
         }
 
         // 与全量扫描一致的目录前置校验（白名单 + 存在性）
-        if (!isKnownLibrary(root)) {
+        if (!isRegisteredLibrary(root)) {
           logger.warn(`拒绝局部扫描模型库列表之外的目录: ${root}`)
           return { error: '该目录不在模型库列表中' }
         }
@@ -344,7 +328,7 @@ export function registerScanHandlers() {
         // 局部扫描只作用于当前根（V-02）：渲染层请求发出后根已切换时直接拒绝，
         // 绝不能借 ensureRootStore 把主进程根目录切回旧库
         const currentRoot = getCurrentRoot()
-        if (currentRoot && !isSameRoot(root, currentRoot)) {
+        if (currentRoot && !samePathIgnoreCase(root, currentRoot)) {
           logger.warn(
             `拒绝针对非当前根的局部扫描: ${root}（当前 ${currentRoot}）`,
           )

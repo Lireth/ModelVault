@@ -10,7 +10,11 @@ import {
   normalizeModelMeta,
   normalizeStoreData,
 } from './store-meta-normalize'
-import { loadJournal, removeJournalDir } from './store-meta-journal'
+import {
+  loadJournal,
+  normalizeSnapshotSeq,
+  removeJournalDir,
+} from './store-meta-journal'
 import { preserveCorruptedFile } from '../utils'
 import {
   clearOfflineRetry,
@@ -73,7 +77,9 @@ export async function loadData() {
     // B-04：磁盘文件同样按不可信输入处理（可能由恶意备份写入或外部编辑）
     metaState.data = normalizeStoreData(parsed)
     metaState.hasSnapshot = true
-    snapshotSeq = Number.isFinite(parsed?.journalSeq) ? parsed.journalSeq : 0
+    // journalSeq 属不可信输入（B-04）：越界/非整数回退 0 并从头回放增量自愈，
+    // 防止外部编辑出的超大代际让后续正常增量被「快照已包含」静默跳过
+    snapshotSeq = normalizeSnapshotSeq(parsed?.journalSeq)
     metaState.journalSeq = snapshotSeq
     logger.info(
       `关联存储加载完成：${Object.keys(metaState.data.models).length} 条记录（${file}）`,
@@ -273,6 +279,12 @@ export function removeModelMeta(modelId) {
  * 键以相对路径关联，绝对路径变了键就失效——重扫时 relink 的 R1/R2
  * 能自愈大多数场景，但改名 .disabled 会使扩展名变化导致两条规则都
  * 不命中；主动迁移保证标注（含哈希履历）即时无缝跟随。
+ *
+ * 目标键已有残留标注时（调用方均先确认目标文件不存在，残留必为旧文件
+ * 删除后遗留的幽灵标注）：跟随实际文件字节的源标注才是正确绑定，
+ * 顶替幽灵并记录其摘要——绝不静默。不做字段级合并：规范化后的元数据
+ * 字段集合固定，合并等价于整体覆盖，反而让幽灵侧的哈希/封面引用等
+ * 身份字段有绑错文件的风险（宁可不绑也绝不绑错）。
  * @param {string} oldId 旧绝对路径
  * @param {string} newId 新绝对路径
  * @returns {boolean} 迁移成功返回 true（无旧数据/越界返回 false）
@@ -284,6 +296,14 @@ export function renameModelMeta(oldId, newId) {
   if (!oldKey || !newKey || oldKey === newKey) return false
   const meta = metaState.data.models[oldKey]
   if (!meta) return false
+  const displaced = metaState.data.models[newKey]
+  if (displaced) {
+    logger.warn(
+      `元数据键迁移顶替了目标键的幽灵标注（alias="${displaced.alias}" ` +
+        `note="${String(displaced.note).slice(0, 50)}" ` +
+        `favorite=${displaced.favorite} rating=${displaced.rating}）: ${newKey}`,
+    )
+  }
   metaState.data.models[newKey] = meta
   delete metaState.data.models[oldKey]
   markDirty(oldKey)

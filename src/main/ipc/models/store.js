@@ -5,6 +5,7 @@ import {
   getModelMeta,
   getCurrentRoot,
   getSettings,
+  isRegisteredLibrary,
   loadSettings,
   loadData,
   switchDataRoot,
@@ -38,15 +39,9 @@ import { metaDisplayFields } from './meta-display'
  */
 
 /**
- * 目录是否属于模型库列表（与 scan.js 同规则：Windows 大小写不敏感）。
- * @param {string} dir 目标目录
- * @returns {boolean}
+ * 目录是否属于模型库白名单（B1）：经 services/store 收敛为单一实现
+ * isRegisteredLibrary（此前 scan.js 与本文件各有一份逐字实现，防漂移）。
  */
-function isKnownLibrary(dir) {
-  const list = getSettings().modelsFolders || []
-  const lower = String(dir).toLowerCase()
-  return list.some((f) => typeof f === 'string' && f.toLowerCase() === lower)
-}
 
 /**
  * 库列表全量根目录的存在性快照（F1-offline 库路径失效处理）：
@@ -247,7 +242,7 @@ export function registerStoreHandlers() {
     async (event, { folder } = {}) => {
       const root = typeof folder === 'string' ? folder.trim() : ''
       if (!root) return { error: '缺少模型文件夹' }
-      if (!isKnownLibrary(root)) {
+      if (!isRegisteredLibrary(root)) {
         logger.warn(`拒绝打开模型库列表之外的目录: ${root}`)
         return { error: '该目录不在模型库列表中' }
       }

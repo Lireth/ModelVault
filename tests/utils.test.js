@@ -6,6 +6,8 @@ import {
   readResponseBytesLimited,
   relativeWithin,
   runWithConcurrency,
+  samePathIgnoreCase,
+  sameResolvedPathIgnoreCase,
   waitForProcessExit,
 } from '../src/main/utils'
 
@@ -269,5 +271,27 @@ describe('relativeWithin（O-1 路径归属判定）', () => {
     expect(relativeWithin(undefined, root)).toBe(null)
     expect(relativeWithin(root, null)).toBe(null)
     expect(relativeWithin(42, root)).toBe(null)
+  })
+})
+
+describe('路径大小写不敏感比较（C2 单一来源）', () => {
+  it('samePathIgnoreCase：原样比较，仅大小写不敏感', () => {
+    const p = path.resolve('mv-cmp-a', 'sub')
+    expect(samePathIgnoreCase(p, p.toUpperCase())).toBe(true)
+    // 原语层不做 resolve：尾斜杠视为不同（两侧来自同一内部来源时形态一致）
+    expect(samePathIgnoreCase(p, p + path.sep)).toBe(false)
+    expect(samePathIgnoreCase(p, path.resolve('mv-cmp-b'))).toBe(false)
+    // 非字符串输入按 String 规整，不抛异常
+    expect(samePathIgnoreCase(undefined, undefined)).toBe(true)
+  })
+
+  it('sameResolvedPathIgnoreCase：resolve 消除尾斜杠与相对段差异', () => {
+    const p = path.resolve('mv-cmp-a', 'sub')
+    expect(sameResolvedPathIgnoreCase(p, p + path.sep)).toBe(true)
+    expect(
+      sameResolvedPathIgnoreCase(path.dirname(p), path.join(p, '..')),
+    ).toBe(true)
+    expect(sameResolvedPathIgnoreCase(p, p.toUpperCase())).toBe(true)
+    expect(sameResolvedPathIgnoreCase(p, path.resolve('mv-cmp-b'))).toBe(false)
   })
 })

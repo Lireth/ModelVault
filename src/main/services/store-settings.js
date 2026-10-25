@@ -12,7 +12,7 @@ import {
 } from '../../shared/app-enums'
 import { DEFAULT_SETTINGS } from '../../shared/defaults'
 import { atomicWriteFile } from './atomic-write'
-import { preserveCorruptedFile } from '../utils'
+import { preserveCorruptedFile, samePathIgnoreCase } from '../utils'
 import { notifyStoreSaveError } from './store-events'
 import {
   LEGACY_STORE_FILE,
@@ -443,6 +443,24 @@ export function getLibrarySettings() {
 }
 
 /**
+ * 目录是否属于模型库白名单（B1，单一可信来源）：settings.modelsFolders
+ * （上限 20）。列表条目只能经 models:chooseFolder（用户对话框确认）写入；
+ * 主进程扫描成功链路只更新已登记库的激活根，不新增条目；settings:update
+ * 仅允许激活/移除/重排已登记库，不能再新增根目录。该列表是
+ * 「.modelvault 写入点可以指向哪里」的唯一可信来源；渲染进程直接传入的
+ * 任意路径不得成为关联存储根。Windows 大小写不敏感比较。
+ * （此前 ipc/models/scan.js 与 store.js 各有一份逐字实现——白名单是
+ * 安全关键判定，双份实现存在漂移风险，收敛于此。）
+ * @param {unknown} dir 目标目录
+ * @returns {boolean} 已登记为模型库时为 true
+ */
+export function isRegisteredLibrary(dir) {
+  const list = getSettings().modelsFolders || []
+  const lower = String(dir).toLowerCase()
+  return list.some((f) => typeof f === 'string' && f.toLowerCase() === lower)
+}
+
+/**
  * 设置落盘串行队列（A1）：并发 updateSettings 依次写盘，
  * 最终落盘必为最新合并快照。单次写失败经监听器上报后队列继续服务
  * 后续写入，不被中断。引导层与库层各自独立排队。
@@ -573,7 +591,7 @@ export async function saveLibrarySettings(root, raw) {
   const snapshot = JSON.stringify(normalized, null, 2)
   await enqueueLibraryWrite(root, snapshot)
   const active = getCurrentRoot()
-  if (root && active && root.toLowerCase() === active.toLowerCase()) {
+  if (root && active && samePathIgnoreCase(root, active)) {
     library = normalized
   }
   return normalized

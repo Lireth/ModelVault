@@ -5,7 +5,12 @@ import { atomicWriteFile } from './atomic-write'
 import { runMaintenance } from './maintenance-lock'
 import { sidecarFilesFor } from './scanner'
 import { getCurrentRoot, isInRoot, toRelKey } from './store-paths'
-import { isPathRealWithin, resolveRealPath } from '../utils'
+import {
+  isPathRealWithin,
+  resolveRealPath,
+  sameResolvedPathIgnoreCase,
+} from '../utils'
+import { isDeltaBatchName } from './store-meta-journal'
 import {
   flushStoreSave,
   getModelMeta,
@@ -37,15 +42,26 @@ import { getSettings } from './store-settings'
  *   目标库造成 store.json 并发读写。
  */
 
-/** 目标库 journal 目录中未合并 delta 的检测（残留即拒绝迁移） */
+/**
+ * 目标库 journal 目录中未合并 delta 的检测（残留即拒绝迁移）。
+ * fail-closed：仅「目录不存在」（目标库从未产生增量日志）视为无残留；
+ * 其余读失败（EACCES/EBUSY——杀毒/索引器占用目录等）无法证明没有未合并
+ * delta，按存在残留拒绝迁移——否则 writeTargetStore 覆盖 store.json 会
+ * 静默丢弃目标库尚未合并的增量标注，恰是本检测要防的场景。
+ */
 async function hasPendingJournal(targetRoot) {
   const journalDir = path.join(targetRoot, '.modelvault', 'journal')
+  let names
   try {
-    const names = await fs.readdir(journalDir)
-    return names.some((name) => /^delta-\d+\.json$/.test(name))
-  } catch {
-    return false
+    names = await fs.readdir(journalDir)
+  } catch (err) {
+    if (err.code === 'ENOENT') return false
+    logger.warn(
+      `目标库增量日志目录不可读，按存在未合并日志处理: ${journalDir} ${err.message}`,
+    )
+    return true
   }
+  return names.some(isDeltaBatchName)
 }
 
 /** 读取目标库 store.json 并规范化（不存在时为空库） */
@@ -118,17 +134,12 @@ export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
     return { error: '没有可传输的模型' }
   if (typeof targetRoot !== 'string' || !targetRoot)
     return { error: '无效的目标库' }
-  if (
-    path.resolve(targetRoot).toLowerCase() ===
-    path.resolve(currentRoot).toLowerCase()
-  ) {
+  if (sameResolvedPathIgnoreCase(targetRoot, currentRoot)) {
     return { error: '目标库不能是当前模型库' }
   }
   // 目标必须是已保存的模型库（settings.modelsFolders），防止任意目录写入
   const saved = (getSettings().modelsFolders || []).some(
-    (f) =>
-      typeof f === 'string' &&
-      path.resolve(f).toLowerCase() === path.resolve(targetRoot).toLowerCase(),
+    (f) => typeof f === 'string' && sameResolvedPathIgnoreCase(f, targetRoot),
   )
   if (!saved) {
     return { error: '目标文件夹不是已保存的模型库，请先在侧栏添加该库' }

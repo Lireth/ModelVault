@@ -19,6 +19,7 @@ import {
   getSettings,
   getCurrentRoot,
   isInRoot,
+  isRegisteredLibrary,
   loadData,
   loadSettings,
   normalizeStoreData,
@@ -35,6 +36,7 @@ import {
   switchDataRoot,
   updateSettings,
 } from '../src/main/services/store'
+import logger from '../src/main/logger'
 import { setSnapshotWorkerThresholdForTests } from '../src/main/services/store-meta-persist'
 import { fakeUserData } from './setup'
 
@@ -234,6 +236,28 @@ describe('路径关联', () => {
       ),
     ).toBe(false)
     expect(renameModelMeta(newAbs, 'D:\\库外\\x.safetensors')).toBe(false)
+  })
+
+  it('迁移目标键已有幽灵标注时被源标注顶替，且告警不静默（防标注丢失）', async () => {
+    const oldAbs = await touchModel('ghost-old.safetensors')
+    setModelMeta(oldAbs, { alias: '真实跟随', rating: 5 })
+    const newAbs = path.join(root, 'ghost-new.safetensors')
+    // 目标键预置幽灵标注（曾占用地路径的旧文件删除后残留）
+    setModelMeta(newAbs, { alias: '幽灵残留', note: '旧文件的数据' })
+    const warnSpy = vi.spyOn(logger, 'warn')
+    try {
+      expect(renameModelMeta(oldAbs, newAbs)).toBe(true)
+    } finally {
+      vi.restoreAllMocks()
+    }
+    const merged = getModelMeta(newAbs)
+    // 跟随实际文件字节的源标注胜出；规范化字段集合固定，幽灵侧字段不混入
+    expect(merged?.alias).toBe('真实跟随')
+    expect(merged?.rating).toBe(5)
+    expect(merged?.note).toBe('')
+    expect(getModelMeta(oldAbs)).toBeNull()
+    // 顶替必须留痕：日志携带被顶替侧摘要，供排查与诊断
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('幽灵标注'))
   })
 })
 
@@ -562,6 +586,75 @@ describe('O5 增量落盘与快照合并', () => {
     await loadData()
 
     expect(getModelMeta(path.join(root, 'a.safetensors')).alias).toBe('fresh')
+  })
+
+  it('快照 journalSeq 越界（外部编辑/损坏）回退 0，从头回放增量自愈', async () => {
+    await fs.mkdir(path.join(root, '.modelvault'), { recursive: true })
+    await fs.writeFile(
+      storeFile(),
+      JSON.stringify({
+        version: 1,
+        // 超大有限代际：不收口时后续正常增量全部被「快照已包含」跳过
+        journalSeq: 1e15,
+        models: { 'a.safetensors': { alias: 'snapshot' } },
+      }),
+    )
+    await fs.mkdir(journalDir(), { recursive: true })
+    await fs.writeFile(
+      path.join(journalDir(), 'delta-000000000001.json'),
+      JSON.stringify({
+        seq: 1,
+        entries: [
+          { op: 'set', key: 'a.safetensors', meta: { alias: 'fresh' } },
+        ],
+      }),
+    )
+
+    await loadData()
+
+    // 代际回退 0 → 批次重放，终态与代际合法时一致；不静默跳过增量
+    expect(getModelMeta(path.join(root, 'a.safetensors')).alias).toBe('fresh')
+    // 自愈后新批次从实际最大代际继续，保持 12 位零填充文件名
+    setModelMeta(path.join(root, 'b.safetensors'), { alias: 'next' })
+    await saveStoreDeltaNow()
+    expect(await fs.readdir(journalDir())).toContain('delta-000000000002.json')
+  })
+
+  it('批次 seq 与文件名不一致或越界时按损坏隔离，条目不应用', async () => {
+    await fs.mkdir(path.join(root, '.modelvault'), { recursive: true })
+    await fs.writeFile(storeFile(), JSON.stringify({ version: 1, models: {} }))
+    await fs.mkdir(journalDir(), { recursive: true })
+    // 内容 seq 与文件名 seq 不一致：无法安全判定代际新旧
+    await fs.writeFile(
+      path.join(journalDir(), 'delta-000000000001.json'),
+      JSON.stringify({
+        seq: 999,
+        entries: [
+          { op: 'set', key: 'x.safetensors', meta: { alias: 'mismatch' } },
+        ],
+      }),
+    )
+    // seq 超出上界（文件名与内容一致）：按不可信输入隔离
+    await fs.writeFile(
+      path.join(journalDir(), 'delta-2000000001.json'),
+      JSON.stringify({
+        seq: 2000000001,
+        entries: [
+          { op: 'set', key: 'y.safetensors', meta: { alias: 'overflow' } },
+        ],
+      }),
+    )
+
+    await loadData()
+
+    expect(getModelMeta(path.join(root, 'x.safetensors'))).toBeNull()
+    expect(getModelMeta(path.join(root, 'y.safetensors'))).toBeNull()
+    await expect(
+      fs.access(path.join(journalDir(), 'delta-000000000001.json')),
+    ).rejects.toThrow()
+    await expect(
+      fs.access(path.join(journalDir(), 'delta-2000000001.json')),
+    ).rejects.toThrow()
   })
 })
 
@@ -1428,5 +1521,15 @@ describe('OPT-03 元数据快照序列化降载', () => {
       'a',
       'b',
     ])
+  })
+})
+
+describe('isRegisteredLibrary（B1 库白名单单一来源）', () => {
+  it('已登记库大小写不敏感命中；未登记路径不命中', async () => {
+    await updateSettings({ modelsFolder: root, modelsFolders: [root] })
+    expect(isRegisteredLibrary(root)).toBe(true)
+    expect(isRegisteredLibrary(root.toUpperCase())).toBe(true)
+    expect(isRegisteredLibrary(path.join(root, 'sub'))).toBe(false)
+    expect(isRegisteredLibrary(undefined)).toBe(false)
   })
 })
