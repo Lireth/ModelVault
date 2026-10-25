@@ -25,6 +25,12 @@ export const LORA_TAG_DEFS = [
   { key: 'tool', label: '工具', color: '#8a97a5' },
 ]
 
+/**
+ * 一键整理的 LoRA 目标根目录名（主进程 organizeByTags 建目录用；
+ * 渲染层批量整理后对该子树做局部扫描也以此为准——两侧单一来源）。
+ */
+export const LORA_DIR = 'LoRA'
+
 /** Checkpoint 的自动分类标签（无需手动标注） */
 export const CHECKPOINT_TAG_DEFS = [
   { key: 'base', label: '基底模型', color: '#4f9cf9' },

@@ -637,7 +637,39 @@ describe('破坏性文件操作的 realpath 归属（O6）', () => {
     })
 
     expect(res.error).toBe('目标文件夹真实路径不在当前模型库内')
-    await expect(fs.readFile(source, 'utf8')).resolves.toBe('model-data')
+    await expect(fs.readFile(source, 'utf-8')).resolves.toBe('model-data')
+  })
+
+  it('库内移动成功返回 targetRelDir（OPT-03 局部扫描子树）；目标为库根时映射空串', async () => {
+    const source = path.join(root, 'mv.safetensors')
+    await fs.writeFile(source, 'model-data')
+    const sub = path.join(root, 'sub')
+    await fs.mkdir(sub, { recursive: true })
+    vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+      canceled: false,
+      filePaths: [sub],
+    })
+
+    const res = await getRegisteredHandler('models:moveModelTo')(makeEvent(), {
+      id: source,
+    })
+
+    expect(res.error).toBeUndefined()
+    expect(res.path).toBe(path.join(sub, 'mv.safetensors'))
+    expect(res.targetRelDir).toBe('sub')
+
+    // 目标为库根本身：newPath === id 走幂等分支，toRelKey(根) 为 null → ''
+    const source2 = path.join(root, 'mv2.safetensors')
+    await fs.writeFile(source2, 'model-data')
+    vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+      canceled: false,
+      filePaths: [root],
+    })
+    const res2 = await getRegisteredHandler('models:moveModelTo')(makeEvent(), {
+      id: source2,
+    })
+    expect(res2.path).toBe(source2)
+    expect(res2.targetRelDir).toBe('')
   })
 
   it('一键整理：源模型通过库内 junction 指向库外时跳过', async (ctx) => {

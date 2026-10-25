@@ -2,6 +2,7 @@ import { state, replaceModels, clearHashOverrides } from './state'
 import { clearModelCoverOverrides } from './cover-overrides'
 import { toast } from './toast'
 import { scanModels } from './library'
+import { modelById } from './selectors'
 import {
   MAX_PARTIAL_SCAN_DIRS,
   collapseDirsToTopLevel,
@@ -271,4 +272,22 @@ export async function partialScanModels(dirs) {
   } finally {
     finalize()
   }
+}
+
+/**
+ * 收集模型 id 集合对应的变更子树（相对目录，去重；OPT-03）：
+ * 文件操作后磁盘 id 已变，但列表旧条目仍持原始 relDir——就地合并需要的
+ * 正是该子树。id 不在当前列表（异常路径）时不贡献子树；结果为空数组时
+ * partialScanModels 自动回退全量扫描，可靠性语义与整表重扫一致。
+ * @param {string[]} ids 模型文件 id（操作前的旧 id）
+ * @returns {string[]} 去重后的相对目录列表
+ */
+export function modelRelDirs(ids) {
+  const dirs = new Set()
+  const byId = modelById.value
+  for (const id of Array.isArray(ids) ? ids : []) {
+    const m = byId.get(id)
+    if (m && typeof m.relDir === 'string') dirs.add(m.relDir)
+  }
+  return [...dirs]
 }

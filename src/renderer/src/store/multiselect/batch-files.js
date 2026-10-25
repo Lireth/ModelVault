@@ -2,7 +2,7 @@ import { state, replaceModels } from '../state'
 import { toast, confirmDialog } from '../toast'
 import { applyMetaUpdates, mapWithConcurrency } from '../meta-apply'
 import { modelById } from '../selectors'
-import { LORA_TAG_KEYS } from '../../../../shared/model-categories'
+import { LORA_DIR, LORA_TAG_KEYS } from '../../../../shared/model-categories'
 
 /**
  * 批量文件级操作（O-4 自 multiselect.js 按域拆出）：
@@ -47,9 +47,15 @@ export async function batchOrganizeByTags() {
       toast('error', `一键移动失败: ${res?.error || '未知错误'}`)
       return
     }
-    // id 已变化，整表重扫收敛（含元数据键已即时迁移的验证）
-    const { scanModels } = await import('../library')
-    if (!state.scanning) await scanModels()
+    // id 已变化：源子树 + LoRA 目标子树（根子树覆盖全部标签子目录）一次
+    // 局部扫描收敛（OPT-03，partialScanModels 内建回退全量兜底）
+    const { partialScanModels, modelRelDirs } = await import('../partial-scan')
+    if (!state.scanning) {
+      await partialScanModels([
+        ...modelRelDirs(moves.map((mv) => mv.id)),
+        LORA_DIR,
+      ])
+    }
     const parts = []
     if (res.failed?.length > 0) parts.push(`失败 ${res.failed.length} 个`)
     if (res.skipped?.length > 0) parts.push(`跳过 ${res.skipped.length} 个`)
@@ -141,10 +147,11 @@ export async function batchToggleDisabled(disabled) {
       else fail += 1
     }
     if (ok > 0) {
-      // id 已全部变化，整表重扫收敛（含元数据键已即时迁移的验证）；
-      // 取消场景同样需要重扫——已改名的部分必须同步到列表
-      const { scanModels } = await import('../library')
-      if (!state.scanning) await scanModels()
+      // id 已全部变化：收集所涉子树去重后一次局部扫描收敛（OPT-03）；
+      // 取消场景同样需要刷新——已改名的部分必须同步到列表
+      const { partialScanModels, modelRelDirs } =
+        await import('../partial-scan')
+      if (!state.scanning) await partialScanModels(modelRelDirs(ids))
     }
     const label = disabled ? '禁用' : '启用'
     const done = ok + fail

@@ -6,7 +6,11 @@ import logger from '../../logger'
 import { isPathRealWithin, relativeWithin } from '../../utils'
 import { getCurrentRoot, renameModelMeta, toRelKey } from '../../services/store'
 import { sidecarFilesFor } from './misc'
-import { LORA_TAG_DEFS, LORA_TAG_KEYS } from '../../../shared/model-categories'
+import {
+  LORA_DIR,
+  LORA_TAG_DEFS,
+  LORA_TAG_KEYS,
+} from '../../../shared/model-categories'
 import {
   MODEL_EXTENSION_NAMES,
   MODEL_EXTENSION_SET,
@@ -43,8 +47,9 @@ import {
  * 移动文件的目标目录（LoRA 一级文件夹 + 7 个标签子文件夹名，与分类标签
  * label 一致，保证移动后重扫的文件夹自动标签与元数据标签一致，形成闭环）：
  * 已标注 LoRA → LoRA/<标签>/，未标注 LoRA → LoRA/ 根目录。
+ * LORA_DIR 名称由 shared/model-categories 单一来源提供（渲染层批量整理的
+ * 局部扫描子树同样引用）。
  */
-const LORA_DIR = 'LoRA'
 const TAG_FOLDER_NAMES = LORA_TAG_DEFS.map((d) => d.label)
 
 /**
@@ -495,7 +500,8 @@ export function registerFilesHandlers() {
       if (!rootReal || !(await isPathRealWithin(targetDir, rootReal))) {
         return { error: '目标文件夹真实路径不在当前模型库内' }
       }
-      if (newPath === id) return { path: id }
+      if (newPath === id)
+        return { path: id, targetRelDir: toRelKey(targetDir) ?? '' }
       try {
         await fs.access(newPath)
         return { error: '目标位置已存在同名文件' }
@@ -519,7 +525,9 @@ export function registerFilesHandlers() {
       }
       renameModelMeta(id, newPath)
       logger.info(`模型已移动: ${id} -> ${newPath}`)
-      return { path: newPath }
+      // targetRelDir：渲染层据此对目标子树做局部扫描（OPT-03）；
+      // 目标为库根时 toRelKey 返回 null，映射为 ''（根直属文件子树）
+      return { path: newPath, targetRelDir: toRelKey(targetDir) ?? '' }
     },
     { errorPrefix: '移动失败' },
   )

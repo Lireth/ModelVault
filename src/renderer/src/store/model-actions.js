@@ -226,8 +226,9 @@ export async function handleMenuAction(id, action) {
 /* ---------------- 文件操作（批次 4：禁用/移动/哈希） ---------------- */
 
 /**
- * 加/去 .disabled 后缀（F10）：成功后重扫刷新列表（文件 id 已变；
- * watcher 自动重扫开启时也会触发，手动重扫兜底 autoRescan 关闭的场景）
+ * 加/去 .disabled 后缀（F10）：成功后对所在子树做局部扫描刷新（文件 id
+ * 已变；OPT-03 起不再全库重扫）。watcher 自动重扫开启时也会触发，手动
+ * 刷新兜底 autoRescan 关闭的场景
  * @param {string} id 模型 id
  * @param {boolean} disabled 目标状态
  */
@@ -247,14 +248,14 @@ export async function toggleDisabledModel(id, disabled) {
     'success',
     disabled ? '已禁用（文件名加 .disabled 后缀，绘画工具不再加载）' : '已启用',
   )
-  if (!state.scanning) await refreshAfterFileChange()
+  if (!state.scanning) await refreshAfterFileChange([id])
   return true
 }
 
 /**
  * 重命名模型文件（N1）：name 为不含扩展名的新文件名。
  * 扩展名由主进程保留；同名 sidecar 一并改名，元数据键即时迁移。
- * 成功后关闭当前详情并整表重扫（文件 id 已变化）。
+ * 成功后关闭当前详情并对所在子树局部扫描收敛新文件名（OPT-03）。
  * @param {string} id 模型 id
  * @param {string} name 新文件名（不含扩展名）
  * @returns {Promise<boolean>} 是否完成重命名
@@ -296,15 +297,15 @@ export async function renameModel(id, name) {
   } else {
     toast('success', `已重命名为「${trimmed}」`)
   }
-  // 文件 id 已变化：关闭当前详情，整表重扫收敛新文件名
+  // 文件 id 已变化：关闭当前详情，所在子树局部扫描收敛新文件名
   state.selectedId = null
-  await refreshAfterFileChange()
+  await refreshAfterFileChange([id])
   return true
 }
 
 /**
  * 库内移动模型（F11）：目标目录经主进程原生对话框选择，
- * 元数据随键迁移，成功后重扫刷新
+ * 元数据随键迁移，成功后对源/目标子树局部扫描刷新（OPT-03）
  * @param {string} id 模型 id
  */
 export async function moveModelTo(id) {
@@ -321,7 +322,15 @@ export async function moveModelTo(id) {
     return false
   }
   toast('success', `已移动到 ${res.path}`)
-  if (!state.scanning) await refreshAfterFileChange()
+  if (!state.scanning) {
+    // 源/目标两个子树都刷新；targetRelDir 缺失（响应形状漂移防御）时
+    // 无法确定目标子树——传空数组整体回退全量，绝不静默漏掉目标子树
+    const hasTarget = typeof res?.targetRelDir === 'string'
+    await refreshAfterFileChange(
+      hasTarget ? [id] : [],
+      hasTarget ? [res.targetRelDir] : [],
+    )
+  }
   return true
 }
 
@@ -378,8 +387,16 @@ export async function importModels(mode = 'copy') {
   }
 }
 
-/** 文件改名/移动后的列表刷新：文件 id 已变，整表重扫是最可靠的收敛方式 */
-async function refreshAfterFileChange() {
-  const { scanModels } = await import('./library')
-  await scanModels()
+/**
+ * 文件改名/禁用/移动后的列表刷新（OPT-03）：影响范围只在所涉子树，
+ * 改用局部增量扫描就地合并——免去全库重扫的磁盘 IO 与全屏扫描遮罩；
+ * partialScanModels 内建「变更目录过多/异常回退全量」的兜底，可靠性
+ * 语义与整表重扫一致。ids 解析出源子树，extraDirs 补充目标子树
+ * （移动场景）；全部为空时自动回退全量扫描。
+ * @param {string[]} ids 操作前的模型 id（列表旧条目仍持原始 relDir）
+ * @param {string[]} [extraDirs] 额外子树（如移动目标目录）
+ */
+async function refreshAfterFileChange(ids, extraDirs = []) {
+  const { partialScanModels, modelRelDirs } = await import('./partial-scan')
+  await partialScanModels([...modelRelDirs(ids), ...extraDirs])
 }
