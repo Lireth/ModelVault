@@ -4,6 +4,7 @@ import logger from '../logger'
 import { relativeWithin } from '../utils'
 import { readLibraryIndex } from './library-index'
 import { getCurrentRoot, getDataFilePath } from './store-paths'
+import { parseJsonOffThread } from './json-serializer'
 import { getSettings } from './store-settings'
 
 /**
@@ -125,7 +126,7 @@ async function readStoreEntries(root) {
   try {
     const stat = await fs.stat(file)
     if (!stat.isFile() || stat.size > MAX_SOURCE_BYTES) return null
-    const parsed = JSON.parse(await fs.readFile(file, 'utf-8'))
+    const parsed = await parseJsonOffThread(await fs.readFile(file, 'utf-8'))
     const models = parsed?.models
     if (!models || typeof models !== 'object' || Array.isArray(models))
       return null

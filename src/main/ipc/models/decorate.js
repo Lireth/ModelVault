@@ -1,4 +1,5 @@
 import path from 'node:path'
+import fs from 'node:fs/promises'
 import { getModelMeta, resolveCover, setModelMeta } from '../../services/store'
 import { metaDisplayFields } from './meta-display'
 import {
@@ -349,6 +350,33 @@ export function resolveCoverSafe(cover) {
 }
 
 /**
+ * 缓存条目引用的缩略图是否已有缺失（A6 失效自愈判定）。
+ * thumbs 目录被外部清空/备份恢复把 .modelvault 整体换掉（thumbs 不入备份）
+ * 后，命中路径持续返回失效 thumbPath 且永不重建——未命中路径的
+ * getThumbPathDeferred 有存在性校验，命中路径此前没有。任一引用失效即
+ * 判缓存失效，走完整装饰重建。
+ * @param {{thumbPath?: string, decorated?: {covers?: Array<{thumbPath?: string}>}}} cached 装饰缓存条目
+ * @returns {Promise<boolean>} 有缺失引用返回 true
+ */
+async function cachedThumbMissing(cached) {
+  const paths = []
+  if (cached.thumbPath) paths.push(cached.thumbPath)
+  for (const cv of cached.decorated?.covers || []) {
+    if (cv.thumbPath) paths.push(cv.thumbPath)
+  }
+  if (paths.length === 0) return false
+  const checks = await Promise.all(
+    paths.map((p) =>
+      fs.access(p).then(
+        () => false,
+        () => true,
+      ),
+    ),
+  )
+  return checks.some((missing) => missing)
+}
+
+/**
  * 单模型的元数据装饰（封面列表校验、默认封面回退 sidecar 预览图）。
  * @param {Record<string, any>} model 扫描出的模型
  * @param {Set<string>} usedThumbs 缩略图保留名单
@@ -359,7 +387,8 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
   const meta0 = getModelMeta(model.id) || {}
   const cached = decorateCache.get(model.id)
   // 增量扫描缓存命中：mtime 与元数据签名均未变化时复用上次结果
-  //（命中路径不做任何文件 IO，sidecar 导入仅发生在缓存未命中时）。
+  //（命中路径仅做缩略图引用的存在性探针（A6），其余不做文件 IO，
+  // sidecar 导入仅发生在缓存未命中时）。
   // forceRefresh 由局部扫描在变更子树上置位：即使模型文件 mtime 未变，
   // 也必须重新检查 sidecar/封面文件，避免新增/修改的 sidecar 被缓存遮蔽。
   if (
@@ -368,16 +397,22 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
     cached.mtimeMs === model.mtimeMs &&
     cached.signature === metaSignature(meta0)
   ) {
-    // 刷新插入顺序实现简易 LRU
-    decorateCache.delete(model.id)
-    decorateCache.set(model.id, cached)
-    if (cached.thumbPath) usedThumbs.add(path.basename(cached.thumbPath))
-    // OPT-1：轮播封面缩略图同样计入保留名单——漏计会被 pruneThumbs 误删，
-    // 且缓存命中路径不会重新生成，坏图将持续到元数据变化
-    for (const cv of cached.decorated.covers) {
-      if (cv.thumbPath) usedThumbs.add(path.basename(cv.thumbPath))
+    if (await cachedThumbMissing(cached)) {
+      // A6：引用的缩略图已不存在——丢弃缓存走完整重建（getThumbPathDeferred
+      // 会登记缺失缩略图的后台补生成），坏图自愈而不是持续到元数据变化
+      decorateCache.delete(model.id)
+    } else {
+      // 刷新插入顺序实现简易 LRU
+      decorateCache.delete(model.id)
+      decorateCache.set(model.id, cached)
+      if (cached.thumbPath) usedThumbs.add(path.basename(cached.thumbPath))
+      // OPT-1：轮播封面缩略图同样计入保留名单——漏计会被 pruneThumbs 误删，
+      // 且缓存命中路径不会重新生成，坏图将持续到元数据变化
+      for (const cv of cached.decorated.covers) {
+        if (cv.thumbPath) usedThumbs.add(path.basename(cv.thumbPath))
+      }
+      return cached.decorated
     }
-    return cached.decorated
   }
 
   // sidecar 导入可能更新元数据（首扫或元数据重置后的恢复），

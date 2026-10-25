@@ -15,6 +15,7 @@ import {
   normalizeSnapshotSeq,
   removeJournalDir,
 } from './store-meta-journal'
+import { parseJsonOffThread } from './json-serializer'
 import { preserveCorruptedFile } from '../utils'
 import {
   clearOfflineRetry,
@@ -73,7 +74,8 @@ export async function loadData() {
   let snapshotSeq = 0
   try {
     const text = await fs.readFile(file, 'utf-8')
-    const parsed = JSON.parse(text)
+    // B1：大库 store.json 的解析移出主线程（阈值内仍在主线程，语义不变）
+    const parsed = await parseJsonOffThread(text)
     // B-04：磁盘文件同样按不可信输入处理（可能由恶意备份写入或外部编辑）
     metaState.data = normalizeStoreData(parsed)
     metaState.hasSnapshot = true

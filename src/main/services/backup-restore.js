@@ -23,6 +23,7 @@ import {
   streamBackupZip,
   unzipBackupEntries,
 } from './backup-zip'
+import { parseJsonOffThread } from './json-serializer'
 
 /**
  * 备份恢复流程（O2 拆分）：
@@ -150,7 +151,8 @@ async function restoreLibraryLocked(
     const storeText = decoder.decode(storeBytes)
     // 落盘前先校验 JSON 并规范化（B-04）：备份来自不可信来源，
     // store.json 的键与字段必须按与磁盘加载相同的规则清洗（原型污染/超大字段）
-    const parsed = JSON.parse(storeText)
+    // B1：大库备份内的 store.json（上限 256MB）解析移出主线程
+    const parsed = await parseJsonOffThread(storeText)
     const sanitized = normalizeStoreData(parsed)
     const sanitizedText = JSON.stringify(sanitized, null, 2)
     const sourceCount =
@@ -170,7 +172,7 @@ async function restoreLibraryLocked(
     let settingsRestored = false
     if (restoreSettings && unzipped['settings.json']) {
       // 库设置随备份恢复（设置随模型库走）：写入临时目录，随目录交换原子生效
-      const parsedSettings = JSON.parse(
+      const parsedSettings = await parseJsonOffThread(
         decoder.decode(unzipped['settings.json']),
       )
       const normalizedSettings = normalizeLibrarySettings(parsedSettings)

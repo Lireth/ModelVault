@@ -12,6 +12,8 @@ import {
   parseResolution,
   readHeaderLength,
   readSafetensorsInfo,
+  runWithHeaderGateForTests,
+  setHeaderGateForTests,
 } from '../src/main/services/safetensors'
 
 /**
@@ -501,6 +503,55 @@ describe('checkSafetensorsHealthy（F6 健康检查）', () => {
       ).toBe(false)
     } finally {
       await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+})
+
+describe('大头部并发闸门（B3）', () => {
+  it('超过并发上限的任务排队执行，在途峰值不超上限', async () => {
+    setHeaderGateForTests({ threshold: 0, concurrency: 2 })
+    try {
+      let active = 0
+      let peak = 0
+      const task = async () => {
+        active += 1
+        peak = Math.max(peak, active)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        active -= 1
+        return active
+      }
+      const results = await Promise.all(
+        Array.from({ length: 8 }, () => runWithHeaderGateForTests(task)),
+      )
+      expect(results).toHaveLength(8)
+      expect(peak).toBeLessThanOrEqual(2)
+      expect(peak).toBeGreaterThanOrEqual(2)
+    } finally {
+      setHeaderGateForTests({})
+    }
+  })
+
+  it('闸门不改变解析结果：强制全量走闸门后真实文件仍正确解析', async () => {
+    setHeaderGateForTests({ threshold: 0, concurrency: 1 })
+    try {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mv-st-gate-'))
+      try {
+        const header = JSON.stringify({
+          __metadata__: { ss_base_model_version: 'sd_xl_base_1.0' },
+        })
+        const headerBuf = Buffer.from(header, 'utf8')
+        const len = Buffer.alloc(8)
+        len.writeBigUInt64LE(BigInt(headerBuf.length))
+        const file = path.join(dir, 'gated.safetensors')
+        await fs.writeFile(file, Buffer.concat([len, headerBuf]))
+        const info = await readSafetensorsInfo(file)
+        expect(info?.baseModel).toBe('sd_xl_base_1.0')
+        expect(await checkSafetensorsHealthy(file)).toBe(true)
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+      }
+    } finally {
+      setHeaderGateForTests({})
     }
   })
 })

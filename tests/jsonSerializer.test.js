@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  parseJsonOffThread,
   resetJsonSerializerForTests,
   serializeJsonOffThread,
+  setParseWorkerThresholdForTests,
 } from '../src/main/services/json-serializer'
 
 /**
@@ -37,5 +39,22 @@ describe('json-serializer', () => {
     const circular = {}
     circular.self = circular
     await expect(serializeJsonOffThread(circular)).rejects.toThrow()
+  })
+})
+
+describe('parseJsonOffThread（B1 读路径降载）', () => {
+  it('在 worker 中解析大文本并结构化克隆回传（阈值 0 强制走 worker）', async () => {
+    setParseWorkerThresholdForTests(0)
+    const value = { 名称: '模型', list: [1, 2, 3], nested: { ok: true } }
+    expect(await parseJsonOffThread(JSON.stringify(value))).toEqual(value)
+  })
+
+  it('解析失败与主线程 JSON.parse 语义一致（抛错不伪成功）', async () => {
+    setParseWorkerThresholdForTests(0)
+    await expect(parseJsonOffThread('{broken!!')).rejects.toThrow()
+  })
+
+  it('低于阈值的文本直接主线程解析', async () => {
+    expect(await parseJsonOffThread('{"a":1}')).toEqual({ a: 1 })
   })
 })

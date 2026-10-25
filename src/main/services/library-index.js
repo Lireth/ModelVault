@@ -4,7 +4,7 @@ import path from 'node:path'
 import logger from '../logger'
 import { samePathIgnoreCase } from '../utils'
 import { atomicWriteFile } from './atomic-write'
-import { serializeJsonOffThread } from './json-serializer'
+import { parseJsonOffThread, serializeJsonOffThread } from './json-serializer'
 import { getIndexFilePath } from './store-paths'
 import { isRelDirInScope } from '../../shared/scan-dirs'
 
@@ -126,7 +126,8 @@ export async function readLibraryIndex(root) {
       logger.warn(`本地索引过大或不是文件，已忽略: ${file}`)
       return null
     }
-    const parsed = JSON.parse(await fs.readFile(file, 'utf-8'))
+    // B1：大库索引解析移出主线程（与写侧 worker 阈值对称的读路径降载）
+    const parsed = await parseJsonOffThread(await fs.readFile(file, 'utf-8'))
     if (
       !parsed ||
       parsed.version !== INDEX_VERSION ||

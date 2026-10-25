@@ -22,6 +22,22 @@ vi.mock('electron', () => ({
   },
 }))
 
+// A5 切库竞态测试需要干预 buildBackupParts 的执行时机：
+// 默认透传真实实现（既有用例行为不变），个别用例 mockImplementationOnce。
+// 真实实现经 hoisted 容器暴露（动态 import 会命中 mock 自身，不可用）
+const { buildBackupPartsMock, realBackupParts } = vi.hoisted(() => ({
+  buildBackupPartsMock: vi.fn(),
+  realBackupParts: { impl: null },
+}))
+vi.mock('../src/main/services/backup-export', async (importOriginal) => {
+  const actual = await importOriginal()
+  realBackupParts.impl = actual.buildBackupParts
+  buildBackupPartsMock.mockImplementation((...args) =>
+    realBackupParts.impl(...args),
+  )
+  return { ...actual, buildBackupParts: buildBackupPartsMock }
+})
+
 import {
   resetAutoBackupForTests,
   runAutoBackupIfDue,
@@ -129,6 +145,39 @@ describe('runAutoBackupIfDue（到期判定与跳过）', () => {
 })
 
 describe('备份产出与滚动保留', () => {
+  it('组装期间发生库切换时跳过本轮：不把新库内容写进旧库目录（A5）', async () => {
+    // B 库预置标注（真实组装读出的将是 B 库内容，组装成功而非 empty 跳过）
+    const rootB = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-autobk-b-'),
+    )
+    roots.push(rootB)
+    setDataRoot(rootB)
+    await loadData()
+    setModelMeta(path.join(rootB, 'b.safetensors'), { alias: 'b' })
+    await flushStoreSave()
+    setDataRoot(root)
+    await loadData()
+    setModelMeta(path.join(root, 'a.safetensors'), { alias: 'a' })
+
+    // 模拟捕获 root（A 库）与组装之间的切换窗口：buildBackupParts 执行时
+    // 根已切到 B 库——旧实现会把 B 库内容写进 A 的 backups/ 目录
+    buildBackupPartsMock.mockImplementationOnce(async (opts) => {
+      setDataRoot(rootB)
+      await loadData()
+      return realBackupParts.impl(opts)
+    })
+    try {
+      const res = await runAutoBackupIfDue()
+      expect(res.skipped).toBe('root-switched')
+      // A 库目录未创建任何备份（切库复核发生在 mkdir 之前）
+      expect(await listAutoBackups()).toEqual([])
+    } finally {
+      // 切回本用例的根，交由 afterEach 静止写盘链后清理
+      setDataRoot(root)
+      await loadData()
+    }
+  })
+
   it('备份写入 .modelvault/backups/auto-<stamp>.zip（metadata 模式，无封面）', async () => {
     setModelMeta(path.join(root, 'a.safetensors'), { alias: 'a' })
     setModelMeta(path.join(root, 'b.safetensors'), { rating: 5 })

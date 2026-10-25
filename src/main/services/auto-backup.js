@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
 import { renameReplacing } from './atomic-write'
+import { samePathIgnoreCase } from '../utils'
 import { DATA_DIR, getCurrentRoot, getSettings } from './store'
 import { buildBackupParts } from './backup-export'
 import { writeBackupZipToFile } from './backup-zip'
@@ -214,6 +215,15 @@ export async function runAutoBackupIfDue(now = Date.now()) {
       // 库尚无标注是正常状态（刚建库），静默跳过而非报错
       logger.info(`自动备份跳过: ${built.error}`)
       return { skipped: 'empty', reason: built.error }
+    }
+    // 切库竞态防护（A5）：组装经 getCurrentRoot() 取数（backup-export），
+    // 捕获 root 与组装之间（lastAutoBackupAt 的 await 间隙）用户切库时，
+    // built 的内容已属于新库——此时不得把 B 库内容写进捕获 root 的
+    // backups/ 目录（恢复时数据错配）。parts 组装后内容冻结，
+    // 此处复核一致即可保证「内容与落点同库」
+    if (!samePathIgnoreCase(getCurrentRoot(), root)) {
+      logger.warn('自动备份组装期间发生了库切换，本轮跳过（下轮检查重试）')
+      return { skipped: 'root-switched' }
     }
     await fs.mkdir(dir, { recursive: true })
     const target = path.join(

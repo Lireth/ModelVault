@@ -303,6 +303,48 @@ describe('safeCoverName', () => {
 })
 
 describe('exportBackup', () => {
+  it('导出走 .tmp 原子落点：成功后覆盖目标且无 .tmp 残留（A4）', async () => {
+    const root = makeLibrary()
+    setDataRoot(root)
+    await loadData()
+    const outDir = mkTmp('modelvault-out-')
+    const outZip = path.join(outDir, 'backup.zip')
+    // 对话框覆盖既有文件场景：旧内容被完整替换为新备份
+    fs.writeFileSync(outZip, '旧内容')
+    dialogMock.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: outZip,
+    })
+
+    const res = await exportBackup(null)
+
+    expect(res.error).toBeUndefined()
+    expect(fs.existsSync(`${outZip}.tmp`)).toBe(false)
+    const manifest = JSON.parse(readZip(outZip)['manifest.json'])
+    expect(manifest.app).toBe(BACKUP_FORMAT)
+  })
+
+  it('写入失败时不触碰用户既有文件：目标原样保留（A4）', async () => {
+    const root = makeLibrary()
+    setDataRoot(root)
+    await loadData()
+    const outDir = mkTmp('modelvault-out-')
+    const outZip = path.join(outDir, 'backup.zip')
+    fs.writeFileSync(outZip, '旧备份内容')
+    // 用同名目录占位 .tmp 路径：写入必然失败，模拟导出中途故障
+    fs.mkdirSync(`${outZip}.tmp`)
+    dialogMock.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: outZip,
+    })
+
+    const res = await exportBackup(null)
+
+    expect(res.error).toContain('备份写入失败')
+    // 既有文件原样保留（此前直写实现失败时 rm 会连旧文件一起毁掉）
+    expect(fs.readFileSync(outZip, 'utf8')).toBe('旧备份内容')
+  })
+
   it('打包设置与当前库的 store.json/covers，thumbs 不纳入', async () => {
     const root = makeLibrary()
     setDataRoot(root)

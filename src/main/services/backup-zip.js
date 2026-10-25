@@ -91,6 +91,11 @@ export function unzipBackupAsync(bytes) {
  * 流式写出备份 zip（OPT-10）：封面逐个读取并直接写入压缩流，不再把所有
  * 封面字节聚合进内存后再整体压缩；内存峰值从「全部封面」降为「单个读块」。
  * JSON 使用 deflate，封面通常已是压缩格式，使用 pass-through 避免无意义 CPU。
+ *
+ * 写盘背压（A4）：deflate 产出快于慢盘刷盘时，writeStream 会把未刷盘数据
+ * 缓存在内存（峰值可逼近整个 zip）。输入侧（文本分块/封面读块）在每次喂入
+ * 前等待 drain，未刷盘数据上限收敛到一个读块量级。
+ *
  * @param {string} filePath 输出 zip 路径
  * @param {{settingsText: string, storeText?: string, manifestText: string,
  *   covers?: Array<{name: string, path: string}>}} contents
@@ -100,13 +105,25 @@ export function writeBackupZipToFile(filePath, contents) {
   return new Promise((resolve, reject) => {
     const out = createWriteStream(filePath)
     let settled = false
+    /** drain 等待者（写缓冲满后登记，drain 事件统一唤醒） */
+    let drainWaiters = []
+    let writePending = false
     const fail = (err) => {
       if (settled) return
       settled = true
+      const waiters = drainWaiters
+      drainWaiters = []
+      for (const w of waiters) w()
       out.destroy()
       reject(err)
     }
     out.on('error', fail)
+    out.on('drain', () => {
+      writePending = false
+      const waiters = drainWaiters
+      drainWaiters = []
+      for (const w of waiters) w()
+    })
     out.on('finish', () => {
       if (settled) return
       settled = true
@@ -115,51 +132,85 @@ export function writeBackupZipToFile(filePath, contents) {
 
     const archive = new Zip((err, data, final) => {
       if (err) return fail(err)
-      if (data && data.length > 0) out.write(Buffer.from(data))
+      // Zip 输出回调是同步的：写缓冲满仅置位标记，由下一次输入喂入前的
+      // waitDrain 拦截（超发量收敛为一个输入单元，无内存放大）
+      if (data && data.length > 0 && !out.write(Buffer.from(data)))
+        writePending = true
       if (final) out.end()
     })
 
-    const addText = (name, text) => {
+    /** 输入侧喂入前的背压等待：写缓冲满时暂停喂压缩流直到 drain */
+    const waitDrain = () =>
+      writePending
+        ? new Promise((r) => {
+            drainWaiters.push(r)
+          })
+        : Promise.resolve()
+
+    /** 文本喂入分块大小（与解压读块同量级：内存峰值与文本总量解耦） */
+    const TEXT_CHUNK = UNZIP_CHUNK_SIZE
+
+    /**
+     * 分块喂入文本条目（A4）：整个文本一次性 push 会让 deflate 同步产出
+     * 全部输出并在 out 写缓冲堆积；按块喂入 + 逐块等待 drain。
+     * 字节整体编码后再切片——按字符串切片会把 UTF-8 多字节序列（含代理对）
+     * 切开产生替换字符，损坏非 ASCII 内容。
+     * @param {string} name 条目名
+     * @param {string} text 文本内容
+     * @returns {Promise<void>}
+     */
+    const addText = async (name, text) => {
       const file = new ZipDeflate(name, { level: ZIP_LEVEL })
       archive.add(file)
-      file.push(strToU8(text), true)
+      const bytes = strToU8(text)
+      if (bytes.length === 0) {
+        file.push(new Uint8Array(0), true)
+        return
+      }
+      for (let i = 0; i < bytes.length; i += TEXT_CHUNK) {
+        await waitDrain()
+        const final = i + TEXT_CHUNK >= bytes.length
+        file.push(
+          final ? bytes.subarray(i) : bytes.subarray(i, i + TEXT_CHUNK),
+          final,
+        )
+      }
     }
 
-    /** 逐个封面流式写入：只保留当前读块
+    /**
+     * 逐个封面流式写入：只保留当前读块（for-await 迭代天然尊重读流背压，
+     * 写侧背压由 waitDrain 显式等待）
      * @param {{name: string, path: string}} cover 封面文件（名称 + 绝对路径）
      * @returns {Promise<void>} 写入完成（含流结束）后 resolve
      */
-    const addCover = (cover) =>
-      new Promise((resolveCover, rejectCover) => {
-        const file = new ZipPassThrough(`${LIB_COVERS_PREFIX}${cover.name}`)
-        archive.add(file)
-        const stream = createReadStream(cover.path, {
-          highWaterMark: UNZIP_CHUNK_SIZE,
-        })
-        // 读块为 Buffer（未设编码）；显式收窄以满足 fflate push 的 Uint8Array 形参
-        stream.on('data', (chunk) =>
-          file.push(new Uint8Array(/** @type {Buffer} */ (chunk))),
-        )
-        stream.on('end', () => {
-          file.push(new Uint8Array(0), true)
-          resolveCover()
-        })
-        stream.on('error', rejectCover)
+    const addCover = async (cover) => {
+      const file = new ZipPassThrough(`${LIB_COVERS_PREFIX}${cover.name}`)
+      archive.add(file)
+      const stream = createReadStream(cover.path, {
+        highWaterMark: UNZIP_CHUNK_SIZE,
       })
-
-    try {
-      addText('settings.json', contents.settingsText)
-      if (contents.storeText)
-        addText(`${LIB_PREFIX}${DATA_FILE}`, contents.storeText)
-      ;(async () => {
-        for (const cover of contents.covers || []) await addCover(cover)
-        // manifest 放在最后：前面的条目均已成功加入后，清单才声明完整内容
-        addText('manifest.json', contents.manifestText)
-        archive.end()
-      })().catch(fail)
-    } catch (err) {
-      fail(err)
+      try {
+        for await (const chunk of stream) {
+          // 读块为 Buffer（未设编码）；显式收窄以满足 fflate push 的 Uint8Array 形参
+          await waitDrain()
+          file.push(new Uint8Array(/** @type {Buffer} */ (chunk)))
+        }
+        file.push(new Uint8Array(0), true)
+      } catch (err) {
+        stream.destroy()
+        throw err
+      }
     }
+
+    ;(async () => {
+      await addText('settings.json', contents.settingsText)
+      if (contents.storeText)
+        await addText(`${LIB_PREFIX}${DATA_FILE}`, contents.storeText)
+      for (const cover of contents.covers || []) await addCover(cover)
+      // manifest 放在最后：前面的条目均已成功加入后，清单才声明完整内容
+      await addText('manifest.json', contents.manifestText)
+      archive.end()
+    })().catch(fail)
   })
 }
 

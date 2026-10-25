@@ -262,6 +262,35 @@ describe('decorateModels 元数据装饰', () => {
     expect(third.alias).toBe('修改后')
   })
 
+  it('缓存命中的缩略图引用失效时丢弃缓存重建；引用有效时照常复用（A6）', async () => {
+    const abs = path.join(root, 'thumb-stale.safetensors')
+    await fs.writeFile(abs, 'x')
+    setModelMeta(abs, { alias: '缓存' })
+    const model = makeModel(abs)
+    const [first] = await decorateModels([model])
+    const entry = decorateCache.get(abs)
+    expect(entry).toBeTruthy()
+
+    // 模拟 thumbs 目录被外部清空/备份恢复替换后的陈旧缓存：引用不存在的缩略图
+    entry.thumbPath = path.join(root, DATA_DIR, 'thumbs', 'ghost.jpg')
+    entry.decorated.coverUrl = 'mvimg://stale'
+    const [second] = await decorateModels([{ ...model }])
+    // 命中探针发现引用失效：缓存被丢弃，完整重建产生新对象（坏图自愈）
+    expect(second).not.toBe(first)
+    expect(decorateCache.get(abs).thumbPath).toBe('')
+
+    // 引用有效（缩略图真实存在）时命中路径照常复用缓存对象
+    const thumbsDir = path.join(root, DATA_DIR, 'thumbs')
+    await fs.mkdir(thumbsDir, { recursive: true })
+    const realThumb = path.join(thumbsDir, 'real.jpg')
+    await fs.writeFile(realThumb, 't')
+    const entry2 = decorateCache.get(abs)
+    entry2.thumbPath = realThumb
+    entry2.decorated.coverUrl = 'mvimg://real'
+    const [third] = await decorateModels([{ ...model }])
+    expect(third).toBe(entry2.decorated)
+  })
+
   it('取消信号在批间生效：aborted 时抛出 AbortError', async () => {
     const abs = path.join(root, 'e.safetensors')
     await fs.writeFile(abs, 'x')

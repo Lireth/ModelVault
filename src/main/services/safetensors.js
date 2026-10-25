@@ -14,6 +14,70 @@ import fs from 'node:fs/promises'
 /** 头部长度上限：异常或超大头部（>16MB）视为不可信，直接放弃解析 */
 const MAX_HEADER_BYTES = 16 * 1024 * 1024
 
+/**
+ * 大头部读取闸门（B3 内存尖峰治理）：装饰池 64 路并发首扫时，单头最大
+ * 16MB 的 Buffer.alloc + 头部字符串 + JSON.parse 三重叠加瞬时可达
+ * 数百 MB~1GB。超过阈值的头部（SD3.5/Flux 单文件 checkpoint 头部 2-8MB
+ * 常见）排队限流，小头部（绝大多数 LoRA/VAE）不受影响。
+ */
+const BIG_HEADER_THRESHOLD = 1024 * 1024
+const BIG_HEADER_CONCURRENCY = 4
+/** 闸门参数（测试可注入：threshold=0 时全部走闸门） */
+let bigHeaderThreshold = BIG_HEADER_THRESHOLD
+let bigHeaderConcurrency = BIG_HEADER_CONCURRENCY
+let bigHeaderActive = 0
+const bigHeaderWaiters = []
+
+/**
+ * 注入大头部闸门参数（仅供单元测试使用；生产代码严禁调用）。
+ * @param {{threshold?: number, concurrency?: number}} [policy]
+ */
+export function setHeaderGateForTests(policy = {}) {
+  bigHeaderThreshold =
+    Number.isFinite(policy.threshold) && policy.threshold >= 0
+      ? policy.threshold
+      : BIG_HEADER_THRESHOLD
+  bigHeaderConcurrency =
+    Number.isFinite(policy.concurrency) && policy.concurrency >= 1
+      ? Math.floor(policy.concurrency)
+      : BIG_HEADER_CONCURRENCY
+}
+
+/**
+ * 以闸门语义执行任务（仅供单元测试验证并发上限；生产代码严禁调用）：
+ * headerLen 取无穷大，配合 setHeaderGateForTests({threshold:0}) 即可
+ * 让任务全部经闸门排队。
+ * @param {() => Promise<T>} task 任务
+ * @returns {Promise<T>}
+ * @template T
+ */
+export function runWithHeaderGateForTests(task) {
+  return runWithHeaderGate(Number.MAX_SAFE_INTEGER, task)
+}
+
+/**
+ * 以大头部闸门执行任务：超过阈值的 headerLen 排队限流（释放时唤醒一个
+ * 等待者，1:1 授 slot），小头部直接执行。闸门不嵌套（两个调用方各自
+ * 独占一段），无自锁风险。
+ * @param {number} headerLen 头部字节数
+ * @param {() => Promise<T>} task 持有头缓冲的读取/解析任务
+ * @returns {Promise<T>}
+ * @template T
+ */
+async function runWithHeaderGate(headerLen, task) {
+  if (!(headerLen > bigHeaderThreshold)) return task()
+  while (bigHeaderActive >= bigHeaderConcurrency) {
+    await new Promise((resolve) => bigHeaderWaiters.push(resolve))
+  }
+  bigHeaderActive += 1
+  try {
+    return await task()
+  } finally {
+    bigHeaderActive -= 1
+    bigHeaderWaiters.shift()?.()
+  }
+}
+
 /** 触发词候选默认提取数量（按训练集出现频次降序） */
 const TAG_CANDIDATES_LIMIT = 15
 
@@ -383,19 +447,24 @@ export async function readSafetensorsInfo(absPath) {
     if (first.bytesRead < 8) return null
     const headerLen = readHeaderLength(lenBuf)
     if (!headerLen || headerLen > MAX_HEADER_BYTES) return null
-    const headerBuf = Buffer.alloc(headerLen)
-    const second = await fh.read(headerBuf, 0, headerLen, 8)
-    if (second.bytesRead < headerLen) return null
-    // parseHeaderBuffer 的返回类型声明为宽泛 object（info 字段 + tensorStats），
-    // 此处按结构访问须收窄类型供 checkJs 校验
-    const parsed =
-      /** @type {SafetensorsInfo & {tensorStats?: TensorStats|null, expectedMinBytes?: number}|null} */ (
-        parseHeaderBuffer(headerBuf)
-      )
-    if (parsed?.tensorStats?.dataRegionEnd > 0) {
-      parsed.expectedMinBytes = 8 + headerLen + parsed.tensorStats.dataRegionEnd
-    }
-    return parsed
+    // B3：大头部（alloc + utf8 字符串 + JSON.parse 三重驻留）经闸门限流，
+    // 避免 64 路并发装饰的瞬时内存尖峰
+    return await runWithHeaderGate(headerLen, async () => {
+      const headerBuf = Buffer.alloc(headerLen)
+      const second = await fh.read(headerBuf, 0, headerLen, 8)
+      if (second.bytesRead < headerLen) return null
+      // parseHeaderBuffer 的返回类型声明为宽泛 object（info 字段 + tensorStats），
+      // 此处按结构访问须收窄类型供 checkJs 校验
+      const parsed =
+        /** @type {SafetensorsInfo & {tensorStats?: TensorStats|null, expectedMinBytes?: number}|null} */ (
+          parseHeaderBuffer(headerBuf)
+        )
+      if (parsed?.tensorStats?.dataRegionEnd > 0) {
+        parsed.expectedMinBytes =
+          8 + headerLen + parsed.tensorStats.dataRegionEnd
+      }
+      return parsed
+    })
   } catch {
     return null
   } finally {
@@ -422,11 +491,14 @@ export async function checkSafetensorsHealthy(absPath) {
     if (first.bytesRead < 8) return false
     const headerLen = readHeaderLength(lenBuf)
     if (!headerLen || headerLen > MAX_HEADER_BYTES) return false
-    const headerBuf = Buffer.alloc(headerLen)
-    const second = await fh.read(headerBuf, 0, headerLen, 8)
-    if (second.bytesRead < headerLen) return false
-    JSON.parse(headerBuf.toString('utf8'))
-    return true
+    // B3：与 readSafetensorsInfo 同一闸门（损坏大文件的补检同样持有整段头）
+    return await runWithHeaderGate(headerLen, async () => {
+      const headerBuf = Buffer.alloc(headerLen)
+      const second = await fh.read(headerBuf, 0, headerLen, 8)
+      if (second.bytesRead < headerLen) return false
+      JSON.parse(headerBuf.toString('utf8'))
+      return true
+    })
   } catch {
     return false
   } finally {

@@ -18,6 +18,8 @@ import {
   PARTIAL_BACKUP_VERSION,
 } from './backup-format'
 import { MAX_COVERS_BYTES, writeBackupZipToFile } from './backup-zip'
+import { renameReplacing } from './atomic-write'
+import { parseJsonOffThread } from './json-serializer'
 
 /**
  * 备份导出流程（O2 拆分）：
@@ -98,7 +100,7 @@ export async function buildBackupParts(options = {}) {
     let parsedStore = null
     try {
       storeText = await fs.readFile(storeFile, 'utf-8')
-      parsedStore = JSON.parse(storeText)
+      parsedStore = await parseJsonOffThread(storeText)
       models = Object.keys(parsedStore?.models || {}).length
     } catch (err) {
       if (err.code !== 'ENOENT') {
@@ -215,16 +217,28 @@ export async function exportBackup(win, options = {}) {
     filters: [{ name: '备份文件', extensions: ['zip'] }],
   })
   if (result.canceled || !result.filePath) return { canceled: true }
+  const target = result.filePath
+  // A4 原子落点（与 auto-backup 同一断电安全标准）：先写 <final>.tmp 并
+  // fsync 刷盘数据块，再经 renameReplacing 带退避更名——导出中途崩溃/断电
+  // 不在用户选定位置留半截 zip；对话框选择覆盖已有文件时，失败路径也
+  // 完整保留用户既有文件（此前直写 + 失败 rm 会连旧文件一起毁掉）
+  const tmp = `${target}.tmp`
   try {
     // OPT-10：封面逐个读入压缩流，不再把所有封面缓冲进内存。
     // 压缩期间主进程仅保留当前读块，内存峰值与封面总量解耦。
-    await writeBackupZipToFile(result.filePath, parts)
-    const outStat = await fs.stat(result.filePath)
-    logger.info(
-      `备份已导出: ${result.filePath}（${models} 模型 / ${covers} 封面）`,
-    )
+    await writeBackupZipToFile(tmp, parts)
+    let fh = null
+    try {
+      fh = await fs.open(tmp, 'r+')
+      await fh.sync()
+    } finally {
+      if (fh) await fh.close().catch(() => {})
+    }
+    await renameReplacing(tmp, target)
+    const outStat = await fs.stat(target)
+    logger.info(`备份已导出: ${target}（${models} 模型 / ${covers} 封面）`)
     return {
-      path: result.filePath,
+      path: target,
       sizeBytes: outStat.size,
       library: Boolean(parts.storeText),
       models,
@@ -233,8 +247,8 @@ export async function exportBackup(win, options = {}) {
       partial,
     }
   } catch (err) {
-    // 失败时清理半成品，避免用户误以为备份可用
-    await fs.rm(result.filePath, { force: true }).catch(() => {})
+    // 失败时只清理本次半成品 tmp；目标位置（可能是用户既有文件）不动
+    await fs.rm(tmp, { force: true }).catch(() => {})
     logger.warn(`备份导出失败: ${err.message}`)
     return { error: `备份写入失败: ${err.message}` }
   }
