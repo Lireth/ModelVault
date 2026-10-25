@@ -12,11 +12,11 @@ import {
 } from '../../shared/app-enums'
 import { DEFAULT_SETTINGS } from '../../shared/defaults'
 import { atomicWriteFile } from './atomic-write'
+import { preserveCorruptedFile } from '../utils'
 import { notifyStoreSaveError } from './store-events'
 import {
   LEGACY_STORE_FILE,
   SETTINGS_FILE,
-  LIB_SETTINGS_FILE,
   getCurrentRoot,
   getLibSettingsFilePath
 } from './store-paths'
@@ -292,9 +292,10 @@ async function loadLibrarySettings(root, seedRaw = null) {
       return seeded
     }
     // 库设置损坏（如写入中断电、磁盘错误）：备份原文件后重置，保留手动恢复机会
+    // （时间戳命名滚动保留，连续损坏不互相覆盖）
     try {
-      await fs.rename(file, `${file}.bak`)
-      logger.error(`库设置文件损坏，原文件已备份为 ${LIB_SETTINGS_FILE}.bak 后重置: ${err.message}`)
+      const backup = await preserveCorruptedFile(file)
+      logger.error(`库设置文件损坏，原文件已备份为 ${path.basename(backup)} 后重置: ${err.message}`)
     } catch (backupErr) {
       logger.error(`库设置加载失败，已重置（备份失败: ${backupErr.message}）: ${err.message}`)
     }
@@ -327,10 +328,11 @@ export async function loadSettings() {
     if (err.code !== 'ENOENT') {
       globalCorrupt = true
       // settings.json 损坏：备份原文件后重置，保留手动恢复机会
+      // （时间戳命名滚动保留，连续损坏不互相覆盖）
       bootstrap = defaultBootstrapSettings()
       try {
-        await fs.rename(getSettingsFilePath(), `${getSettingsFilePath()}.bak`)
-        logger.error(`应用设置文件损坏，原文件已备份为 ${SETTINGS_FILE}.bak 后重置: ${err.message}`)
+        const backup = await preserveCorruptedFile(getSettingsFilePath())
+        logger.error(`应用设置文件损坏，原文件已备份为 ${path.basename(backup)} 后重置: ${err.message}`)
       } catch (backupErr) {
         logger.error(`应用设置加载失败，已重置（备份失败: ${backupErr.message}）: ${err.message}`)
       }
@@ -494,7 +496,8 @@ export async function updateSettings(patch) {
 /**
  * 重载指定根目录的库设置到内存（切库/备份恢复到当前库后调用）：
  * 读取该库的 .modelvault/settings.json；文件不存在时以默认值初始化并落盘，
- * 损坏时备份 .bak 后以默认值重置。root 为空时内存回退默认值。
+ * 损坏时备份为带时间戳的 .bak（滚动保留最近 3 份）后以默认值重置。root 为
+ * 空时内存回退默认值。
  * @param {string|null} root 模型根目录绝对路径
  */
 export async function reloadLibrarySettings(root) {

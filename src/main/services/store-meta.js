@@ -7,6 +7,7 @@ import { isEmptyModelMeta, planMetaRelinks, splitRelKey } from './meta-relink'
 import { isRelKeyInScope } from '../../shared/scan-dirs'
 import { isUnsafeModelKey, normalizeModelMeta, normalizeStoreData } from './store-meta-normalize'
 import { loadJournal, removeJournalDir } from './store-meta-journal'
+import { preserveCorruptedFile } from '../utils'
 import {
   clearOfflineRetry,
   flushStoreSave,
@@ -17,7 +18,6 @@ import { markDirty, metaState } from './store-meta-state'
 import {
   COVERS_DIR,
   DATA_DIR,
-  DATA_FILE,
   LEGACY_STORE_FILE,
   getCoversDir,
   getCurrentRoot,
@@ -80,11 +80,12 @@ export async function loadData() {
     } else {
       metaState.data = { version: 1, models: {} }
       metaState.dataReset = true
-      // store.json 损坏（如写入中断电、磁盘错误）：先备份原文件再重置，保留手动恢复机会。
-      // 增量日志同时丢弃——在缺失快照基线时回放 delta 可能把半套数据重新拼起来
+      // store.json 损坏（如写入中断电、磁盘错误）：先备份原文件再重置，保留手动恢复机会
+      // （时间戳命名滚动保留，连续损坏不互相覆盖）。增量日志同时丢弃——在缺失快照
+      // 基线时回放 delta 可能把半套数据重新拼起来
       try {
-        await fs.rename(file, `${file}.bak`)
-        logger.error(`关联存储文件损坏，原文件已备份为 ${DATA_FILE}.bak 后重置: ${err.message}`)
+        const backup = await preserveCorruptedFile(file)
+        logger.error(`关联存储文件损坏，原文件已备份为 ${path.basename(backup)} 后重置: ${err.message}`)
       } catch (backupErr) {
         logger.error(`关联存储加载失败，已重置（备份失败: ${backupErr.message}）: ${err.message}`)
       }

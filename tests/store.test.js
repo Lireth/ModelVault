@@ -845,21 +845,35 @@ describe('应用设置规范化', () => {
 
 describe('应用设置文件损坏恢复（B2）', () => {
   const settingsFile = path.join(fakeUserData, 'settings.json')
-  const backupFile = `${settingsFile}.bak`
+
+  /** 列出损坏备份（settings.json.bak-<时间戳>，字典序即时间序） */
+  async function listBaks() {
+    try {
+      return (await fs.readdir(fakeUserData))
+        .filter((name) => name.startsWith('settings.json.bak-'))
+        .sort()
+    } catch {
+      return []
+    }
+  }
 
   afterEach(async () => {
     await fs.rm(settingsFile, { force: true }).catch(() => {})
-    await fs.rm(backupFile, { force: true }).catch(() => {})
+    for (const name of await listBaks()) {
+      await fs.rm(path.join(fakeUserData, name), { force: true }).catch(() => {})
+    }
   })
 
-  it('settings.json 损坏时备份为 .bak 后重置，不直接覆盖原文件', async () => {
+  it('settings.json 损坏时备份为带时间戳的 .bak 后重置，不直接覆盖原文件', async () => {
     await fs.mkdir(fakeUserData, { recursive: true })
     await fs.writeFile(settingsFile, '{corrupted!!')
     const s = await loadSettings()
     // 返回默认设置（modelsFolder 丢失但可手动从备份恢复）
     expect(s.modelsFolder).toBe('')
     // 原文件被备份，损坏内容原样保留，供用户手动抢救
-    expect(await fs.readFile(backupFile, 'utf-8')).toBe('{corrupted!!')
+    const baks = await listBaks()
+    expect(baks.length).toBe(1)
+    expect(await fs.readFile(path.join(fakeUserData, baks[0]), 'utf-8')).toBe('{corrupted!!')
     // settings.json 已被 rename 移走，待下次 updateSettings 重写新文件
     await expect(fs.access(settingsFile)).rejects.toThrow()
   })
@@ -869,8 +883,26 @@ describe('应用设置文件损坏恢复（B2）', () => {
     await fs.writeFile(settingsFile, '123')
     const s = await loadSettings()
     expect(s.theme).toBe('dark')
-    expect(await fs.readFile(backupFile, 'utf-8')).toBe('123')
+    const baks = await listBaks()
+    expect(baks.length).toBe(1)
+    expect(await fs.readFile(path.join(fakeUserData, baks[0]), 'utf-8')).toBe('123')
     await expect(fs.access(settingsFile)).rejects.toThrow()
+  })
+
+  it('连续损坏各留独立现场不被覆盖，滚动仅保留最近 3 份', async () => {
+    await fs.mkdir(fakeUserData, { recursive: true })
+    for (let i = 1; i <= 5; i++) {
+      await fs.writeFile(settingsFile, `corrupt-${i}`)
+      await loadSettings()
+    }
+    const baks = await listBaks()
+    expect(baks.length).toBe(3)
+    const contents = []
+    for (const name of baks) {
+      contents.push(await fs.readFile(path.join(fakeUserData, name), 'utf-8'))
+    }
+    // 最早的 corrupt-1/2 已被滚动清理；修复前单一 .bak 只剩最后一份现场
+    expect(contents).toEqual(['corrupt-3', 'corrupt-4', 'corrupt-5'])
   })
 
   it('引导层设置落盘失败同样上报，且写盘链保持可等待（C7）', async () => {
@@ -1124,13 +1156,16 @@ describe('库设置随模型库存储（双层设置）', () => {
     expect(otherOnDisk.theme).toBe('dark')
   })
 
-  it('库设置文件损坏时备份为 .bak 后以默认值重置', async () => {
+  it('库设置文件损坏时备份为带时间戳的 .bak 后以默认值重置', async () => {
     const libFile = path.join(root, '.modelvault', 'settings.json')
     await fs.mkdir(path.dirname(libFile), { recursive: true })
     await fs.writeFile(libFile, '{broken!!')
     await reloadLibrarySettings(root)
     expect(getSettings().theme).toBe('dark')
-    expect(await fs.readFile(`${libFile}.bak`, 'utf-8')).toBe('{broken!!')
+    const dir = path.dirname(libFile)
+    const baks = (await fs.readdir(dir)).filter((n) => n.startsWith('settings.json.bak-')).sort()
+    expect(baks.length).toBe(1)
+    expect(await fs.readFile(path.join(dir, baks[0]), 'utf-8')).toBe('{broken!!')
     await expect(fs.access(libFile)).rejects.toThrow()
   })
 
