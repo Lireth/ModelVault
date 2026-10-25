@@ -20,6 +20,12 @@ export const CIVITAI_DISABLED_ERROR = 'Civitai 功能已关闭'
 const REQUEST_TIMEOUT_MS = 15000
 /** 图片下载超时（ms）：示例图普遍数 MB，放宽到 30s */
 const IMAGE_TIMEOUT_MS = 30000
+/**
+ * 示例视频「头部阶段」超时（ms）：与图片链路同级——上游响应头到达前
+ * 挂起超过此时限即中止（协议层转 502，不再无限悬挂占住套接字）；
+ * 头部到达后定时器解除，body 流式回传不受时限（视频可持续播放）。
+ */
+const VIDEO_HEADER_TIMEOUT_MS = 30000
 /** 识别结果携带的示例图上限（Civitai 热门模型可达数百张，UI 无需全量） */
 const MAX_IMAGES = 30
 /** 示例图下载大小上限（与封面导入同一量级） */
@@ -567,7 +573,9 @@ const RANGE_HEADER_RE = /^bytes=\d{0,16}-\d{0,16}$/
 
 /**
  * 发起 Civitai 示例视频请求（FN-02）：透传 Range 以支持拖动播放，
- * 不设置整体超时（视频可能较大且持续播放），域名白名单与图片一致。
+ * 仅对「响应头到达」设置超时（上游连接挂死时中止，协议层转 502）；
+ * body 流式回传不设整体超时（视频较大且可持续播放，播放中停滞由
+ * 播放器重发 Range 自行恢复），域名白名单与图片一致。
  * @param {string} url 已通过 isAllowedCivitaiImageUrl 校验的视频地址
  * @param {string} [range] 原始 Range 请求头（须过白名单格式校验才透传）
  * @returns {Promise<Response>}
@@ -588,12 +596,27 @@ export async function fetchCivitaiVideo(url, range = '') {
       logger.warn(`已丢弃非法 Range 请求头（按无 Range 回源）: ${value.slice(0, 60)}`)
     }
   }
-  return fetchWithAllowedRedirects(
-    url,
-    { headers },
-    isAllowedCivitaiImageUrl,
-    'Civitai 视频请求'
-  )
+  // 头部阶段超时：此前完全无 signal——CDN 连接挂死时协议请求无限悬挂、
+  // 套接字泄漏且 UI 无反馈。响应头到达即解除定时器，body 保持无界流式
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), VIDEO_HEADER_TIMEOUT_MS)
+  try {
+    return await fetchWithAllowedRedirects(
+      url,
+      { headers, signal: controller.signal },
+      isAllowedCivitaiImageUrl,
+      'Civitai 视频请求'
+    )
+  } catch (err) {
+    if (controller.signal.aborted && err?.name === 'AbortError') {
+      throw new Error(`视频上游 ${VIDEO_HEADER_TIMEOUT_MS / 1000}s 内未响应（连接挂起），已中止`, {
+        cause: err
+      })
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /**

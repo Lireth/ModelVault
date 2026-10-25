@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, afterEach } from 'vitest'
 import { fakeUserData } from './setup'
 
 /**
@@ -15,6 +15,7 @@ import {
   civitaiCompletePatch,
   downloadCivitaiImage,
   fetchCivitaiModelType,
+  fetchCivitaiVideo,
   isAllowedCivitaiImageUrl,
   normalizeVersionInfo,
   parseCivitaiModelId,
@@ -498,5 +499,58 @@ describe('civitaiCompletePatch', () => {
   it('meta 或 info 缺失时安全返回', () => {
     expect(civitaiCompletePatch(null, info).applied).toEqual([])
     expect(civitaiCompletePatch({}, null).applied).toEqual([])
+  })
+})
+
+describe('fetchCivitaiVideo（头部阶段超时）', () => {
+  const VIDEO_URL = 'https://image.civitai.com/generation/x-123.mp4'
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.mocked(net.fetch).mockReset()
+  })
+
+  it('上游连接挂死（响应头迟迟不到）时按超时中止而非无限悬挂', async () => {
+    vi.useFakeTimers()
+    // 模拟连接挂死 + 真实 net.fetch 对 signal 的反应：永不 resolve，仅在中止时拒绝
+    vi.mocked(net.fetch).mockImplementation(
+      (_url, opts) =>
+        new Promise((_resolve, reject) => {
+          opts?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('This operation was aborted', 'AbortError'))
+          )
+        })
+    )
+
+    const pending = fetchCivitaiVideo(VIDEO_URL)
+    const assertion = expect(pending).rejects.toThrow('视频上游 30s 内未响应')
+    await vi.advanceTimersByTimeAsync(30000)
+    await assertion
+    // 协议层对错误的既有语义：转 502 返回，UI 不再无限等待
+    await expect(pending).rejects.toBeInstanceOf(Error)
+  })
+
+  it('响应头按时到达后解除超时定时器，body 不受时限影响（流式播放语义）', async () => {
+    vi.useFakeTimers()
+    vi.mocked(net.fetch).mockResolvedValue(new Response('video-bytes', { status: 200 }))
+
+    const response = await fetchCivitaiVideo(VIDEO_URL)
+    expect(response.status).toBe(200)
+    // 远超头部超时窗口后定时器已解除：信号未中止，body 仍可完整读取
+    await vi.advanceTimersByTimeAsync(120000)
+    expect(await response.text()).toBe('video-bytes')
+  })
+
+  it('Range 头透传与超时信号一并传给上游请求', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(new Response('part', { status: 206 }))
+    await fetchCivitaiVideo(VIDEO_URL, 'bytes=100-200')
+    expect(net.fetch).toHaveBeenCalledWith(
+      VIDEO_URL,
+      expect.objectContaining({
+        redirect: 'manual',
+        signal: expect.any(AbortSignal),
+        headers: expect.objectContaining({ Range: 'bytes=100-200' })
+      })
+    )
   })
 })
