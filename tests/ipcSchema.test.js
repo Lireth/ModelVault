@@ -517,4 +517,20 @@ describe('IPC 通道单一来源对账（O2）', () => {
     const invokes = new Set(Object.keys(IPC_PAYLOAD_SCHEMAS))
     expect(IPC_EVENT_CHANNELS.filter((c) => invokes.has(c))).toEqual([])
   })
+
+  it('window.api 类型声明结构性派生自 preload（OPT-08）：api.d.ts 引用实现，无 any 回退', () => {
+    // 渲染层 window.api 的类型经 typeof import 结构性派生自 preload——
+    // preload 增删方法即同步反映到渲染层调用点的类型检查。守护声明文件
+    // 不被回退为手工镜像或 `api: any`（那会静默失去编译期锁定）
+    const apiDts = fs.readFileSync(
+      path.resolve(__dirname, '../src/renderer/src/store/api.d.ts'),
+      'utf-8',
+    )
+    expect(apiDts).toContain("typeof import('../../../preload/index.js').api")
+    const globalDts = fs.readFileSync(
+      path.resolve(__dirname, '../src/renderer/src/store/global.d.ts'),
+      'utf-8',
+    )
+    expect(globalDts).not.toContain('api: any')
+  })
 })

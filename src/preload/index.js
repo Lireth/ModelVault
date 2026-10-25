@@ -7,18 +7,18 @@ import { IPC_PAYLOAD_SCHEMAS, IPC_EVENT_CHANNELS } from '../shared/ipc-schema'
  * 注册表登记）。O2 单一来源：白名单由 schema 注册表键集派生，不再独立维护，
  * 与主进程注册点的一致性由 tests/ipcSchema.test.js 双向对账锁定。
  */
-const VALID_INVOKE_CHANNELS = Object.freeze(Object.keys(IPC_PAYLOAD_SCHEMAS))
+const VALID_INVOKE_CHANNELS = new Set(Object.keys(IPC_PAYLOAD_SCHEMAS))
 
 /**
  * 事件通道白名单（O9 单一来源）：由 shared/ipc-schema.js 的
  * IPC_EVENT_CHANNELS 派生，不再独立维护；preload 的 subscribe 调用点
  * 与该清单的一致性由 tests/ipcSchema.test.js 对账锁定。
  */
-const VALID_RECEIVE_CHANNELS = IPC_EVENT_CHANNELS
+const VALID_RECEIVE_CHANNELS = new Set(IPC_EVENT_CHANNELS)
 
 /** 带白名单校验的 invoke（所有便捷方法的统一入口） */
 function invokeValidated(channel, payload) {
-  if (!VALID_INVOKE_CHANNELS.includes(channel)) {
+  if (!VALID_INVOKE_CHANNELS.has(channel)) {
     throw new Error(`不允许的 IPC 通道: ${channel}`)
   }
   return ipcRenderer.invoke(channel, payload)
@@ -26,7 +26,7 @@ function invokeValidated(channel, payload) {
 
 /** 带白名单校验的事件订阅，返回取消监听函数 */
 function subscribe(channel, listener) {
-  if (!VALID_RECEIVE_CHANNELS.includes(channel)) {
+  if (!VALID_RECEIVE_CHANNELS.has(channel)) {
     throw new Error(`不允许的 IPC 通道: ${channel}`)
   }
   const handler = (_event, data) => listener(data)
@@ -258,3 +258,8 @@ const api = {
 }
 
 contextBridge.exposeInMainWorld('api', api)
+
+// 导出 api 供类型层引用（OPT-08）：src/renderer/src/store/api.d.ts 经
+// typeof import 结构性派生 window.api 类型——方法增删即同步反映到渲染层
+// 调用点的类型检查。不改变运行时行为（bundle 仍仅经 contextBridge 暴露）。
+export { api }
