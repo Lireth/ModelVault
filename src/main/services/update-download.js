@@ -4,9 +4,14 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { app, net } from 'electron'
+import { app } from 'electron'
 import logger from '../logger'
 import { isAllowedExternalUrl, readResponseTextLimited } from '../utils'
+import {
+  REQUEST_TIMEOUT_MS,
+  fetchWithValidatedRedirects,
+  isTransientNetworkError,
+} from './net-fetch'
 
 /**
  * 应用内更新下载与安装（F-6，portable 形态专用）：
@@ -29,8 +34,6 @@ import { isAllowedExternalUrl, readResponseTextLimited } from '../utils'
  */
 
 const UPDATE_DIR_NAME = 'update'
-/** 校验和/元信息请求超时（ms） */
-const REQUEST_TIMEOUT_MS = 15000
 /** 更新包体积上限（B）：超限中止，防异常响应写满磁盘 */
 const MAX_UPDATE_BYTES = 600 * 1024 * 1024
 /** 校验和文件上限（V-06）：正常仅 65~100 字节 */
@@ -43,8 +46,6 @@ const ALLOWED_UPDATE_HOSTS = new Set([
   'release-assets.githubusercontent.com',
   'github-releases.githubusercontent.com',
 ])
-/** 重定向跟随上限（V-06：每一跳重新校验主机） */
-const MAX_REDIRECTS = 5
 /** 版本号白名单（V-06）：只允许纯数字三段，杜绝路径分隔符/命令字符进入文件名 */
 const VERSION_PATTERN = /^\d{1,5}\.\d{1,5}\.\d{1,5}$/
 /** 进度推送节流间隔（ms） */
@@ -95,22 +96,6 @@ export function isSafeUpdateVersion(version) {
   return typeof version === 'string' && VERSION_PATTERN.test(version)
 }
 
-/** 是否为需要跟随的 HTTP 重定向状态 */
-function isRedirectStatus(status) {
-  return (
-    status === 301 ||
-    status === 302 ||
-    status === 303 ||
-    status === 307 ||
-    status === 308
-  )
-}
-
-/** Electron 网络栈对 fetch manual 重定向不支持时的特征错误 */
-function isRedirectCancelledError(err) {
-  return err instanceof Error && err.message.includes('Redirect was cancelled')
-}
-
 /**
  * 更新链路 URL 白名单（V-06）：https + GitHub 页面/API/Release 资产 CDN。
  * @param {unknown} url 待校验 URL
@@ -128,133 +113,68 @@ function isAllowedUpdateHost(url) {
   }
 }
 
-/**
- * 探测一跳重定向目标（Electron 兼容层）：
- * net.fetch 的 redirect:'manual' 在 Electron 网络栈中不被支持——上游返回
- * 3xx 时直接以 "Redirect was cancelled"（ERR_REDIRECT_CANCELLED）抛错，
- * 而非规范语义的不透明响应（Location 不可读）。GitHub Release 资产
- * 必经 302 跳转 CDN，缺失该兜底时更新下载必然失败。这里改用 net.request
- * 的 manual 模式：redirect 事件读出跳转目标后立即取消请求，主传输仍走
- * net.fetch（流式 body / 超时/续传信号语义不变）。与 civitai.js 的同名
- * 兜底保持同构（后续网络工具收敛的合并候选）。
- * @param {string} url 当前跳点 URL（调用方已校验白名单）
- * @param {RequestInit} options 与主请求一致的选项（headers/signal）
- * @returns {Promise<{status: number, location: string, headers: Headers}>}
- */
-function probeRedirectTarget(url, options) {
-  return new Promise((resolve, reject) => {
-    // HeadersInit → net.request 要求的普通头记录（Range 等简单值单值字符串
-    // 化即可；探测请求不携带 body，无多值头语义）。不携带会话 Cookie——
-    // 更新链路为公开资产下载，与 net.fetch 默认凭据语义保持一致
-    const headersRecord = {}
-    for (const [name, value] of new Headers(options.headers || {})) {
-      headersRecord[name] = value
-    }
-    const request = net.request({
-      method: 'GET',
-      url,
-      redirect: 'manual',
-      useSessionCookies: false,
-      headers: headersRecord,
-    })
-    let settled = false
-    const finish = (ok, value) => {
-      if (settled) return
-      settled = true
-      ok ? resolve(value) : reject(value)
-    }
-    /** Electron 响应头对象（Record<string, string|string[]>）→ Headers */
-    const headersOf = (record) => {
-      const headers = new Headers()
-      for (const [name, values] of Object.entries(record || {})) {
-        for (const value of [].concat(values)) headers.append(name, value)
-      }
-      return headers
-    }
-    request.on(
-      'redirect',
-      (statusCode, _method, redirectUrl, responseHeaders) => {
-        const headers = headersOf(responseHeaders)
-        // ClientRequest 的取消方法是 abort（无 cancel/destroy；用可选链防御
-        // Electron 版本 API 差异，避免事件处理器内抛错演变成主进程致命错误）
-        request.abort?.()
-        finish(true, {
-          status: statusCode,
-          location: headers.get('location') || redirectUrl || '',
-          headers,
-        })
-      },
-    )
-    request.on('response', (incoming) => {
-      // 未发 redirect 事件直接拿到响应（3xx 且无跳转目标等）：按终态返回空体
-      // （IncomingMessage 无 destroy 方法，经 request.abort 中止 body 传输）
-      request.abort?.()
-      finish(true, {
-        status: incoming.statusCode || 0,
-        location: '',
-        headers: headersOf(incoming.headers),
-      })
-    })
-    request.on('error', (err) => finish(false, err))
-    const { signal } = options
-    if (signal) {
-      if (signal.aborted) {
-        request.abort?.()
-        finish(false, new DOMException('已终止', 'AbortError'))
-        return
-      }
-      signal.addEventListener(
-        'abort',
-        () => {
-          request.abort?.()
-          finish(false, new DOMException('已终止', 'AbortError'))
-        },
-        { once: true },
-      )
-    }
-    request.end()
-  })
-}
+// 重定向跟随（V-06 逐跳白名单）与 Electron "Redirect was cancelled"
+// 兼容探测统一由 services/net-fetch.js 提供；更新链路为公开资产下载，
+// 探测不携带会话 Cookie（与 net.fetch 默认凭据语义一致）
 
 /**
- * 发起更新相关请求并手动跟随重定向（V-06）：
- * net.fetch 默认跟随 302 时只校验初始 URL，白名单主机可把请求引向任意
- * 站点。此处每一跳都校验主机，超出次数上限即失败。Electron 网络栈对
- * manual 模式不支持（3xx 直接抛 "Redirect was cancelled"，Location 不可
- * 读），此时经 probeRedirectTarget 探测跳转目标后逐跳继续。
+ * 发起更新相关请求并手动跟随重定向（V-06，逐跳 GitHub 白名单）。
  * @param {string} url 初始 URL（调用方已校验）
  * @param {RequestInit} options fetch 选项
  * @returns {Promise<Response>} 最终响应
  */
-export async function fetchAllowedUpdateUrl(url, options) {
-  if (!isAllowedUpdateHost(url)) {
-    throw new Error('更新下载地址不在 GitHub 白名单内，已拒绝')
-  }
-  let current = url
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    let response
+export function fetchAllowedUpdateUrl(url, options) {
+  return fetchWithValidatedRedirects(
+    url,
+    options,
+    isAllowedUpdateHost,
+    '更新下载',
+    { useSessionCookies: false },
+  )
+}
+
+/** 瞬时网络错误重试的退避间隔（ms） */
+const TRANSIENT_RETRY_DELAY_MS = 500
+/** 重试退避时长（测试可注入 0 避免真实等待） */
+let transientRetryDelayMs = TRANSIENT_RETRY_DELAY_MS
+
+/**
+ * 注入瞬时错误重试退避时长（仅供单元测试使用；生产代码严禁调用）
+ * @param {number} ms 毫秒
+ */
+export function setTransientRetryDelayForTests(ms) {
+  transientRetryDelayMs =
+    Number.isFinite(ms) && ms >= 0 ? ms : TRANSIENT_RETRY_DELAY_MS
+}
+
+/** 等待指定毫秒（重试退避） */
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * 带瞬时错误重试的更新请求（连接级失败重试 1 次）：
+ * 此前更新链路对 ECONNRESET/ENOTFOUND 等连接级瞬时错误零重试，网络抖动
+ * 即要求用户手动重点。仅对「请求未建立/被重置」类失败重试——fetch 拒绝
+ * 发生在响应到达前，本次无任何字节落盘，重试幂等；options 经工厂按次
+ * 重建，超时类 AbortSignal 不复用第一次已消耗的时间。超时中止与服务端
+ * 4xx/5xx 不重试（等待会成倍拉长/非网络层失败，交回调用方既有语义）。
+ * @param {string} url 初始 URL
+ * @param {() => RequestInit} buildOptions 每次尝试的 fetch 选项工厂
+ * @returns {Promise<Response>} 最终响应
+ */
+async function fetchUpdateUrlReliably(url, buildOptions) {
+  for (let attempt = 0; ; attempt++) {
     try {
-      response = await net.fetch(current, { ...options, redirect: 'manual' })
+      return await fetchAllowedUpdateUrl(url, buildOptions())
     } catch (err) {
-      if (!isRedirectCancelledError(err)) throw err
-      const probe = await probeRedirectTarget(current, options)
-      // 无跳转目标的 3xx 按终态响应处理（调用方按非 ok 分支报错，与
-      // 规范的 manual 语义一致；body 恒为空——3xx 本就无有效载荷）
-      response = new Response('', {
-        status: probe.status,
-        headers: probe.headers,
-      })
+      if (attempt >= 1 || !isTransientNetworkError(err)) throw err
+      logger.warn(
+        `更新请求连接级失败，${transientRetryDelayMs}ms 后重试: ${err.message}`,
+      )
+      await delay(transientRetryDelayMs)
     }
-    if (!isRedirectStatus(response.status)) return response
-    const location = response.headers.get('location')
-    if (!location) return response
-    const next = new URL(location, current).toString()
-    if (!isAllowedUpdateHost(next)) {
-      throw new Error('更新下载重定向目标不在 GitHub 白名单内，已拒绝')
-    }
-    current = next
   }
-  throw new Error('更新下载重定向次数过多，已拒绝')
 }
 
 /**
@@ -585,9 +505,9 @@ export async function downloadUpdatePackage(onProgress) {
     // 重定向逐跳校验 + 文本大小上限（V-06）
     let expected
     try {
-      const res = await fetchAllowedUpdateUrl(checksumUrl, {
+      const res = await fetchUpdateUrlReliably(checksumUrl, () => ({
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      })
+      }))
       if (!res.ok) return { error: `校验和下载失败（HTTP ${res.status}）` }
       expected = parseChecksumHash(
         await readResponseTextLimited(res, MAX_CHECKSUM_BYTES, '校验和文件'),
@@ -652,10 +572,10 @@ export async function downloadUpdatePackage(onProgress) {
       }
     }
     let writeFlag = resumeFrom > 0 ? 'a' : 'w'
-    const response = await fetchAllowedUpdateUrl(downloadUrl, {
+    const response = await fetchUpdateUrlReliably(downloadUrl, () => ({
       signal: downloadAbort.signal,
       ...(resumeFrom > 0 ? { headers: { Range: `bytes=${resumeFrom}-` } } : {}),
-    })
+    }))
     if (resumeFrom > 0 && response.status === 416) {
       await fsp.rm(partPath, { force: true }).catch(() => {})
       return { error: '断点续传位置无效，临时文件已清理，请重试下载' }

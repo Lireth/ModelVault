@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import logger from '../logger'
 import { isAllowedExternalUrl, readResponseTextLimited } from '../utils'
 import { getSettings } from './store-settings'
+import { REQUEST_TIMEOUT_MS } from './net-fetch'
 import {
   fetchAllowedUpdateUrl,
   findUpdateAssets,
@@ -22,8 +23,8 @@ import {
 /** 更新检查的仓库标识（发布流水线以 v* 标签触发，tag 即版本号） */
 const UPDATE_REPO = 'Lireth/ModelVault'
 
-/** 请求超时（ms） */
-const REQUEST_TIMEOUT_MS = 10000
+// 请求超时统一走 net-fetch.js 的 REQUEST_TIMEOUT_MS（原本地 10s，随全网
+// 络层收敛放宽为 15s，与 Civitai/更新下载链路一致）
 /** GitHub Release JSON 上限（V-06）：正常响应远小于此值 */
 const MAX_UPDATE_JSON_BYTES = 2 * 1024 * 1024
 /** 启动自动检查延迟（ms，O-3）：避开启动初期的库加载/扫描/索引预热竞争 */

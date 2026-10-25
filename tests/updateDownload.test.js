@@ -42,6 +42,7 @@ import {
   verifyUpdateSignature,
   setAuthenticodeQueryForTests,
   setSignerThumbprintForTests,
+  setTransientRetryDelayForTests,
 } from '../src/main/services/update-download'
 
 const EXE_BYTES = Buffer.from('hello-exe')
@@ -89,6 +90,7 @@ beforeEach(() => {
 afterEach(async () => {
   setAuthenticodeQueryForTests(null)
   setSignerThumbprintForTests('')
+  setTransientRetryDelayForTests(500)
   await fs.rm(updateDir(), { recursive: true, force: true }).catch(() => {})
 })
 
@@ -223,7 +225,7 @@ describe('fetchAllowedUpdateUrl（Electron 重定向兼容层）', () => {
     )
 
     await expect(fetchAllowedUpdateUrl(ASSETS.downloadUrl, {})).rejects.toThrow(
-      '重定向目标不在 GitHub 白名单内',
+      '重定向目标不在白名单内',
     )
   })
 
@@ -414,7 +416,54 @@ describe('downloadUpdatePackage（下载 + SHA256 校验闭环）', () => {
     )
     setPendingUpdate(ASSETS, '0.2.0')
     const res = await downloadUpdatePackage()
-    expect(res.error).toContain('重定向目标不在 GitHub 白名单')
+    expect(res.error).toContain('重定向目标不在白名单')
+  })
+
+  it('下载请求遇连接级瞬时错误自动重试一次后成功（OPT-01）', async () => {
+    setTransientRetryDelayForTests(0)
+    // 校验和正常；下载首试连接被重置（响应到达前失败，无字节落盘，重试幂等）
+    let downloadAttempts = 0
+    vi.mocked(net.fetch).mockImplementation(async (url) => {
+      if (String(url).endsWith('.sha256')) {
+        return new Response(CHECKSUM_BODY, { status: 200 })
+      }
+      downloadAttempts += 1
+      if (downloadAttempts === 1) {
+        const err = new Error('net::ERR_CONNECTION_RESET')
+        err.cause = Object.assign(new Error('connect ECONNRESET'), {
+          code: 'ECONNRESET',
+        })
+        throw err
+      }
+      return new Response(EXE_BYTES, {
+        status: 200,
+        headers: { 'content-length': String(EXE_BYTES.length) },
+      })
+    })
+    setPendingUpdate(ASSETS, '0.2.0')
+
+    const res = await downloadUpdatePackage()
+
+    expect(res.error).toBeUndefined()
+    expect(downloadAttempts).toBe(2)
+    expect(await fs.readFile(res.path, 'utf-8')).toBe('hello-exe')
+  })
+
+  it('非瞬时错误（HTTP 500）不做连接级重试，按既有语义返回失败', async () => {
+    let attempts = 0
+    vi.mocked(net.fetch).mockImplementation(async (url) => {
+      if (String(url).endsWith('.sha256')) {
+        return new Response(CHECKSUM_BODY, { status: 200 })
+      }
+      attempts += 1
+      return new Response('server error', { status: 500 })
+    })
+    setPendingUpdate(ASSETS, '0.2.0')
+
+    const res = await downloadUpdatePackage()
+
+    expect(res.error).toContain('HTTP 500')
+    expect(attempts).toBe(1)
   })
 
   it('校验和文件超过 64KB 上限时拒绝', async () => {

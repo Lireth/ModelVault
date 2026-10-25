@@ -1,7 +1,7 @@
-import { net } from 'electron'
 import logger from '../logger'
 import { readResponseBytesLimited, readResponseTextLimited } from '../utils'
 import { computeFileHashOffThread } from './hash-worker-pool'
+import { REQUEST_TIMEOUT_MS, fetchWithValidatedRedirects } from './net-fetch'
 
 /**
  * Civitai 在线识别服务：
@@ -16,8 +16,6 @@ import { computeFileHashOffThread } from './hash-worker-pool'
 const CIVITAI_API_BASE = 'https://civitai.red/api/v1'
 /** 关闭 Civitai 开关时主进程统一拒绝文案（IPC 与 civimg 代理共用） */
 export const CIVITAI_DISABLED_ERROR = 'Civitai 功能已关闭'
-/** 请求超时（ms），与 updater.js 一致 */
-const REQUEST_TIMEOUT_MS = 15000
 /** 图片下载超时（ms）：示例图普遍数 MB，放宽到 30s */
 const IMAGE_TIMEOUT_MS = 30000
 /**
@@ -32,8 +30,6 @@ const MAX_IMAGES = 30
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024
 /** API JSON 响应上限（V-06）：正常响应含描述/图片列表也远小于此值 */
 const MAX_API_JSON_BYTES = 8 * 1024 * 1024
-/** 允许跟随的重定向次数上限（V-06：每一跳都重新校验白名单） */
-const MAX_REDIRECTS = 3
 
 /**
  * Civitai API 全局限流（实测）：
@@ -88,148 +84,9 @@ function throttleCivitaiApi() {
   return run
 }
 
-/** 是否为需要跟随的 HTTP 重定向状态 */
-function isRedirectStatus(status) {
-  return (
-    status === 301 ||
-    status === 302 ||
-    status === 303 ||
-    status === 307 ||
-    status === 308
-  )
-}
-
-/** Electron 网络栈对 fetch manual 重定向不支持时的特征错误 */
-function isRedirectCancelledError(err) {
-  return err instanceof Error && err.message.includes('Redirect was cancelled')
-}
-
-/**
- * 探测一跳重定向目标（Electron 兼容层）：
- * net.fetch 的 redirect:'manual' 在 Electron 网络栈中不被支持——上游返回
- * 3xx 时直接以 "Redirect was cancelled"（ERR_REDIRECT_CANCELLED）抛错，
- * 而非规范语义的不透明响应（Location 不可读）。这里改用 net.request 的
- * manual 模式：redirect 事件读出跳转目标后立即取消请求，主传输仍走
- * net.fetch（流式 body / 超时信号语义不变）。
- * @param {string} url 当前跳点 URL（调用方已校验白名单）
- * @param {RequestInit} options 与主请求一致的选项（headers/signal）
- * @returns {Promise<{status: number, location: string, headers: Headers}>}
- */
-function probeRedirectTarget(url, options) {
-  return new Promise((resolve, reject) => {
-    // HeadersInit → net.request 要求的普通头记录（Accept/Referer 等简单值，
-    // 单值字符串化即可；探测请求不携带 body，无多值头语义）
-    const headersRecord = {}
-    for (const [name, value] of new Headers(options.headers || {})) {
-      headersRecord[name] = value
-    }
-    const request = net.request({
-      method: 'GET',
-      url,
-      redirect: 'manual',
-      useSessionCookies: true,
-      headers: headersRecord,
-    })
-    let settled = false
-    const finish = (ok, value) => {
-      if (settled) return
-      settled = true
-      ok ? resolve(value) : reject(value)
-    }
-    /** Electron 响应头对象（Record<string, string|string[]>）→ Headers */
-    const headersOf = (record) => {
-      const headers = new Headers()
-      for (const [name, values] of Object.entries(record || {})) {
-        for (const value of [].concat(values)) headers.append(name, value)
-      }
-      return headers
-    }
-    request.on(
-      'redirect',
-      (statusCode, _method, redirectUrl, responseHeaders) => {
-        const headers = headersOf(responseHeaders)
-        // ClientRequest 的取消方法是 abort（无 cancel/destroy；用可选链防御
-        // Electron 版本 API 差异，避免事件处理器内抛错演变成主进程致命错误）
-        request.abort?.()
-        finish(true, {
-          status: statusCode,
-          location: headers.get('location') || redirectUrl || '',
-          headers,
-        })
-      },
-    )
-    request.on('response', (incoming) => {
-      // 未发 redirect 事件直接拿到响应（3xx 且无跳转目标等）：按终态返回空体
-      // （IncomingMessage 无 destroy 方法，经 request.abort 中止 body 传输）
-      request.abort?.()
-      finish(true, {
-        status: incoming.statusCode || 0,
-        location: '',
-        headers: headersOf(incoming.headers),
-      })
-    })
-    request.on('error', (err) => finish(false, err))
-    const { signal } = options
-    if (signal) {
-      if (signal.aborted) {
-        request.abort?.()
-        finish(false, new DOMException('已终止', 'AbortError'))
-        return
-      }
-      signal.addEventListener(
-        'abort',
-        () => {
-          request.abort?.()
-          finish(false, new DOMException('已终止', 'AbortError'))
-        },
-        { once: true },
-      )
-    }
-    request.end()
-  })
-}
-
-/**
- * 发起请求并手动跟随重定向（V-06）：
- * net.fetch 默认跟随 302 时只校验初始 URL，白名单主机可把请求引向任意
- * 站点。这里改为 redirect: 'manual'，每一跳都用 isAllowed 重新校验，
- * 超出次数上限即失败。Electron 网络栈对 manual 模式不支持（3xx 直接抛
- * "Redirect was cancelled"，Location 不可读），此时经 probeRedirectTarget
- * 探测跳转目标后逐跳继续。
- * @param {string} url 初始 URL（调用方已校验）
- * @param {RequestInit} options fetch 选项
- * @param {(url: string) => boolean} isAllowed 每一跳的 URL 校验
- * @param {string} label 错误文案中的资源名
- * @returns {Promise<Response>} 最终响应
- */
-async function fetchWithAllowedRedirects(url, options, isAllowed, label) {
-  if (!isAllowed(url)) throw new Error(`${label}地址不在白名单内，已拒绝`)
-  let current = url
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    let response
-    try {
-      response = await net.fetch(current, { ...options, redirect: 'manual' })
-    } catch (err) {
-      if (!isRedirectCancelledError(err)) throw err
-      const probe = await probeRedirectTarget(current, options)
-      // 无跳转目标的 3xx 按终态响应处理（调用方按非 ok 分支报错，与
-      // 规范的 manual 语义一致；body 恒为空——3xx 本就无有效载荷）
-      response = new Response('', {
-        status: probe.status,
-        headers: probe.headers,
-      })
-    }
-    if (!isRedirectStatus(response.status)) return response
-    const location = response.headers.get('location')
-    if (!location) return response
-    const next = new URL(location, current).toString()
-    if (!isAllowed(next)) {
-      throw new Error(`${label}重定向目标不在白名单内，已拒绝`)
-    }
-    current = next
-  }
-  throw new Error(`${label}重定向次数过多，已拒绝`)
-}
+// 重定向跟随（V-06 逐跳白名单）与 Electron "Redirect was cancelled"
+// 兼容探测统一由 services/net-fetch.js 提供（单一实现），本模块仅以
+// Civitai 白名单回调 + 会话 Cookie 凭据语义调用
 
 /**
  * Civitai 站点基域（com 主站 + red 镜像站，NSFW 内容在 red 站无需跳转即可识别）。
@@ -273,11 +130,12 @@ async function fetchCivitaiApi(url, options = {}) {
     await throttleCivitaiApi()
     let response
     try {
-      response = await fetchWithAllowedRedirects(
+      response = await fetchWithValidatedRedirects(
         url,
         { ...options, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
         isAllowedCivitaiApiUrl,
         'Civitai 请求',
+        { useSessionCookies: true },
       )
     } catch (err) {
       return {
@@ -620,7 +478,7 @@ export function civitaiCompletePatch(meta, info) {
  * @returns {Promise<Response>}
  */
 export async function fetchCivitaiImage(url) {
-  return fetchWithAllowedRedirects(
+  return fetchWithValidatedRedirects(
     url,
     {
       headers: {
@@ -631,6 +489,7 @@ export async function fetchCivitaiImage(url) {
     },
     isAllowedCivitaiImageUrl,
     'Civitai 图片请求',
+    { useSessionCookies: true },
   )
 }
 
@@ -672,11 +531,12 @@ export async function fetchCivitaiVideo(url, range = '') {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), VIDEO_HEADER_TIMEOUT_MS)
   try {
-    return await fetchWithAllowedRedirects(
+    return await fetchWithValidatedRedirects(
       url,
       { headers, signal: controller.signal },
       isAllowedCivitaiImageUrl,
       'Civitai 视频请求',
+      { useSessionCookies: true },
     )
   } catch (err) {
     if (controller.signal.aborted && err?.name === 'AbortError') {
