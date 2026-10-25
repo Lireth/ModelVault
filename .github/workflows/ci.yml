@@ -1,10 +1,12 @@
 # ModelVault 持续集成工作流（CI）
 #
 # 触发条件：推送到 main 分支、针对 main 的 PR、手动触发
-# 职责：依赖安装 → 运行时依赖漏洞审计 → ESLint → 类型检查（shared 契约层 +
-#   preload）→ 单元测试 → 三端编译 → 编译产物完整性校验 → 启动冒烟
-#   （out/ 与 win-unpacked）→ 覆盖率报告归档；PR 另做依赖差分审查
-#   （dependency-review）。CodeQL 静态扫描见独立的 codeql.yml。
+# 职责（矩阵分工）：Node 22 基准腿执行全量门禁——依赖安装 → 运行时依赖
+#   漏洞审计 → ESLint → 类型检查（shared 契约层 + preload）→ 单元测试
+#   （含覆盖率）→ 三端编译 → 编译产物完整性校验 → 启动冒烟（out/ 与
+#   win-unpacked）→ 覆盖率报告归档；Node 24 兼容性腿仅运行单元测试
+#   （验证 engines 纸面承诺）。PR 另做依赖差分审查（dependency-review）。
+#   CodeQL 静态扫描见独立的 codeql.yml。
 # 与 release.yml 的分工：本工作流只做质量门禁与目录产物（--dir）启动冒烟，
 #   不生成便携版/安装包、不发布；正式产物由推送 v* 标签触发的 release.yml 负责。
 
@@ -50,7 +52,10 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     # D6：engines 声明 >=22.22.2（jsdom 30 强制要求，Node 20 已 EOL），
-    # 矩阵覆盖 22/24 双版本验证（避免纸面承诺）
+    # 矩阵覆盖 22/24 双版本验证（避免纸面承诺）。矩阵分工：22 为基准腿
+    # 跑全量门禁（审计/静态检查/编译/冒烟均与本腿绑定），24 为兼容性腿
+    # 仅运行单元测试——静态检查与编译产物只依赖源码与 lock 文件，不随
+    # Node 版本变化，双跑纯属重复耗时
     strategy:
       fail-fast: false
       matrix:
@@ -86,7 +91,9 @@ jobs:
       # OP-08 供应链门禁：只审计运行时依赖（vue / fflate），避免 devDependencies
       # 的噪音；.npmrc 指向的镜像不提供 audit 端点，显式使用官方 registry。
       # high 及以上漏洞阻断构建，其余等级输出告警供人工评估。
+      # 审计结果只依赖 lock 文件，仅基准腿执行（避免矩阵重复）
       - name: 运行时依赖漏洞审计
+        if: matrix.node == '22'
         shell: pwsh
         run: |
           npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org
@@ -97,14 +104,17 @@ jobs:
 
       # ---------- 测试与构建 ----------
 
-      # D1 代码质量门禁：ESLint（flat config，错误级规则）不通过则终止 CI
+      # D1 代码质量门禁：ESLint（flat config，错误级规则）不通过则终止 CI。
+      # 静态检查只依赖源码，仅基准腿执行（Node 24 兼容腿只跑测试）
       - name: ESLint 代码检查
+        if: matrix.node == '22'
         run: npm run lint
 
       # O10 渐进式类型门禁：TypeScript checkJs 覆盖 shared 契约层、preload、
       # main 全层与 renderer 全部 JS（.vue 模板由组件测试覆盖），捕获字段漂移类回归；
       # strict 渐进收紧，新增文件默认纳入检查范围
       - name: 类型检查（shared / preload / main / renderer JS）
+        if: matrix.node == '22'
         run: npm run typecheck
 
       # 覆盖率统计的 instrumentation 有明显开销：仅在 Node 22 基准腿生成
@@ -117,12 +127,16 @@ jobs:
         if: matrix.node == '24'
         run: npm test
 
+      # 编译产物同样只依赖源码与依赖树，仅基准腿生成并校验（兼容腿跑完
+      # 测试即结束，缩短矩阵总时长）
       - name: 编译主进程 / preload / 渲染进程
+        if: matrix.node == '22'
         run: npm run build
 
       # ---------- 构建产物验证 ----------
 
       - name: 验证编译产物
+        if: matrix.node == '22'
         shell: pwsh
         run: |
           $required = @(
@@ -160,9 +174,10 @@ jobs:
       # ---------- 构建产物与覆盖率归档 ----------
 
       # test:coverage 生成的报告归档到运行页面，便于追溯历史覆盖率变化；
-      # 若前置步骤（lint/测试）失败导致目录不存在，仅告警不阻断 CI
+      # 仅基准腿生成报告，兼容腿无 coverage/ 目录（此前 if: always() 使该腿
+      # 空跑一次上传）；若前置步骤失败导致目录不存在，仅告警不阻断 CI
       - name: 上传覆盖率报告
-        if: always()
+        if: always() && matrix.node == '22'
         uses: actions/upload-artifact@v7
         with:
           name: coverage-node-${{ matrix.node }}
