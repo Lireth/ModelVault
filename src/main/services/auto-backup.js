@@ -2,6 +2,7 @@ import { app } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
+import { renameReplacing } from './atomic-write'
 import { DATA_DIR, getCurrentRoot, getSettings } from './store'
 import { buildBackupParts } from './backup-export'
 import { writeBackupZipToFile } from './backup-zip'
@@ -18,6 +19,11 @@ import { writeBackupZipToFile } from './backup-zip'
  * 设计要点：
  * - 是否执行由触发时刻的设置值决定（用户关闭开关即时生效，无需重启）；
  * - 无激活库 / 库尚无标注 / 上次备份不足 24h / 已有备份在途时静默跳过；
+ * - 正式包原子落点（A4）：先写 <final>.tmp 并 fsync，再经 renameReplacing
+ *   带退避更名——进程强退只可能留下 .tmp 半成品（不在识别/滚动清单内，
+ *   下次备份前清扫），半截正式包自此不可能出现；
+ * - 上次备份时间仅信任 EOCD 完整的 zip（A4）：文件名合法的半截包不顶替
+ *   有效备份推迟下次自动备份，确认损坏的包由滚动清理直接清除；
  * - 定时器 unref，不阻止进程退出（与 scheduleStartupUpdateCheck 同规范）；
  * - 开发与冒烟模式跳过（避免测试环境在用户库目录写备份）。
  */
@@ -26,6 +32,12 @@ import { writeBackupZipToFile } from './backup-zip'
 const BACKUP_DIR_NAME = 'backups'
 const AUTO_BACKUP_PREFIX = 'auto-'
 const AUTO_BACKUP_SUFFIX = '.zip'
+/** 原子写临时文件后缀（先写 <final>.tmp 再 rename，强退不留半截正式包） */
+const AUTO_BACKUP_TMP_SUFFIX = '.tmp'
+/** zip EOCD 记录长度（固定 22 字节；fflate 写出的 zip 无注释区） */
+const ZIP_EOCD_LEN = 22
+/** zip EOCD 签名（PK\x05\x06）：位于文件末尾 22 字节记录的起始处 */
+const ZIP_EOCD_SIGNATURE = Buffer.from([0x50, 0x4b, 0x05, 0x06])
 /** 自动备份滚动保留份数 */
 const AUTO_BACKUP_KEEP = 5
 /** 备份间隔（ms）：距上次自动备份不足 24h 不重复 */
@@ -62,9 +74,42 @@ export function scheduleAutoBackupCheck() {
 }
 
 /**
+ * 校验 zip 文件尾部 EOCD（End of Central Directory）是否完整（A4）。
+ * 本项目自动备份仅由 fflate 写出（无注释区），EOCD 必为末尾 22 字节且
+ * 签名 PK\x05\x06——强退残留的半截包缺失该记录，可据此确定性识别。
+ * @param {string} filePath zip 文件路径
+ * @returns {Promise<boolean|null>} true=EOCD 完整；false=可读但 EOCD 缺失
+ *   （确认的半截包，可安全清除）；null=打开/读取失败（可能是瞬时 IO 问题，
+ *   不作判定，避免误删有效备份）
+ */
+async function checkZipComplete(filePath) {
+  let fh = null
+  try {
+    fh = await fs.open(filePath, 'r')
+    const stat = await fh.stat()
+    if (stat.size < ZIP_EOCD_LEN) return false
+    const tail = Buffer.alloc(ZIP_EOCD_LEN)
+    const { bytesRead } = await fh.read(
+      tail,
+      0,
+      ZIP_EOCD_LEN,
+      stat.size - ZIP_EOCD_LEN,
+    )
+    if (bytesRead !== ZIP_EOCD_LEN) return null
+    return tail.subarray(0, 4).equals(ZIP_EOCD_SIGNATURE)
+  } catch {
+    return null
+  } finally {
+    if (fh) await fh.close().catch(() => {})
+  }
+}
+
+/**
  * 上一次自动备份的时间戳（解析备份目录内 auto-<stamp>.zip 文件名）。
+ * 仅信任 EOCD 完整的 zip（A4）：强退残留的半截包文件名合法但内容不完整，
+ * 不得顶替有效备份推迟下次自动备份。
  * @param {string} dir 备份目录
- * @returns {Promise<number>} 最近一次的时间戳；目录不存在/无备份为 0
+ * @returns {Promise<number>} 最近一次的时间戳；目录不存在/无有效备份为 0
  */
 async function lastAutoBackupAt(dir) {
   let names
@@ -86,12 +131,19 @@ async function lastAutoBackupAt(dir) {
         name.length - AUTO_BACKUP_SUFFIX.length,
       ),
     )
-    if (Number.isFinite(stamp) && stamp > latest) latest = stamp
+    if (!Number.isFinite(stamp) || stamp <= latest) continue
+    if ((await checkZipComplete(path.join(dir, name))) !== true) {
+      logger.warn(`自动备份文件不完整或不可读，已忽略: ${name}`)
+      continue
+    }
+    latest = stamp
   }
   return latest
 }
 
-/** 滚动清理超出保留数的旧备份（字典序即时间序；尽力而为） */
+/** 滚动清理超出保留数的旧备份（字典序即时间序；尽力而为）。
+ * 确认损坏的包（EOCD 缺失的半截包，A4）不占保留名额，直接清除；
+ * 打开失败（瞬时 IO）不作判定留待下次，避免误删有效备份。 */
 async function pruneAutoBackups(dir) {
   try {
     const names = (await fs.readdir(dir))
@@ -100,14 +152,39 @@ async function pruneAutoBackups(dir) {
           n.startsWith(AUTO_BACKUP_PREFIX) && n.endsWith(AUTO_BACKUP_SUFFIX),
       )
       .sort()
-    for (const old of names.slice(
+    const intact = []
+    for (const name of names) {
+      const filePath = path.join(dir, name)
+      if ((await checkZipComplete(filePath)) === false) {
+        await fs.rm(filePath, { force: true }).catch(() => {})
+        continue
+      }
+      intact.push(name)
+    }
+    for (const old of intact.slice(
       0,
-      Math.max(0, names.length - AUTO_BACKUP_KEEP),
+      Math.max(0, intact.length - AUTO_BACKUP_KEEP),
     )) {
       await fs.rm(path.join(dir, old), { force: true }).catch(() => {})
     }
   } catch {
     /* 清理失败仅留下多余的旧备份，不影响正确性 */
+  }
+}
+
+/** 清扫强退残留的 .tmp 半成品（running 互斥保证执行时无在途写入，A4） */
+async function sweepStaleTmp(dir) {
+  try {
+    for (const name of await fs.readdir(dir)) {
+      if (
+        name.startsWith(AUTO_BACKUP_PREFIX) &&
+        name.endsWith(AUTO_BACKUP_TMP_SUFFIX)
+      ) {
+        await fs.rm(path.join(dir, name), { force: true }).catch(() => {})
+      }
+    }
+  } catch {
+    /* 清扫失败不影响本次备份 */
   }
 }
 
@@ -143,10 +220,24 @@ export async function runAutoBackupIfDue(now = Date.now()) {
       dir,
       `${AUTO_BACKUP_PREFIX}${now}${AUTO_BACKUP_SUFFIX}`,
     )
+    // running 互斥保证此刻无在途备份：目录内的 .tmp 均为强退残留，直接清扫
+    await sweepStaleTmp(dir)
+    // A4 原子落点：先写 .tmp 并 fsync 刷盘数据块，再经 renameReplacing 带退避
+    // 更名——强退（进程被杀）只可能留下不在识别/滚动清单内的 .tmp 半成品，
+    // 更名后的正式包必为完整内容（与 atomicWriteFile 同一断电安全标准）
+    const tmp = `${target}${AUTO_BACKUP_TMP_SUFFIX}`
     try {
-      await writeBackupZipToFile(target, built.parts)
+      await writeBackupZipToFile(tmp, built.parts)
+      let fh = null
+      try {
+        fh = await fs.open(tmp, 'r+')
+        await fh.sync()
+      } finally {
+        if (fh) await fh.close().catch(() => {})
+      }
+      await renameReplacing(tmp, target)
     } catch (err) {
-      await fs.rm(target, { force: true }).catch(() => {})
+      await fs.rm(tmp, { force: true }).catch(() => {})
       return { error: `自动备份写入失败: ${err.message}` }
     }
     await pruneAutoBackups(dir)

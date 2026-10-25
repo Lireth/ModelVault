@@ -24,8 +24,9 @@ const RENAME_MAX_ATTEMPTS = 5
  * 同一文件的并发原子写（临时文件已彼此独立）在 Windows 上，
  * 后到达的 MoveFileExW 替换会确定性失败于 EPERM，短暂退避后重试
  * 待前一路 rename 释放目标即可成功。
+ * 供 atomicWriteFile 与 auto-backup（A4 zip 原子落点）共享。
  */
-async function renameReplacing(tmp, file) {
+export async function renameReplacing(tmp, file) {
   for (let attempt = 1; ; attempt++) {
     try {
       await fs.rename(tmp, file)
