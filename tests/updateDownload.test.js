@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createHash } from 'node:crypto'
+import { EventEmitter } from 'node:events'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fakeUserData } from './setup'
@@ -465,6 +466,63 @@ describe('E1 Authenticode 更新包验签', () => {
     await expect(
       fs.access(path.join(updateDir(), 'ModelVault-0.2.0.exe'))
     ).rejects.toThrow()
+  })
+
+  it('真实 PowerShell 路径：stderr 错误流被消费，非零退出即时失败而非阻塞至超时', async () => {
+    setSignerThumbprintForTests(THUMB)
+    // 不设 authenticodeQueryForTests → 走真实 queryAuthenticode（spawn 由本文件 mock）
+    const child = new EventEmitter()
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    child.kill = vi.fn()
+    let stderrConsumed = false
+    child.stderr.on('newListener', (evt) => {
+      if (evt === 'data') stderrConsumed = true
+    })
+    vi.mocked(spawn).mockImplementationOnce(() => child)
+
+    const pending = verifyUpdateSignature(path.join(updateDir(), 'sign-check.exe'))
+    // 模拟 $ErrorActionPreference='Stop' 下 cmdlet 抛错：约 2MB 错误流
+    // （远超管道缓冲）——修复前 stderr 无监听，子进程写满缓冲后阻塞，
+    // 只能等 20s 超时返回 null 且丢失错误现场
+    for (let i = 0; i < 32; i++) {
+      child.stderr.emit(
+        'data',
+        Buffer.from(`Get-AuthenticodeSignature : 错误 ${i}\n` + 'E'.repeat(64 * 1024))
+      )
+    }
+    child.emit('exit', 1)
+
+    const res = await pending
+    // 回归核心：stderr 的 data 事件已被监听（管道被持续消费，不会写满阻塞）
+    expect(stderrConsumed).toBe(true)
+    expect(res).toMatchObject({ ok: false, required: true })
+    // 由 exit 正常收尾（即时失败），未触发超时 kill
+    expect(child.kill).not.toHaveBeenCalled()
+  })
+
+  it('真实 PowerShell 路径：exit 0 且 stdout 为合法 JSON 时，stderr 噪音不影响解析', async () => {
+    setSignerThumbprintForTests(THUMB)
+    const child = new EventEmitter()
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    child.kill = vi.fn()
+    vi.mocked(spawn).mockImplementationOnce(() => child)
+
+    const pending = verifyUpdateSignature(path.join(updateDir(), 'sign-ok.exe'))
+    child.stderr.emit('data', Buffer.from('WARNING: verbose noise\n'))
+    child.stdout.emit(
+      'data',
+      // PowerShell 管道可能带 UTF-8 BOM，与真实输出形态一致
+      Buffer.from(`\uFEFF{"status":"Valid","thumbprint":"${THUMB}","subject":"CN=ModelVault"}`)
+    )
+    child.emit('exit', 0)
+
+    await expect(pending).resolves.toMatchObject({
+      ok: true,
+      required: true,
+      thumbprint: THUMB
+    })
   })
 
   it('安装前复验失败时拒绝执行（防止下载后文件被替换）', async () => {

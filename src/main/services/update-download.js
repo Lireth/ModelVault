@@ -429,9 +429,22 @@ function queryAuthenticode(filePath) {
         finish(null)
       }
     })
+    // stderr 必须消费：$ErrorActionPreference='Stop' 下 cmdlet 抛错时
+    // PowerShell 向 stderr 写错误流，stdio 两路 pipe 中仅消费 stdout 的
+    // 话，stderr 管道缓冲写满会阻塞子进程——只能等 20s 超时返回 null
+    // （被解读为「PowerShell 不可用」），且丢失真实错误现场。截尾保留
+    // 最近输出，失败时写入日志辅助排查
+    let stderrTail = ''
+    child.stderr?.on('data', (chunk) => {
+      stderrTail = (stderrTail + chunk.toString()).slice(-2048)
+    })
+    const recentStderr = () => stderrTail.trim().replace(/\s+/g, ' ').slice(0, 300)
     child.once('error', () => finish(null))
     child.once('exit', (code) => {
       if (code !== 0) {
+        if (stderrTail) {
+          logger.warn(`PowerShell 验签异常退出（code ${code}）: ${recentStderr()}`)
+        }
         finish(null)
         return
       }
@@ -440,6 +453,9 @@ function queryAuthenticode(filePath) {
         const parsed = JSON.parse(stdout.replace(/^\uFEFF/, '').trim())
         finish(parsed && typeof parsed === 'object' ? parsed : null)
       } catch {
+        if (stderrTail) {
+          logger.warn(`PowerShell 验签输出解析失败: ${recentStderr()}`)
+        }
         finish(null)
       }
     })
