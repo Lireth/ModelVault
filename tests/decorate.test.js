@@ -132,6 +132,51 @@ describe('decorateModels 元数据装饰', () => {
     expect(decorated.hasManualCover).toBe(false)
   })
 
+  it('OPT-02：头部完好但数据区越过文件末尾时标记 suspect（截断检测）', async () => {
+    // 头部声明数据区到 16 字节末尾，实际只写 4 字节数据——下载中断的典型形态
+    const header = JSON.stringify({
+      __metadata__: { 'modelspec.title': '截断模型' },
+      'model.weight': { dtype: 'F32', shape: [2, 2], data_offsets: [0, 16] },
+    })
+    const lenBuf = Buffer.alloc(8)
+    lenBuf.writeUInt32LE(Buffer.byteLength(header), 0)
+    const abs = path.join(root, 'truncated.safetensors')
+    await fs.writeFile(
+      abs,
+      Buffer.concat([lenBuf, Buffer.from(header), Buffer.alloc(4)]),
+    )
+    const stat = await fs.stat(abs)
+
+    const [decorated] = await decorateModels([
+      makeModel(abs, { size: stat.size, mtimeMs: stat.mtimeMs }),
+    ])
+    // 修复前：头部可解析 → 走成功路径，suspect 恒为 false（漏报）
+    expect(decorated.suspect).toBe(true)
+    // autoInfo 本身仍产出（头部完好），标题可读
+    expect(decorated.autoInfo.title).toBe('截断模型')
+  })
+
+  it('OPT-02：数据区完整落在文件内时不误报 suspect', async () => {
+    const header = JSON.stringify({
+      'model.weight': { dtype: 'F32', shape: [2, 2], data_offsets: [0, 16] },
+    })
+    const lenBuf = Buffer.alloc(8)
+    lenBuf.writeUInt32LE(Buffer.byteLength(header), 0)
+    const abs = path.join(root, 'complete.safetensors')
+    await fs.writeFile(
+      abs,
+      Buffer.concat([lenBuf, Buffer.from(header), Buffer.alloc(16)]),
+    )
+    const stat = await fs.stat(abs)
+
+    const [decorated] = await decorateModels([
+      makeModel(abs, { size: stat.size, mtimeMs: stat.mtimeMs }),
+    ])
+    // 8 + headerLen + 16 == 实际体积：恰好在边界内为健康
+    expect(decorated.suspect).toBe(false)
+    expect(decorated.autoInfo.expectedMinBytes).toBe(stat.size)
+  })
+
   it('多封面校验：丢失文件被过滤，默认封面回退第一张有效封面', async () => {
     const abs = path.join(root, 'b.safetensors')
     await fs.writeFile(abs, 'x')
@@ -579,10 +624,14 @@ describe('健康检查与 civitai 自动导入（F6/F8 集成）', () => {
     expect(d1.autoInfo).toBeNull()
 
     // 合法但无 __metadata__：F-1 起返回仅含张量统计的 autoInfo，不标记 suspect
-    // （结构合法；健康补检仅在解析失败时触发，此处装饰结果直接可用）
+    // （结构合法；健康补检仅在解析失败时触发，此处装饰结果直接可用）。
+    // OPT-02 起数据区比对依赖真实体积，须按 scanner 语义传真实 stat
     const healthy = path.join(root, 'healthy.safetensors')
     await writeSafetensors(healthy, null)
-    const [d2] = await decorateModels([makeModel(healthy)])
+    const hs = await fs.stat(healthy)
+    const [d2] = await decorateModels([
+      makeModel(healthy, { size: hs.size, mtimeMs: hs.mtimeMs }),
+    ])
     expect(d2.suspect).toBe(false)
     expect(d2.autoInfo).not.toBeNull()
     expect(d2.autoInfo.tensorStats).toMatchObject({ tensorCount: 1 })

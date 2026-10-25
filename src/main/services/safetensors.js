@@ -150,6 +150,9 @@ export function extractSafetensorsInfo(metadata) {
  *   Checkpoint 单文件（SD1.5/SDXL/Flux/SD3.5）与 kohya 命名 LoRA
  * @property {{textEncoder: number, unet: number, vae: number}} componentRatios
  *   组件字节占比（0-1，未分类字节不计入分母；无法分类时全 0）
+ * @property {number} dataRegionEnd 数据区末尾偏移（张量表 data_offsets.end
+ *   最大值；无有效条目为 0）——与 8 字节长度区 + headerLen 组合即文件
+ *   最小合法体积，供装饰层与实际体积比对判下载截断（OPT-02）
  */
 
 /**
@@ -243,6 +246,7 @@ export function analyzeTensorIndex(header) {
   const componentBytes = { textEncoder: 0, unet: 0, vae: 0 }
   let tensorCount = 0
   let paramCount = 0
+  let dataRegionEnd = 0
   const keys = []
   for (const [key, entry] of Object.entries(header)) {
     if (key === '__metadata__') continue
@@ -266,6 +270,16 @@ export function analyzeTensorIndex(header) {
     dtypeTensors.set(dtype, (dtypeTensors.get(dtype) || 0) + 1)
     const component = classifyTensorKey(key)
     if (component) componentBytes[component] += bytes
+    // 数据区末尾（OPT-02 截断检测）：data_offsets = [begin, end]，end 的
+    // 最大值决定数据区边界；缺失/非法偏移的条目保守不计（无法证明越界）
+    const offsets = entry.data_offsets
+    if (
+      Array.isArray(offsets) &&
+      Number.isFinite(offsets[1]) &&
+      offsets[1] >= 0
+    ) {
+      if (offsets[1] > dataRegionEnd) dataRegionEnd = offsets[1]
+    }
     keys.push(key)
   }
   if (tensorCount === 0) return null
@@ -292,6 +306,7 @@ export function analyzeTensorIndex(header) {
     dtypes,
     architecture: inferArchitecture(keys),
     componentRatios,
+    dataRegionEnd,
   }
 }
 
@@ -353,6 +368,9 @@ export function parseHeaderBuffer(headerBuf) {
 
 /**
  * 读取并解析 safetensors 文件的头部元信息。
+ * 张量表带有效 data_offsets 时附带 expectedMinBytes（8 字节长度区 +
+ * headerLen + 数据区末尾 = 文件最小合法体积，OPT-02）：调用方与实际
+ * 文件体积比对即可识别「头部完好但数据区截断」的下载中断文件，零额外 IO。
  * @param {string} absPath .safetensors 文件绝对路径
  * @returns {Promise<object|null>} 解析信息；文件异常/头部不可信/无有效内容返回 null
  */
@@ -368,7 +386,16 @@ export async function readSafetensorsInfo(absPath) {
     const headerBuf = Buffer.alloc(headerLen)
     const second = await fh.read(headerBuf, 0, headerLen, 8)
     if (second.bytesRead < headerLen) return null
-    return parseHeaderBuffer(headerBuf)
+    // parseHeaderBuffer 的返回类型声明为宽泛 object（info 字段 + tensorStats），
+    // 此处按结构访问须收窄类型供 checkJs 校验
+    const parsed =
+      /** @type {SafetensorsInfo & {tensorStats?: TensorStats|null, expectedMinBytes?: number}|null} */ (
+        parseHeaderBuffer(headerBuf)
+      )
+    if (parsed?.tensorStats?.dataRegionEnd > 0) {
+      parsed.expectedMinBytes = 8 + headerLen + parsed.tensorStats.dataRegionEnd
+    }
+    return parsed
   } catch {
     return null
   } finally {

@@ -217,9 +217,65 @@ describe('parseHeaderBuffer / readSafetensorsInfo', () => {
       await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
     }
   })
+
+  it('OPT-02：expectedMinBytes = 8 + headerLen + 数据区末尾，随张量统计附带', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-st-min-'))
+    try {
+      // 头部声明数据区到 16 字节末尾，实际只写 4 字节数据（截断形态）
+      const header = JSON.stringify({
+        __metadata__: { 'modelspec.title': '截断模型' },
+        'model.weight': { dtype: 'F32', shape: [2, 2], data_offsets: [0, 16] },
+      })
+      const lenBuf = Buffer.alloc(8)
+      lenBuf.writeUInt32LE(Buffer.byteLength(header), 0)
+      await fs.writeFile(
+        path.join(dir, 'truncated.safetensors'),
+        Buffer.concat([lenBuf, Buffer.from(header), Buffer.alloc(4)]),
+      )
+      const info = await readSafetensorsInfo(
+        path.join(dir, 'truncated.safetensors'),
+      )
+      expect(info.expectedMinBytes).toBe(8 + Buffer.byteLength(header) + 16)
+      expect(info.tensorStats.dataRegionEnd).toBe(16)
+
+      // 张量表无有效 data_offsets（缺失/非法）时不附带，保守不判
+      const bareHeader = JSON.stringify({
+        'model.weight': { dtype: 'F32', shape: [2, 2] },
+        'bad.weight': { dtype: 'F32', shape: [1], data_offsets: 'junk' },
+      })
+      const bareLen = Buffer.alloc(8)
+      bareLen.writeUInt32LE(Buffer.byteLength(bareHeader), 0)
+      await fs.writeFile(
+        path.join(dir, 'bare.safetensors'),
+        Buffer.concat([bareLen, Buffer.from(bareHeader), Buffer.alloc(16)]),
+      )
+      const bare = await readSafetensorsInfo(path.join(dir, 'bare.safetensors'))
+      expect(bare.tensorStats.dataRegionEnd).toBe(0)
+      expect(bare.expectedMinBytes).toBeUndefined()
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+    }
+  })
 })
 
 describe('analyzeTensorIndex（F-1 张量索引统计）', () => {
+  it('数据区末尾取 data_offsets.end 最大值；缺失/非法偏移保守不计（OPT-02）', () => {
+    const stats = analyzeTensorIndex({
+      'a.weight': { dtype: 'F16', shape: [1], data_offsets: [0, 2] },
+      'b.weight': { dtype: 'F32', shape: [1], data_offsets: [2, 100] },
+      'c.weight': { dtype: 'F32', shape: [1], data_offsets: [100, 50] },
+      'd.weight': { dtype: 'F32', shape: [1] }, // 缺失 data_offsets
+      'e.weight': { dtype: 'F32', shape: [1], data_offsets: [0, -3] }, // 非法负值
+    })
+    expect(stats.dataRegionEnd).toBe(100)
+    // 全部条目均无有效偏移时为 0
+    expect(
+      analyzeTensorIndex({
+        'x.weight': { dtype: 'F32', shape: [1], data_offsets: 'junk' },
+      }).dataRegionEnd,
+    ).toBe(0)
+  })
+
   it('参数量与 dtype 分布（占参数量降序）', () => {
     const stats = analyzeTensorIndex({
       'a.weight': { dtype: 'F16', shape: [2, 3] }, // 6

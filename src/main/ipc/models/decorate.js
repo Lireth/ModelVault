@@ -445,8 +445,11 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
   // 文件头部自动解析信息（仅 .safetensors：kohya ss_* / modelspec.* 训练元信息，
   // 仅供详情页展示与一键填入，不写入元数据、不覆盖用户标注）。
   // 健康检查（F6）：0 字节文件直接判损坏；safetensors 元信息解析失败时
-  // 补一次结构校验分辨「无元信息」与「文件损坏」（下载截断/头部垃圾），
-  // 结果标记 suspect 随装饰缓存复用——坏模型在使用时才暴雷，提前可见
+  // 补一次结构校验分辨「无元信息」与「文件损坏」（下载截断/头部垃圾）；
+  // 头部可解析但张量数据区越过文件末尾（expectedMinBytes > 实际体积，
+  // OPT-02）同样判损坏——下载中断的典型形态：头部完好、数据区缺尾巴，
+  // 此前仅有此形态漏检。结果标记 suspect 随装饰缓存复用——坏模型在
+  // 使用时才暴雷，提前可见
   let autoInfo = null
   let suspect = false
   if (model.size <= 0) {
@@ -455,6 +458,11 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
     autoInfo = await readSafetensorsInfo(model.id)
     if (!autoInfo) {
       suspect = !(await checkSafetensorsHealthy(model.id))
+    } else if (
+      Number.isFinite(autoInfo.expectedMinBytes) &&
+      autoInfo.expectedMinBytes > model.size
+    ) {
+      suspect = true
     }
   }
   const decorated = {
@@ -481,7 +489,7 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
     triggerWords: meta.triggerWords || '',
     // 触发词来源（'sidecar'/'civitai' 时详情页显示自动导入提示，F8）
     triggerWordsSource: meta.triggerWordsSource || '',
-    // 结构疑似损坏（F6）：0 字节或 safetensors 头部不可解析
+    // 结构疑似损坏（F6）：0 字节、头部不可解析或数据区越过文件末尾
     suspect,
     // 文件 SHA256（F9）：空串表示尚未计算；已算值随装饰缓存复用，
     // 渲染层据此做重复分组展示
