@@ -59,9 +59,10 @@ export function registerIpcHandlers() {
 
   // 打开日志目录（B-04）：反馈问题时用户可直接定位 %APPDATA%\modelvault\logs。
   // 目录为应用自有 userData 子目录，不接受渲染进程传入路径，无越界面。
-  // shell.openPath 成功返回空串，失败返回错误消息字符串
-  wrapHandler('app:openLogs', () => {
-    const failure = shell.openPath(getLogDir())
+  // shell.openPath 返回 Promise，resolve 值为空串（成功）或错误消息字符串（失败）；
+  // 必须 await 后再判定，否则 Promise 恒为真值会把成功误判为失败
+  wrapHandler('app:openLogs', async () => {
+    const failure = await shell.openPath(getLogDir())
     if (failure) {
       logger.warn(`打开日志目录失败: ${failure}`)
       return { error: '打开日志目录失败' }
