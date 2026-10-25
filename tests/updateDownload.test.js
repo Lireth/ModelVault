@@ -18,7 +18,7 @@ vi.mock('electron', () => ({
     getVersion: vi.fn(() => '0.1.0'),
     quit: vi.fn()
   },
-  net: { fetch: vi.fn() }
+  net: { fetch: vi.fn(), request: vi.fn() }
 }))
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(() => ({ unref: vi.fn(), once: vi.fn() }))
@@ -29,6 +29,7 @@ import { spawn } from 'node:child_process'
 import {
   parseChecksumHash,
   findUpdateAssets,
+  fetchAllowedUpdateUrl,
   setPendingUpdate,
   hasPendingUpdate,
   resetUpdateStateForTest,
@@ -73,6 +74,7 @@ beforeEach(() => {
   // 验签用例通过 setSignerThumbprintForTests 显式开启
   delete process.env.MODELVAULT_SIGNER_THUMBPRINT
   vi.mocked(net.fetch).mockReset()
+  vi.mocked(net.request).mockReset()
   vi.mocked(app.quit).mockClear()
   vi.mocked(spawn).mockClear()
   resetUpdateStateForTest()
@@ -137,6 +139,80 @@ describe('findUpdateAssets（命名约定 + 白名单双校验）', () => {
       )
     ).toBeNull()
     expect(findUpdateAssets(null, '0.2.0')).toBeNull()
+  })
+})
+
+describe('fetchAllowedUpdateUrl（Electron 重定向兼容层）', () => {
+  /** 构造只发一次 redirect 事件的 net.request 桩（Electron manual 模式） */
+  function fakeRedirectingRequest(target) {
+    const calls = []
+    const impl = (opts) => {
+      expect(opts.redirect).toBe('manual')
+      // 更新链路为公开资产下载，探测不携带会话 Cookie（与 net.fetch 默认
+      // 凭据语义一致；区别于 civitai 探测桩的 useSessionCookies: true）
+      expect(opts.useSessionCookies).toBe(false)
+      const listeners = {}
+      const req = {
+        on: (evt, cb) => {
+          ;(listeners[evt] ||= []).push(cb)
+          return req
+        },
+        end: () => {
+          queueMicrotask(() => {
+            listeners.redirect?.[0]?.(302, 'GET', target, { Location: [target] })
+          })
+        },
+        // ClientRequest 的真实取消方法是 abort（无 cancel/destroy）
+        abort: () => calls.push('abort')
+      }
+      return req
+    }
+    impl.calls = calls
+    return impl
+  }
+
+  it('Electron 不支持 manual 重定向时（Redirect was cancelled），经 net.request 探测目标并逐跳继续', async () => {
+    // Electron 实际行为：net.fetch manual 模式遇 3xx 直接抛错而非返回 3xx 响应；
+    // GitHub Release 资产必经 302 跳转 CDN，缺失该兜底时更新下载必然失败
+    const cdnUrl = 'https://objects.githubusercontent.com/gh-release-assets/abc/ModelVault-0.2.0.exe'
+    const requestStub = fakeRedirectingRequest(cdnUrl)
+    vi.mocked(net.fetch).mockImplementation(async (url) => {
+      if (String(url) === ASSETS.downloadUrl) {
+        throw new Error('Redirect was cancelled')
+      }
+      return new Response(EXE_BYTES, { status: 200 })
+    })
+    vi.mocked(net.request).mockImplementation(requestStub)
+
+    const res = await fetchAllowedUpdateUrl(ASSETS.downloadUrl, {})
+    expect(res.status).toBe(200)
+    expect(net.fetch).toHaveBeenCalledTimes(2)
+    expect(net.fetch).toHaveBeenLastCalledWith(cdnUrl, { redirect: 'manual' })
+    // 探测完成后经 abort 取消底层请求（ClientRequest 无 cancel/destroy 方法，
+    // 回归防御：调用不存在的方法会在事件处理器内抛错并演变为致命错误）
+    expect(requestStub.calls).toContain('abort')
+  })
+
+  it('探测到的重定向目标不在白名单时同样拒绝（探测路径保持 V-06 门禁）', async () => {
+    vi.mocked(net.fetch).mockImplementation(async () => {
+      throw new Error('Redirect was cancelled')
+    })
+    vi.mocked(net.request).mockImplementation(
+      fakeRedirectingRequest('https://evil.example.com/x.exe')
+    )
+
+    await expect(fetchAllowedUpdateUrl(ASSETS.downloadUrl, {})).rejects.toThrow(
+      '重定向目标不在 GitHub 白名单内'
+    )
+  })
+
+  it('非重定向取消类错误原样抛出，不进入探测路径', async () => {
+    vi.mocked(net.fetch).mockRejectedValue(new Error('net::ERR_CONNECTION_RESET'))
+
+    await expect(fetchAllowedUpdateUrl(ASSETS.downloadUrl, {})).rejects.toThrow(
+      'ERR_CONNECTION_RESET'
+    )
+    expect(net.request).not.toHaveBeenCalled()
   })
 })
 

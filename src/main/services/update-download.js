@@ -97,6 +97,11 @@ function isRedirectStatus(status) {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308
 }
 
+/** Electron 网络栈对 fetch manual 重定向不支持时的特征错误 */
+function isRedirectCancelledError(err) {
+  return err instanceof Error && err.message.includes('Redirect was cancelled')
+}
+
 /**
  * 更新链路 URL 白名单（V-06）：https + GitHub 页面/API/Release 资产 CDN。
  * @param {unknown} url 待校验 URL
@@ -112,9 +117,92 @@ function isAllowedUpdateHost(url) {
 }
 
 /**
+ * 探测一跳重定向目标（Electron 兼容层）：
+ * net.fetch 的 redirect:'manual' 在 Electron 网络栈中不被支持——上游返回
+ * 3xx 时直接以 "Redirect was cancelled"（ERR_REDIRECT_CANCELLED）抛错，
+ * 而非规范语义的不透明响应（Location 不可读）。GitHub Release 资产
+ * 必经 302 跳转 CDN，缺失该兜底时更新下载必然失败。这里改用 net.request
+ * 的 manual 模式：redirect 事件读出跳转目标后立即取消请求，主传输仍走
+ * net.fetch（流式 body / 超时/续传信号语义不变）。与 civitai.js 的同名
+ * 兜底保持同构（后续网络工具收敛的合并候选）。
+ * @param {string} url 当前跳点 URL（调用方已校验白名单）
+ * @param {RequestInit} options 与主请求一致的选项（headers/signal）
+ * @returns {Promise<{status: number, location: string, headers: Headers}>}
+ */
+function probeRedirectTarget(url, options) {
+  return new Promise((resolve, reject) => {
+    // HeadersInit → net.request 要求的普通头记录（Range 等简单值单值字符串
+    // 化即可；探测请求不携带 body，无多值头语义）。不携带会话 Cookie——
+    // 更新链路为公开资产下载，与 net.fetch 默认凭据语义保持一致
+    const headersRecord = {}
+    for (const [name, value] of new Headers(options.headers || {})) {
+      headersRecord[name] = value
+    }
+    const request = net.request({
+      method: 'GET',
+      url,
+      redirect: 'manual',
+      useSessionCookies: false,
+      headers: headersRecord
+    })
+    let settled = false
+    const finish = (ok, value) => {
+      if (settled) return
+      settled = true
+      ok ? resolve(value) : reject(value)
+    }
+    /** Electron 响应头对象（Record<string, string|string[]>）→ Headers */
+    const headersOf = (record) => {
+      const headers = new Headers()
+      for (const [name, values] of Object.entries(record || {})) {
+        for (const value of [].concat(values)) headers.append(name, value)
+      }
+      return headers
+    }
+    request.on('redirect', (statusCode, _method, redirectUrl, responseHeaders) => {
+      const headers = headersOf(responseHeaders)
+      // ClientRequest 的取消方法是 abort（无 cancel/destroy；用可选链防御
+      // Electron 版本 API 差异，避免事件处理器内抛错演变成主进程致命错误）
+      request.abort?.()
+      finish(true, {
+        status: statusCode,
+        location: headers.get('location') || redirectUrl || '',
+        headers
+      })
+    })
+    request.on('response', (incoming) => {
+      // 未发 redirect 事件直接拿到响应（3xx 且无跳转目标等）：按终态返回空体
+      // （IncomingMessage 无 destroy 方法，经 request.abort 中止 body 传输）
+      request.abort?.()
+      finish(true, {
+        status: incoming.statusCode || 0,
+        location: '',
+        headers: headersOf(incoming.headers)
+      })
+    })
+    request.on('error', (err) => finish(false, err))
+    const { signal } = options
+    if (signal) {
+      if (signal.aborted) {
+        request.abort?.()
+        finish(false, new DOMException('已终止', 'AbortError'))
+        return
+      }
+      signal.addEventListener('abort', () => {
+        request.abort?.()
+        finish(false, new DOMException('已终止', 'AbortError'))
+      }, { once: true })
+    }
+    request.end()
+  })
+}
+
+/**
  * 发起更新相关请求并手动跟随重定向（V-06）：
  * net.fetch 默认跟随 302 时只校验初始 URL，白名单主机可把请求引向任意
- * 站点。此处每一跳都校验主机，超出次数上限即失败。
+ * 站点。此处每一跳都校验主机，超出次数上限即失败。Electron 网络栈对
+ * manual 模式不支持（3xx 直接抛 "Redirect was cancelled"，Location 不可
+ * 读），此时经 probeRedirectTarget 探测跳转目标后逐跳继续。
  * @param {string} url 初始 URL（调用方已校验）
  * @param {RequestInit} options fetch 选项
  * @returns {Promise<Response>} 最终响应
@@ -125,7 +213,16 @@ export async function fetchAllowedUpdateUrl(url, options) {
   }
   let current = url
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const response = await net.fetch(current, { ...options, redirect: 'manual' })
+    let response
+    try {
+      response = await net.fetch(current, { ...options, redirect: 'manual' })
+    } catch (err) {
+      if (!isRedirectCancelledError(err)) throw err
+      const probe = await probeRedirectTarget(current, options)
+      // 无跳转目标的 3xx 按终态响应处理（调用方按非 ok 分支报错，与
+      // 规范的 manual 语义一致；body 恒为空——3xx 本就无有效载荷）
+      response = new Response('', { status: probe.status, headers: probe.headers })
+    }
     if (!isRedirectStatus(response.status)) return response
     const location = response.headers.get('location')
     if (!location) return response
