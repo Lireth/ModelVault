@@ -205,6 +205,7 @@ describe('shared/defaults', () => {
       'autoRescan',
       'autoCheckUpdate',
       'hashWarmup',
+      'hashWarmupConcurrency',
       'autoBackup',
       'savedViews',
     ].sort()

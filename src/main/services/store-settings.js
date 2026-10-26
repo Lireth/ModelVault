@@ -99,6 +99,7 @@ function defaultLibrarySettings() {
     autoRescan: base.autoRescan,
     autoCheckUpdate: base.autoCheckUpdate,
     hashWarmup: base.hashWarmup,
+    hashWarmupConcurrency: base.hashWarmupConcurrency,
     autoBackup: base.autoBackup,
     savedViews: [...base.savedViews],
   }
@@ -114,6 +115,20 @@ function normalizeExtensions(raw) {
     : []
   const unique = [...new Set(list)]
   return unique.length > 0 ? unique : [...MODEL_EXTENSION_SET]
+}
+
+/**
+ * 规范化哈希预热并发数（OPT-3）：整数收口到 [1, 4]，非法值回退基准值。
+ * 上限 4 与 schema（vInt min 1 max 4）一致：并发收益受磁盘随机读限制，
+ * 更高并发只放大内存与句柄占用。
+ * @param {unknown} raw 设置原文
+ * @param {number} fallback 非法时的回退值（默认设置或旧值）
+ * @returns {number} 1-4 的整数
+ */
+function normalizeHashConcurrency(raw, fallback) {
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(4, Math.max(1, Math.floor(n)))
 }
 
 /**
@@ -231,6 +246,11 @@ export function normalizeLibrarySettings(raw) {
     hashWarmup: HASH_WARMUP_KEYS.has(raw.hashWarmup)
       ? raw.hashWarmup
       : base.hashWarmup,
+    // 哈希预热并发数（OPT-3）：非法/越界回退基准值（默认 1，串行）
+    hashWarmupConcurrency: normalizeHashConcurrency(
+      raw.hashWarmupConcurrency,
+      base.hashWarmupConcurrency,
+    ),
     // 自动定期元数据备份（OPT-07）：缺省视为开启（默认真语义）
     autoBackup: raw.autoBackup !== false,
     savedViews: normalizeSavedViews(raw.savedViews),

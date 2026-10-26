@@ -200,6 +200,7 @@ export function registerScanHandlers() {
         // 只对同尺寸模型计算，full=true 同步重置体积索引（清除已删除模型）
         requestHashWarmup(decorated, {
           mode: appSettings.hashWarmup,
+          concurrency: appSettings.hashWarmupConcurrency,
           full: true,
         })
 
@@ -387,6 +388,7 @@ export function registerScanHandlers() {
         // 同尺寸模型也能被识别为重复候选
         requestHashWarmup(decorated, {
           mode: appSettings.hashWarmup,
+          concurrency: appSettings.hashWarmupConcurrency,
           full: false,
         })
 

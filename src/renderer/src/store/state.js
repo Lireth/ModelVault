@@ -11,6 +11,7 @@ import {
   SORT_OPTION_DEFS,
   CARD_SIZE_DEFS,
   HASH_WARMUP_DEFS,
+  WARMUP_CONCURRENCY_OPTIONS as SHARED_WARMUP_CONCURRENCY,
 } from '../../../shared/app-enums'
 import { MODEL_EXTENSIONS as SHARED_SCAN_EXTS } from '../../../shared/model-extensions'
 import { DEFAULT_SETTINGS } from '../../../shared/defaults'
@@ -90,6 +91,9 @@ export const SCAN_EXTENSION_OPTIONS = SHARED_SCAN_EXTS
 
 /** 后台哈希预热策略选项（O1 单一来源 shared/app-enums.js） */
 export const HASH_WARMUP_OPTIONS = HASH_WARMUP_DEFS
+
+/** 哈希预热并发数选项（OPT-3；A-12 单一来源 shared/app-enums.js） */
+export const WARMUP_CONCURRENCY_OPTIONS = SHARED_WARMUP_CONCURRENCY
 
 /** 分类标签 key→显示信息映射（搜索域构建复用） */
 export const SUB_MAP = Object.fromEntries(

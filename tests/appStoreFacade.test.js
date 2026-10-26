@@ -26,6 +26,7 @@ const EXPECTED_EXPORTS = [
   'CARD_SIZE_OPTIONS',
   'SCAN_EXTENSION_OPTIONS',
   'HASH_WARMUP_OPTIONS',
+  'WARMUP_CONCURRENCY_OPTIONS',
   'sortDirectional',
   'tagsForType',
   'typeInfo',

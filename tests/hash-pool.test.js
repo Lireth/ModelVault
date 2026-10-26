@@ -20,6 +20,7 @@ import {
   crashHashWorkerForTests,
   isRetryableHashPoolError,
   resetHashPoolForTests,
+  setHashPoolConcurrency,
 } from '../src/main/services/hash-worker-pool'
 
 let dir
@@ -75,6 +76,79 @@ it('多任务串行执行：按入队顺序逐个完成（并发 1）', async ()
   expect(ha).toBe(a.expected)
   expect(hb).toBe(b.expected)
   expect(order).toEqual(['a', 'b'])
+})
+
+it('OPT-3：并发 2 时第二任务在前一任务完成前启动（并行执行）', async () => {
+  setHashPoolConcurrency(2)
+  try {
+    // A 足够大（SHA256 耗时远大于 worker 消息往返），B 极小：B 的首个进度
+    // 必然先于 A 的完成到达——并发 1 时 B 只能在 A 完成后才启动。
+    // 时间断言有 ~10 倍以上余量（64MB 哈希 ≥ 百毫秒，启动延迟 ≈ 毫秒级）
+    const a = await writeFixture('par-a.bin', Buffer.alloc(64 * 1024 * 1024, 1))
+    const b = await writeFixture('par-b.bin', Buffer.from('par-b'))
+    let aDoneAt = Infinity
+    let bStartedAt = Infinity
+    const pa = computeFileHashOffThread(a.abs, undefined, () => {}).then(
+      (h) => {
+        aDoneAt = Date.now()
+        return h
+      },
+    )
+    const pb = computeFileHashOffThread(b.abs, undefined, () => {
+      if (bStartedAt === Infinity) bStartedAt = Date.now()
+    })
+    const [ha, hb] = await Promise.all([pa, pb])
+    expect(ha).toBe(a.expected)
+    expect(hb).toBe(b.expected)
+    expect(bStartedAt).toBeLessThan(aDoneAt)
+  } finally {
+    setHashPoolConcurrency(1)
+  }
+})
+
+it('OPT-3：并发 2 下前台任务只抢占一个后台槽位，另一后台任务继续完成', async () => {
+  setHashPoolConcurrency(2)
+  try {
+    const a = await writeFixture('pr-a.bin', Buffer.from('bg-a'))
+    const b = await writeFixture('pr-b.bin', Buffer.from('bg-b'))
+    const c = await writeFixture('pr-c.bin', Buffer.from('priority'))
+
+    // 同一 tick 内入队：a/b 占满两个槽位（currentTask 同步置位），
+    // 随后到达的前台任务 c 无空闲槽位 → 抢占其一（a），b 不受影响
+    const pa = computeFileHashOffThread(a.abs)
+    const pb = computeFileHashOffThread(b.abs)
+    const pc = computeFileHashOffThread(c.abs, undefined, undefined, {
+      priority: true,
+    })
+
+    // 被抢占的后台任务以 PreemptedError 让路（重排由预热层负责）；
+    // 未被抢占的后台任务与前台任务正常完成
+    await expect(pa).rejects.toMatchObject({ name: 'PreemptedError' })
+    const [hb, hc] = await Promise.all([pb, pc])
+    expect(hb).toBe(b.expected)
+    expect(hc).toBe(c.expected)
+  } finally {
+    setHashPoolConcurrency(1)
+  }
+})
+
+it('OPT-3：并发缩容不影响在途任务，后续任务照常完成', async () => {
+  setHashPoolConcurrency(2)
+  const a = await writeFixture('sh-a.bin', Buffer.from('shrink-a'))
+  const b = await writeFixture('sh-b.bin', Buffer.from('shrink-b'))
+  const pa = computeFileHashOffThread(a.abs)
+  const pb = computeFileHashOffThread(b.abs)
+  // 缩容后立即派发新任务：在途的 a/b 不中断，空闲超额槽位被回收
+  setHashPoolConcurrency(1)
+  const c = await writeFixture('sh-c.bin', Buffer.from('shrink-c'))
+  const [ha, hb, hc] = await Promise.all([
+    pa,
+    pb,
+    computeFileHashOffThread(c.abs),
+  ])
+  expect(ha).toBe(a.expected)
+  expect(hb).toBe(b.expected)
+  expect(hc).toBe(c.expected)
 })
 
 it('前台优先级任务先于已排队的后台任务执行', async () => {

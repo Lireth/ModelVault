@@ -34,6 +34,7 @@ export function useSettingsForm() {
     civitaiEnabled: true,
     nsfwBlur: true,
     hashWarmup: 'candidates',
+    hashWarmupConcurrency: 1,
     autoBackup: true,
   })
 
@@ -60,6 +61,11 @@ export function useSettingsForm() {
     form.civitaiEnabled = state.settings.civitaiEnabled !== false
     form.nsfwBlur = state.settings.nsfwBlur !== false
     form.hashWarmup = state.settings.hashWarmup || 'candidates'
+    form.hashWarmupConcurrency =
+      Number.isFinite(state.settings.hashWarmupConcurrency) &&
+      state.settings.hashWarmupConcurrency >= 1
+        ? state.settings.hashWarmupConcurrency
+        : 1
     form.autoBackup = state.settings.autoBackup !== false
     // 填充完成后建立脏检测基线（A9）：此后表单值与快照不一致即为脏
     savedSnapshot = formSnapshotValue()
@@ -92,6 +98,7 @@ export function useSettingsForm() {
       civitaiEnabled: form.civitaiEnabled,
       nsfwBlur: form.nsfwBlur,
       hashWarmup: form.hashWarmup,
+      hashWarmupConcurrency: form.hashWarmupConcurrency,
     }
   }
 
@@ -113,6 +120,7 @@ export function useSettingsForm() {
       form.civitaiEnabled !== s.civitaiEnabled ||
       form.nsfwBlur !== s.nsfwBlur ||
       form.hashWarmup !== s.hashWarmup ||
+      form.hashWarmupConcurrency !== s.hashWarmupConcurrency ||
       form.scanExtensions.length !== s.scanExtensions.length ||
       form.scanExtensions
         .slice()

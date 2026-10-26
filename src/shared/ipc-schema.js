@@ -352,6 +352,8 @@ export const IPC_PAYLOAD_SCHEMAS = {
       autoRescan: vBool(),
       autoCheckUpdate: vBool(),
       hashWarmup: vStr({ max: 16 }),
+      // 哈希预热并发数（OPT-3）：整数 1-4，范围收口仍在 normalizeSettings
+      hashWarmupConcurrency: vInt({ min: 1, max: 4 }),
       autoBackup: vBool(),
       // 智能视图：字段与 store-settings.normalizeSavedViews 对齐；
       // 文案/枚举回退仍在 normalize（这里只挡类型与未知字段）

@@ -2,6 +2,7 @@
 import {
   SCAN_EXTENSION_OPTIONS,
   HASH_WARMUP_OPTIONS,
+  WARMUP_CONCURRENCY_OPTIONS,
 } from '../../store/appStore'
 
 /**
@@ -77,6 +78,28 @@ defineProps({
           @click="form.hashWarmup = h.key"
         >
           {{ h.label }}
+        </button>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <span class="setting-title">预热并发数</span>
+        <span class="setting-desc">
+          同时计算的模型文件数。1
+          为逐个串行（机械硬盘/移动硬盘推荐，避免多路大文件读盘互相争抢）；固态硬盘可调高以加快「全库」预热的完成速度。
+        </span>
+      </div>
+      <div class="seg-group">
+        <button
+          v-for="n in WARMUP_CONCURRENCY_OPTIONS"
+          :key="n"
+          type="button"
+          class="seg-btn"
+          :class="{ active: form.hashWarmupConcurrency === n }"
+          @click="form.hashWarmupConcurrency = n"
+        >
+          {{ n }}
         </button>
       </div>
     </div>

@@ -11,17 +11,24 @@ import logger from '../logger'
  * 在数 GB 哈希期间保持空闲。
  *
  * 设计要点：
- * - 单 worker + 内部 FIFO 队列（并发 1）：与 hash-warmup「单文件串行处理，
- *   避免多路大文件读取争抢磁盘 I/O」的既有约定一致，本模块是串行语义的
- *   唯一执行点——调用方（预热/识别链路）无需关心排队；
+ * - 多槽位并行（OPT-3）：并发数经 setHashPoolConcurrency 配置（1-4，默认 1）。
+ *   默认串行：与 hash-warmup「单文件串行处理，避免多路大文件读取争抢磁盘
+ *   I/O」的既有约定一致；SSD/NVMe 用户可调高并发加快全库预热。每个槽位
+ *   持有独立 worker 与在途任务，槽位间互不共享 abort 标志；
  * - 内联源码（eval: true）：worker 代码以字符串内置，规避 electron-vite
  *   主进程 bundle 的额外 entry 配置与 vitest ESM 环境下的 worker 文件路径
  *   解析问题，dev/打包/测试三环境行为完全一致；
- * - 取消：AbortSignal 触发时主进程立即 reject 并向 worker 发 abort 消息，
- *   worker 在下一读块边界检查后中止（在途读块最多 8MB 的收尾开销）；
+ * - 取消：AbortSignal 触发时主进程立即 reject 并向所在槽位的 worker 发
+ *   abort 消息，worker 在下一读块边界检查后中止（在途读块最多 8MB 的收尾
+ *   开销）；排队中的任务直接出队结算；
+ * - 优先级（OPT-08）：前台任务优先出队；前台到达且所有槽位都被后台任务
+ *   占用时，抢占其中一个后台槽位（块边界中止），其余后台任务继续执行——
+ *   多槽位下不再需要「整池让路」；
  * - 崩溃自愈（OPT-05）：worker 崩溃时当前任务以可重试的 WorkerCrashError
- *   拒绝，队列中尚未开始的任务保留，worker 退避重建后继续消费；连续崩溃
- *   超过阈值时以 WorkerUnavailableError 拒绝剩余队列，避免无限重建。
+ *   拒绝，队列中尚未开始的任务保留，退避重建后继续消费；连续崩溃超过阈值
+ *   时以 WorkerUnavailableError 拒绝剩余队列，避免无限重建；
+ * - 缩容（OPT-3）：并发调小时，空闲的超额槽位立即关闭，在途槽位完成当前
+ *   任务后不再接受新任务（惰性回收，不中断计算）。
  */
 
 /** worker 读块大小（8MB）：大文件吞吐与内存占用的平衡点（原 civitai.js HASH_CHUNK_SIZE） */
@@ -34,6 +41,10 @@ const RESTART_MAX_DELAY_MS = 4000
 /** 连续崩溃上限：达到后拒绝剩余队列，避免 worker 启动失败时无限重建 */
 const MAX_CRASH_STREAK = 3
 
+/** 并发数合法区间（OPT-3）：1 = 串行（默认），4 = 上限 */
+const MIN_POOL_CONCURRENCY = 1
+const MAX_POOL_CONCURRENCY = 4
+
 /**
  * worker 内联源码（CJS，eval 模式）：
  * 消息协议——
@@ -42,8 +53,8 @@ const MAX_CRASH_STREAK = 3
  *     { type: 'done', id, hash } 成功；
  *     { type: 'done', id, error, name, code } 失败（含取消；code 供上层识别
  *     可重试的临时文件错误）。
- * 任务严格串行：主进程侧并发为 1，worker 内 aborted 标志只作用于当前任务
- * （任务开始时复位，abort 消息不会泄漏到后续任务）。
+ * 单 worker 内任务严格串行（并发由多槽位实现）：worker 内 aborted 标志只
+ * 作用于当前任务（任务开始时复位，abort 消息不会泄漏到后续任务）。
  */
 const WORKER_SOURCE = `
 const { parentPort } = require('node:worker_threads')
@@ -144,27 +155,50 @@ export function isRetryableHashPoolError(err) {
   return typeof err.code === 'string' && RETRYABLE_FILE_CODES.has(err.code)
 }
 
-/** 单例 worker（惰性创建；异常退出后置 null，下次任务重建） */
-let worker = null
+/**
+ * 池内任务（computeFileHashOffThread 构造，消息路由/取消/结算共用）：
+ * @typedef {object} HashPoolTask
+ * @property {number} id 派发序号（单调递增，worker 消息按 id 回路由）
+ * @property {string} filePath 文件绝对路径
+ * @property {AbortSignal=} signal 取消信号
+ * @property {((hashedBytes: number, totalBytes: number) => void)=} onProgress 进度回调
+ * @property {boolean} priority 是否前台任务
+ * @property {boolean} preempting 是否已被标记抢占（等待 worker 回传 AbortError）
+ * @property {(() => void)|null} abortListener abort 事件监听（结算时移除）
+ * @property {HashPoolSlot|null} slot 执行槽位（pump 派发时置位；排队中为 null）
+ * @property {boolean} settled 是否已结算
+ * @property {(hash: string) => void} resolve
+ * @property {(err: Error) => void} reject
+ */
+
+/**
+ * 槽位（OPT-3）：每个槽位持有独立 worker 实例与至多一个在途任务。
+ * slots 数组长度只增不减（缩容按 poolConcurrency 忽略尾部槽位并惰性回收），
+ * 避免在途任务的槽位引用失效。
+ * @typedef {{worker: Worker|null, currentTask: HashPoolTask|null}} HashPoolSlot
+ */
+
+/** 槽位数组（惰性创建 worker；缩容后尾部空闲槽位被回收） */
+const slots = []
+
+/** 当前允许的并行任务数（1 = 串行；setHashPoolConcurrency 调整） */
+let poolConcurrency = MIN_POOL_CONCURRENCY
 
 /** 派发序号：任务 id 单调递增，worker 消息按 id 回路由 */
 let nextTaskId = 0
 
-/** 崩溃重启定时器与连续崩溃计数（OPT-05） */
+/** 崩溃重启定时器与连续崩溃计数（OPT-05；池级全局共享） */
 let restartTimer = null
 let crashStreak = 0
 
 /**
- * 双通道任务队列（worker 并发 1：同一时刻至多一个在途任务）：
+ * 双通道任务队列：
  * - foreground：详情页/识别/预热 priority 任务，优先出队；
  * - background：批量预热等后台任务，让路于前台。
- * 两个队列仍严格串行执行，优先级只影响取队顺序。
+ * 优先级只影响取队顺序；并行度由槽位数决定。
  */
 const foregroundQueue = []
 const backgroundQueue = []
-
-/** 当前在途任务（null 表示空闲） */
-let currentTask = null
 
 /** 构造“后台任务已让路”错误（仅线程池内部使用） */
 function preemptedError() {
@@ -174,22 +208,23 @@ function preemptedError() {
 }
 
 /**
- * 惰性创建 worker 并绑定消息路由：
+ * 惰性创建槽位 worker 并绑定消息路由：
  * - progress：按 id 匹配任务并转发 onProgress 回调；
  * - done：按 id 结算任务（成功/失败），空闲后立即泵出下一任务；
  * - error / exit：worker 崩溃——当前任务以 WorkerCrashError 拒绝，队列保留
  *   并退避重建后继续消费（OPT-05）。
+ * @param {HashPoolSlot} slot 目标槽位
  */
-function ensureWorker() {
-  if (worker) return worker
+function ensureSlotWorker(slot) {
+  if (slot.worker) return slot.worker
   const w = new Worker(WORKER_SOURCE, { eval: true })
   // unref：哈希预热是后台任务，不得阻止应用退出（退出编排不感知本线程）
   w.unref()
   w.on('message', (msg) => {
     // 代际防护：崩溃重建后旧 worker 的迟到消息必须丢弃
-    if (worker !== w) return
+    if (slot.worker !== w) return
     if (!msg || typeof msg.id !== 'number') return
-    const task = currentTask
+    const task = slot.currentTask
     if (!task || task.id !== msg.id) return
     if (msg.type === 'progress') {
       if (typeof task.onProgress === 'function') {
@@ -204,7 +239,7 @@ function ensureWorker() {
       // 这里不自动重排（由哈希预热层按任务语义重新入队），只把错误类型
       // 改为 PreemptedError，避免上层把让路误报为“计算失败”。
       const preempted = task.preempting && msg.name === 'AbortError'
-      settleCurrent()
+      settleSlot(slot)
       if (preempted) {
         task.reject(preemptedError())
       } else if (msg.error !== undefined) {
@@ -221,16 +256,16 @@ function ensureWorker() {
     }
   })
   w.on('error', (err) => {
-    if (worker !== w) return
-    handleWorkerFailure(w, err)
+    if (slot.worker !== w) return
+    handleSlotFailure(slot, w, err)
   })
   w.on('exit', (code) => {
     // reset 路径先置空 worker 再 terminate，此处代际校验会忽略；
     // 其余退出均按崩溃处理（含 code=0 的非预期退出）
-    if (worker !== w) return
-    handleWorkerFailure(w, new Error(`哈希工作线程已退出（code=${code}）`))
+    if (slot.worker !== w) return
+    handleSlotFailure(slot, w, new Error(`哈希工作线程已退出（code=${code}）`))
   })
-  worker = w
+  slot.worker = w
   return w
 }
 
@@ -288,32 +323,34 @@ function recordCrash() {
 }
 
 /**
- * worker 崩溃处理：置空实例、终止残留、拒绝当前任务并进入重启流程。
+ * 槽位 worker 崩溃处理：置空实例、终止残留、拒绝当前任务并进入重启流程。
+ * @param {HashPoolSlot} slot 崩溃的槽位
  * @param {Worker} w 崩溃的 worker 实例
  * @param {Error} cause 崩溃原因
  */
-function handleWorkerFailure(w, cause) {
-  if (worker !== w) return
-  worker = null
+function handleSlotFailure(slot, w, cause) {
+  if (slot.worker !== w) return
+  slot.worker = null
   try {
     w.terminate().catch(() => {})
   } catch {
     /* 进程已退出 */
   }
-  const task = currentTask
+  const task = slot.currentTask
   if (task) {
-    settleCurrent()
+    settleSlot(slot)
     task.reject(workerCrashError(`哈希工作线程异常: ${cause.message}`))
   }
   recordCrash()
 }
 
-/** 结束当前在途任务的占位（仅状态清理，结算本身由消息路由完成） */
-function settleCurrent() {
-  if (currentTask?.abortListener) {
-    currentTask.signal?.removeEventListener('abort', currentTask.abortListener)
+/** 结束槽位当前在途任务的占位（仅状态清理，结算本身由消息路由完成） */
+function settleSlot(slot) {
+  const task = slot.currentTask
+  if (task?.abortListener) {
+    task.signal?.removeEventListener('abort', task.abortListener)
   }
-  currentTask = null
+  slot.currentTask = null
 }
 
 /** 从队列取下一个未取消任务（前台优先，后台兜底） */
@@ -328,23 +365,52 @@ function nextTask() {
 }
 
 /**
- * 入队并按需抢占：前台任务入队时，若当前正在执行后台任务，
- * 通知 worker 在下一读块边界中止；等 worker 回传 done 后再启动前台任务，
- * 避免新旧任务并发读写同一个 worker 的共享 abort 标志。
+ * 回收超出并发数的空闲槽位（OPT-3 缩容）：尾部槽位若空闲则终止并从数组
+ * 移除；在途槽位保留（完成当前任务后 pump 不再向其派发，下次缩容回收）。
+ */
+function trimSlots() {
+  for (let i = slots.length - 1; i >= poolConcurrency; i--) {
+    const slot = slots[i]
+    if (slot.currentTask) continue
+    slots.splice(i, 1)
+    if (slot.worker) {
+      const w = slot.worker
+      slot.worker = null
+      // 先置空再终止：exit 事件经代际校验忽略，不会误入崩溃路径
+      w.terminate().catch(() => {})
+    }
+  }
+}
+
+/**
+ * 入队并按需抢占：前台任务入队时，若所有槽位都被后台任务占用，
+ * 通知其中一个槽位的 worker 在下一读块边界中止；等其回传 done 后
+ * pump 再启动前台任务，避免新旧任务并发读写同一个 worker 的共享
+ * abort 标志。多槽位（OPT-3）下其余后台任务不受影响，继续并行执行。
  */
 function enqueueTask(task) {
   // 新任务到达时无需继续等待退避：立即尝试重建并派发
   clearRestartTimer()
   if (task.priority) {
     foregroundQueue.push(task)
-    if (
-      currentTask &&
-      !currentTask.priority &&
-      !currentTask.preempting &&
-      worker
-    ) {
-      currentTask.preempting = true
-      worker.postMessage({ type: 'abort', id: currentTask.id })
+    // 仅当没有空闲槽位可立即接单时才抢占（无在途任务的槽位可惰性建 worker）
+    const hasFreeSlot = slots
+      .slice(0, poolConcurrency)
+      .some((s) => !s.currentTask)
+    if (!hasFreeSlot) {
+      for (const slot of slots.slice(0, poolConcurrency)) {
+        const current = slot.currentTask
+        if (
+          current &&
+          !current.priority &&
+          !current.preempting &&
+          slot.worker
+        ) {
+          current.preempting = true
+          slot.worker.postMessage({ type: 'abort', id: current.id })
+          break
+        }
+      }
     }
   } else {
     backgroundQueue.push(task)
@@ -365,28 +431,38 @@ function dequeueTask(task) {
 }
 
 /**
- * 从队列泵出下一任务（串行）：前台优先；队列中已取消的任务直接跳过。
+ * 从队列泵出任务（并行上限 = poolConcurrency）：前台优先；队列中已取消的
+ * 任务直接跳过。槽位按需物化（懒创建），超出并发数的槽位（缩容残留）
+ * 不再接受新任务。
  */
 function pump() {
-  if (currentTask || restartTimer) return
-  const task = nextTask()
-  if (!task) return
-  currentTask = task
-  let w
-  try {
-    w = ensureWorker()
-  } catch (err) {
-    const failure = workerCrashError(`哈希工作线程创建失败: ${err.message}`)
-    settleCurrent()
-    task.reject(failure)
-    recordCrash()
-    return
-  }
-  try {
-    w.postMessage({ type: 'hash', id: task.id, filePath: task.filePath })
-  } catch (err) {
-    // postMessage 失败通常意味着 worker 已终止：按崩溃路径重建
-    handleWorkerFailure(w, err)
+  if (restartTimer) return
+  trimSlots()
+  for (let i = 0; i < poolConcurrency; i++) {
+    if (i >= slots.length) slots.push({ worker: null, currentTask: null })
+    const slot = slots[i]
+    if (slot.currentTask) continue
+    const task = nextTask()
+    if (!task) return
+    task.slot = slot
+    slot.currentTask = task
+    let w
+    try {
+      w = ensureSlotWorker(slot)
+    } catch (err) {
+      const failure = workerCrashError(`哈希工作线程创建失败: ${err.message}`)
+      settleSlot(slot)
+      task.reject(failure)
+      recordCrash()
+      return
+    }
+    try {
+      w.postMessage({ type: 'hash', id: task.id, filePath: task.filePath })
+    } catch (err) {
+      // postMessage 失败通常意味着 worker 已终止：按崩溃路径重建
+      handleSlotFailure(slot, w, err)
+      return
+    }
   }
 }
 
@@ -394,19 +470,37 @@ function pump() {
 function failAll(err) {
   clearRestartTimer()
   crashStreak = 0
-  if (currentTask) {
-    const task = currentTask
-    settleCurrent()
-    task.reject(err)
+  for (const slot of slots) {
+    if (slot.currentTask) {
+      const task = slot.currentTask
+      settleSlot(slot)
+      task.reject(err)
+    }
+    if (slot.worker) {
+      const w = slot.worker
+      // 先置空再终止：terminate 触发的 exit 事件经代际校验忽略，
+      // 避免旧实例的退出误伤随后重建的新 worker
+      slot.worker = null
+      w.terminate().catch(() => {})
+    }
   }
   rejectQueued(err)
-  if (worker) {
-    const w = worker
-    // 先置空再终止：terminate 触发的 exit 事件经代际校验忽略，
-    // 避免旧实例的退出误伤随后重建的新 worker
-    worker = null
-    w.terminate().catch(() => {})
-  }
+}
+
+/**
+ * 调整线程池并行度（OPT-3）：1 = 串行（默认，机械硬盘友好），上限 4。
+ * 扩容立即生效（pump 按需创建槽位）；缩容时在途任务不中断，空闲的超额
+ * 槽位被回收，完成任务的尾部槽位不再接受新任务。
+ * @param {number} n 并行任务数（非法值按 1 处理）
+ */
+export function setHashPoolConcurrency(n) {
+  const value = Number(n)
+  poolConcurrency =
+    Number.isFinite(value) && value >= MIN_POOL_CONCURRENCY
+      ? Math.min(MAX_POOL_CONCURRENCY, Math.floor(value))
+      : MIN_POOL_CONCURRENCY
+  // 扩容或缩容后立即重新派发/回收（缩容在途任务不受影响）
+  pump()
 }
 
 /**
@@ -418,7 +512,7 @@ function failAll(err) {
  * @param {(hashedBytes: number, totalBytes: number) => void} [onProgress]
  *   哈希进度回调（可选，每块读取后触发）
  * @param {{priority?: boolean}} [options] priority=true 为前台任务：
- *   优先于排队中的后台任务，并可在块边界抢占在途后台任务（OPT-08）
+ *   优先于排队中的后台任务，并可在全部槽位被后台占用时抢占其一（OPT-08）
  * @returns {Promise<string>} 64 位十六进制哈希
  */
 export function computeFileHashOffThread(
@@ -440,6 +534,7 @@ export function computeFileHashOffThread(
       priority: options.priority === true,
       preempting: false,
       abortListener: null,
+      slot: null,
       settled: false,
       resolve: (hash) => {
         task.settled = true
@@ -452,11 +547,11 @@ export function computeFileHashOffThread(
     }
     task.abortListener = () => {
       if (task.settled) return
-      if (currentTask === task) {
-        // 在途任务：通知 worker 在下一块边界中止，主进程立即返回；
-        // 泵出队列中的下一任务，避免取消后串行链停摆
-        worker?.postMessage({ type: 'abort', id: task.id })
-        settleCurrent()
+      if (task.slot && task.slot.currentTask === task) {
+        // 在途任务：通知所在槽位的 worker 在下一块边界中止，主进程立即返回；
+        // 泵出队列中的下一任务，避免取消后并行链停摆
+        task.slot.worker?.postMessage({ type: 'abort', id: task.id })
+        settleSlot(task.slot)
         task.reject(abortError())
         pump()
       } else if (dequeueTask(task)) {
@@ -474,20 +569,28 @@ export function computeFileHashOffThread(
 
 /** 终止 worker 并清空全部内部状态（测试隔离用；生产代码严禁调用） */
 export async function resetHashPoolForTests() {
-  const w = worker
+  const toTerminate = slots
+    .map((slot) => slot.worker)
+    .filter((w) => w instanceof Worker)
   failAll(new Error('哈希线程池已重置'))
+  slots.length = 0
   nextTaskId = 0
-  if (w) await w.terminate().catch(() => {})
+  poolConcurrency = MIN_POOL_CONCURRENCY
+  await Promise.all(toTerminate.map((w) => w.terminate().catch(() => {})))
   logger.info('哈希线程池已重置（测试）')
 }
 
 /**
- * 强制终止当前 worker，模拟崩溃（仅供单元测试使用；生产代码严禁调用）。
+ * 强制终止在途 worker，模拟崩溃（仅供单元测试使用；生产代码严禁调用）。
  * 不清理当前任务/队列，使退出事件走真实崩溃恢复路径。
  * @returns {boolean} 是否存在可终止的 worker
  */
 export function crashHashWorkerForTests() {
-  if (!worker) return false
-  worker.terminate().catch(() => {})
-  return true
+  for (const slot of slots) {
+    if (slot.worker) {
+      slot.worker.terminate().catch(() => {})
+      return true
+    }
+  }
+  return false
 }

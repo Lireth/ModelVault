@@ -73,6 +73,7 @@ async function onSave() {
       autoScan: form.autoScan,
       autoRescan: form.autoRescan,
       hashWarmup: form.hashWarmup,
+      hashWarmupConcurrency: form.hashWarmupConcurrency,
       excludeDirs,
       theme: form.theme,
       accentColor: form.accentColor,

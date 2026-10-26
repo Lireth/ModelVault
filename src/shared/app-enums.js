@@ -54,3 +54,10 @@ export const HASH_WARMUP_DEFS = [
 
 /** 合法哈希预热策略 key 集合（主进程校验用） */
 export const HASH_WARMUP_KEYS = new Set(HASH_WARMUP_DEFS.map((d) => d.key))
+
+/**
+ * 哈希预热并发数选项（OPT-3；A-12 单一来源）：设置页分段选择与
+ * 主进程 normalize（store-settings 收口 1-4）共用同一区间。
+ * 上限 4：并发收益受磁盘随机读限制，更高并发只放大内存与句柄占用。
+ */
+export const WARMUP_CONCURRENCY_OPTIONS = [1, 2, 3, 4]

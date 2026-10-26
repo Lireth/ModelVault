@@ -16,7 +16,10 @@ import {
 } from '../../services/store'
 import { pruneOrphanCovers } from '../../services/covers'
 import { syncWatcher } from '../../services/watcher'
-import { requestHashWarmup } from '../../services/hash-warmup'
+import {
+  requestHashWarmup,
+  setHashWarmupConcurrency,
+} from '../../services/hash-warmup'
 import {
   maintenanceBusyMessage,
   releaseMaintenance,
@@ -206,6 +209,7 @@ export function registerStoreHandlers() {
               : getModelIdsByAbsPath()
             requestHashWarmup(warmupSeed, {
               mode: settings.hashWarmup,
+              concurrency: settings.hashWarmupConcurrency,
               full: true,
             })
             // 目录监控启动路径闭合（OPT-19）：启动时若 autoScan 关闭则不会触发扫描，
@@ -287,6 +291,7 @@ export function registerStoreHandlers() {
         const indexModels = /** @type {any[]} */ (cachedIndex.models)
         requestHashWarmup(indexModels, {
           mode: settings.hashWarmup,
+          concurrency: settings.hashWarmupConcurrency,
           full: true,
         })
         logger.info(
@@ -383,6 +388,9 @@ export function registerStoreHandlers() {
       }
       await updateSettings(patch)
       const settings = getSettings()
+      // 哈希预热并发数随设置联动（OPT-3）：保存后立即生效（线程池并行度 +
+      // 预热 lane 数同步），无需等待下次扫描/切库重新播种
+      setHashWarmupConcurrency(settings.hashWarmupConcurrency)
       // 目录监控随设置联动（E8）：autoRescan 开关或激活根目录变更时重启/停止监听；
       // 排除名单与 scanner 同规则（按目录名小写匹配），被排除目录的变更不触发重扫
       syncWatcher(

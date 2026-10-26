@@ -340,6 +340,70 @@ describe('requestHashWarmup（队列消费）', () => {
   })
 })
 
+describe('预热并发（OPT-3）', () => {
+  /** 挂起式 computeFileHash 替身：resolve 时机由用例控制 */
+  function deferredHash() {
+    let resolve
+    const promise = new Promise((r) => {
+      resolve = r
+    })
+    return { promise, resolve }
+  }
+
+  it('concurrency=2 时两条 lane 并行消费，且不超过并发上限', async () => {
+    const a = await makeModel('cc-a.safetensors')
+    const b = await makeModel('cc-b.safetensors')
+    const c = await makeModel('cc-c.safetensors')
+    const d1 = deferredHash()
+    const d2 = deferredHash()
+    const d3 = deferredHash()
+    const deferreds = [d1, d2, d3]
+    let call = 0
+    computeFileHash.mockImplementation(() => deferreds[call++].promise)
+
+    requestHashWarmup([a, b, c], {
+      mode: 'full',
+      concurrency: 2,
+      delayMs: 0,
+    })
+    // 两条 lane 同时取队：前两个计算启动，第三个受并发上限约束不启动
+    await vi.waitFor(() => expect(computeFileHash).toHaveBeenCalledTimes(2))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(computeFileHash).toHaveBeenCalledTimes(2)
+
+    // 任一 lane 完成（d1 供第一个启动的计算）后，第三个任务立即补位
+    deferreds[0].resolve(fakeHash(1))
+    await vi.waitFor(() => expect(computeFileHash).toHaveBeenCalledTimes(3))
+    deferreds[1].resolve(fakeHash(2))
+    deferreds[2].resolve(fakeHash(3))
+    await whenWarmupIdle()
+    expect(getModelMeta(a).hash).toBeTruthy()
+    expect(getModelMeta(b).hash).toBeTruthy()
+    expect(getModelMeta(c).hash).toBe(fakeHash(3))
+  })
+
+  it('缺省（未传 concurrency）保持串行：前一计算未完成时后续不启动', async () => {
+    const a = await makeModel('cs-a.safetensors')
+    const b = await makeModel('cs-b.safetensors')
+    const d1 = deferredHash()
+    const d2 = deferredHash()
+    const deferreds = [d1, d2]
+    let call = 0
+    computeFileHash.mockImplementation(() => deferreds[call++].promise)
+
+    requestHashWarmup([a, b], { mode: 'full', delayMs: 0 })
+    await vi.waitFor(() => expect(computeFileHash).toHaveBeenCalledTimes(1))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(computeFileHash).toHaveBeenCalledTimes(1)
+
+    d1.resolve(fakeHash(1))
+    await vi.waitFor(() => expect(computeFileHash).toHaveBeenCalledTimes(2))
+    d2.resolve(fakeHash(2))
+    await whenWarmupIdle()
+    expect(getModelMeta(b).hash).toBe(fakeHash(2))
+  })
+})
+
 describe('哈希预热策略（O1：体积预筛 + 按需计算）', () => {
   it('candidates：只计算同尺寸模型，体积唯一的模型不读盘哈希', async () => {
     const a = await makeModel('c1.safetensors', 'a'.repeat(1024))

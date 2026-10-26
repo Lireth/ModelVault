@@ -1004,6 +1004,26 @@ describe('应用设置规范化', () => {
     expect(s.savedViews[2].tagFilters).toEqual(['旧标签'])
   })
 
+  it('hashWarmupConcurrency 规范化：整数收口 1-4，非法值回退（OPT-3）', async () => {
+    await updateSettings({ hashWarmupConcurrency: 3 })
+    let s = await loadSettings()
+    expect(s.hashWarmupConcurrency).toBe(3)
+    // 越界钳制到上限/下限
+    await updateSettings({ hashWarmupConcurrency: 9 })
+    s = await loadSettings()
+    expect(s.hashWarmupConcurrency).toBe(4)
+    await updateSettings({ hashWarmupConcurrency: 0 })
+    s = await loadSettings()
+    expect(s.hashWarmupConcurrency).toBe(1)
+    // 非数值回退默认 1；小数向下取整
+    await updateSettings({ hashWarmupConcurrency: 'oops' })
+    s = await loadSettings()
+    expect(s.hashWarmupConcurrency).toBe(1)
+    await updateSettings({ hashWarmupConcurrency: 2.9 })
+    s = await loadSettings()
+    expect(s.hashWarmupConcurrency).toBe(2)
+  })
+
   it('savedViews 缺失或非数组时回退空数组，上限 20 个', async () => {
     await updateSettings({ savedViews: 'oops' })
     let s = await loadSettings()

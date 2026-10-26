@@ -2,7 +2,10 @@ import fs from 'node:fs/promises'
 import logger from '../logger'
 import { getModelMeta, setModelMeta } from './store'
 import { computeFileHash } from './civitai'
-import { isRetryableHashPoolError } from './hash-worker-pool'
+import {
+  isRetryableHashPoolError,
+  setHashPoolConcurrency,
+} from './hash-worker-pool'
 
 /**
  * 模型哈希后台预热服务（Civitai 识别加速）：
@@ -70,6 +73,33 @@ export function setHashRetryDelayForTests(ms) {
  */
 const VALID_MODES = new Set(['candidates', 'full', 'off'])
 const DEFAULT_MODE = 'full'
+
+/**
+ * 后台预热并行消费数（OPT-3）：1 = 串行（默认，机械硬盘/移动硬盘友好，
+ * 避免多路大文件读取争抢磁盘 I/O）；SSD/NVMe 用户可调高（上限 4，与设置
+ * normalize/schema 上限一致）加快全库预热。经 setHashWarmupConcurrency
+ * 调整（requestHashWarmup 的 opts.concurrency 与 settings:update 链路），
+ * 同时同步线程池并行度——两条链路（批量预热/识别）共用同一执行池。
+ * 并发数在 drain 启动时读取：批量进行中调整自下一轮批量生效。
+ */
+let warmupConcurrency = 1
+
+/** 并发数合法区间（OPT-3）：与设置 normalize（store-settings）保持一致 */
+const MIN_WARMUP_CONCURRENCY = 1
+const MAX_WARMUP_CONCURRENCY = 4
+
+/**
+ * 调整哈希预热并行消费数（OPT-3）：收口到 [1, 4]，同时同步线程池并行度。
+ * @param {number} n 并行任务数（非法值按 1 处理）
+ */
+export function setHashWarmupConcurrency(n) {
+  const value = Number(n)
+  warmupConcurrency =
+    Number.isFinite(value) && value >= MIN_WARMUP_CONCURRENCY
+      ? Math.min(MAX_WARMUP_CONCURRENCY, Math.floor(value))
+      : MIN_WARMUP_CONCURRENCY
+  setHashPoolConcurrency(warmupConcurrency)
+}
 
 /**
  * 已知模型体积/修改时间（id -> {size, mtimeMs}）：
@@ -425,15 +455,20 @@ function enqueueCollisionPeers(size, excludeId = undefined) {
  *
  * @param {Array<string|{id:string, size?:number, mtimeMs?:number}>} items 模型列表
  * @param {{priority?: boolean, delayMs?: number, mode?: 'candidates'|'full'|'off',
- *   full?: boolean}} [opts]
+ *   full?: boolean, concurrency?: number}} [opts]
  *   priority: 插队到队首并立即启动（详情页打开当前模型），不受策略限制；
  *   mode: 预热策略（缺省 full，保持服务层既有语义）；
  *   full: 本次请求是否代表完整库快照（全量扫描/启动加载 → 重置体积索引）；
- *   delayMs: 普通入队的延迟启动间隔（默认 3s）
+ *   delayMs: 普通入队的延迟启动间隔（默认 3s）；
+ *   concurrency: 哈希预热并行消费数（OPT-3，调用方自设置读取传入；
+ *   缺省保持当前值——应用入口始终显式传出的既有约定）
  */
 export function requestHashWarmup(items, opts = {}) {
   const priority = opts.priority === true
   const mode = priority ? 'full' : normalizeMode(opts.mode)
+  if (opts.concurrency !== undefined) {
+    setHashWarmupConcurrency(opts.concurrency)
+  }
   const list = normalizeRequestItems(items)
   // 全量快照：作废旧策略/旧库的排队项，并整体替换体积索引，
   // 清除已删除/已移出模型的陈旧记录（在途计算与 force 任务保留）
@@ -521,63 +556,80 @@ function scheduleDrain(delayMs) {
   }, delayMs)
 }
 
-/** 串行消费队列：逐个 stat 复查 → 候选策略判定 → 跳过有效缓存 → 计算并回写 */
+/**
+ * 串行消费队列（OPT-3 前的既有语义保留为单 lane）：逐个 stat 复查 →
+ * 候选策略判定 → 跳过有效缓存 → 计算并回写。
+ * @returns {Promise<void>} 队列清空或扫描期暂停时返回
+ */
+async function drainLane() {
+  while (queue.length > 0 && !paused) {
+    const task = queue.shift()
+    const id = task.id
+    queued.delete(id)
+    // 出队即计消费（缓存命中/文件缺失/候选跳过的条目同样计入，保持计数连贯）；
+    // consumedIds 防止「候选碰撞后补入队」把同一模型重复计数
+    if (!consumedIds.has(id)) {
+      consumedIds.add(id)
+      doneCount += 1
+    }
+    if (inflight.has(id)) continue
+    let stat
+    try {
+      stat = await fs.stat(id)
+      if (!stat.isFile()) continue
+    } catch {
+      continue // 文件已被删除/移动：静默跳过
+    }
+    // 以真实体积更新索引：扫描结果里的 size 可能已过期，stat 是候选判定的唯一依据
+    rememberInfo(id, stat.size, stat.mtimeMs)
+    if (!task.force) {
+      if (task.mode === 'off') continue
+      if (task.mode === 'candidates') {
+        const group = sizeIndex.get(stat.size)
+        if (!group || group.size < 2) continue // 体积唯一：不可能有重复副本
+        // 本次 stat 可能首次建立同尺寸分组：把组内其他尚未计算的模型补入队
+        enqueueCollisionPeers(stat.size, id)
+      }
+    }
+    const meta = getModelMeta(id)
+    if (meta?.hash && meta.hashMtime === stat.mtimeMs) continue // 缓存有效，免计算
+    try {
+      // 详情页/识别 priority 任务走线程池前台通道；后台批量保持普通优先级
+      await computeAndCacheHash(id, stat.mtimeMs, { priority: task.force })
+      logger.info(`后台哈希预热完成: ${id}`)
+    } catch (err) {
+      if (err?.name === 'PreemptedError') {
+        // 前台任务让路：后台任务被线程池在块边界中止，重新入队等待前台完成，
+        // 不视为失败，避免用户打开详情后批量预热静默丢模型。
+        logger.info(`后台哈希任务让路，已重新入队: ${id}`)
+        // 该任务出队时已计入 done/consumed；让路后重新排队，回退计数，
+        // 待重算完成时再次计入，避免进度出现“done + remaining > 总数”。
+        if (consumedIds.delete(id)) doneCount = Math.max(0, doneCount - 1)
+        if (!queued.has(id)) {
+          queued.add(id)
+          queue.push({ id, force: false, mode: task.mode })
+        }
+        continue
+      }
+      logger.warn(`后台哈希预热失败: ${id} ${err.message}`)
+    }
+  }
+}
+
+/**
+ * 消费预热队列（OPT-3 并行改造）：按 warmupConcurrency 启动至多 N 条取队
+ * lane 并行消费（1 = 串行，既有行为）。lane 共享同一队列 FIFO，同一模型
+ * 只会被一条 lane 取走（队列内 id 唯一）；进入扫描期（paused）后各 lane
+ * 在当前任务完成后依次退出，已在计算的单个文件不中断。
+ * 并发数在本次 drain 启动时确定，批量进行中调整自下一轮批量生效。
+ */
 async function drain() {
   if (draining) return
   draining = true
   try {
-    while (queue.length > 0 && !paused) {
-      const task = queue.shift()
-      const id = task.id
-      queued.delete(id)
-      // 出队即计消费（缓存命中/文件缺失/候选跳过的条目同样计入，保持计数连贯）；
-      // consumedIds 防止「候选碰撞后补入队」把同一模型重复计数
-      if (!consumedIds.has(id)) {
-        consumedIds.add(id)
-        doneCount += 1
-      }
-      if (inflight.has(id)) continue
-      let stat
-      try {
-        stat = await fs.stat(id)
-        if (!stat.isFile()) continue
-      } catch {
-        continue // 文件已被删除/移动：静默跳过
-      }
-      // 以真实体积更新索引：扫描结果里的 size 可能已过期，stat 是候选判定的唯一依据
-      rememberInfo(id, stat.size, stat.mtimeMs)
-      if (!task.force) {
-        if (task.mode === 'off') continue
-        if (task.mode === 'candidates') {
-          const group = sizeIndex.get(stat.size)
-          if (!group || group.size < 2) continue // 体积唯一：不可能有重复副本
-          // 本次 stat 可能首次建立同尺寸分组：把组内其他尚未计算的模型补入队
-          enqueueCollisionPeers(stat.size, id)
-        }
-      }
-      const meta = getModelMeta(id)
-      if (meta?.hash && meta.hashMtime === stat.mtimeMs) continue // 缓存有效，免计算
-      try {
-        // 详情页/识别 priority 任务走线程池前台通道；后台批量保持普通优先级
-        await computeAndCacheHash(id, stat.mtimeMs, { priority: task.force })
-        logger.info(`后台哈希预热完成: ${id}`)
-      } catch (err) {
-        if (err?.name === 'PreemptedError') {
-          // 前台任务让路：后台任务被线程池在块边界中止，重新入队等待前台完成，
-          // 不视为失败，避免用户打开详情后批量预热静默丢模型。
-          logger.info(`后台哈希任务让路，已重新入队: ${id}`)
-          // 该任务出队时已计入 done/consumed；让路后重新排队，回退计数，
-          // 待重算完成时再次计入，避免进度出现“done + remaining > 总数”。
-          if (consumedIds.delete(id)) doneCount = Math.max(0, doneCount - 1)
-          if (!queued.has(id)) {
-            queued.add(id)
-            queue.push({ id, force: false, mode: task.mode })
-          }
-          continue
-        }
-        logger.warn(`后台哈希预热失败: ${id} ${err.message}`)
-      }
-    }
+    const lanes = []
+    for (let i = 0; i < warmupConcurrency; i++) lanes.push(drainLane())
+    await Promise.all(lanes)
     if (queue.length === 0 && doneCount > 0) {
       // 本轮批量清空：先广播最终计数，再归零供下一轮从 0 计数
       emitProgress(
@@ -613,6 +665,7 @@ export function resetHashWarmupForTests() {
   draining = false
   doneCount = 0
   lastEmitAt = 0
+  warmupConcurrency = 1
   if (drainTimer) {
     clearTimeout(drainTimer)
     drainTimer = null
