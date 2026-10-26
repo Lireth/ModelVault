@@ -11,6 +11,7 @@ import {
   findSidecarText,
   isExcludedScanName,
   isVisibleScanEntry,
+  modelAddedMs,
   scanModels,
   sidecarBaseOf,
   sidecarFilesFor,
@@ -146,6 +147,18 @@ describe('classifySubCategory 自动分类标签', () => {
   })
 })
 
+describe('modelAddedMs（OPT-1 添加时间数据源）', () => {
+  it('birthtime 可用时返回文件创建时间', () => {
+    expect(modelAddedMs({ birthtimeMs: 2000, mtimeMs: 1000 })).toBe(2000)
+    expect(modelAddedMs({ birthtimeMs: 1000, mtimeMs: 2000 })).toBe(1000)
+  })
+
+  it('birthtime 缺失/异常（0/epoch）时回退修改时间', () => {
+    expect(modelAddedMs({ birthtimeMs: 0, mtimeMs: 1000 })).toBe(1000)
+    expect(modelAddedMs({ birthtimeMs: NaN, mtimeMs: 1000 })).toBe(1000)
+  })
+})
+
 describe('scanModels', () => {
   let root
 
@@ -249,6 +262,15 @@ describe('scanModels', () => {
     expect(b.relDir).toBe('lora')
     expect(typeof b.size).toBe('number')
     expect(typeof b.mtimeMs).toBe('number')
+  })
+
+  it('模型携带添加时间（OPT-1 排序数据源）：真实文件系统下等于文件创建时间', async () => {
+    const { models } = await scanModels(root, undefined, {})
+    const a = models.find((m) => m.id === path.join(root, 'a.safetensors'))
+    expect(Number.isFinite(a.ctimeMs)).toBe(true)
+    expect(a.ctimeMs).toBeGreaterThan(0)
+    const stat = await fs.stat(a.id)
+    expect(a.ctimeMs).toBe(modelAddedMs(stat))
   })
 
   it('支持自定义扩展名白名单', async () => {

@@ -1185,6 +1185,7 @@ describe('筛选与排序（filteredModels）', () => {
     expect(sortDirectional('type')).toBe(true)
     expect(sortDirectional('size')).toBe(true)
     expect(sortDirectional('mtime')).toBe(true)
+    expect(sortDirectional('added')).toBe(true)
     expect(sortDirectional('favorite')).toBe(false)
     expect(sortDirectional('rating')).toBe(false)
   })
@@ -1197,6 +1198,20 @@ describe('筛选与排序（filteredModels）', () => {
     state.sortBy = 'mtime'
     state.sortAsc = true
     expect(filteredModels.value.map((m) => m.id)).toEqual(['a', 'c', 'b'])
+  })
+
+  it('按添加时间排序（OPT-1）：ctimeMs 新在前，缺失时回退 mtimeMs，sortAsc=false 翻转', () => {
+    // c（ctime 最新）> b（无 ctimeMs，回退 mtime 旧值）> a（ctime 最早）
+    replaceModels([
+      makeModel('a', { ctimeMs: 100 }),
+      makeModel('b', { mtimeMs: 300 }),
+      makeModel('c', { ctimeMs: 500, mtimeMs: 200 }),
+    ])
+    state.sortBy = 'added'
+    state.sortAsc = true
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['c', 'b', 'a'])
+    state.sortAsc = false
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['a', 'b', 'c'])
   })
 
   it('按分类排序遵循固定分类顺序（checkpoint → vae → lora 依 MODEL_TYPES）', () => {

@@ -20,6 +20,17 @@ const zhCollator = new Intl.Collator('zh-CN')
 const TYPE_ORDER = Object.fromEntries(MODEL_TYPES.map((t, i) => [t.key, i]))
 
 /**
+ * 模型添加时间（OPT-1「按添加时间」排序）：扫描层 ctimeMs 为文件创建时间
+ * （下载/复制入盘时间）；旧本地索引快照或手工构造的对象无该字段时回退
+ * 修改时间，保证存量数据可排序。
+ * @param {Record<string, any>} m 模型对象
+ * @returns {number} 添加时间（epoch ms）
+ */
+function addedMsOf(m) {
+  return Number.isFinite(m.ctimeMs) && m.ctimeMs > 0 ? m.ctimeMs : m.mtimeMs
+}
+
+/**
  * 搜索域小写缓存（O3）：按模型对象引用记忆化的小写搜索域，覆盖文件名、
  * 备注名、备注、触发词、分类标签（含中文标签），以换行连接防止跨字段
  * 误匹配。模型对象仅在元数据更新/批量同步/重扫时被整体替换——替换后
@@ -170,6 +181,11 @@ export const filteredModels = computed(() => {
       break
     case 'mtime':
       list.sort((a, b) => b.mtimeMs - a.mtimeMs)
+      break
+    case 'added':
+      // 按添加时间（OPT-1）：与 mtime 同一约定——比较器恒为「新在前」，
+      // sortAsc=true 默认即最新入库在前，sortAsc=false 翻转为最早在前
+      list.sort((a, b) => addedMsOf(b) - addedMsOf(a))
       break
     case 'favorite':
       // 收藏优先，同组内按名称（U2）；固定语义排序，不响应方向翻转（O1）

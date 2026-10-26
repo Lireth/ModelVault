@@ -173,6 +173,20 @@ export function classifySubCategory(relSegments) {
 }
 
 /**
+ * 由 stat 计算模型添加时间（OPT-1 排序数据源，纯函数便于单测）：
+ * 文件创建时间（Windows birthtime）即「下载/复制入盘」时间，比修改时间
+ * 更贴近用户的「什么时候加进来的」直觉（修改时间会被整理/重写打乱）；
+ * 文件系统不支持创建时间时（birthtime 为 0/epoch）回退修改时间。
+ * @param {{birthtimeMs: number, mtimeMs: number}} stat fs.stat 结果
+ * @returns {number} 添加时间（epoch ms）
+ */
+export function modelAddedMs(stat) {
+  return Number.isFinite(stat?.birthtimeMs) && stat.birthtimeMs > 0
+    ? stat.birthtimeMs
+    : stat.mtimeMs
+}
+
+/**
  * 递归扫描模型目录。
  * @param {string} root 模型根目录绝对路径
  * @param {(progress: {dirs: number, found: number, current: string}) => void} [onProgress] 进度回调
@@ -300,7 +314,7 @@ export async function scanModels(root, onProgress, options = {}) {
     // OPT-02：记录本目录的可见条目名（与 watcher 快照同构，排序保证稳定比较）
     dirSnapshot.set(dir, visibleNames.sort())
 
-    // 并行 stat（仅取 size/mtime）：流式固定并发池（与 watcher 共用
+    // 并行 stat（取 size/mtime/birthtime）：流式固定并发池（与 watcher 共用
     // utils.runWithConcurrency，O-5）——完成一个补位一个，无「批内并发、
     // 批间串行」的整批等待尾延迟，并发峰值恒定。结果按索引回填后在下方
     // 顺序提交，保持 models/errors 的顺序确定性与取消语义（每文件前检查）。
@@ -339,6 +353,9 @@ export async function scanModels(root, onProgress, options = {}) {
         relDir: rel,
         size: stat.size,
         mtimeMs: stat.mtimeMs,
+        // 添加时间（OPT-1「按添加时间」排序数据源）：随模型对象透传装饰层
+        // 与本地索引（索引保留装饰层额外字段），渲染层缺省时回退 mtimeMs
+        ctimeMs: modelAddedMs(stat),
       })
       onProgress?.({
         dirs: dirCount,
