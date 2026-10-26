@@ -67,8 +67,10 @@ export default defineConfig({
           functions: 93,
           lines: 90,
         },
-        // 目录监控（轮询快照比对 + 增量扫描触发）
-        '**/src/main/services/watcher.js': {
+        // 目录监控（轮询快照比对 + 增量扫描触发；O12 拆分后逻辑位于 watcher
+        // （门面+生命周期）与 watcher-state/snapshot/baseline/broadcast/native/
+        // poll 六个子模块，glob 键对匹配文件取聚合值判定）
+        '**/src/main/services/watcher*.js': {
           statements: 90,
           branches: 78,
           functions: 96,
