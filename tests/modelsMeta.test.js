@@ -173,6 +173,9 @@ describe('mvimg 协议路径白名单', () => {
     await fs.writeFile(img, PNG_MAGIC)
     const res = await request(img)
     expect(res.status).toBe(200)
+    // 缩略图隐藏窗口（about:blank 不透明来源）经 crossorigin="anonymous"
+    // 读取源图：响应必须携带 ACAO 头，否则画布被污染、convertToBlob 抛错
+    expect(res.headers.get('access-control-allow-origin')).toBe('*')
   })
 
   it('根目录外路径拒绝（403）', async () => {

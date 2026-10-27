@@ -31,6 +31,10 @@ ipcRenderer.on('thumb:render', async (_event, task) => {
         const img = new Image()
         img.onload = () => resolve(img)
         img.onerror = () => reject(new Error('读取源图失败'))
+        // CORS 匿名读取：本窗口为 about:blank 不透明来源，mvimg:// 属跨源；
+        // 不带 crossorigin 绘入画布会污染 OffscreenCanvas，convertToBlob
+        // 抛「tainted canvas」错误（mvimg 响应已附带 ACAO:* 头，配对使用）
+        img.crossOrigin = 'anonymous'
         img.src = url
       })
       width = source.naturalWidth

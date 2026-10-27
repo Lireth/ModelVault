@@ -48,6 +48,12 @@ export function registerImageScheme() {
         secure: true,
         supportFetchAPI: true,
         stream: true,
+        // corsEnabled：允许跨源 CORS 请求到达本协议处理器（响应头经
+        // withCacheHeaders 附带 ACAO:*）。缩略图隐藏窗口（about:blank
+        // 不透明来源）需经 <img crossorigin="anonymous"> 读取源图绘制
+        // OffscreenCanvas，缺该特权时 CORS 请求在 Chromium 层被直接
+        // 拦截，图片加载失败、缩略图回退原图。
+        corsEnabled: true,
       },
     },
     {
@@ -57,6 +63,7 @@ export function registerImageScheme() {
         secure: true,
         supportFetchAPI: true,
         stream: true,
+        corsEnabled: true,
       },
     },
   ])
@@ -150,6 +157,10 @@ function isImmutableAssetPath(realPath) {
  * 为上游 file:// 响应附加缓存策略头（A-05），保留响应体与其余响应头。
  * 不可变资产长缓存一年（省重复读盘/解码）；其余（sidecar 同名图）no-cache，
  * 每次使用前重验证，防止用户替换同名预览图后看到旧图。
+ * 另附 `Access-Control-Allow-Origin: *`：缩略图隐藏窗口（about:blank 不透明
+ * 来源）经 <img crossorigin="anonymous"> 读取源图做 OffscreenCanvas 缩放，
+ * 无该头时 CORS 校验不通过，画布被污染导致 convertToBlob 抛错（回退原图）。
+ * mvimg 响应体本就限定在当前库根目录内的图片文件，放开跨源读不扩大可读范围。
  */
 function withCacheHeaders(upstream, immutable) {
   const headers = new Headers(upstream.headers || undefined)
@@ -157,6 +168,7 @@ function withCacheHeaders(upstream, immutable) {
     'Cache-Control',
     immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
   )
+  headers.set('Access-Control-Allow-Origin', '*')
   return new Response(upstream.body, {
     status: upstream.status || 200,
     statusText: upstream.statusText,

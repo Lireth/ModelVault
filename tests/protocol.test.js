@@ -27,6 +27,7 @@ import { net, protocol } from 'electron'
 import {
   isCivitaiVideoUrl,
   registerImageProtocolHandler,
+  registerImageScheme,
   toImageUrl,
 } from '../src/main/protocol'
 import { setDataRoot, updateSettings } from '../src/main/services/store'
@@ -68,6 +69,23 @@ afterEach(async () => {
   for (const dir of roots) {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
   }
+})
+
+describe('registerImageScheme 特权注册', () => {
+  it('mvimg/civimg 均注册 corsEnabled（缩略图隐藏窗口跨源读取依赖）', () => {
+    registerImageScheme()
+    const entries = vi
+      .mocked(protocol.registerSchemesAsPrivileged)
+      .mock.calls.flatMap(([schemes]) => schemes)
+    for (const scheme of ['mvimg', 'civimg']) {
+      const entry = entries.find((s) => s.scheme === scheme)
+      expect(entry).toBeDefined()
+      expect(entry.privileges.corsEnabled).toBe(true)
+      expect(entry.privileges.standard).toBe(true)
+      expect(entry.privileges.secure).toBe(true)
+      expect(entry.privileges.supportFetchAPI).toBe(true)
+    }
+  })
 })
 
 describe('mvimg 协议路径白名单', () => {
