@@ -81,12 +81,22 @@ it('多任务串行执行：按入队顺序逐个完成（并发 1）', async ()
 it('OPT-3：并发 2 时第二任务在前一任务完成前启动（并行执行）', async () => {
   setHashPoolConcurrency(2)
   try {
+    // 槽位 worker 惰性创建（pump 时 new Worker）：前置用例只暖了 slot0，
+    // slot1 会在 B 入队那一刻才冷启动——CI 高负载下（vitest 多文件并行跑）
+    // 线程冷启动可达数十毫秒，与 A 的哈希耗时同量级，冷启动成本会污染
+    // 并行性断言（CI 上已复现）。先用两个极小任务把双槽位 worker 都拉起，
+    // 使后续断言只测量真正的并行执行
+    const warm1 = await writeFixture('par-w1.bin', Buffer.from('warm-1'))
+    const warm2 = await writeFixture('par-w2.bin', Buffer.from('warm-2'))
+    await Promise.all([
+      computeFileHashOffThread(warm1.abs),
+      computeFileHashOffThread(warm2.abs),
+    ])
+
     // A 足够大（SHA256 耗时远大于 worker 消息往返），B 极小：并发 2 下两者
     // 并行执行时 B 必然先完成——并发 1 时 B 只能在 A 完成后才启动。
-    // 断言比较两者的完成时间：真正并行时 B 领先 A ≥ 百毫秒量级（64MB 哈希
-    // 耗时 >> worker 消息往返），余量充足且稳定。不比较"启动/进度回调的
-    // 送达时序"——CI 高负载下 B 的首个进度消息可能晚于 A 的完成微任务数毫秒
-    // 才被事件循环处理（已复现），测量送达顺序无法可靠证明并行性
+    // 断言比较两者的完成时间：双 worker 预热后 B 的消息往返仅毫秒级，而
+    // A（64MB）哈希 ≥ 数十毫秒，余量充足；断言仍能捕获并发退化为串行的回归
     const a = await writeFixture('par-a.bin', Buffer.alloc(64 * 1024 * 1024, 1))
     const b = await writeFixture('par-b.bin', Buffer.from('par-b'))
     let aDoneAt = Infinity
