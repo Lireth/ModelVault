@@ -207,7 +207,7 @@ function normalizeSavedViews(raw) {
 function normalizeNsfwBlur(raw, fallback) {
   if (raw === true) return 'blur'
   if (raw === false) return 'off'
-  return NSFW_BLUR_KEYS.has(raw) ? raw : fallback
+  return typeof raw === 'string' && NSFW_BLUR_KEYS.has(raw) ? raw : fallback
 }
 
 /** 规范化引导字段：仅接受 modelsFolder / modelsFolders */

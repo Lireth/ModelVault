@@ -13,7 +13,7 @@ import {
 function normalizeNsfwBlur(raw) {
   if (raw === true) return 'blur'
   if (raw === false) return 'off'
-  return NSFW_BLUR_KEYS.has(raw) ? raw : 'blur'
+  return typeof raw === 'string' && NSFW_BLUR_KEYS.has(raw) ? raw : 'blur'
 }
 
 /**
