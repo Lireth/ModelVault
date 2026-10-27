@@ -9,6 +9,7 @@ import {
   CARD_SIZE_KEYS,
   VIEW_MODE_KEYS,
   HASH_WARMUP_KEYS,
+  NSFW_BLUR_KEYS,
 } from '../../shared/app-enums'
 import { DEFAULT_SETTINGS } from '../../shared/defaults'
 import { atomicWriteFile } from './atomic-write'
@@ -195,6 +196,20 @@ function normalizeSavedViews(raw) {
   return out
 }
 
+/**
+ * 规范化 NSFW 模糊样式（off/blur/heavy）：
+ * - 旧版布尔值迁移：true → blur（原「开启模糊」），false → off（原「关闭」）；
+ * - 枚举字符串校验，非法值回退基准值（默认「模糊」）。
+ * @param {unknown} raw 设置原文
+ * @param {string} fallback 非法时的回退值（默认设置或旧值）
+ * @returns {string} off / blur / heavy
+ */
+function normalizeNsfwBlur(raw, fallback) {
+  if (raw === true) return 'blur'
+  if (raw === false) return 'off'
+  return NSFW_BLUR_KEYS.has(raw) ? raw : fallback
+}
+
 /** 规范化引导字段：仅接受 modelsFolder / modelsFolders */
 function normalizeBootstrapSettings(raw) {
   return {
@@ -239,7 +254,9 @@ export function normalizeLibrarySettings(raw) {
     showParams:
       typeof raw.showParams === 'boolean' ? raw.showParams : base.showParams,
     civitaiEnabled: raw.civitaiEnabled !== false,
-    nsfwBlur: raw.nsfwBlur !== false,
+    // NSFW 模糊样式（off/blur/heavy）：旧版为布尔值（true=模糊/false=关闭），
+    // 读到布尔时迁移为对应样式；非法值回退默认「模糊」
+    nsfwBlur: normalizeNsfwBlur(raw.nsfwBlur, base.nsfwBlur),
     autoRescan: raw.autoRescan === true,
     // 启动自动检查更新（O-3）：缺省视为开启（与 civitaiEnabled 同款默认真语义）
     autoCheckUpdate: raw.autoCheckUpdate !== false,

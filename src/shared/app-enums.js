@@ -56,6 +56,21 @@ export const HASH_WARMUP_DEFS = [
 export const HASH_WARMUP_KEYS = new Set(HASH_WARMUP_DEFS.map((d) => d.key))
 
 /**
+ * NSFW 示例图模糊样式（A-12 单一来源：主进程校验与设置页分段选择共用）：
+ * - off：不模糊，仅显示红色 NSFW 标记；
+ * - blur：标准模糊（默认，与旧版开启时一致）；
+ * - heavy：重度模糊（高码），加重模糊强度使内容不可辨。
+ */
+export const NSFW_BLUR_DEFS = [
+  { key: 'off', label: '关闭' },
+  { key: 'blur', label: '模糊' },
+  { key: 'heavy', label: '高码' },
+]
+
+/** 合法 NSFW 模糊样式 key 集合（主进程校验用） */
+export const NSFW_BLUR_KEYS = new Set(NSFW_BLUR_DEFS.map((d) => d.key))
+
+/**
  * 哈希预热并发数选项（OPT-3；A-12 单一来源）：设置页分段选择与
  * 主进程 normalize（store-settings 收口 1-4）共用同一区间。
  * 上限 4：并发收益受磁盘随机读限制，更高并发只放大内存与句柄占用。

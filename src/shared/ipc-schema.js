@@ -348,7 +348,8 @@ export const IPC_PAYLOAD_SCHEMAS = {
       showMtime: vBool(),
       showParams: vBool(),
       civitaiEnabled: vBool(),
-      nsfwBlur: vBool(),
+      // NSFW 模糊样式：off/blur/heavy（枚举收口在 normalizeSettings）
+      nsfwBlur: vStr({ max: 16 }),
       autoRescan: vBool(),
       autoCheckUpdate: vBool(),
       hashWarmup: vStr({ max: 16 }),

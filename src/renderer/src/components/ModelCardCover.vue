@@ -173,6 +173,25 @@ const subTag = computed(() => {
 
 /** 重复模型（FEAT-1）：文件 SHA256 与其他模型完全一致（O4 集合命中） */
 const isDuplicate = computed(() => duplicateIdSet.value.has(props.model.id))
+
+/**
+ * NSFW 模糊样式（设置 nsfwBlur：off/blur/heavy）：off 不模糊仅留红色角标，
+ * blur 标准模糊，heavy 重度模糊（高码，内容不可辨）。
+ * 旧版布尔值按真值迁移（true=blur），防御内存态尚未规范化。
+ */
+const blurMode = computed(() => {
+  const v = state.settings.nsfwBlur
+  if (v === 'off') return 'off'
+  if (v === 'heavy') return 'heavy'
+  return v ? 'blur' : 'off'
+})
+
+/** 封面图模糊 class：NSFW 模型按所选样式叠加标准/重度模糊 */
+const nsfwCoverClass = computed(() =>
+  props.model.nsfw && blurMode.value !== 'off'
+    ? { blurred: true, 'blurred-heavy': blurMode.value === 'heavy' }
+    : {},
+)
 </script>
 
 <template>
@@ -183,7 +202,7 @@ const isDuplicate = computed(() => duplicateIdSet.value.has(props.model.id))
       :alt="model.name"
       loading="lazy"
       draggable="false"
-      :class="{ blurred: model.nsfw && state.settings.nsfwBlur }"
+      :class="nsfwCoverClass"
       @error="coverError = true"
     />
     <div v-else class="cover-placeholder">
@@ -196,7 +215,7 @@ const isDuplicate = computed(() => duplicateIdSet.value.has(props.model.id))
         <img
           :key="cycleUrl"
           :src="cycleUrl"
-          :class="{ blurred: model.nsfw && state.settings.nsfwBlur }"
+          :class="nsfwCoverClass"
           alt=""
           draggable="false"
           @error="onCycleImgError(cycleList[cycleIdx])"
@@ -274,10 +293,16 @@ const isDuplicate = computed(() => duplicateIdSet.value.has(props.model.id))
 }
 
 /* NSFW 模型：首页预览图模糊展示（详情页正常显示）；受设置 nsfwBlur 控制，
- * 关闭后清单页仅显示红色 NSFW 标记 */
+ * off 仅显示红色 NSFW 标记，blur 标准模糊，heavy 重度模糊（高码） */
 .cover img.blurred {
   filter: blur(14px);
   transform: scale(1.1); /* 放大避免模糊边缘露出原图 */
+}
+
+/* 重度模糊（高码）：大幅加重模糊半径并扩大放大裁切，隐约轮廓也不可辨 */
+.cover img.blurred-heavy {
+  filter: blur(36px) saturate(0.7);
+  transform: scale(1.35);
 }
 
 /* 悬停轮播层：覆盖默认封面，transition 默认模式（新旧图同时驻留）实现交叉淡入淡出 */

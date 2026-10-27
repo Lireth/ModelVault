@@ -1,4 +1,5 @@
 import { computed, reactive, watch } from 'vue'
+import { NSFW_BLUR_KEYS } from '../../../shared/app-enums'
 import {
   applyAccent,
   applyTheme,
@@ -6,6 +7,14 @@ import {
   confirmDialog,
   state,
 } from '../store/appStore'
+
+/** 规范化 NSFW 模糊样式（与主进程 store-settings.normalizeNsfwBlur 同语义）：
+ * 旧版布尔值迁移（true=blur/false=off），非法值回退默认「模糊」 */
+function normalizeNsfwBlur(raw) {
+  if (raw === true) return 'blur'
+  if (raw === false) return 'off'
+  return NSFW_BLUR_KEYS.has(raw) ? raw : 'blur'
+}
 
 /**
  * 设置页表单状态与脏数据保护（O-4 自 SettingsPage.vue 按域拆出）：
@@ -32,7 +41,7 @@ export function useSettingsForm() {
     showMtime: true,
     showParams: true,
     civitaiEnabled: true,
-    nsfwBlur: true,
+    nsfwBlur: 'blur',
     hashWarmup: 'candidates',
     hashWarmupConcurrency: 1,
     autoBackup: true,
@@ -59,7 +68,9 @@ export function useSettingsForm() {
     form.showMtime = state.settings.showMtime !== false
     form.showParams = state.settings.showParams !== false
     form.civitaiEnabled = state.settings.civitaiEnabled !== false
-    form.nsfwBlur = state.settings.nsfwBlur !== false
+    // NSFW 模糊样式（off/blur/heavy）：旧版布尔值迁移（true=blur/false=off），
+    // 与主进程 normalizeNsfwBlur 同语义，防御内存态尚未规范化的情况
+    form.nsfwBlur = normalizeNsfwBlur(state.settings.nsfwBlur)
     form.hashWarmup = state.settings.hashWarmup || 'candidates'
     form.hashWarmupConcurrency =
       Number.isFinite(state.settings.hashWarmupConcurrency) &&

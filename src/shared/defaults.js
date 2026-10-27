@@ -26,9 +26,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // Civitai 在线识别（详情页按文件哈希反查模型页并一键补全空缺信息）；
   // 仅用户点击识别/补全时发起网络请求，无后台流量
   civitaiEnabled: true,
-  // NSFW 示例图模糊：清单页（网格/列表）中被标记 NSFW 的模型封面与示例图
-  // 模糊展示（红色 NSFW 标记不受影响）；详情页图片始终不模糊
-  nsfwBlur: true,
+  // NSFW 示例图模糊样式：清单页（网格/列表）中被标记 NSFW 的模型封面与
+  // 示例图按所选样式模糊展示（红色 NSFW 标记不受影响）；详情页图片始终不模糊。
+  // off 关闭 / blur 标准模糊 / heavy 重度模糊（高码，内容不可辨）
+  nsfwBlur: 'blur',
   autoRescan: false,
   // 启动自动检查更新（O-3）：应用启动完成后延迟静默查询 GitHub Releases，
   // 仅在有新版本时经 app:updateAvailable 事件提示（无更新/失败均不打扰）

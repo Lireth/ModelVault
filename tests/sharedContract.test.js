@@ -27,6 +27,8 @@ import {
   CARD_SIZE_KEYS,
   VIEW_MODE_DEFS,
   VIEW_MODE_KEYS,
+  NSFW_BLUR_DEFS,
+  NSFW_BLUR_KEYS,
 } from '../src/shared/app-enums'
 import { DEFAULT_SETTINGS } from '../src/shared/defaults'
 import { isRelDirInScope, isRelKeyInScope } from '../src/shared/scan-dirs'
@@ -215,6 +217,16 @@ describe('shared/defaults', () => {
   it('默认值本身合法（枚举值在共享集合内）', () => {
     expect(SORT_BY_KEYS.has(DEFAULT_SETTINGS.sortBy)).toBe(true)
     expect(CARD_SIZE_KEYS.has(DEFAULT_SETTINGS.cardSize)).toBe(true)
+    expect(NSFW_BLUR_KEYS.has(DEFAULT_SETTINGS.nsfwBlur)).toBe(true)
+  })
+
+  it('NSFW 模糊样式定义与 key 集合一致（off/blur/heavy）', () => {
+    expect(NSFW_BLUR_DEFS.map((d) => d.key)).toEqual([
+      'off',
+      'blur',
+      'heavy',
+    ])
+    expect([...NSFW_BLUR_KEYS].sort()).toEqual(['blur', 'heavy', 'off'])
   })
 
   it('DEFAULT_SETTINGS 被冻结（防止双端运行期意外改写共享默认值）', () => {

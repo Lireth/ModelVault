@@ -422,35 +422,62 @@ describe('库统计页（F7，自设置页独立为 StatsPage）', () => {
   })
 })
 
-describe('SettingsPage NSFW 示例图模糊开关', () => {
-  it('开关默认开启；关闭后保存载荷携带 nsfwBlur: false', async () => {
+describe('SettingsPage NSFW 示例图模糊样式', () => {
+  /** 定位 NSFW 模糊样式设置行（分段选择：关闭/模糊/高码） */
+  async function mountNsfwRow() {
+    const wrapper = await mountSettings()
+    return {
+      wrapper,
+      row: wrapper
+        .findAll('.setting-row')
+        .find((r) => r.text().includes('NSFW 示例图模糊')),
+    }
+  }
+
+  it('默认选中「模糊」；选「关闭」后保存载荷携带 nsfwBlur: off', async () => {
     window.api.settings.update.mockImplementation((patch) =>
       Promise.resolve({ settings: { ...state.settings, ...patch } }),
     )
-    const wrapper = await mountSettings()
-    const row = wrapper
-      .findAll('.switch-row')
-      .find((r) => r.text().includes('NSFW 示例图模糊'))
+    const { wrapper, row } = await mountNsfwRow()
     expect(row).toBeTruthy()
-    const sw = row.find('input.switch')
-    expect(sw.element.checked).toBe(true) // 默认开启（与既有模糊行为一致）
-    await sw.setValue(false)
+    const btns = row.findAll('.seg-btn')
+    expect(btns.map((b) => b.text())).toEqual(['关闭', '模糊', '高码'])
+    expect(
+      btns.find((b) => b.classes().includes('active')).text(),
+    ).toBe('模糊') // 默认标准模糊（与既有模糊行为一致）
+    await btns.find((b) => b.text() === '关闭').trigger('click')
     const saveBtn = wrapper.findAll('button').find((b) => b.text() === '保存')
     await saveBtn.trigger('click')
     await flushPromises()
     expect(window.api.settings.update).toHaveBeenCalledWith(
-      expect.objectContaining({ nsfwBlur: false }),
+      expect.objectContaining({ nsfwBlur: 'off' }),
     )
     wrapper.unmount()
   })
 
-  it('已保存设置关闭模糊时表单回填 false（重启后开关状态保持）', async () => {
-    state.settings.nsfwBlur = false
-    const wrapper = await mountSettings()
-    const row = wrapper
-      .findAll('.switch-row')
-      .find((r) => r.text().includes('NSFW 示例图模糊'))
-    expect(row.find('input.switch').element.checked).toBe(false)
+  it('选「高码」保存载荷携带 nsfwBlur: heavy', async () => {
+    window.api.settings.update.mockImplementation((patch) =>
+      Promise.resolve({ settings: { ...state.settings, ...patch } }),
+    )
+    const { wrapper, row } = await mountNsfwRow()
+    await row
+      .findAll('.seg-btn')
+      .find((b) => b.text() === '高码')
+      .trigger('click')
+    const saveBtn = wrapper.findAll('button').find((b) => b.text() === '保存')
+    await saveBtn.trigger('click')
+    await flushPromises()
+    expect(window.api.settings.update).toHaveBeenCalledWith(
+      expect.objectContaining({ nsfwBlur: 'heavy' }),
+    )
+    wrapper.unmount()
+  })
+
+  it('已保存样式为关闭时回填「关闭」选中态（重启后选择保持）', async () => {
+    state.settings.nsfwBlur = 'off'
+    const { wrapper, row } = await mountNsfwRow()
+    const active = row.findAll('.seg-btn').find((b) => b.classes().includes('active'))
+    expect(active.text()).toBe('关闭')
     wrapper.unmount()
   })
 })

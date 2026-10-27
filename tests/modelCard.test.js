@@ -104,18 +104,29 @@ describe('ModelCard 修饰键点击（多选交互增强）', () => {
   })
 })
 
-describe('ModelCard NSFW 模糊开关', () => {
-  it('nsfw 模型默认模糊（设置 nsfwBlur 默认开启）且显示红色 NSFW 角标', () => {
+describe('ModelCard NSFW 模糊样式', () => {
+  it('nsfw 模型默认模糊（设置 nsfwBlur 默认 blur）且显示红色 NSFW 角标', () => {
     const wrapper = mountCard(
       makeModel('m1', { nsfw: true, coverUrl: 'mvimg://thumb/a.png' }),
     )
     expect(wrapper.find('.cover img').classes()).toContain('blurred')
+    expect(wrapper.find('.cover img').classes()).not.toContain('blurred-heavy')
     expect(wrapper.find('.nsfw-badge').exists()).toBe(true)
     wrapper.unmount()
   })
 
-  it('设置关闭模糊后 nsfw 模型封面不再模糊，红色 NSFW 角标保留', () => {
-    state.settings.nsfwBlur = false
+  it('样式为 heavy（高码）时叠加重度模糊 class', () => {
+    state.settings.nsfwBlur = 'heavy'
+    const wrapper = mountCard(
+      makeModel('m1', { nsfw: true, coverUrl: 'mvimg://thumb/a.png' }),
+    )
+    expect(wrapper.find('.cover img').classes()).toContain('blurred')
+    expect(wrapper.find('.cover img').classes()).toContain('blurred-heavy')
+    wrapper.unmount()
+  })
+
+  it('设置关闭（off）后 nsfw 模型封面不再模糊，红色 NSFW 角标保留', () => {
+    state.settings.nsfwBlur = 'off'
     const wrapper = mountCard(
       makeModel('m1', { nsfw: true, coverUrl: 'mvimg://thumb/a.png' }),
     )
@@ -124,8 +135,25 @@ describe('ModelCard NSFW 模糊开关', () => {
     wrapper.unmount()
   })
 
-  it('非 nsfw 模型不受开关影响，始终不模糊', () => {
+  it('旧版布尔值兼容：true 视为标准模糊，false 视为关闭', () => {
     state.settings.nsfwBlur = true
+    const wrapper = mountCard(
+      makeModel('m1', { nsfw: true, coverUrl: 'mvimg://thumb/a.png' }),
+    )
+    expect(wrapper.find('.cover img').classes()).toContain('blurred')
+    expect(wrapper.find('.cover img').classes()).not.toContain('blurred-heavy')
+    wrapper.unmount()
+
+    state.settings.nsfwBlur = false
+    const wrapper2 = mountCard(
+      makeModel('m2', { nsfw: true, coverUrl: 'mvimg://thumb/b.png' }),
+    )
+    expect(wrapper2.find('.cover img').classes()).not.toContain('blurred')
+    wrapper2.unmount()
+  })
+
+  it('非 nsfw 模型不受样式影响，始终不模糊', () => {
+    state.settings.nsfwBlur = 'blur'
     const wrapper = mountCard(
       makeModel('m1', { nsfw: false, coverUrl: 'mvimg://thumb/a.png' }),
     )
