@@ -83,19 +83,21 @@ it('OPT-3：并发 2 时第二任务在前一任务完成前启动（并行执�
   try {
     // A 足够大（SHA256 耗时远大于 worker 消息往返），B 极小：B 的首个进度
     // 必然先于 A 的完成到达——并发 1 时 B 只能在 A 完成后才启动。
-    // 时间断言有 ~10 倍以上余量（64MB 哈希 ≥ 百毫秒，启动延迟 ≈ 毫秒级）
+    // 时间断言有 ~10 倍以上余量（64MB 哈希 ≥ 百毫秒，启动延迟 ≈ 毫秒级）；
+    // 用 performance.now()（单调、亚毫秒精度）而非 Date.now()，避免两个
+    // 时间戳落入同一毫秒导致断言偶发失败（CI 上已复现）
     const a = await writeFixture('par-a.bin', Buffer.alloc(64 * 1024 * 1024, 1))
     const b = await writeFixture('par-b.bin', Buffer.from('par-b'))
     let aDoneAt = Infinity
     let bStartedAt = Infinity
     const pa = computeFileHashOffThread(a.abs, undefined, () => {}).then(
       (h) => {
-        aDoneAt = Date.now()
+        aDoneAt = performance.now()
         return h
       },
     )
     const pb = computeFileHashOffThread(b.abs, undefined, () => {
-      if (bStartedAt === Infinity) bStartedAt = Date.now()
+      if (bStartedAt === Infinity) bStartedAt = performance.now()
     })
     const [ha, hb] = await Promise.all([pa, pb])
     expect(ha).toBe(a.expected)
