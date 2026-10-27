@@ -81,28 +81,28 @@ it('多任务串行执行：按入队顺序逐个完成（并发 1）', async ()
 it('OPT-3：并发 2 时第二任务在前一任务完成前启动（并行执行）', async () => {
   setHashPoolConcurrency(2)
   try {
-    // A 足够大（SHA256 耗时远大于 worker 消息往返），B 极小：B 的首个进度
-    // 必然先于 A 的完成到达——并发 1 时 B 只能在 A 完成后才启动。
-    // 时间断言有 ~10 倍以上余量（64MB 哈希 ≥ 百毫秒，启动延迟 ≈ 毫秒级）；
-    // 用 performance.now()（单调、亚毫秒精度）而非 Date.now()，避免两个
-    // 时间戳落入同一毫秒导致断言偶发失败（CI 上已复现）
+    // A 足够大（SHA256 耗时远大于 worker 消息往返），B 极小：并发 2 下两者
+    // 并行执行时 B 必然先完成——并发 1 时 B 只能在 A 完成后才启动。
+    // 断言比较两者的完成时间：真正并行时 B 领先 A ≥ 百毫秒量级（64MB 哈希
+    // 耗时 >> worker 消息往返），余量充足且稳定。不比较"启动/进度回调的
+    // 送达时序"——CI 高负载下 B 的首个进度消息可能晚于 A 的完成微任务数毫秒
+    // 才被事件循环处理（已复现），测量送达顺序无法可靠证明并行性
     const a = await writeFixture('par-a.bin', Buffer.alloc(64 * 1024 * 1024, 1))
     const b = await writeFixture('par-b.bin', Buffer.from('par-b'))
     let aDoneAt = Infinity
-    let bStartedAt = Infinity
-    const pa = computeFileHashOffThread(a.abs, undefined, () => {}).then(
-      (h) => {
-        aDoneAt = performance.now()
-        return h
-      },
-    )
-    const pb = computeFileHashOffThread(b.abs, undefined, () => {
-      if (bStartedAt === Infinity) bStartedAt = performance.now()
+    let bDoneAt = Infinity
+    const pa = computeFileHashOffThread(a.abs).then((h) => {
+      aDoneAt = performance.now()
+      return h
+    })
+    const pb = computeFileHashOffThread(b.abs).then((h) => {
+      bDoneAt = performance.now()
+      return h
     })
     const [ha, hb] = await Promise.all([pa, pb])
     expect(ha).toBe(a.expected)
     expect(hb).toBe(b.expected)
-    expect(bStartedAt).toBeLessThan(aDoneAt)
+    expect(bDoneAt).toBeLessThan(aDoneAt)
   } finally {
     setHashPoolConcurrency(1)
   }
