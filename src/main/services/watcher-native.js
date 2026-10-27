@@ -25,7 +25,7 @@ import { scheduleBroadcast } from './watcher-broadcast'
  * @param {string|null} filename fs.watch 回调的文件名（recursive 下为相对路径）
  * @returns {string[]|null} 子树数组；null 表示忽略该事件；空数组表示无法定位（全量兜底）
  */
-export function nativeEventDirs(w, filename) {
+function nativeEventDirs(w, filename) {
   // 文件名缺失（缓冲区溢出/平台差异）时无法定位子树：走全量扫描兜底
   if (typeof filename !== 'string' || !filename) return []
   const rel = filename.split(path.sep).join('/').replace(/^\/+/, '')

@@ -42,7 +42,7 @@ function broadcast(root, dirs = []) {
  * @param {string[]} relDirs 变更子树（空数组表示无法定位，按全根处理）
  * @returns {Promise<void>}
  */
-export async function refreshSnapshotScopes(w, relDirs) {
+async function refreshSnapshotScopes(w, relDirs) {
   if (w !== getWatcher() || w.refreshing) return
   w.refreshing = true
   try {

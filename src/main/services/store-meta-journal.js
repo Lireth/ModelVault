@@ -22,7 +22,7 @@ import { metaState } from './store-meta-state'
  * 但有限的 seq——若照单全收，加载基线被抬高后，之后所有正常增量都会被
  * 「快照已包含」跳过并随快照固化，增量静默丢失。越界一律按损坏批次隔离。
  */
-export const MAX_JOURNAL_SEQ = 1_000_000_000
+const MAX_JOURNAL_SEQ = 1_000_000_000
 
 /** 增量批次文件名（delta-<seq>.json，写盘侧 12 位零填充，读取兼容任意位数） */
 const DELTA_BATCH_NAME_RE = /^delta-(\d+)\.json$/
