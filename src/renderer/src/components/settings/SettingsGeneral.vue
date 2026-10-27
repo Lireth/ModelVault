@@ -120,8 +120,9 @@ async function onImportModels(mode) {
       <div class="setting-info">
         <span class="setting-title">NSFW 示例图模糊</span>
         <span class="setting-desc"
-          >清单页中被标记 NSFW 的模型封面与示例图按所选样式模糊展示；关闭后仅显示红色
-          NSFW 标记，高码为重度模糊（无法隐约辨认内容），详情页不受影响</span
+          >清单页中被标记 NSFW
+          的模型封面与示例图按所选样式模糊展示；关闭后仅显示红色 NSFW
+          标记，高码为重度模糊（无法隐约辨认内容），详情页不受影响</span
         >
       </div>
       <div class="seg-group">

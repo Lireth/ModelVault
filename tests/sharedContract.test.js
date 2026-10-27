@@ -221,11 +221,7 @@ describe('shared/defaults', () => {
   })
 
   it('NSFW 模糊样式定义与 key 集合一致（off/blur/heavy）', () => {
-    expect(NSFW_BLUR_DEFS.map((d) => d.key)).toEqual([
-      'off',
-      'blur',
-      'heavy',
-    ])
+    expect(NSFW_BLUR_DEFS.map((d) => d.key)).toEqual(['off', 'blur', 'heavy'])
     expect([...NSFW_BLUR_KEYS].sort()).toEqual(['blur', 'heavy', 'off'])
   })
 

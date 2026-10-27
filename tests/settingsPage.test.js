@@ -442,9 +442,7 @@ describe('SettingsPage NSFW 示例图模糊样式', () => {
     expect(row).toBeTruthy()
     const btns = row.findAll('.seg-btn')
     expect(btns.map((b) => b.text())).toEqual(['关闭', '模糊', '高码'])
-    expect(
-      btns.find((b) => b.classes().includes('active')).text(),
-    ).toBe('模糊') // 默认标准模糊（与既有模糊行为一致）
+    expect(btns.find((b) => b.classes().includes('active')).text()).toBe('模糊') // 默认标准模糊（与既有模糊行为一致）
     await btns.find((b) => b.text() === '关闭').trigger('click')
     const saveBtn = wrapper.findAll('button').find((b) => b.text() === '保存')
     await saveBtn.trigger('click')
@@ -476,7 +474,9 @@ describe('SettingsPage NSFW 示例图模糊样式', () => {
   it('已保存样式为关闭时回填「关闭」选中态（重启后选择保持）', async () => {
     state.settings.nsfwBlur = 'off'
     const { wrapper, row } = await mountNsfwRow()
-    const active = row.findAll('.seg-btn').find((b) => b.classes().includes('active'))
+    const active = row
+      .findAll('.seg-btn')
+      .find((b) => b.classes().includes('active'))
     expect(active.text()).toBe('关闭')
     wrapper.unmount()
   })
