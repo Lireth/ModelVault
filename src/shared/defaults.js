@@ -10,8 +10,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   modelsFolders: [],
   autoScan: true,
   excludeDirs: [],
-  // 主题：dark / light / system（跟随系统亮暗，渲染层解析为有效主题后应用）
-  theme: 'dark',
+  // 主题：dark / light / system（跟随系统亮暗，渲染层解析为有效主题后应用）。
+  // 默认跟随系统：首次打开未设置文件夹、文件夹路径丢失/损坏等重置状态下
+  // 库设置均回退到此默认值，避免在系统为浅色时突兀地以深色启动。
+  theme: 'system',
   // 强调色：预设 key（渲染层 constants/accents.js）或 #rrggbb 自定义色
   accentColor: 'blue',
   cardSize: 'normal',

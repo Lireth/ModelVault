@@ -20,7 +20,7 @@ import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
 /**
  * 系统亮暗媒体查询（主题跟随系统）：惰性求值——
  * node 测试环境无 window/matchMedia（jsdom 亦未实现），返回 null，
- * resolveTheme 将 system 解析为 dark（与默认主题一致）；
+ * resolveTheme 将 system 解析为 dark（无媒体查询时的回退亮暗）；
  * 不缓存查询对象：调用方测试桩在 import 后才注入，且 Chromium 侧
  * 每次调用返回的 MediaQueryList 状态总是最新的。
  */

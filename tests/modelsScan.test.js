@@ -896,7 +896,7 @@ describe('settings:update', () => {
     expect(res.error).toBeUndefined()
     expect(res.settings.sortBy).toBe('type')
     // 增量合并：其余字段保留默认值
-    expect(res.settings.theme).toBe('dark')
+    expect(res.settings.theme).toBe('system')
   })
 
   it('变更 modelsFolder 为不存在的路径时拒绝且不落盘（任意目录写入防护）', async () => {

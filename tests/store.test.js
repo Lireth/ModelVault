@@ -883,13 +883,13 @@ describe('应用设置规范化', () => {
     expect(s.sortAsc).toBe(true)
   })
 
-  it('theme 接受 dark/light/system，未知值回退 dark', async () => {
-    await updateSettings({ theme: 'system' })
+  it('theme 接受 dark/light/system，未知值回退默认 system', async () => {
+    await updateSettings({ theme: 'light' })
     let s = await loadSettings()
-    expect(s.theme).toBe('system')
+    expect(s.theme).toBe('light')
     await updateSettings({ theme: 'neon' })
     s = await loadSettings()
-    expect(s.theme).toBe('dark')
+    expect(s.theme).toBe('system')
   })
 
   it('hashWarmup 接受 candidates/full/off，未知值回退 candidates', async () => {
@@ -1083,7 +1083,7 @@ describe('应用设置文件损坏恢复（B2）', () => {
     await fs.mkdir(fakeUserData, { recursive: true })
     await fs.writeFile(settingsFile, '123')
     const s = await loadSettings()
-    expect(s.theme).toBe('dark')
+    expect(s.theme).toBe('system')
     const baks = await listBaks()
     expect(baks.length).toBe(1)
     expect(await fs.readFile(path.join(fakeUserData, baks[0]), 'utf-8')).toBe(
@@ -1297,7 +1297,7 @@ describe('库设置并发落盘串行化（A1）', () => {
       releaseRename()
       await Promise.all([pendingWrite, reload])
       // 已切到 other：库设置为该库的默认值
-      expect(getSettings().theme).toBe('dark')
+      expect(getSettings().theme).toBe('system')
     } finally {
       vi.restoreAllMocks()
     }
@@ -1362,14 +1362,14 @@ describe('库设置随模型库存储（双层设置）', () => {
     )
     roots.push(other)
     await reloadLibrarySettings(other)
-    expect(getSettings().theme).toBe('dark')
+    expect(getSettings().theme).toBe('system')
     const otherOnDisk = JSON.parse(
       await fs.readFile(
         path.join(other, '.modelvault', 'settings.json'),
         'utf-8',
       ),
     )
-    expect(otherOnDisk.theme).toBe('dark')
+    expect(otherOnDisk.theme).toBe('system')
   })
 
   it('库设置文件损坏时备份为带时间戳的 .bak 后以默认值重置', async () => {
@@ -1377,7 +1377,7 @@ describe('库设置随模型库存储（双层设置）', () => {
     await fs.mkdir(path.dirname(libFile), { recursive: true })
     await fs.writeFile(libFile, '{broken!!')
     await reloadLibrarySettings(root)
-    expect(getSettings().theme).toBe('dark')
+    expect(getSettings().theme).toBe('system')
     const dir = path.dirname(libFile)
     const baks = (await fs.readdir(dir))
       .filter((n) => n.startsWith('settings.json.bak-'))
