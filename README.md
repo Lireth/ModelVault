@@ -219,7 +219,7 @@ wrapHandler('my:channel', async (event, payload) => {
 
 ### 测试
 
-单元测试位于 `tests/`（92 个文件 / 1376 用例；渲染层 store 测试自 appStore.test.js 按域拆分为 appStore*.test.js，共享装配在 `tests/helpers/storeTest.js`）：主进程纯逻辑与 IPC handler（node 环境）、渲染层 store 按域拆分测试、组件交互测试（`@vue/test-utils` + jsdom，文件头 `// @vitest-environment jsdom` 声明）。Electron API 在 `tests/setup.js` 中统一 mock，公共挂载/IPC 脚手架在 `tests/helpers/` 中复用。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证；`npm run test:coverage` 受防退化阈值门禁约束（Statements 80% / Branches 73% / Functions 77% / Lines 82%，棘轮渐进上调），store-meta/store-settings/watcher/backup 等数据完整性关键服务另有 per-file 覆盖率地板（见 `vitest.config.mjs`）。
+单元测试位于 `tests/`（93 个文件 / 1379 用例；渲染层 store 测试自 appStore.test.js 按域拆分为 appStore*.test.js，共享装配在 `tests/helpers/storeTest.js`）：主进程纯逻辑与 IPC handler（node 环境）、渲染层 store 按域拆分测试、组件交互测试（`@vue/test-utils` + jsdom，文件头 `// @vitest-environment jsdom` 声明）。Electron API 在 `tests/setup.js` 中统一 mock，公共挂载/IPC 脚手架在 `tests/helpers/` 中复用。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证；`npm run test:coverage` 受防退化阈值门禁约束（Statements 80% / Branches 73% / Functions 77% / Lines 82%，棘轮渐进上调），store-meta/store-settings/watcher/backup 等数据完整性关键服务另有 per-file 覆盖率地板（见 `vitest.config.mjs`）。
 
 ### CI 与发版
 

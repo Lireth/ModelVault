@@ -47,6 +47,12 @@ export const DEFAULT_CONTENT_CHECK_INTERVAL = 60000
 export const DEFAULT_TRAVERSAL_CONCURRENCY = 8
 /** 内容快照中单目录内文件 stat 的并发上限（与目录池相乘仍有界） */
 export const STAT_CONCURRENCY = 8
+/**
+ * 活跃期全量回扫周期（PERF-4）：上一轮有变更（热点）时，连续巡检只遍历
+ * 「根目录直属条目 + 热点子树」，每 N 轮做一次全树遍历兜底冷区域——
+ * 冷区域变更发现延迟上界 = N × 基础间隔，热点区域仍是基础间隔。
+ */
+export const DEFAULT_FULL_WALK_INTERVAL = 5
 
 /**
  * 监控状态对象（syncWatcher 构造；stop/startNativeWatch/scheduleBroadcast
@@ -70,6 +76,10 @@ export const STAT_CONCURRENCY = 8
  * @property {Array<object>} deliverQueue 待交付广播队列（扫描期清空）
  * @property {number} snapshotRevision 快照基线代际（并发遍历丢弃依据）
  * @property {number} idleRounds 连续空闲轮数（退避爬梯）
+ * @property {string[]} lastHotDirs 最近一轮巡检发现的变更子树（POSIX 相对路径；
+ *   空数组 = 无热点，下轮走全树遍历）
+ * @property {number} walkCount 非静默巡检轮计数（全量/热点轮交替的周期依据）
+ * @property {number} fullWalkInterval 活跃期全量回扫周期（每 N 轮一次全树遍历）
  * @property {Set<string>} pendingDirs 防抖静默期内累积的变更子树（原生事件候选）
  * @property {Set<string>} pendingConfirmedDirs 轮询已确认的变更子树（基线已更新）
  * @property {number} pollInterval 基础轮询间隔（ms）

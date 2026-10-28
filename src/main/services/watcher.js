@@ -9,6 +9,7 @@ import {
   DEFAULT_BACKOFF,
   DEFAULT_BROADCAST_DEBOUNCE,
   DEFAULT_CONTENT_CHECK_INTERVAL,
+  DEFAULT_FULL_WALK_INTERVAL,
   DEFAULT_POLL_INTERVAL,
   DEFAULT_TRAVERSAL_CONCURRENCY,
   NATIVE_WATCH_FALLBACK_BACKOFF,
@@ -132,10 +133,12 @@ export function refreshWatcherBaseline(root, dirs, snapshot) {
  *   避免被排除目录内的文件变化触发无意义重扫）
  * @param {{pollInterval?: number, broadcastDebounce?: number,
  *   contentCheckInterval?: number, traversalConcurrency?: number,
+ *   fullWalkInterval?: number,
  *   nativeWatch?: boolean, baseline?: Map<string, string[]>,
  *   backoff?: number[], isVisible?: () => boolean,
  *   onPollScheduled?: (delay: number) => void}} [timing]
- *   轮询间隔/广播防抖/内容校验间隔（毫秒）与目录遍历并发；nativeWatch 开启
+ *   轮询间隔/广播防抖/内容校验间隔（毫秒）与目录遍历并发；fullWalkInterval 为
+ *   活跃期全量回扫周期（PERF-4，默认 5）；nativeWatch 开启
  *   原生事件监听；baseline 为全量扫描产出的目录名快照（OPT-02：直接作为
  *   监控基线，跳过扫描后的重复全树遍历）；backoff 空闲退避阶梯；
  *   isVisible/onPollScheduled 为测试注入钩子；生产走默认值，测试注入小值
@@ -193,6 +196,10 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
     deliverQueue: [],
     snapshotRevision: 0,
     idleRounds: 0,
+    // PERF-4：热点巡检状态（活跃期只巡变更子树 + 根直属条目，每 N 轮全树兜底）
+    lastHotDirs: [],
+    walkCount: 0,
+    fullWalkInterval: timing.fullWalkInterval ?? DEFAULT_FULL_WALK_INTERVAL,
     pendingDirs: new Set(),
     pendingConfirmedDirs: new Set(),
     pollInterval: pollMs,
