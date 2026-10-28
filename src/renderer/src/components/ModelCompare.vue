@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import {
   closeCompare,
   compareState,
@@ -13,12 +13,15 @@ import {
   subCategoryInfo,
   typeInfo,
 } from '../store/appStore'
+import { useDialogFocus } from '../composables/useDialogFocus'
 
 /**
  * 模型对比视图（FN-03）：
  * 多选 2~6 个模型后并排展示分类/基底/体积/评分/推荐参数/触发词/标签等，
  * 值不一致的行高亮，便于在同类 LoRA 之间做选择。
  * 数据全部来自现有模型对象，零额外 IPC；打开期间以 id 快照为准。
+ * 焦点管理（O10/OPT-03）：打开焦点入面板、关闭归还触发元素、
+ * Tab 在面板内首末循环（遮罩模态面板，与详情页同款标准）。
  */
 
 /** 字段定义（get 返回展示文本；diff=false 的字段不参与差异高亮） */
@@ -58,7 +61,9 @@ const FIELD_DEFS = [
   { key: 'path', label: '文件路径', get: (m) => m.id || '-', diff: false },
 ]
 
-const panelEl = ref(null)
+const { containerRef: panelEl, onContainerKeydown: onPanelTab } =
+  useDialogFocus({ isOpen: computed(() => compareState.open) })
+
 const models = computed(() =>
   compareState.ids.map((id) => modelById.value.get(id)).filter(Boolean),
 )
@@ -78,13 +83,6 @@ function openModel(id) {
   closeCompare()
   openDetail(id)
 }
-
-watch(
-  () => compareState.open,
-  (open) => {
-    if (open) nextTick(() => panelEl.value?.focus())
-  },
-)
 
 function onKeydown(e) {
   if (e.key !== 'Escape' || !compareState.open) return
@@ -110,6 +108,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         aria-modal="true"
         aria-label="模型对比"
         tabindex="-1"
+        @keydown="onPanelTab"
       >
         <header class="compare-header">
           <h2>模型对比</h2>

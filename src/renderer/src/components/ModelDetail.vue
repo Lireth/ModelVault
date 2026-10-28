@@ -1,9 +1,10 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AutoInfoPanel from './detail/AutoInfoPanel.vue'
 import CivitaiPanel from './detail/CivitaiPanel.vue'
 import CoverPanel from './detail/CoverPanel.vue'
 import MetaForm from './detail/MetaForm.vue'
+import { useDialogFocus } from '../composables/useDialogFocus'
 import {
   closeDetail,
   renameModel,
@@ -27,52 +28,12 @@ import {
 /** 中部表单列实例：承接 AutoInfoPanel 的「一键填入」（跨列写本地表单） */
 const metaFormRef = ref(null)
 
-/* ---------------- 焦点管理（O10：键盘/读屏可达性） ---------------- */
+/* ---------------- 焦点管理（O10：键盘/读屏可达性；OPT-03 统一 composable） ---------------- */
 
-/** 面板容器（打开时焦点移入，tabindex=-1 仅作焦点落点） */
-const panelEl = ref(null)
-/** 打开详情前的焦点元素（关闭时归还，键盘用户不丢焦点） */
-let restoreFocusEl = null
-
-/** 面板内 Tab 序列中的可聚焦元素 */
-function focusablesInPanel() {
-  if (!panelEl.value) return []
-  return [
-    ...panelEl.value.querySelectorAll(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-    ),
-  ].filter((el) => !el.disabled && el.offsetParent !== null)
-}
-
-// 打开时焦点入面板、关闭时归还触发元素（与确认层同款可达性标准）；
-// 模型间切换（model → model）不移动焦点
-watch(selectedModel, (m, old) => {
-  if (m && !old) {
-    restoreFocusEl = document.activeElement
-    nextTick(() => panelEl.value?.focus())
-  } else if (!m && old) {
-    if (restoreFocusEl && typeof restoreFocusEl.focus === 'function')
-      restoreFocusEl.focus()
-    restoreFocusEl = null
-  }
-})
-
-/** Tab 焦点陷阱：Tab 不穿透遮罩聚焦到被遮挡的网格卡片，在面板内首末循环 */
-function onPanelTab(e) {
-  if (e.key !== 'Tab') return
-  const items = focusablesInPanel()
-  if (items.length === 0) return
-  const first = items[0]
-  const last = items[items.length - 1]
-  const active = document.activeElement
-  if (e.shiftKey && (active === first || active === panelEl.value)) {
-    e.preventDefault()
-    last.focus()
-  } else if (!e.shiftKey && active === last) {
-    e.preventDefault()
-    first.focus()
-  }
-}
+const { containerRef: panelEl, onContainerKeydown: onPanelTab } =
+  useDialogFocus({
+    isOpen: computed(() => Boolean(selectedModel.value)),
+  })
 
 /** ESC 关闭详情页（U1）：设置页打开时让位给它的 ESC 处理；
  *  表单有未保存修改时经 closeDetail 内的确认拦截（C8）。
