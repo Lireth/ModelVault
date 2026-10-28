@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   filteredModels,
   saveSettings,
@@ -8,6 +8,12 @@ import {
   state,
   toggleMultiSelectMode,
 } from '../store/appStore'
+import {
+  SEARCH_SYNTAX,
+  applySearchSuggestion,
+  caretAfterSuggestion,
+  suggestSearchSyntax,
+} from '../store/search-syntax'
 import { useSearchInput } from '../composables/useSearchInput'
 
 /**
@@ -16,6 +22,9 @@ import { useSearchInput } from '../composables/useSearchInput'
  * 排序（方式/方向）+ 列表/网格视图切换。
  * searchFieldEl 与 clearSearch 经 defineExpose 转供给全局快捷键
  * （App 的 Ctrl+F 聚焦 / Esc 清空搜索）。
+ * 搜索语法辅助（FEAT-1）：「?」按钮帮助面板（示例点击插入）与
+ * 输入自动补全（前缀/值两级候选，方向键选择、Enter 应用、Esc 关闭），
+ * 目录单一来源见 store/search-syntax.js。
  */
 
 const { searchInput, searchFieldEl, clearSearch } = useSearchInput()
@@ -41,16 +50,109 @@ async function onToggleViewMode() {
   await saveSettings({ viewMode: state.viewMode })
 }
 
+/* ---------------- 搜索语法帮助面板（FEAT-1） ---------------- */
+
+const syntaxHelpOpen = ref(false)
+/** 搜索框容器（面板外点击关闭的判定范围） */
+const searchBoxEl = ref(null)
+
+function toggleSyntaxHelp() {
+  syntaxHelpOpen.value = !syntaxHelpOpen.value
+}
+
+/** 面板示例点击：追加为搜索框 token 并聚焦输入框 */
+async function insertSyntaxExample(s) {
+  const base = searchInput.value.trimEnd()
+  searchInput.value = base ? `${base} ${s.example} ` : `${s.example} `
+  syntaxHelpOpen.value = false
+  await nextTick()
+  searchFieldEl.value?.focus()
+}
+
+/** 面板外 mousedown 关闭（mousedown 先于 click，避免抢走示例按钮点击） */
+function onDocMouseDown(e) {
+  if (
+    syntaxHelpOpen.value &&
+    searchBoxEl.value &&
+    !searchBoxEl.value.contains(e.target)
+  ) {
+    syntaxHelpOpen.value = false
+  }
+}
+
+onMounted(() => document.addEventListener('mousedown', onDocMouseDown))
+onBeforeUnmount(() => document.removeEventListener('mousedown', onDocMouseDown))
+
+/* ---------------- 输入自动补全（FEAT-1） ---------------- */
+
+/** 当前补全建议（suggestSearchSyntax 结果；null 表示无候选） */
+const suggestion = ref(null)
+/** 键盘高亮的候选下标 */
+const suggestionIndex = ref(0)
+
+/** 输入时重算建议（用 input 事件携带的实时光标位置） */
+function onSearchInput(e) {
+  const el = e.target
+  suggestion.value = suggestSearchSyntax(
+    el.value,
+    el.selectionStart ?? undefined,
+  )
+  suggestionIndex.value = 0
+}
+
+function onSearchKeydown(e) {
+  if (e.isComposing) return // 输入法组合中的按键不拦截
+  const sugg = suggestion.value
+  if (sugg && sugg.items.length) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      const n = sugg.items.length
+      suggestionIndex.value =
+        (suggestionIndex.value + (e.key === 'ArrowDown' ? 1 : n - 1)) % n
+      return
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      applyActiveSuggestion()
+      return
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      suggestion.value = null
+      return
+    }
+  }
+  if (syntaxHelpOpen.value && e.key === 'Escape') {
+    e.preventDefault()
+    syntaxHelpOpen.value = false
+  }
+}
+
+/** 应用当前高亮候选：替换区间文本并把光标落到插入文本末尾 */
+async function applyActiveSuggestion() {
+  const sugg = suggestion.value
+  if (!sugg || !sugg.items.length) return
+  const item = sugg.items[suggestionIndex.value]
+  searchInput.value = applySearchSuggestion(searchInput.value, sugg, item)
+  suggestion.value = null
+  await nextTick()
+  const el = searchFieldEl.value
+  const caret = caretAfterSuggestion(sugg, item)
+  el?.setSelectionRange(caret, caret)
+}
+
+/** 焦点离开输入框时收起候选（候选点击经 mousedown.prevent 保留焦点先行） */
+function onSearchBlur() {
+  suggestion.value = null
+}
+
 defineExpose({ searchFieldEl, clearSearch })
 </script>
 
 <template>
   <!-- 搜索 + 排序：位于模型清单上方（选择文件夹后显示） -->
   <div class="search-row">
-    <div
-      class="search-box"
-      title='搜索名称、备注名、备注与分类标签；支持结构化语法（与筛选叠加）：base:pony tag:"我的标签" type:lora size:>1gb score:>=4 fav:yes nsfw:no'
-    >
+    <div ref="searchBoxEl" class="search-box">
       <span class="search-icon" aria-hidden="true">
         <svg
           viewBox="0 0 16 16"
@@ -71,7 +173,39 @@ defineExpose({ searchFieldEl, clearSearch })
         type="text"
         placeholder="搜索名称 / 备注 / 触发词…（支持 base: tag: size:>1gb score:>=4 语法）"
         spellcheck="false"
+        autocomplete="off"
+        role="combobox"
+        :aria-expanded="Boolean(suggestion && suggestion.items.length)"
+        aria-controls="search-syntax-suggest"
+        @input="onSearchInput"
+        @keydown="onSearchKeydown"
+        @blur="onSearchBlur"
       />
+      <button
+        class="search-help"
+        :class="{ active: syntaxHelpOpen }"
+        title="搜索语法帮助"
+        aria-label="搜索语法帮助"
+        :aria-expanded="syntaxHelpOpen"
+        @click="toggleSyntaxHelp"
+      >
+        <svg
+          viewBox="0 0 16 16"
+          width="12"
+          height="12"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <circle cx="8" cy="8" r="6.2" />
+          <path
+            d="M6.3 6.3c0-1 .8-1.8 1.7-1.8s1.7.7 1.7 1.6c0 1.2-1.7 1.3-1.7 2.6"
+          />
+          <path d="M8 11.4v.01" stroke-width="1.9" />
+        </svg>
+      </button>
       <button
         v-if="searchInput"
         class="search-clear"
@@ -91,6 +225,53 @@ defineExpose({ searchFieldEl, clearSearch })
           <path d="M4 4l8 8M12 4l-8 8" />
         </svg>
       </button>
+
+      <!-- 搜索语法帮助面板（FEAT-1）：目录单一来源 search-syntax.js，示例点击插入 -->
+      <div
+        v-if="syntaxHelpOpen"
+        class="search-help-panel"
+        role="group"
+        aria-label="结构化搜索语法帮助"
+      >
+        <div class="help-head">
+          结构化语法（与筛选叠加，多条件 AND；点击示例插入搜索框）
+        </div>
+        <ul class="help-list">
+          <li v-for="s in SEARCH_SYNTAX" :key="s.prefix" class="help-row">
+            <button
+              class="help-example"
+              :title="`插入 ${s.example}`"
+              @click="insertSyntaxExample(s)"
+            >
+              {{ s.example }}
+            </button>
+            <span class="help-label">{{ s.label }}</span>
+            <span class="help-desc">{{ s.desc }}</span>
+          </li>
+        </ul>
+      </div>
+
+      <!-- 输入自动补全（FEAT-1）：前缀/值两级候选，Enter 应用、Esc 关闭 -->
+      <ul
+        v-if="suggestion && suggestion.items.length"
+        id="search-syntax-suggest"
+        class="search-suggest"
+        role="listbox"
+        aria-label="搜索语法建议"
+      >
+        <li
+          v-for="(item, i) in suggestion.items"
+          :key="item.key"
+          role="option"
+          :aria-selected="i === suggestionIndex"
+          :class="{ active: i === suggestionIndex }"
+          @mousedown.prevent
+          @click="applyActiveSuggestion"
+        >
+          <code>{{ item.insert }}</code>
+          <span class="suggest-label">{{ item.label }}</span>
+        </li>
+      </ul>
     </div>
 
     <!-- 统计与快捷筛选（原结果栏）：与搜索框/排序同一行，减少纵向占用 -->
@@ -272,7 +453,7 @@ defineExpose({ searchFieldEl, clearSearch })
 
 .search-box input {
   width: 100%;
-  padding: 8px 30px 8px 30px;
+  padding: 8px 56px 8px 30px;
   /* 玻璃输入框：半透明底 + 亮边 */
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
@@ -308,6 +489,141 @@ defineExpose({ searchFieldEl, clearSearch })
 .search-clear:hover {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+/* 语法帮助按钮（FEAT-1）：与清空按钮并排，位于其左侧 */
+.search-help {
+  position: absolute;
+  right: 28px;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.search-help:hover,
+.search-help.active {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+/* 语法帮助面板：玻璃浮层，覆盖在搜索框下方 */
+.search-help-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  width: max(100%, 440px);
+  padding: 10px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--font-xs);
+}
+
+.help-head {
+  margin-bottom: 8px;
+  color: var(--text-muted);
+}
+
+.help-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.help-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.help-example {
+  justify-self: start;
+  padding: 1px 6px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.help-example:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.help-label {
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.help-desc {
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* 输入自动补全候选（FEAT-1）：前缀/值两级，键盘上下选择 */
+.search-suggest {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--font-xs);
+}
+
+.search-suggest li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.search-suggest li.active {
+  background: var(--bg-hover);
+}
+
+.search-suggest code {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.suggest-label {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 结果统计（搜索行内，靠右与排序对齐） */
