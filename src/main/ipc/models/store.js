@@ -168,6 +168,10 @@ export function registerStoreHandlers() {
       }
       try {
         const settings = await loadSettings()
+        // PERF-1：库列表存在性快照与激活库加载链互不依赖（只读 stat），
+        // 提前并行发起——未挂载盘符的单次 stat 可能阻塞数秒，不再串行
+        // 追加在激活库链之后拖慢首帧返回
+        const rootStatusesPromise = collectRootStatuses(settings.modelsFolders)
         let cachedIndex = null
         // F1-offline：激活库路径失效标志（目录被移动/重命名/盘符未挂载）——
         // 渲染层据此进入明确的离线态，而非笼统的扫描失败 toast
@@ -186,14 +190,17 @@ export function registerStoreHandlers() {
             await ensureRootStore(settings.modelsFolder, {
               maintenanceToken: token,
             })
-            // 清理不再被元数据引用的孤儿封面文件
-            await pruneOrphanCovers()
-            // F1：返回上次全量扫描的本地索引，渲染层可先秒开列表再后台校验
-            cachedIndex = await readLibraryIndex(settings.modelsFolder)
-            if (cachedIndex) {
+            // PERF-1：孤儿封面清理与本地索引读取互不依赖（清理只触碰
+            // covers 目录且自吞错误、内部 readdir→引用快照顺序保持不变；
+            // 索引读失败返回 null），并行执行缩短启动/切库关键路径
+            const index = await Promise.all([
+              pruneOrphanCovers(),
+              readLibraryIndex(settings.modelsFolder),
+            ]).then(([, index]) => index)
+            if (index) {
               cachedIndex = {
-                ...cachedIndex,
-                models: overlayCurrentMeta(cachedIndex.models),
+                ...index,
+                models: overlayCurrentMeta(index.models),
               }
             }
             // 启动后后台预热缺失的模型哈希（Civitai 识别加速）：仅入队，
@@ -223,9 +230,9 @@ export function registerStoreHandlers() {
             )
           }
         }
-        // F1-offline：库列表全量根目录存在性快照随响应回传（含正常分支）——
-        // 激活库正常时，其他已保存库同样可能因盘符未挂载而失效，侧栏需要标记
-        const rootStatuses = await collectRootStatuses(settings.modelsFolders)
+        // F1-offline：库列表全量根目录存在性快照（PERF-1：已在链首并行发起，
+        // 此处仅等待收尾；激活库失效分支同样需要回传）
+        const rootStatuses = await rootStatusesPromise
         return {
           settings,
           cachedIndex,
