@@ -37,10 +37,32 @@ export function useVirtualScroll(opts) {
   const pitch =
     typeof opts.rowHeight === 'object' ? opts.rowHeight : ref(opts.rowHeight)
 
-  /** id → 模型索引映射（锚恢复定位用，组件键盘导航共用） */
-  const indexById = computed(
-    () => new Map(opts.models().map((m, i) => [m.id, i])),
-  )
+  /**
+   * id → 模型索引映射（锚恢复定位用，组件键盘导航共用）。
+   * PERF-3：与 state.js 的 O2 索引同哲学——派生数组（filteredModels）在
+   * 就地更新/重排序后 id 序列可能与上次完全一致（缩略图/哈希回填、重扫
+   * 合并等场景），此时 O(n) 浅比较 id 后直接复用既有 Map，跳过 O(n) 的
+   * Map 全量重建（哈希+分配约为比较成本的数倍）；id 序列真正变化才重建。
+   * 映射语义不变：id 顺序即下标顺序。
+   */
+  let indexedModels = null
+  let cachedIndexById = new Map()
+  const indexById = computed(() => {
+    const models = opts.models()
+    if (indexedModels && indexedModels.length === models.length) {
+      let same = true
+      for (let i = 0; i < models.length; i++) {
+        if (indexedModels[i].id !== models[i].id) {
+          same = false
+          break
+        }
+      }
+      if (same) return cachedIndexById
+    }
+    indexedModels = models
+    cachedIndexById = new Map(models.map((m, i) => [m.id, i]))
+    return cachedIndexById
+  })
 
   const startIndex = computed(() => {
     const raw = Math.floor(scrollTop.value / pitch.value) - (opts.overscan || 0)
