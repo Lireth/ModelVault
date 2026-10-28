@@ -15,6 +15,7 @@ import {
   flushSettingsSave,
 } from '../../services/store'
 import { pruneOrphanCovers } from '../../services/covers'
+import { startPerf } from '../../services/perf'
 import { syncWatcher } from '../../services/watcher'
 import {
   requestHashWarmup,
@@ -167,6 +168,8 @@ export function registerStoreHandlers() {
         return { settings: getSettings(), cachedIndex: null }
       }
       try {
+        // PERF-2：冷启动/切库关键路径耗时观测（[perf] 日志，优化收益实测依据）
+        const perf = startPerf('models:loadStore')
         const settings = await loadSettings()
         // PERF-1：库列表存在性快照与激活库加载链互不依赖（只读 stat），
         // 提前并行发起——未挂载盘符的单次 stat 可能阻塞数秒，不再串行
@@ -233,6 +236,11 @@ export function registerStoreHandlers() {
         // F1-offline：库列表全量根目录存在性快照（PERF-1：已在链首并行发起，
         // 此处仅等待收尾；激活库失效分支同样需要回传）
         const rootStatuses = await rootStatusesPromise
+        perf(
+          `索引${cachedIndex ? '命中' : '缺失'} / 激活库${
+            folderMissing ? '失效' : '正常'
+          } / ${rootStatuses.filter((r) => !r.exists).length} 个失效库`,
+        )
         return {
           settings,
           cachedIndex,
@@ -267,6 +275,8 @@ export function registerStoreHandlers() {
 
       // 先探测索引：无可用索引时不切换主进程根目录，交由渲染层走
       // scanModels 的 V-02 状态机（扫描失败可回滚旧库）
+      // PERF-2：秒切库全程耗时观测（索引探测 + 维护锁 + 关联存储切换）
+      const perf = startPerf('models:openLibrary')
       const cachedIndex = await readLibraryIndex(root)
       if (!cachedIndex) {
         logger.info(`模型库无可用本地索引，回退全量扫描: ${root}`)
@@ -304,6 +314,7 @@ export function registerStoreHandlers() {
         logger.info(
           `模型库已打开（本地索引 ${cachedIndex.models.length} 个模型）: ${root}`,
         )
+        perf(`本地索引 ${cachedIndex.models.length} 个模型`)
         return {
           root,
           settings,

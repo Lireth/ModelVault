@@ -214,11 +214,12 @@ wrapHandler('my:channel', async (event, payload) => {
 
 - 位置：`%APPDATA%\modelvault\logs\modelvault-YYYY-MM-DD.log`（按天分文件，保留 14 天）
 - 用法：`import logger from './logger'` 后调用 `logger.info / warn / error`
+- 性能基线（PERF-2）：冷启动/切库等关键路径耗时以 `[perf]` 前缀写入日志（`startPerf` 打点，见 `src/main/services/perf.js`；缩略图渲染仅记录超过 2s 的慢任务），优化前后可按前缀检索对比
 - 主进程全局异常自动记录；渲染进程异常经 `app:reportError` 通道上报写入同一日志，同类错误节流降噪
 
 ### 测试
 
-单元测试位于 `tests/`（88 个文件 / 1346 用例；渲染层 store 测试自 appStore.test.js 按域拆分为 appStore*.test.js，共享装配在 `tests/helpers/storeTest.js`）：主进程纯逻辑与 IPC handler（node 环境）、渲染层 store 按域拆分测试、组件交互测试（`@vue/test-utils` + jsdom，文件头 `// @vitest-environment jsdom` 声明）。Electron API 在 `tests/setup.js` 中统一 mock，公共挂载/IPC 脚手架在 `tests/helpers/` 中复用。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证；`npm run test:coverage` 受防退化阈值门禁约束（Statements 80% / Branches 73% / Functions 77% / Lines 82%，棘轮渐进上调），store-meta/store-settings/watcher/backup 等数据完整性关键服务另有 per-file 覆盖率地板（见 `vitest.config.mjs`）。
+单元测试位于 `tests/`（91 个文件 / 1372 用例；渲染层 store 测试自 appStore.test.js 按域拆分为 appStore*.test.js，共享装配在 `tests/helpers/storeTest.js`）：主进程纯逻辑与 IPC handler（node 环境）、渲染层 store 按域拆分测试、组件交互测试（`@vue/test-utils` + jsdom，文件头 `// @vitest-environment jsdom` 声明）。Electron API 在 `tests/setup.js` 中统一 mock，公共挂载/IPC 脚手架在 `tests/helpers/` 中复用。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证；`npm run test:coverage` 受防退化阈值门禁约束（Statements 80% / Branches 73% / Functions 77% / Lines 82%，棘轮渐进上调），store-meta/store-settings/watcher/backup 等数据完整性关键服务另有 per-file 覆盖率地板（见 `vitest.config.mjs`）。
 
 ### CI 与发版
 

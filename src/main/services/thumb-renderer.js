@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { app, BrowserWindow } from 'electron'
 import logger from '../logger'
+import { startPerf } from './perf'
 
 /**
  * 缩略图渲染服务（P2 主进程非阻塞改造）：
@@ -244,8 +245,21 @@ function dispatchThumbTask(payload) {
   clearIdleTimer()
   const ready = ensureWindowReady()
   const id = nextTaskId++
+  // PERF-2：单张缩略图渲染静默观测——首屏批量生成会产生数百条任务，
+  // 低于 2s 完全不写日志；超过阈值的慢任务（超大源图/GPU 卡顿）以 warn 显形
+  const done = startPerf('缩略图渲染任务', { warnMs: 2000, quiet: true })
   return new Promise((resolve, reject) => {
-    const task = { resolve, reject, timer: null }
+    const task = {
+      resolve: (value) => {
+        done()
+        resolve(value)
+      },
+      reject: (err) => {
+        done(err?.message || '失败')
+        reject(err)
+      },
+      timer: null,
+    }
     pending.set(id, task)
     task.timer = setTimeout(() => {
       // 超时：渲染进程已不可信（挂死/GPU 异常），拒绝全部在途任务并销毁窗口，
