@@ -40,6 +40,29 @@ const MAX_SOURCE_BYTES = 64 * 1024 * 1024
  */
 const THUMB_GEN_CONCURRENCY = 4
 
+/**
+ * 命中结果 TTL 缓存（PERF-5，与 protocol.js OP-04 同款手法）：
+ * 缩略图文件名内嵌源图 mtime，命中判定链必须先 stat 源图（拿 mtime 算文件名）
+ * 再 access 缓存文件——两次系统调用无法合并为一次。改为把「stat + access」的
+ * 结论缓存短 TTL：扫描装饰对同一封面在重复扫描/重复装饰中反复走该链路，
+ * 命中缓存在 TTL 内零系统调用直接返回。
+ * 一致性边界：TTL 内源图被替换会短暂返回旧 mtime 的缩略图路径（与既有
+ * 「按 mtime 失效」语义的偏差窗口 ≤ TTL），由下次扫描的 pruneThumbs 纠正；
+ * 未命中同样缓存（免系统调用重新登记后台任务），生成成功后就地升级为命中。
+ */
+const THUMB_HIT_TTL_MS = 30_000
+const THUMB_HIT_CACHE_MAX = 4096
+/** @type {Map<string, {hit: boolean, thumbPath: string, mtimeMs: number, expiresAt: number}>} */
+const hitCache = new Map()
+
+/** 写入命中缓存（key 为源图小写路径；超限按插入序淘汰最旧） */
+function putThumbHitCache(key, entry) {
+  if (hitCache.size >= THUMB_HIT_CACHE_MAX) {
+    hitCache.delete(hitCache.keys().next().value)
+  }
+  hitCache.set(key, { ...entry, expiresAt: Date.now() + THUMB_HIT_TTL_MS })
+}
+
 /** 缩略图缓存目录（位于模型根目录内） */
 function getThumbsDir() {
   return path.join(getCurrentRoot(), '.modelvault', THUMBS_DIR)
@@ -94,21 +117,36 @@ const deferredJobs = new Map()
  */
 export async function getThumbPathDeferred(absCover) {
   if (!absCover || typeof absCover !== 'string' || !getCurrentRoot()) return ''
+  const key = absCover.toLowerCase()
+  const cached = hitCache.get(key)
+  if (cached && cached.expiresAt > Date.now()) {
+    if (cached.hit) return cached.thumbPath
+    // 未命中缓存：免系统调用直接重新登记后台任务（生成成功后缓存升级为命中）
+    deferredJobs.set(cached.thumbPath, {
+      absCover,
+      mtimeMs: cached.mtimeMs,
+    })
+    return ''
+  }
   try {
     const stat = await fs.stat(absCover)
     const thumbPath = path.join(
       getThumbsDir(),
       thumbFileName(absCover, stat.mtimeMs),
     )
+    let hit = false
     try {
       await fs.access(thumbPath)
-      return thumbPath
+      hit = true
     } catch {
       /* 缓存未命中，登记后台生成 */
     }
+    putThumbHitCache(key, { hit, thumbPath, mtimeMs: stat.mtimeMs })
+    if (hit) return thumbPath
     deferredJobs.set(thumbPath, { absCover, mtimeMs: stat.mtimeMs })
     return ''
   } catch (err) {
+    // 源图 stat 失败（被删/离线）不缓存：可能是瞬时状态，下轮请求重新探测
     logger.warn(`缩略图预检失败（回退原图）: ${err.message}`)
     return ''
   }
@@ -121,6 +159,9 @@ export async function getThumbPathDeferred(absCover) {
  */
 export function clearDeferredJobs() {
   deferredJobs.clear()
+  // PERF-5：命中缓存一并清空——切库后 thumbPath 依赖当前根目录，
+  // 虽然缓存 key 含绝对路径本就跨根安全，清空可避免旧根条目占位
+  hitCache.clear()
 }
 
 /**
@@ -151,7 +192,15 @@ export async function drainDeferredThumbs(
       )
       try {
         const generated = await generateThumb(absCover, thumbPath)
-        if (generated) onGenerated(absCover, generated)
+        if (generated) {
+          // PERF-5：生成成功，命中缓存由未命中就地升级（下轮请求零系统调用）
+          putThumbHitCache(absCover.toLowerCase(), {
+            hit: true,
+            thumbPath,
+            mtimeMs,
+          })
+          onGenerated(absCover, generated)
+        }
       } catch (err) {
         logger.warn(`后台缩略图生成失败（回退原图）: ${err.message}`)
       }

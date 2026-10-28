@@ -187,3 +187,42 @@ describe('延迟生成队列（扫描装饰阶段专用）', () => {
     expect(kept[0].absCover).toBe(source)
   })
 })
+
+describe('命中结果 TTL 缓存（PERF-5）', () => {
+  it('TTL 内重复请求短路磁盘探测（缓存文件删除后仍返回缓存路径）', async () => {
+    mockRender({ mode: 'wide' })
+    const thumbPath = await generateNow(source)
+    // 生成成功即升级为命中缓存
+    expect(await getThumbPathDeferred(source)).toBe(thumbPath)
+    await fs.rm(thumbPath)
+    // TTL 内不再探测磁盘：直接返回缓存路径（有界陈旧窗口，由 TTL 到期兜底）
+    expect(await getThumbPathDeferred(source)).toBe(thumbPath)
+  })
+
+  it('TTL 过期后重新探测磁盘，未命中重新登记并可再生成', async () => {
+    mockRender({ mode: 'wide' })
+    const thumbPath = await generateNow(source)
+    expect(await getThumbPathDeferred(source)).toBe(thumbPath)
+    await fs.rm(thumbPath)
+    vi.useFakeTimers({ now: Date.now() + 31_000 })
+    try {
+      // 过期后重新 stat+access：缓存文件已删除 → 未命中重新登记
+      expect(await getThumbPathDeferred(source)).toBe('')
+      const out = []
+      await drainDeferredThumbs((_, p) => out.push(p))
+      expect(out).toEqual([thumbPath])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clearDeferredJobs 一并清空命中缓存（切根卫生）', async () => {
+    mockRender({ mode: 'wide' })
+    const thumbPath = await generateNow(source)
+    expect(await getThumbPathDeferred(source)).toBe(thumbPath)
+    await fs.rm(thumbPath)
+    clearDeferredJobs()
+    // 缓存已清：重新探测磁盘发现缓存缺失 → 未命中登记
+    expect(await getThumbPathDeferred(source)).toBe('')
+  })
+})
