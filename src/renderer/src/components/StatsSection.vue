@@ -30,12 +30,36 @@ import { normalizeBaseModel } from '../../../shared/model-categories'
  * 本文件保留：全部派生计算（单一来源，经 props 下发各板块）。
  * 全部由渲染层 state.models 派生，零 IPC、随扫描/标注即时刷新；
  * 图表为纯 CSS 条形（无图表库依赖）。
+ * OPT-02：总览/分类/格式/基底/TOP5 五组统计合并为单趟 O(n) 聚合
+ * （stats 计算一趟遍历同时产出全部 Map 与 TOP5 插入排序结果），
+ * extRows/baseRows/topSize 仅做零遍历的展示变换，避免大库多次全量扫描。
  */
+
+/**
+ * TOP5 有界插入（替代全量排序 O(n log n) → O(n·k)，k=5）：
+ * 等值不交换保持原遍历序（与稳定排序语义一致），满 5 后更小值直接跳过。
+ */
+function insertTop5(top5, m, size) {
+  if (top5.length >= 5 && size <= top5[top5.length - 1].size) return
+  top5.push({ m, size })
+  let i = top5.length - 1
+  while (i > 0 && top5[i - 1].size < top5[i].size) {
+    const tmp = top5[i - 1]
+    top5[i - 1] = top5[i]
+    top5[i] = tmp
+    i -= 1
+  }
+  if (top5.length > 5) top5.pop()
+}
 
 const stats = computed(() => {
   const models = state.models
   const byType = new Map()
+  const byExt = new Map()
+  const byFamily = new Map()
+  const top5 = []
   let totalBytes = 0
+  let familyTotal = 0
   let withNote = 0
   let withAlias = 0
   let withParams = 0
@@ -49,11 +73,42 @@ const stats = computed(() => {
   let unrated = 0
   const now = Date.now()
   for (const m of models) {
-    totalBytes += Number.isFinite(m.size) ? m.size : 0
+    const size = Number.isFinite(m.size) ? m.size : 0
+    totalBytes += size
     const t = byType.get(m.type) || { count: 0, bytes: 0 }
     t.count += 1
-    t.bytes += Number.isFinite(m.size) ? m.size : 0
+    t.bytes += size
     byType.set(m.type, t)
+    // 格式聚合：优先使用扫描结果携带的真实扩展名（OPT-06）：.disabled 只是
+    // 禁用后缀，直接截取路径末段会把 a.safetensors.disabled 误统计为 disabled 格式。
+    let ext =
+      typeof m.ext === 'string' && m.ext
+        ? m.ext.replace(/^\./, '').toLowerCase()
+        : ''
+    if (!ext) {
+      // 兼容无 ext 的旧索引：剔除 .disabled 后再取最后一段扩展名
+      let id = typeof m.id === 'string' ? m.id : ''
+      if (id.toLowerCase().endsWith('.disabled'))
+        id = id.slice(0, -'.disabled'.length)
+      const dot = id.lastIndexOf('.')
+      ext = dot >= 0 ? id.slice(dot + 1).toLowerCase() : '其他'
+    }
+    const e = byExt.get(ext) || { count: 0, bytes: 0 }
+    e.count += 1
+    e.bytes += size
+    byExt.set(ext, e)
+    // 基底家族聚合（未解析不计数，与筛选器命中语义一致）
+    const family = normalizeBaseModel(
+      m.baseModel || m.autoInfo?.baseModel || '',
+    )
+    if (family) {
+      familyTotal += 1
+      const f = byFamily.get(family) || { count: 0, bytes: 0 }
+      f.count += 1
+      f.bytes += size
+      byFamily.set(family, f)
+    }
+    insertTop5(top5, m, size)
     if (m.note) withNote += 1
     if (m.alias) withAlias += 1
     if (hasAnyParams(m)) withParams += 1
@@ -72,6 +127,10 @@ const stats = computed(() => {
     total: models.length,
     totalBytes,
     byType,
+    byExt,
+    byFamily,
+    familyTotal,
+    top5,
     withNote,
     withAlias,
     withParams,
@@ -135,15 +194,12 @@ const coverageRows = computed(() => [
 /** 最占空间 TOP 5（轻量占用分析：清理场景定位大头；pct 为占总容量的百分比） */
 const topSize = computed(() => {
   const total = stats.value.totalBytes
-  return [...state.models]
-    .sort((a, b) => (b.size || 0) - (a.size || 0))
-    .slice(0, 5)
-    .map((m) => ({
-      id: m.id,
-      name: m.alias || m.name,
-      size: m.size,
-      pct: total > 0 ? Math.round(((m.size || 0) / total) * 100) : 0,
-    }))
+  return stats.value.top5.map(({ m, size }) => ({
+    id: m.id,
+    name: m.alias || m.name,
+    size: m.size,
+    pct: total > 0 ? Math.round((size / total) * 100) : 0,
+  }))
 })
 
 /* ---------------- F-3 图表化增强 ---------------- */
@@ -162,29 +218,8 @@ const EXT_PALETTE = [
 ]
 
 const extRows = computed(() => {
-  const byExt = new Map()
-  for (const m of state.models) {
-    // 优先使用扫描结果携带的真实扩展名（OPT-06）：.disabled 只是禁用后缀，
-    // 直接截取路径末段会把 a.safetensors.disabled 误统计为 disabled 格式。
-    let ext =
-      typeof m.ext === 'string' && m.ext
-        ? m.ext.replace(/^\./, '').toLowerCase()
-        : ''
-    if (!ext) {
-      // 兼容无 ext 的旧索引：剔除 .disabled 后再取最后一段扩展名
-      let id = typeof m.id === 'string' ? m.id : ''
-      if (id.toLowerCase().endsWith('.disabled'))
-        id = id.slice(0, -'.disabled'.length)
-      const dot = id.lastIndexOf('.')
-      ext = dot >= 0 ? id.slice(dot + 1).toLowerCase() : '其他'
-    }
-    const row = byExt.get(ext) || { count: 0, bytes: 0 }
-    row.count += 1
-    row.bytes += Number.isFinite(m.size) ? m.size : 0
-    byExt.set(ext, row)
-  }
   const total = stats.value.total
-  return [...byExt.entries()]
+  return [...stats.value.byExt.entries()]
     .map(([ext, s]) => ({ ext, count: s.count, bytes: s.bytes }))
     .sort((a, b) => b.bytes - a.bytes || b.count - a.count)
     .map((row, i) => ({
@@ -216,22 +251,12 @@ const ratingRows = computed(() => {
 /**
  * 基底模型家族分布（F-2 数据源）：仅统计已解析/已回填基底模型的条目，
  * 按家族聚合计数与容量；未知（未解析）数量单列——筛选器命中语义与之一致
- * （未解析不命中任何家族）。
+ * （未解析不命中任何家族）。聚合在 stats 单趟遍历内完成（OPT-02），
+ * 此处仅按 BASE_MODEL_FAMILIES 固定顺序取行。
  */
 const baseRows = computed(() => {
-  const byFamily = new Map()
-  let total = 0
-  for (const m of state.models) {
-    const family = normalizeBaseModel(
-      m.baseModel || m.autoInfo?.baseModel || '',
-    )
-    if (!family) continue
-    total += 1
-    const row = byFamily.get(family) || { count: 0, bytes: 0 }
-    row.count += 1
-    row.bytes += Number.isFinite(m.size) ? m.size : 0
-    byFamily.set(family, row)
-  }
+  const byFamily = stats.value.byFamily
+  const total = stats.value.familyTotal
   return {
     total,
     rows: BASE_MODEL_FAMILIES.filter((f) => byFamily.has(f.key)).map((f) => {
