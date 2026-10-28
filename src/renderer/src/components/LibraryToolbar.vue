@@ -473,7 +473,8 @@ defineExpose({ searchFieldEl, clearSearch })
 
 .search-clear {
   position: absolute;
-  right: 4px;
+  /* 清空按钮仅在输入非空时渲染，位于常驻帮助按钮左侧，避免布局跳动 */
+  right: 28px;
   width: 24px;
   height: 24px;
   border: none;
@@ -491,10 +492,10 @@ defineExpose({ searchFieldEl, clearSearch })
   color: var(--text);
 }
 
-/* 语法帮助按钮（FEAT-1）：与清空按钮并排，位于其左侧 */
+/* 语法帮助按钮（FEAT-1）：常驻锚定搜索框最右侧 */
 .search-help {
   position: absolute;
-  right: 28px;
+  right: 4px;
   width: 24px;
   height: 24px;
   border: none;
