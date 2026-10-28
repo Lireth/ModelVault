@@ -10,7 +10,7 @@ import { fakeUserData } from './setup'
  * - 非 local host → 400
  * - 不存在路径 → 404
  * - 根目录外真实文件 → 403（越界拒绝，B8 防符号链接绕过的前置）
- * - 根目录内图片 → 放行并经 net.fetch(file://) 读取
+ * - 根目录内图片 → 放行并流式直读文件（PERF-6，不再经 net.fetch(file://)）
  * - 根目录内伪装扩展名（非图片扩展）→ 404
  */
 
@@ -110,15 +110,18 @@ describe('mvimg 协议路径白名单', () => {
     expect(res.status).toBe(403)
   })
 
-  it('根目录内的图片文件放行，经 net.fetch 以 file:// 读取', async () => {
+  it('根目录内的图片文件放行，流式直读返回完整内容与媒体头（PERF-6）', async () => {
     const cover = path.join(root, 'cover.png')
     await fs.writeFile(cover, PNG_MAGIC)
-    vi.mocked(net.fetch).mockResolvedValue({ status: 200, body: 'img' })
     const res = await handler(makeRequest(cover))
     expect(res.status).toBe(200)
-    const fetchUrl = vi.mocked(net.fetch).mock.calls[0][0]
-    expect(fetchUrl.startsWith('file://')).toBe(true)
-    expect(decodeURIComponent(fetchUrl)).toContain('cover.png')
+    // 直读响应体与磁盘文件一致；Content-Type 由扩展名映射下发
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(PNG_MAGIC)
+    expect(res.headers.get('Content-Type')).toBe('image/png')
+    expect(res.headers.get('Content-Length')).toBe(String(PNG_MAGIC.length))
+    expect(res.headers.get('Last-Modified')).toBeTruthy()
+    // PERF-6：mvimg 不再走 net.fetch（file:// 栈）
+    expect(net.fetch).not.toHaveBeenCalled()
   })
 
   it('根目录内的非图片扩展文件返回 404（扩展名白名单）', async () => {
@@ -126,7 +129,6 @@ describe('mvimg 协议路径白名单', () => {
     await fs.writeFile(note, 'text')
     const res = await handler(makeRequest(note))
     expect(res.status).toBe(404)
-    expect(net.fetch).not.toHaveBeenCalled()
   })
 
   it('伪装成图片扩展名的非图片内容返回 404（文件头魔数校验）', async () => {
@@ -134,7 +136,6 @@ describe('mvimg 协议路径白名单', () => {
     await fs.writeFile(fake, 'this is not an image')
     const res = await handler(makeRequest(fake))
     expect(res.status).toBe(404)
-    expect(net.fetch).not.toHaveBeenCalled()
   })
 
   it('旧版全局封面目录（userData/covers）内的文件放行（历史数据兼容）', async () => {
@@ -143,9 +144,9 @@ describe('mvimg 协议路径白名单', () => {
     const legacyCover = path.join(legacyDir, 'old-cover.png')
     await fs.writeFile(legacyCover, PNG_MAGIC)
     try {
-      vi.mocked(net.fetch).mockResolvedValue({ status: 200 })
       const res = await handler(makeRequest(legacyCover))
       expect(res.status).toBe(200)
+      expect(Buffer.from(await res.arrayBuffer())).toEqual(PNG_MAGIC)
     } finally {
       await fs.rm(legacyCover, { force: true }).catch(() => {})
     }
@@ -163,12 +164,6 @@ describe('mvimg 协议路径白名单', () => {
     const cover = path.join(root, '.modelvault', 'covers', '1728-cover.png')
     await fs.mkdir(path.dirname(cover), { recursive: true })
     await fs.writeFile(cover, PNG_MAGIC)
-    vi.mocked(net.fetch).mockResolvedValue(
-      new Response('img', {
-        status: 200,
-        headers: { 'Content-Type': 'image/png' },
-      }),
-    )
 
     const res = await handler(makeRequest(cover))
 
@@ -176,7 +171,7 @@ describe('mvimg 协议路径白名单', () => {
     const cacheControl = res.headers.get('Cache-Control')
     expect(cacheControl).toContain('immutable')
     expect(cacheControl).toContain('max-age=31536000')
-    // 上游 content-type 保留
+    // Content-Type 由扩展名映射自行下发（PERF-6 直读）
     expect(res.headers.get('Content-Type')).toBe('image/png')
   })
 
@@ -189,20 +184,18 @@ describe('mvimg 协议路径白名单', () => {
     )
     await fs.mkdir(path.dirname(thumb), { recursive: true })
     await fs.writeFile(thumb, JPEG_MAGIC)
-    vi.mocked(net.fetch).mockResolvedValue(
-      new Response('thumb', { status: 200 }),
-    )
 
     const res = await handler(makeRequest(thumb))
 
     expect(res.status).toBe(200)
     expect(res.headers.get('Cache-Control')).toContain('immutable')
+    // .jpg → image/jpeg（缩略图管线的媒体类型正确性）
+    expect(res.headers.get('Content-Type')).toBe('image/jpeg')
   })
 
   it('模型目录内 sidecar 同名图（路径不变但内容可被替换）返回 no-cache', async () => {
     const sidecar = path.join(root, 'model.preview.png')
     await fs.writeFile(sidecar, PNG_MAGIC)
-    vi.mocked(net.fetch).mockResolvedValue(new Response('img', { status: 200 }))
 
     const res = await handler(makeRequest(sidecar))
 

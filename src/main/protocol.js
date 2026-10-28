@@ -1,7 +1,7 @@
-import { protocol, net, app } from 'electron'
-import { pathToFileURL } from 'node:url'
+import { protocol, app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
+import { Readable } from 'node:stream'
 import logger from './logger'
 import { relativeWithin } from './utils'
 import { isValidImageFile, isImageBuffer } from './services/covers'
@@ -177,6 +177,23 @@ function withCacheHeaders(upstream, immutable) {
 }
 
 /**
+ * 图片扩展名 → Content-Type（PERF-6 直读响应自行下发；扩展名集合与
+ * scanner.IMAGE_EXTENSIONS 一致，白名单校验未命中的请求到不了这里）。
+ */
+const IMAGE_MIME_TYPES = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp',
+}
+
+function imageMimeType(realPath) {
+  return IMAGE_MIME_TYPES[path.extname(realPath).toLowerCase()] || 'image/png'
+}
+
+/**
  * civimg 代理允许透传给渲染进程的上游响应头白名单（媒体语义所需子集）。
  * 上游（Civitai CDN）响应头不整体透传：Set-Cookie 可能落入 civimg 来源的
  * cookie 存储（standard+secure scheme 下的行为随 Electron 版本演进），
@@ -268,10 +285,34 @@ function registerMvimgHandler() {
           expiresAt: Date.now() + IMMUTABLE_ASSET_TTL_MS,
         })
       }
-      const upstream = await net.fetch(pathToFileURL(realPath).toString())
-      // 按资产命名稳定性下发缓存策略（A-05）：关联存储封面/缩略图不可变，
-      // sidecar 同名图 no-cache
-      return withCacheHeaders(upstream, isImmutableAssetPath(realPath))
+      // PERF-6：net.fetch(file://) 需经一轮 Chromium URL 载入栈，仅为读本地
+      // 文件；改为 Node 流式直读（fh.createReadStream → Readable.toWeb），
+      // Content-Type/Content-Length/Last-Modified 由本方下发，响应头确定化。
+      // 文件句柄随流 autoClose（流结束/出错/取消时关闭）；open 与建流之间的
+      // 失败显式关闭句柄。校验到读盘之间文件被删除属瞬态竞态：流中断由
+      // 渲染层 <img> 错误回退原图，与既有失效处理一致。
+      const immutable = isImmutableAssetPath(realPath)
+      const fh = await fs.promises.open(realPath, 'r')
+      let body
+      let stat
+      try {
+        stat = await fh.stat()
+        body = Readable.toWeb(fh.createReadStream())
+      } catch (err) {
+        await fh.close().catch(() => {})
+        throw err
+      }
+      return withCacheHeaders(
+        new Response(body, {
+          status: 200,
+          headers: {
+            'Content-Type': imageMimeType(realPath),
+            'Content-Length': String(stat.size),
+            'Last-Modified': stat.mtime.toUTCString(),
+          },
+        }),
+        immutable,
+      )
     } catch (err) {
       logger.error(`mvimg 协议处理失败: ${err.message}`)
       return new Response('Internal Error', { status: 500 })
