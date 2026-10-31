@@ -23,7 +23,9 @@ import { scheduleBroadcast } from './watcher-broadcast'
  * 原生事件文件名 → 待广播子树（OP-05）。
  * @param {WatcherState} w 监控状态（读取 excludeNames）
  * @param {string|null} filename fs.watch 回调的文件名（recursive 下为相对路径）
- * @returns {string[]|null} 子树数组；null 表示忽略该事件；空数组表示无法定位（全量兜底）
+ * @returns {string[]|null} 子树数组；null 表示忽略该事件；
+ *   空数组表示无法定位（filename 缺失，缓冲溢出偶发）——经 OPT-10 降级为
+ *   全根「仅名称」回填并把内容基线置空，不再触发即时全树 stat
  */
 function nativeEventDirs(w, filename) {
   // 文件名缺失（缓冲区溢出/平台差异）时无法定位子树：走全量扫描兜底

@@ -55,6 +55,7 @@ import {
   computeStatSnapshotDiff,
   refreshWatcherBaseline,
   setWatcherScanning,
+  simulateUnlocatedNativeEventForTests,
   snapshotsEqual,
   stopWatcher,
   syncWatcher,
@@ -1129,5 +1130,51 @@ describe('OPT-9 渐进内容校验（冷区轮转 + 热区即时）', () => {
       '热子树内容覆盖未检出',
       3000,
     )
+  })
+})
+
+describe('OPT-10 原生事件 filename 缺失降级', () => {
+  it('unlocated 事件降级为仅名称回填：零 stat 且内容基线置空', async () => {
+    await fs.writeFile(path.join(root, 'seed.png'), 'seed')
+    // onPollScheduled 由基准轮结束后的 scheduleNextWalk 触发：作为基准轮
+    // 完成的确定性信号（固定 sleep 在并行负载下可能与慢基准轮竞态，
+    // 使基准的 stat 调用泄漏进 spy 断言窗口）
+    let baselineDone = false
+    syncWatcher(root, true, [], {
+      // 关闭真实 fs.watch（避免真实事件与模拟事件在防抖窗口合并）；
+      // 轮询与内容轮拉到很长——本用例的全部活动只有基准轮与模拟事件
+      pollInterval: 100000,
+      broadcastDebounce: 20,
+      contentCheckInterval: 600000,
+      isVisible: () => true,
+      onPollScheduled: () => {
+        baselineDone = true
+      },
+    })
+    await waitFor(() => baselineDone, '基准轮未完成', 3000)
+    sentEvents.length = 0
+
+    const statSpy = vi.spyOn(fs, 'stat')
+    try {
+      // 真实变更（根目录新增文件）+ filename 缺失事件（无法定位变更位置）
+      await fs.writeFile(path.join(root, 'new.png'), 'x')
+      simulateUnlocatedNativeEventForTests()
+      await waitFor(() => sentEvents.length > 0, '降级回填未广播变更', 3000)
+
+      // 仅名称回填：回填路径零 stat——旧实现在内容基线存在时会全树
+      // readdir + 全文件 stat（缓冲溢出突发反复触发即时全树扫描级开销）
+      expect(statSpy).not.toHaveBeenCalled()
+      expect(sentEvents[0].channel).toBe('models:fsChanged')
+      expect(sentEvents[0].payload.dirs).toContain('')
+
+      // 内容基线已置空：后续 unlocated 事件保持降级（突发只产生一次
+      // 延迟到内容轮的全量重建，而非每事件一次即时全树 stat）
+      await fs.writeFile(path.join(root, 'new2.png'), 'x')
+      simulateUnlocatedNativeEventForTests()
+      await waitFor(() => sentEvents.length > 1, '第二次降级回填未广播', 3000)
+      expect(statSpy).not.toHaveBeenCalled()
+    } finally {
+      statSpy.mockRestore()
+    }
   })
 })

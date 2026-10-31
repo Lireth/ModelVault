@@ -2,7 +2,7 @@ import { BrowserWindow } from 'electron'
 import logger from '../logger'
 import { samePathIgnoreCase } from '../utils'
 import { applyFullBaseline, applyPartialBaseline } from './watcher-baseline'
-import { scheduleBroadcastTimer } from './watcher-broadcast'
+import { scheduleBroadcast, scheduleBroadcastTimer } from './watcher-broadcast'
 import { startNativeWatch } from './watcher-native'
 import { runWalk, scheduleNextWalk } from './watcher-poll'
 import {
@@ -270,3 +270,16 @@ export {
   snapshotsEqual,
 } from './watcher-snapshot'
 export { stopWatcher } from './watcher-state'
+
+/**
+ * 触发一次「filename 缺失」的原生事件广播（仅供单元测试使用；生产代码
+ * 严禁调用）：与 watcher-native 回调在 filename 为 null 时的行为同链路——
+ * 空定位集合 + refresh 标记，驱动防抖交付进入 OPT-10 的降级回填分支。
+ * 真实 fs.watch 无法在测试中强制产生 null filename（缓冲溢出为偶发现象）。
+ * @returns {void}
+ */
+export function simulateUnlocatedNativeEventForTests() {
+  const w = getWatcher()
+  if (!w) return
+  scheduleBroadcast(w, [], { refresh: true })
+}

@@ -38,11 +38,19 @@ function broadcast(root, dirs = []) {
  * 原生事件广播后回填相关子树快照（OPT-02）：
  * 事件只用于提前触发，快照才是正确性来源；若不回填，下一轮轮询会把同一
  * 变更再当作新变更广播一次，导致重复局部扫描。
+ * 回填成本与事件语义成比例（OPT-10）：
+ * - 定位子树（rel !== ''）：子树内 readdir（内容基线存在时含 stat）——
+ *   成本与子树大小成比例；
+ * - filename 缺失（unlocated，nativeDirs 为空 = 无法定位变更位置）：降级为
+ *   全根「仅名称」回填并把内容基线置空——ReadDirectoryChangesW 缓冲溢出
+ *   的突发不再反复触发即时全树 stat，内容基线由后续内容校验轮按 OPT-9
+ *   渐进分桶重建；
  * @param {WatcherState} w 监控状态
  * @param {string[]} relDirs 变更子树（空数组表示无法定位，按全根处理）
+ * @param {boolean} [unlocated] 本次事件是否无法定位变更位置（filename 缺失）
  * @returns {Promise<void>}
  */
-async function refreshSnapshotScopes(w, relDirs) {
+async function refreshSnapshotScopes(w, relDirs, unlocated = false) {
   if (w !== getWatcher() || w.refreshing) return
   w.refreshing = true
   try {
@@ -55,7 +63,8 @@ async function refreshSnapshotScopes(w, relDirs) {
       if (depth > MAX_SCAN_DEPTH) continue
       const abs = rel === '' ? w.root : path.join(w.root, ...rel.split('/'))
       if (relativeWithin(abs, w.root) === null) continue
-      const withStats = Boolean(w.statSnapshot)
+      // OPT-10：unlocated 的全根回填强制仅名称（内容基线随之置空，见上）
+      const withStats = Boolean(w.statSnapshot) && !(unlocated && rel === '')
       let snapshot
       try {
         snapshot = await collectDirSnapshot(abs, w.excludeNames, {
@@ -73,18 +82,19 @@ async function refreshSnapshotScopes(w, relDirs) {
       }
       if (w !== getWatcher()) return
       if (rel === '') {
-        // 无法定位子树（filename 缺失等）：按全根刷新，后续轮询以本次为基线
+        // 无法定位子树（filename 缺失等）：按全根刷新，后续轮询以本次为基线；
+        // unlocated 时 withStats=false，内容基线在此置空（交给内容校验轮重建）
         w.snapshot = withStats ? namesFromSnapshot(snapshot) : snapshot
         w.statSnapshot = withStats ? snapshot : null
         continue
       }
       removeSnapshotSubtree(w, abs)
-      for (const [dir, entries] of snapshot) {
+      for (const [dir, names] of snapshot) {
         w.snapshot.set(
           dir,
-          withStats ? entries.map((entry) => entry.name) : entries,
+          withStats ? names.map((entry) => entry.name) : names,
         )
-        if (withStats && w.statSnapshot) w.statSnapshot.set(dir, entries)
+        if (withStats && w.statSnapshot) w.statSnapshot.set(dir, names)
       }
     }
   } catch (err) {
@@ -123,7 +133,12 @@ async function deliverBroadcast(w, nativeDirs, confirmedDirs, needsRefresh) {
   if (needsRefresh) {
     const before = new Map(w.snapshot)
     const beforeStats = w.statSnapshot ? new Map(w.statSnapshot) : null
-    await refreshSnapshotScopes(w, nativeDirs)
+    // OPT-10：filename 缺失（nativeDirs 为空）= 无法定位变更位置——降级为
+    // 仅名称回填并把内容基线置空（refreshSnapshotScopes 内），缓冲溢出突发
+    // 不再反复触发即时全树 stat；内容校验轮按 OPT-9 渐进分桶重建基线。
+    // 回填后的差异比较自动落到名称通道（statSnapshot 已置空）
+    const unlocated = nativeDirs.length === 0
+    await refreshSnapshotScopes(w, nativeDirs, unlocated)
     if (w !== getWatcher()) return
     const refreshed =
       beforeStats && w.statSnapshot
