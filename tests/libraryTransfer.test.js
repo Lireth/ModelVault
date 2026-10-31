@@ -24,7 +24,8 @@ import { transferModelsToLibrary } from '../src/main/services/library-transfer'
  * - copy/move 的文件与 sidecar 传输、源清理语义；
  * - 元数据键迁移（保持相对路径）、无标注模型不写条目；
  * - 封面文件随引用复制（同名不覆盖）；
- * - 目标同名文件跳过、journal 残留拒绝、目标未注册/当前库拒绝。
+ * - 目标同名文件跳过、journal 残留拒绝、目标未注册/当前库拒绝；
+ * - 目标库 store.json 读失败/损坏时中止迁移（fail-closed，防覆盖清空既有标注）。
  */
 
 /** 本文件产生的临时目录（测试结束后统一清理） */
@@ -275,6 +276,59 @@ describe('transferModelsToLibrary（F-3 跨库传输）', () => {
     expect(res.error).toContain('未完成的同步')
     await expect(
       fsp.access(path.join(targetRoot, 'jr.safetensors')),
+    ).rejects.toThrow()
+  })
+
+  it('目标库 store.json 损坏（解析失败）时中止迁移，不覆盖损坏文件', async () => {
+    // 截断的 JSON：readTargetStore 旧实现按空库继续，合并写回会清空
+    // 目标库其他模型标注；fail-closed 后必须中止且原样保留损坏文件
+    const corrupted =
+      '{"version":1,"models":{"kept.safetensors":{"note":"keep"}}'
+    await fsp.mkdir(path.join(targetRoot, '.modelvault'), { recursive: true })
+    await fsp.writeFile(
+      path.join(targetRoot, '.modelvault', 'store.json'),
+      corrupted,
+    )
+    const abs = await writeModel(sourceRoot, 'c.safetensors', 'x')
+    setModelMeta(abs, { note: 'n' })
+
+    const res = await transferModelsToLibrary({
+      ids: [abs],
+      targetRoot,
+      mode: 'copy',
+    })
+    expect(res.error).toContain('已中止传输')
+    expect(res.error).toContain('损坏')
+    // 损坏文件原样保留（不覆盖、不重建），交由目标库加载链路备份后重置
+    expect(
+      await fsp.readFile(
+        path.join(targetRoot, '.modelvault', 'store.json'),
+        'utf-8',
+      ),
+    ).toBe(corrupted)
+    // 文件未传输、目标库无新建条目
+    await expect(
+      fsp.access(path.join(targetRoot, 'c.safetensors')),
+    ).rejects.toThrow()
+  })
+
+  it('目标库 store.json 不可读（非 ENOENT）时中止迁移（fail-closed）', async () => {
+    // 用同名目录占位 store.json：readFile 抛 EISDIR，
+    // 等价模拟杀毒/索引器占用导致的读取失败——无法证明内容为空即拒绝
+    await fsp.mkdir(path.join(targetRoot, '.modelvault', 'store.json'), {
+      recursive: true,
+    })
+    const abs = await writeModel(sourceRoot, 'lock.safetensors', 'x')
+    setModelMeta(abs, { note: 'n' })
+
+    const res = await transferModelsToLibrary({
+      ids: [abs],
+      targetRoot,
+      mode: 'copy',
+    })
+    expect(res.error).toContain('已中止传输')
+    await expect(
+      fsp.access(path.join(targetRoot, 'lock.safetensors')),
     ).rejects.toThrow()
   })
 

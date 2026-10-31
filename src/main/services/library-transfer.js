@@ -34,10 +34,11 @@ import { getSettings } from './store-settings'
  * - **move = 复制成功后清理源**：源文件/已复制 sidecar 直接删除（目标已有
  *   完整副本），源元数据移除；先 try rename（同卷瞬时完成），跨卷回退
  *   copy+delete；任一模型文件传输失败仅影响自身，其余继续；
- * - **目标库元数据离线写回**：目标库 store.json 读取 → normalizeStoreData
- *   清洗 → 合并成功项条目 → 一次写回。目标库存在未合并 journal（上次以该库
- *   为激活库的会话异常退出残留 delta）时拒绝迁移——delta 重放会覆盖离线
- *   写入，须先打开一次目标库让加载链路合并日志；
+ * - **目标库元数据离线写回**：目标库 store.json 读取（fail-closed：仅不存在
+ *   视为空库，读失败/损坏即中止迁移，防覆盖写回清空目标库既有标注）→
+ *   normalizeStoreData 清洗 → 合并成功项条目 → 一次写回。目标库存在未合并
+ *   journal（上次以该库为激活库的会话异常退出残留 delta）时拒绝迁移——
+ *   delta 重放会覆盖离线写入，须先打开一次目标库让加载链路合并日志；
  * - **维护锁互斥**：整个传输在 'import' 维护锁内执行，防止传输期间切库到
  *   目标库造成 store.json 并发读写。
  */
@@ -64,14 +65,34 @@ async function hasPendingJournal(targetRoot) {
   return names.some(isDeltaBatchName)
 }
 
-/** 读取目标库 store.json 并规范化（不存在时为空库） */
+/**
+ * 读取目标库 store.json 并规范化（不存在时为空库）。
+ * fail-closed（与 hasPendingJournal 同一防线策略）：仅 ENOENT（目标库尚无
+ * 元数据文件）允许按空库继续；其余读失败（EACCES/EBUSY——杀毒/索引器占用
+ * 等）与解析失败（文件损坏）抛出由调用方中止迁移——此处的失败若按空库
+ * 返回，writeTargetStore 会整体覆盖 store.json，静默清空目标库其他模型的
+ * 标注与封面引用。损坏文件不在此处越权处理：目标库自身的加载链路
+ * （loadData）已具备「备份损坏文件后重置」的自愈流程，先打开一次目标库即可。
+ * @returns {Promise<{version: number, models: object}>}
+ * @throws {Error} 读失败（非 ENOENT）或文件损坏时抛出，调用方必须中止迁移
+ */
 async function readTargetStore(targetRoot) {
   const file = path.join(targetRoot, '.modelvault', 'store.json')
+  let text
   try {
-    const parsed = JSON.parse(await fs.readFile(file, 'utf-8'))
-    return normalizeStoreData(parsed)
-  } catch {
-    return { version: 1, models: {} }
+    text = await fs.readFile(file, 'utf-8')
+  } catch (err) {
+    if (err.code === 'ENOENT') return { version: 1, models: {} }
+    throw err
+  }
+  try {
+    // B-04：磁盘文件同样按不可信输入处理（与 loadData 的损坏口径一致：
+    // 解析与清洗任一失败均视为损坏，normalizeStoreData 本身不抛异常）
+    return normalizeStoreData(JSON.parse(text))
+  } catch (err) {
+    throw new Error(`目标库元数据文件损坏，无法解析: ${file} ${err.message}`, {
+      cause: err,
+    })
   }
 }
 
@@ -196,7 +217,18 @@ export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
     // 可清），不会出现「源文件已删而标注未迁移」的标注丢失
     let metaWritten = 0
     if (planned.length > 0) {
-      const store = await readTargetStore(targetRoot)
+      // fail-closed：目标库元数据读不出（被占用/损坏）就中止——此时尚未复制
+      // 封面、未写任何元数据、未传输文件，干净回退；若按空库继续，合并写回
+      // 会静默清空目标库其他模型的全部标注
+      let store
+      try {
+        store = await readTargetStore(targetRoot)
+      } catch (err) {
+        logger.error(`目标库元数据读取失败，已中止迁移: ${err.message}`)
+        return {
+          error: `目标库元数据读取失败（可能被占用或损坏），已中止传输: ${err.message}`,
+        }
+      }
       for (const item of planned) {
         if (!item.meta || typeof item.meta !== 'object') continue
         // 封面引用（.modelvault/covers/*）指向的文件复制到目标库（同名不覆盖）
