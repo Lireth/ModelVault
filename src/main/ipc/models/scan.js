@@ -57,6 +57,22 @@ const PROGRESS_INTERVAL = 120
 /** 当前扫描的取消控制器（null 表示无进行中的扫描） */
 let scanAbort = null
 
+/**
+ * 解析扫描扩展名选项（FIX-5 全量/局部扫描统一口径）：
+ * 返回用户配置的扫描扩展名列表；异常情况（非数组/空数组——设置规范化
+ * normalizeExtensions 保证恒非空，此处仅为契约兜底，防设置层漂移）返回
+ * undefined，由 scanner 落回默认全集（options.extensions || MODEL_EXTENSIONS）。
+ * 不可用 `|| []` 兜底：空数组为真值，scanner 语义中空集 = 扫不到任何文件，
+ * 会把整次扫描静默变成零结果。
+ * 纯函数，便于单测。
+ * @param {{scanExtensions?: unknown}|undefined} appSettings 应用设置（getSettings() 结果）
+ * @returns {string[]|undefined}
+ */
+export function resolveScanExtensions(appSettings) {
+  const exts = appSettings?.scanExtensions
+  return Array.isArray(exts) && exts.length > 0 ? exts : undefined
+}
+
 /** 注册扫描链路的 IPC 处理器 */
 export function registerScanHandlers() {
   // 扫描模型目录（耗时操作，进度通过 models:scanProgress 事件推送，
@@ -149,7 +165,9 @@ export function registerScanHandlers() {
           },
           {
             excludeDirs: appSettings.excludeDirs || [],
-            extensions: appSettings.scanExtensions || [],
+            // 与局部扫描同一兜底口径（FIX-5）：异常时回退 undefined → scanner
+            // 默认全集；此前 `|| []` 在异常场景会产出空集（扫不到任何文件）
+            extensions: resolveScanExtensions(appSettings),
             signal,
           },
         )
@@ -343,13 +361,8 @@ export function registerScanHandlers() {
           // 与全量扫描一致地应用用户配置的扫描扩展名（B3 修复）：此前传
           // undefined 落回默认全集，用户已排除的扩展名（如 .ckpt）会在
           // watcher 触发一次局部重扫后“复活”，局部结果与全量结果不一致。
-          // 空数组防御回退 undefined：scanner 语义中空集 = 扫不到任何文件，
-          // 规范化后的 scanExtensions 恒非空，此处仅为契约兜底
-          extensions:
-            Array.isArray(appSettings.scanExtensions) &&
-            appSettings.scanExtensions.length > 0
-              ? appSettings.scanExtensions
-              : undefined,
+          // 兜底口径与全量扫描共用 resolveScanExtensions（FIX-5）
+          extensions: resolveScanExtensions(appSettings),
           subDirs,
           signal,
         })

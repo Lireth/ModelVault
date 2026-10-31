@@ -93,6 +93,7 @@ import {
   getThumbPathDeferred,
 } from '../src/main/services/thumbs'
 import { decorateModels } from '../src/main/ipc/models/decorate'
+import { resolveScanExtensions } from '../src/main/ipc/models/scan'
 
 const settingsFile = path.join(fakeUserData, 'settings.json')
 const roots = []
@@ -479,6 +480,58 @@ describe('models:partialScan（A-03）', () => {
     expect(res.error).toBe('模型库已切换，请稍后重试')
     expect(getCurrentRoot()).toBe(root)
     expect(vi.mocked(scanModels).mock.calls.length).toBe(callsBefore)
+  })
+})
+
+describe('resolveScanExtensions（FIX-5 全量/局部统一兜底口径）', () => {
+  it('非空数组原样透传（保留用户配置引用）', () => {
+    const exts = ['.safetensors', '.ckpt']
+    expect(resolveScanExtensions({ scanExtensions: exts })).toBe(exts)
+  })
+
+  it('空数组回退 undefined（scanner 落回默认全集，而非空集零结果）', () => {
+    // 旧全量扫描侧 `|| []` 兜底在此场景会产出空 Set = 扫不到任何文件
+    expect(resolveScanExtensions({ scanExtensions: [] })).toBeUndefined()
+    expect(resolveScanExtensions({})).toBeUndefined()
+    expect(
+      resolveScanExtensions({ scanExtensions: 'not-array' }),
+    ).toBeUndefined()
+    expect(resolveScanExtensions(undefined)).toBeUndefined()
+  })
+
+  it('全量扫描应用用户配置的扫描扩展名（与局部扫描同一语义）', async () => {
+    const scan = getRegisteredHandler('models:scan')
+    await registerLibrary(root)
+    await updateSettings({ scanExtensions: ['.safetensors'] })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 1,
+    })
+
+    const res = await scan(makeEvent(), { folder: root })
+    expect(res.error).toBeUndefined()
+    expect(vi.mocked(scanModels).mock.calls.at(-1)[2].extensions).toEqual([
+      '.safetensors',
+    ])
+  })
+
+  it('未改设置时全量扫描透传规范化的全量扩展名（非空数组）', async () => {
+    const scan = getRegisteredHandler('models:scan')
+    await registerLibrary(root)
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 1,
+    })
+
+    await scan(makeEvent(), { folder: root })
+
+    const extensions = vi.mocked(scanModels).mock.calls.at(-1)[2].extensions
+    // 全量扫描旧实现为 `|| []`：设置正常时行为一致，此处锁定契约
+    // （恒为非空数组透传，与局部扫描完全同口径）
+    expect(Array.isArray(extensions)).toBe(true)
+    expect(extensions.length).toBeGreaterThan(0)
   })
 })
 
