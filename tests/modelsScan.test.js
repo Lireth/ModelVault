@@ -1025,3 +1025,37 @@ describe('settings:update', () => {
     expect(res.settings.sortBy).toBe('mtime')
   })
 })
+
+describe('列表载荷遗留字段剥离（OPT-11）', () => {
+  it('旧索引残留的 folder 字段在秒开路径统一剥离（源头已移除）', async () => {
+    await registerLibrary(root)
+    // 构造携带旧版 folder 字段的本地索引（升级前写入的索引文件形态）
+    await writeLibraryIndex(root, {
+      models: [
+        {
+          id: path.join(root, 'legacy.safetensors'),
+          name: 'legacy',
+          type: 'checkpoint',
+          folder: root,
+          relDir: '',
+          size: 1,
+          mtimeMs: 1000,
+        },
+      ],
+    })
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 1,
+    })
+
+    const loadStore = getRegisteredHandler('models:loadStore')
+    const res = await loadStore(makeEvent())
+    expect(res.error).toBeUndefined()
+    const entry = res.cachedIndex.models[0]
+    expect(Object.hasOwn(entry, 'folder')).toBe(false)
+    // 其余字段不受剥离影响
+    expect(entry.id).toBe(path.join(root, 'legacy.safetensors'))
+    expect(entry.name).toBe('legacy')
+  })
+})

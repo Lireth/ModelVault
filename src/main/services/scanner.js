@@ -311,34 +311,36 @@ export async function scanModels(root, onProgress, options = {}) {
           errors.push({ dir: f.fullPath, message: err })
           return
         }
-        if (seenIds.has(f.fullPath)) return
-        seenIds.add(f.fullPath)
-        const ext = f.ext || path.extname(f.name).toLowerCase()
-        models.push({
-          id: f.fullPath,
-          // disabled 文件名含双重后缀（x.safetensors.disabled），一并剥离
-          name: path.basename(
-            f.name,
-            ext + (f.disabled ? DISABLED_SUFFIX : ''),
-          ),
-          ext,
-          disabled: f.disabled === true,
-          type: classifyModel(
-            unit.rel ? unit.rel.split('/') : [],
-            f.name,
-          ),
-          // 自动分类标签：按文件夹名匹配（装饰层与 meta.subCategory 合成生效）
-          folderSubCategory: classifySubCategory(
-            unit.rel ? unit.rel.split('/') : [],
-          ),
-          folder: unit.dir,
-          relDir: unit.rel,
-          size: stat.size,
-          mtimeMs: stat.mtimeMs,
-          // 添加时间（OPT-1「按添加时间」排序数据源）：随模型对象透传装饰层
-          // 与本地索引（索引保留装饰层额外字段），渲染层缺省时回退 mtimeMs
-          ctimeMs: modelAddedMs(stat),
-        })
+      if (seenIds.has(f.fullPath)) return
+      seenIds.add(f.fullPath)
+      const ext = f.ext || path.extname(f.name).toLowerCase()
+      models.push({
+        id: f.fullPath,
+        // disabled 文件名含双重后缀（x.safetensors.disabled），一并剥离
+        name: path.basename(
+          f.name,
+          ext + (f.disabled ? DISABLED_SUFFIX : ''),
+        ),
+        ext,
+        disabled: f.disabled === true,
+        type: classifyModel(
+          unit.rel ? unit.rel.split('/') : [],
+          f.name,
+        ),
+        // 自动分类标签：按文件夹名匹配（装饰层与 meta.subCategory 合成生效）
+        folderSubCategory: classifySubCategory(
+          unit.rel ? unit.rel.split('/') : [],
+        ),
+        relDir: unit.rel,
+        // OPT-11：不再携带 folder（所在库根绝对路径）——全库同一长字符串
+        // 且可由 dirname(id) 派生，渲染层/主进程均无消费方（字段盘点确认），
+        // 万级库的 IPC 载荷/装饰缓存/本地索引各省约 1MB 纯冗余
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        // 添加时间（OPT-1「按添加时间」排序数据源）：随模型对象透传装饰层
+        // 与本地索引（索引保留装饰层额外字段），渲染层缺省时回退 mtimeMs
+        ctimeMs: modelAddedMs(stat),
+      })
         onProgress?.({
           dirs: dirCount,
           found: models.length,

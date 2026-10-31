@@ -274,7 +274,7 @@ export function registerScanHandlers() {
         setWatcherScanning(false)
       }
     },
-    { errorPrefix: '扫描失败' },
+    { errorPrefix: '扫描失败', perfWarnMs: 200 },
   )
 
   // 取消进行中的扫描（经 AbortController 中止，扫描返回 { canceled: true }）
@@ -430,6 +430,6 @@ export function registerScanHandlers() {
         setWatcherScanning(false)
       }
     },
-    { errorPrefix: '局部扫描失败' },
+    { errorPrefix: '局部扫描失败', perfWarnMs: 200 },
   )
 }

@@ -698,3 +698,24 @@ describe('civitaiImportPatch / findSidecarCivitaiInfo（F8）', () => {
     }
   })
 })
+
+describe('模型对象形状（OPT-11 列表瘦身）', () => {
+  it('扫描结果不携带 folder（所在库根可由 dirname(id) 派生，渲染层零消费）', async () => {
+    const shapeRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-shape-'),
+    )
+    try {
+      await fs.writeFile(path.join(shapeRoot, 'a.safetensors'), 'x')
+      await fs.mkdir(path.join(shapeRoot, 'lora'))
+      await fs.writeFile(path.join(shapeRoot, 'lora', 'b.ckpt'), 'x')
+      const { models } = await scanModels(shapeRoot, undefined, {})
+      expect(models.length).toBe(2)
+      for (const m of models) {
+        expect(Object.hasOwn(m, 'folder')).toBe(false)
+        expect(m.relDir === '' || m.relDir === 'lora').toBe(true)
+      }
+    } finally {
+      await fs.rm(shapeRoot, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+})

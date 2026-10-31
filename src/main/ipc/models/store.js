@@ -78,16 +78,29 @@ async function collectRootStatuses(folders) {
  * @param {any[]} models 索引中的装饰模型
  * @returns {any[]} 合并后的模型列表
  */
+/**
+ * 列表载荷遗留字段剥离（OPT-11）：folder 为旧版本地索引的残留字段——
+ * 源头（scanner）已停止写入，渲染层/导出/统计均无消费方，可由 dirname(id)
+ * 派生。旧索引文件在下次全量扫描重写前仍携带该字段，秒开路径统一剥离。
+ * @param {Record<string, any>} m 索引模型条目
+ * @returns {Record<string, any>} 剥离后的条目（无残留时原引用返回）
+ */
+function omitListLegacyFields(m) {
+  if (!m || typeof m !== 'object' || !('folder' in m)) return m
+  const { folder: _folder, ...rest } = m
+  return rest
+}
+
 function overlayCurrentMeta(models) {
   if (!Array.isArray(models)) return models
   return models.map((m) => {
     const meta = getModelMeta(m.id)
-    if (!meta) return m
+    if (!meta) return omitListLegacyFields(m)
     // 索引快照的 baseModel 作为高优先级覆盖值传入：与装饰路径「autoInfo
     // （文件头部）优先」的语义对齐——快照中的头部解析值不被空 meta 抹掉，
     // meta 的 Civitai 回填仅在快照缺失时兜底
     return {
-      ...m,
+      ...omitListLegacyFields(m),
       ...metaDisplayFields(m, meta, { baseModel: m.baseModel || '' }),
     }
   })
@@ -251,7 +264,12 @@ export function registerStoreHandlers() {
         releaseMaintenance(token)
       }
     },
-    { errorPrefix: '数据加载失败' },
+    {
+      errorPrefix: '数据加载失败',
+      // OPT-3/OPT-11：列表通道阈值下调至 200ms——万级库的全量模型载荷是
+      // 结构化克隆的大头，[perf] 数据驱动后续瘦身决策
+      perfWarnMs: 200,
+    },
   )
 
   // F1：打开已保存的模型库并优先返回本地索引（秒切库）。
@@ -327,7 +345,7 @@ export function registerStoreHandlers() {
         releaseMaintenance(token)
       }
     },
-    { errorPrefix: '打开模型库失败' },
+    { errorPrefix: '打开模型库失败', perfWarnMs: 200 },
   )
 
   // 选择模型根目录
