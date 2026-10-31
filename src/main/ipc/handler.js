@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import { ipcMain } from 'electron'
 import logger from '../logger'
+import { startPerf } from '../services/perf'
 import { getCurrentRoot, isInRoot } from '../services/store'
 import { validateIpcPayload } from '../../shared/ipc-schema'
 import { isPathRealWithin, resolveRealPath } from '../utils'
@@ -24,22 +25,48 @@ import { isThumbRendererContents } from '../services/thumb-renderer'
  *   一律拒绝并告警（O1 fail-closed），新增通道漏登记不会静默绕过结构门禁；
  * - 抛出的异常兜底为 { error: `${前缀}: ${err.message}` } 并写主进程日志；
  * - AbortError（用户主动取消）保留 { canceled: true } 语义（与 models:scan
- *   取消链路的既有契约一致）。
+ *   取消链路的既有契约一致）；
+ * - 通道级耗时观测（OPT-3，PERF-2 基线）：每次 invoke 覆盖「schema 校验 +
+ *   业务处理」全程计时，quiet 模式低于阈值零日志（高频通道无噪音）、超阈值
+ *   以 [perf] warn 显形（长耗时通道按 perfWarnMs 下调阈值采集基线，为
+ *   IPC payload 瘦身等优化提供实测依据）；失败路径不静默——异常日志始终
+ *   携带耗时（按通道名检索可离线聚合失败率/慢调用分布）。
  */
+
+/** IPC 通道慢调用阈值（ms）：quiet 模式仅超阈值写 [perf] 日志 */
+const IPC_PERF_WARN_MS = 1000
+/** 慢调用阈值（测试可注入 0 观察全部通道） */
+let ipcPerfWarnMs = IPC_PERF_WARN_MS
+
+/**
+ * 注入 IPC 通道慢调用阈值（仅供单元测试使用；生产代码严禁调用）
+ * @param {number} ms 毫秒
+ */
+export function setIpcPerfWarnMsForTests(ms) {
+  ipcPerfWarnMs = Number.isFinite(ms) && ms >= 0 ? ms : IPC_PERF_WARN_MS
+}
 
 /**
  * 注册一个带统一异常兜底的 IPC handler。
  * @param {string} channel 通道名（日志定位用）
  * @param {(event: import('electron').IpcMainInvokeEvent, payload: any) => any} handler
  *   业务处理器；返回值原样回传渲染进程
- * @param {{errorPrefix?: string}} [opts] 异常兜底文案前缀（默认「操作失败」）
+ * @param {{errorPrefix?: string, perfWarnMs?: number}} [opts]
+ *   errorPrefix 为异常兜底文案前缀（默认「操作失败」）；perfWarnMs 覆盖该
+ *   通道的慢调用阈值（长耗时通道下调以采集基线，高频通道保持全局默认）
  */
 export function wrapHandler(channel, handler, opts = {}) {
   const prefix = opts.errorPrefix || '操作失败'
+  const perfWarnMs =
+    typeof opts.perfWarnMs === 'number' ? opts.perfWarnMs : ipcPerfWarnMs
   ipcMain.handle(channel, async (event, payload) => {
+    // OPT-3 通道级观测：覆盖「schema 校验 + 业务处理」全程，label 即通道名
+    //（与既有 [perf] 打点同一前缀格式，可统一检索聚合）
+    const done = startPerf(channel, { warnMs: perfWarnMs, quiet: true })
     // OPT-01：缩略图隐藏窗口只允许 on/send 两条缩略图通道；即使其
     // preload 被图片解码漏洞利用，也不能借 invoke 触达业务 IPC。
     if (isThumbRendererContents(event?.sender)) {
+      done('来源拒绝')
       logger.warn(`拒绝来自缩略图渲染窗口的 IPC 调用: ${channel}`)
       return { error: '不允许的 IPC 来源' }
     }
@@ -47,16 +74,24 @@ export function wrapHandler(channel, handler, opts = {}) {
       // O-2 结构门禁：非法 payload 不进入业务代码（语义校验仍在 handler 内）
       const schemaError = validateIpcPayload(channel, payload)
       if (schemaError) {
+        done('入参校验失败')
         logger.warn(`IPC ${channel} 入参校验失败: ${schemaError}`)
         return { error: schemaError }
       }
-      return await handler(event, payload)
+      const result = await handler(event, payload)
+      done()
+      return result
     } catch (err) {
       if (err?.name === 'AbortError') {
+        done('用户取消')
         logger.info(`IPC ${channel}: 用户已取消`)
         return { canceled: true }
       }
-      logger.error(`IPC ${channel} 处理异常: ${err.stack || err.message}`)
+      // 失败路径不受 quiet 静默：done 恒返回耗时，随异常日志带出
+      const ms = done(err?.message || '异常')
+      logger.error(
+        `IPC ${channel} 处理异常（耗时 ${ms}ms）: ${err.stack || err.message}`,
+      )
       return { error: `${prefix}: ${err.message}` }
     }
   })

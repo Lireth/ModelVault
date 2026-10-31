@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
@@ -532,5 +532,119 @@ describe('IPC 通道单一来源对账（O2）', () => {
       'utf-8',
     )
     expect(globalDts).not.toContain('api: any')
+  })
+})
+
+// —— wrapHandler 统一包装运行时行为（O1/O2 契约 + OPT-3 通道观测）——
+// 本节为运行时测试：handler.js 经 electron ipcMain 测试桩注册。复用已登记
+// 的无参通道名（fail-closed 要求通道已登记；ipcMain 为测试桩，同名重复注册
+// 无副作用），以受控 handler 验证统一包装、异常兜底与通道级打点语义。
+const { ipcMainHandleMock } = vi.hoisted(() => ({
+  ipcMainHandleMock: vi.fn(),
+}))
+vi.mock('electron', () => ({
+  app: {
+    getPath: vi.fn(() => '/tmp'),
+    getAppPath: vi.fn(() => '/tmp'),
+    isPackaged: true,
+  },
+  ipcMain: { handle: ipcMainHandleMock },
+  BrowserWindow: vi.fn(),
+}))
+
+const { wrapHandler, setIpcPerfWarnMsForTests } = await import(
+  '../src/main/ipc/handler'
+)
+const logger = (await import('../src/main/logger')).default
+
+describe('wrapHandler 统一包装与通道观测（O1/O2 运行时契约 + OPT-3）', () => {
+  /** 取 wrapHandler 为指定通道注册的统一包装函数 */
+  function getWrapped(channel) {
+    const call = ipcMainHandleMock.mock.calls.find(([name]) => name === channel)
+    if (!call) throw new Error(`通道未注册: ${channel}`)
+    return call[1]
+  }
+
+  beforeEach(() => {
+    ipcMainHandleMock.mockClear()
+    setIpcPerfWarnMsForTests(1000)
+    vi.spyOn(logger, 'info').mockImplementation(() => {})
+    vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    vi.spyOn(logger, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    setIpcPerfWarnMsForTests(1000)
+  })
+
+  it('正常调用返回结果；低于阈值时 [perf] 静默（OPT-3 零噪音）', async () => {
+    wrapHandler('models:loadStore', async () => ({ ok: true }))
+    const wrapped = getWrapped('models:loadStore')
+    const res = await wrapped({ sender: {} }, undefined)
+    expect(res).toEqual({ ok: true })
+    expect(logger.info).not.toHaveBeenCalled()
+    expect(logger.warn).not.toHaveBeenCalled()
+  })
+
+  it('超过阈值的通道以 [perf] warn 显形（通道名 + 耗时）（OPT-3）', async () => {
+    wrapHandler('models:loadStore', async () => 'ok')
+    const wrapped = getWrapped('models:loadStore')
+    vi.spyOn(performance, 'now')
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(5000)
+    await wrapped({ sender: {} }, undefined)
+    expect(logger.warn).toHaveBeenCalledTimes(1)
+    expect(logger.warn.mock.calls[0][0]).toContain(
+      '[perf] models:loadStore 耗时 5000ms',
+    )
+    expect(logger.info).not.toHaveBeenCalled()
+  })
+
+  it('perfWarnMs 按通道覆盖全局阈值（长耗时通道下调采集基线）（OPT-3）', async () => {
+    wrapHandler('models:loadStore', async () => 'ok', { perfWarnMs: 0 })
+    const wrapped = getWrapped('models:loadStore')
+    await wrapped({ sender: {} }, undefined)
+    // 阈值 0：任何耗时都达到阈值，按 perf.js 语义升级为 warn 级
+    expect(logger.warn).toHaveBeenCalledTimes(1)
+    expect(logger.warn.mock.calls[0][0]).toContain(
+      '[perf] models:loadStore 耗时',
+    )
+  })
+
+  it('异常兜底为 { error } 且失败日志恒带耗时（不受 quiet 静默）（OPT-3）', async () => {
+    wrapHandler(
+      'models:loadStore',
+      async () => {
+        throw new Error('业务失败')
+      },
+      { errorPrefix: '测试失败' },
+    )
+    const wrapped = getWrapped('models:loadStore')
+    const res = await wrapped({ sender: {} }, undefined)
+    expect(res).toEqual({ error: '测试失败: 业务失败' })
+    expect(logger.error).toHaveBeenCalledTimes(1)
+    expect(logger.error.mock.calls[0][0]).toContain(
+      'IPC models:loadStore 处理异常（耗时',
+    )
+  })
+
+  it('AbortError 保留 canceled 语义（既有契约运行时锁定）', async () => {
+    wrapHandler('models:loadStore', async () => {
+      const err = new Error('用户取消')
+      err.name = 'AbortError'
+      throw err
+    })
+    const wrapped = getWrapped('models:loadStore')
+    const res = await wrapped({ sender: {} }, undefined)
+    expect(res).toEqual({ canceled: true })
+  })
+
+  it('未登记 schema 的通道在进入业务前拒绝（O1 fail-closed 运行时锁定）', async () => {
+    wrapHandler('test:unregistered', async () => 'should-not-run')
+    const wrapped = getWrapped('test:unregistered')
+    const res = await wrapped({ sender: {} }, {})
+    expect(res.error).toBe('通道未登记入参 schema: test:unregistered')
+    expect(logger.warn).toHaveBeenCalledTimes(1)
   })
 })
