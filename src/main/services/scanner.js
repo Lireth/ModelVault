@@ -38,6 +38,14 @@ export const MAX_SCAN_DEPTH = 8
 /** 并行 stat 的并发上限：与 watcher 等共用 utils.runWithConcurrency（流式取任务，无批间屏障） */
 const STAT_CONCURRENCY = 64
 
+/**
+ * 目录遍历的并发上限（OPT-02）：与 watcher 快照遍历
+ * （watcher-snapshot 的 DEFAULT_TRAVERSAL_CONCURRENCY=8）同一量级的有界并发。
+ * 此前 readdir 逐目录 await——大库/机械盘/网络盘上扫描耗时 ≈ 目录数 × 单次
+ * readdir 延迟，是遍历阶段唯一的纯串行等待（文件 stat 本就 64 路并行）。
+ */
+const TRAVERSAL_CONCURRENCY = 8
+
 /** 跳过的文件/目录名（说明文件、隐藏项、无关目录） */
 const EXCLUDED_ENTRY = /^(put_|\.)/i
 
@@ -188,6 +196,11 @@ export function modelAddedMs(stat) {
 
 /**
  * 递归扫描模型目录。
+ *
+ * 目录遍历为有界并发（OPT-02）：readdir 在固定并发窗口内重叠，消除大库/
+ * 机械盘/网络盘上「目录数 × 单次 readdir 延迟」的串行等待；结果按出队序号
+ * 顺序提交，输出的内容与顺序运行间确定（遍历次序为 BFS）。
+ *
  * @param {string} root 模型根目录绝对路径
  * @param {(progress: {dirs: number, found: number, current: string}) => void} [onProgress] 进度回调
  * @param {{excludeDirs?: string[]|Set<string>, extensions?: string[]|Set<string>,
@@ -248,26 +261,123 @@ export async function scanModels(root, onProgress, options = {}) {
           (item) => item.depth <= MAX_SCAN_DEPTH && isInsideRoot(item.dir),
         )
     : [{ dir: root, depth: 0, rel: '', descend: true }]
-  const stack = initialDirs
+  const queue = initialDirs
+  // OPT-02 并发遍历：动态 FIFO 队列 + 固定 worker（与 watcher-snapshot 的
+  // pump 同构的有界并发）——readdir 在并发窗口内重叠；子目录在读取完成后
+  // 压入共享队尾（BFS）。确定性保证：目录节点出队时分配单调序号，读改写
+  // 完成的结果按序号顺序提交——models/errors/dirSnapshot 的内容与相互顺序
+  // 与串行实现完全一致（仅遍历次序 DFS→BFS，运行间确定性不变），取消与
+  // seenIds 去重语义不变。
+  let nextSeq = 0
+  let nextCommitSeq = 0
+  /** 已完成读改写、待按序提交的目录单元（seq → unit；null 为跳过占位） */
+  const pendingUnits = new Map()
+  let qi = 0
+  let active = 0
+  let settled = false
+  /** 结束遍历（err 非空时以该错误拒绝整体 Promise，如 stat 池的取消中止） */
+  let settleWalk = /** @type {(err?: Error) => void} */ (() => {})
+  const walkDone = /** @type {Promise<void>} */ (
+    new Promise((resolve, reject) => {
+      settleWalk = (err) => {
+        if (settled) return
+        settled = true
+        if (err) reject(err)
+        else resolve()
+      }
+    })
+  )
 
-  while (stack.length > 0) {
-    if (signal?.aborted) throw abortError()
-    const { dir, depth, rel, descend } = stack.pop()
-    if (depth > MAX_SCAN_DEPTH) continue
+  /**
+   * 提交所有已就绪的连续序号单元（同步、纯 CPU：快照登记 + 模型登记）。
+   * 提交严格按出队序号推进——单个慢目录只延迟其后目录的「登记」时机，
+   * 不阻塞并发窗口内其他目录的 readdir/stat。
+   */
+  function commitReadyUnits() {
+    while (pendingUnits.has(nextCommitSeq)) {
+      const unit = pendingUnits.get(nextCommitSeq)
+      pendingUnits.delete(nextCommitSeq)
+      nextCommitSeq += 1
+      if (!unit) continue
+      if (unit.error) {
+        errors.push({ dir: unit.dir, message: unit.error })
+        continue
+      }
+      // OPT-02：记录本目录的可见条目名（与 watcher 快照同构，排序保证稳定比较）
+      dirSnapshot.set(unit.dir, unit.visibleNames.sort())
+      unit.fileEntries.forEach((f, index) => {
+        const { stat, err } = unit.stats[index]
+        if (err) {
+          errors.push({ dir: f.fullPath, message: err })
+          return
+        }
+        if (seenIds.has(f.fullPath)) return
+        seenIds.add(f.fullPath)
+        const ext = f.ext || path.extname(f.name).toLowerCase()
+        models.push({
+          id: f.fullPath,
+          // disabled 文件名含双重后缀（x.safetensors.disabled），一并剥离
+          name: path.basename(
+            f.name,
+            ext + (f.disabled ? DISABLED_SUFFIX : ''),
+          ),
+          ext,
+          disabled: f.disabled === true,
+          type: classifyModel(
+            unit.rel ? unit.rel.split('/') : [],
+            f.name,
+          ),
+          // 自动分类标签：按文件夹名匹配（装饰层与 meta.subCategory 合成生效）
+          folderSubCategory: classifySubCategory(
+            unit.rel ? unit.rel.split('/') : [],
+          ),
+          folder: unit.dir,
+          relDir: unit.rel,
+          size: stat.size,
+          mtimeMs: stat.mtimeMs,
+          // 添加时间（OPT-1「按添加时间」排序数据源）：随模型对象透传装饰层
+          // 与本地索引（索引保留装饰层额外字段），渲染层缺省时回退 mtimeMs
+          ctimeMs: modelAddedMs(stat),
+        })
+        onProgress?.({
+          dirs: dirCount,
+          found: models.length,
+          current: f.relChild,
+        })
+      })
+    }
+  }
+
+  /** 处理单个出队目录：readdir → 分类入队子目录 → 并行 stat → 按序提交 */
+  async function processDir(node) {
+    const seq = nextSeq++
+    const { dir, depth, rel, descend } = node
+    if (depth > MAX_SCAN_DEPTH) {
+      // 超深目录不入快照不计数（与旧实现一致）；占位空槽保持提交链连续
+      pendingUnits.set(seq, null)
+      commitReadyUnits()
+      return
+    }
 
     let entries
     try {
       entries = await fs.readdir(dir, { withFileTypes: true })
     } catch (err) {
       // 子树模式下目标目录已被删除是正常增量场景，静默跳过；
-      // 全量模式（根节点不可读）仍计入错误由调用方决定停止监控
-      if (scoped) continue
-      errors.push({ dir, message: err.message })
-      continue
+      // 全量模式（根节点不可读）仍计入错误由调用方决定停止监控。
+      // 两类均以占位/错误单元进提交链：序号连续、errors 顺序确定
+      if (scoped) {
+        pendingUnits.set(seq, null)
+        commitReadyUnits()
+        return
+      }
+      pendingUnits.set(seq, { dir, error: err?.message || String(err) })
+      commitReadyUnits()
+      return
     }
     dirCount += 1
 
-    // 先遍历目录项：入队子目录 + 收集待 stat 的模型文件
+    // 先遍历目录项：子目录压入共享队尾（BFS）+ 收集待 stat 的模型文件
     const fileEntries = []
     const visibleNames = []
     for (const entry of entries) {
@@ -282,7 +392,7 @@ export async function scanModels(root, onProgress, options = {}) {
       if (entry.isDirectory()) {
         // descend=false 仅用于子树集合中的根节点（''）：不递归后代
         if (descend) {
-          stack.push({
+          queue.push({
             dir: fullPath,
             depth: depth + 1,
             rel: relChild,
@@ -311,13 +421,12 @@ export async function scanModels(root, onProgress, options = {}) {
       if (!extensions.has(path.extname(name).toLowerCase())) continue
       fileEntries.push({ fullPath, name, relChild })
     }
-    // OPT-02：记录本目录的可见条目名（与 watcher 快照同构，排序保证稳定比较）
-    dirSnapshot.set(dir, visibleNames.sort())
 
     // 并行 stat（取 size/mtime/birthtime）：流式固定并发池（与 watcher 共用
-    // utils.runWithConcurrency，O-5）——完成一个补位一个，无「批内并发、
-    // 批间串行」的整批等待尾延迟，并发峰值恒定。结果按索引回填后在下方
-    // 顺序提交，保持 models/errors 的顺序确定性与取消语义（每文件前检查）。
+    // utils.runWithConcurrency，O-5）——完成一个补位一个。目录级并发后，
+    // 同窗口内多个目录的 stat 池自然重叠，在途总量仍有界（≤ 在途单元数 ×
+    // 64，实际受 libuv 线程池约束）。结果按索引回填后进提交链，取消语义
+    // （每文件前检查）与顺序提交语义不变。
     const stats = new Array(fileEntries.length)
     await runWithConcurrency(
       fileEntries,
@@ -331,39 +440,40 @@ export async function scanModels(root, onProgress, options = {}) {
       },
       STAT_CONCURRENCY,
     )
-    fileEntries.forEach((f, index) => {
-      const { stat, err } = stats[index]
-      if (err) {
-        errors.push({ dir: f.fullPath, message: err })
-        return
-      }
-      if (seenIds.has(f.fullPath)) return
-      seenIds.add(f.fullPath)
-      const ext = f.ext || path.extname(f.name).toLowerCase()
-      models.push({
-        id: f.fullPath,
-        // disabled 文件名含双重后缀（x.safetensors.disabled），一并剥离
-        name: path.basename(f.name, ext + (f.disabled ? DISABLED_SUFFIX : '')),
-        ext,
-        disabled: f.disabled === true,
-        type: classifyModel(rel ? rel.split('/') : [], f.name),
-        // 自动分类标签：按文件夹名匹配（装饰层与 meta.subCategory 合成生效）
-        folderSubCategory: classifySubCategory(rel ? rel.split('/') : []),
-        folder: dir,
-        relDir: rel,
-        size: stat.size,
-        mtimeMs: stat.mtimeMs,
-        // 添加时间（OPT-1「按添加时间」排序数据源）：随模型对象透传装饰层
-        // 与本地索引（索引保留装饰层额外字段），渲染层缺省时回退 mtimeMs
-        ctimeMs: modelAddedMs(stat),
-      })
-      onProgress?.({
-        dirs: dirCount,
-        found: models.length,
-        current: f.relChild,
-      })
-    })
+    pendingUnits.set(seq, { dir, rel, fileEntries, stats, visibleNames })
+    commitReadyUnits()
   }
+
+  // 固定 worker 池：pump 完成一个补位一个（与 watcher-snapshot 同构）
+  const pump = () => {
+    if (settled) return
+    if (active === 0 && (qi >= queue.length || signal?.aborted)) {
+      // 队列排空或已取消：正常收尾——取消由外层 signal 后置检查统一抛 AbortError
+      settleWalk()
+      return
+    }
+    while (
+      active < TRAVERSAL_CONCURRENCY &&
+      qi < queue.length &&
+      !settled &&
+      !signal?.aborted
+    ) {
+      const node = queue[qi++]
+      active += 1
+      processDir(node)
+        .catch((err) => {
+          // stat 池的取消中止等异常：终止整次遍历（与旧实现异常直接上抛一致）
+          settleWalk(err)
+        })
+        .finally(() => {
+          active -= 1
+          pump()
+        })
+    }
+  }
+  pump()
+  await walkDone
+  if (signal?.aborted) throw abortError()
 
   return { models, errors, dirCount, dirSnapshot }
 }

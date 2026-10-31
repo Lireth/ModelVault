@@ -303,6 +303,58 @@ describe('scanModels', () => {
     expect(partial.dirSnapshot.has(root)).toBe(false)
   })
 
+  it('并发遍历：多次扫描输出完全一致（运行间确定性，OPT-02）', async () => {
+    // 多层级多文件树：跨目录的提交顺序是并发调度最敏感的面
+    await fs.mkdir(path.join(root, 'lora', '角色', 'deep'), {
+      recursive: true,
+    })
+    await fs.writeFile(path.join(root, 'lora', '角色', 'c1.safetensors'), 'x')
+    await fs.writeFile(
+      path.join(root, 'lora', '角色', 'deep', 'd1.safetensors'),
+      'x',
+    )
+    await fs.writeFile(path.join(root, 'lora', 'c2.safetensors'), 'x')
+    try {
+      const run1 = await scanModels(root, undefined, {})
+      const run2 = await scanModels(root, undefined, {})
+
+      // 运行间确定性：并发调度差异不得泄漏到输出顺序
+      expect(run2.models.map((m) => m.id)).toEqual(run1.models.map((m) => m.id))
+      expect(run2.dirCount).toBe(run1.dirCount)
+      // 目录快照逐键一致
+      expect(run2.dirSnapshot.size).toBe(run1.dirSnapshot.size)
+      for (const [dir, names] of run1.dirSnapshot) {
+        expect(run2.dirSnapshot.get(dir)).toEqual(names)
+      }
+
+      // 全量内容抽查：BFS 遍历覆盖嵌套深层目录
+      const ids = run1.models.map((m) => m.id)
+      expect(ids).toContain(
+        path.join(root, 'lora', '角色', 'deep', 'd1.safetensors'),
+      )
+      // 深层模型的类型/标签派生与层级一致
+      const deep = run1.models.find(
+        (m) => m.id === path.join(root, 'lora', '角色', 'deep', 'd1.safetensors'),
+      )
+      expect(deep.type).toBe('lora')
+      expect(deep.folderSubCategory).toBe('role')
+    } finally {
+      await fs.rm(path.join(root, 'lora', '角色'), {
+        recursive: true,
+        force: true,
+      })
+      await fs.rm(path.join(root, 'lora', 'c2.safetensors'), { force: true })
+    }
+  })
+
+  it('取消：已中止信号以 AbortError 拒绝且不产出结果（OPT-02 保持语义）', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      scanModels(root, undefined, { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
   it('子树重复/重叠时按 id 去重，扫描结果不含重复模型（B-01 防御）', async () => {
     await fs.mkdir(path.join(root, 'lora', 'sub'), { recursive: true })
     await fs.writeFile(
