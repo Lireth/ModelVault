@@ -77,6 +77,7 @@ import {
   syncWatcher,
 } from '../src/main/services/watcher'
 import {
+  flushSettingsSave,
   getCurrentRoot,
   loadData,
   loadSettings,
@@ -99,6 +100,12 @@ const settingsFile = path.join(fakeUserData, 'settings.json')
 const roots = []
 let root
 let releaseScan
+
+/** OPT-4：updateSettings 落盘经防抖合并——磁盘往返断言前先冲刷待写快照 */
+const loadSettingsFlushed = async () => {
+  await flushSettingsSave()
+  return loadSettings()
+}
 
 /** 将 scanModels mock 挂起（返回手动释放的 Promise），释放时可指定正常返回或 AbortError */
 function hangScanModels() {
@@ -143,7 +150,9 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  // settings.json 由 updateSettings/chooseFolder 用例写入，清理防跨用例污染
+  // OPT-4：先冲刷防抖待写再清理——顺序颠倒会让迟到的落盘在删除后
+  // 重建 settingsFile，把上一用例的引导层状态泄漏进下一用例的 loadSettings
+  await flushSettingsSave()
   await fs.rm(settingsFile, { force: true }).catch(() => {})
   vi.mocked(dialog.showOpenDialog).mockReset()
 })
@@ -794,7 +803,7 @@ describe('models:scan 目录校验与回写（C6）', () => {
     const scan = getRegisteredHandler('models:scan')
     const res = await scan(makeEvent(), { folder: rootB })
     expect(res.root).toBe(rootB)
-    const { modelsFolder } = await loadSettings()
+    const { modelsFolder } = await loadSettingsFlushed()
     expect(modelsFolder).toBe(rootB)
   })
 
@@ -812,7 +821,7 @@ describe('models:scan 目录校验与回写（C6）', () => {
     expect(res.error).toContain('磁盘错误')
     // 已切到 rootB 后扫描失败：必须回滚到原根，避免渲染层旧列表与主进程根错位
     expect(getCurrentRoot()).toBe(root)
-    const { modelsFolder } = await loadSettings()
+    const { modelsFolder } = await loadSettingsFlushed()
     expect(modelsFolder).toBe(root)
   })
 })
@@ -926,7 +935,7 @@ describe('models:chooseFolder', () => {
       filePaths: [root],
     })
     expect(await chooseFolder(makeEvent())).toBe(root)
-    const settings = await loadSettings()
+    const settings = await loadSettingsFlushed()
     // 目录进入库列表（供后续 models:scan 白名单校验），但不提前成为激活库
     expect(settings.modelsFolders).toContain(root)
     expect(settings.modelsFolder).not.toBe(root)
@@ -958,7 +967,7 @@ describe('settings:update', () => {
       modelsFolder: path.join(root, 'no-such-dir'),
     })
     expect(res.error).toContain('模型文件夹不存在或不是目录')
-    const { modelsFolder } = await loadSettings()
+    const { modelsFolder } = await loadSettingsFlushed()
     expect(modelsFolder).toBe('')
   })
 
@@ -980,7 +989,7 @@ describe('settings:update', () => {
     const update = getRegisteredHandler('settings:update')
     const res = await update(makeEvent(), { modelsFolder: outside })
     expect(res.error).toContain('不在模型库列表')
-    const settings = await loadSettings()
+    const settings = await loadSettingsFlushed()
     expect(settings.modelsFolder).toBe('')
     expect(settings.modelsFolders).toEqual([])
   })
@@ -999,7 +1008,7 @@ describe('settings:update', () => {
     await updateSettings({ modelsFolder: root, modelsFolders: [root] })
     const removed = await update(makeEvent(), { modelsFolders: [] })
     expect(removed.error).toBeUndefined()
-    const settings = await loadSettings()
+    const settings = await loadSettingsFlushed()
     // 激活库恒保留在列表中，移除仅作用于其余条目
     expect(settings.modelsFolders).toEqual([root])
   })

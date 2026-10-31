@@ -37,6 +37,7 @@ import {
   updateSettings,
 } from '../src/main/services/store'
 import logger from '../src/main/logger'
+import { setSettingsSaveDelayForTests } from '../src/main/services/store-settings'
 import { setSnapshotWorkerThresholdForTests } from '../src/main/services/store-meta-persist'
 import { fakeUserData } from './setup'
 
@@ -65,6 +66,13 @@ beforeEach(async () => {
   roots.push(root)
   setDataRoot(root)
   await loadData()
+})
+
+// OPT-4：updateSettings 的落盘经防抖合并——用例结束后冲刷待写快照，
+// 防止迟到的落盘把前序用例的设置写进共享夹具路径，干扰后续读盘断言
+afterEach(async () => {
+  await flushSettingsSave()
+  setSettingsSaveDelayForTests(500)
 })
 
 // 只清理本文件创建的临时目录：删除整个系统临时目录会连带摧毁
@@ -870,14 +878,20 @@ describe('切换根目录与落盘链（A6）', () => {
 })
 
 describe('应用设置规范化', () => {
+  // OPT-4：updateSettings 落盘经防抖合并——磁盘往返断言前先冲刷待写快照，
+  // 使 loadSettings 能读到刚写入的值（冲刷无待写时为零开销空操作）
+  const loadSettingsFlushed = async () => {
+    await flushSettingsSave()
+    return loadSettings()
+  }
   it('autoBackup 默认开启，显式关闭保留，非法值回退开启（OPT-07）', async () => {
-    let s = await loadSettings()
+    let s = await loadSettingsFlushed()
     expect(s.autoBackup).toBe(true)
     await updateSettings({ autoBackup: false })
-    s = await loadSettings()
+    s = await loadSettingsFlushed()
     expect(s.autoBackup).toBe(false)
     await updateSettings({ autoBackup: 'no' })
-    s = await loadSettings()
+    s = await loadSettingsFlushed()
     expect(s.autoBackup).toBe(true)
     // 恢复默认，避免影响后续用例
     await updateSettings({ autoBackup: true })
@@ -887,74 +901,74 @@ describe('应用设置规范化', () => {
     await updateSettings({
       excludeDirs: ['Loras', '  LORAS ', 'Embeds', '', '.modelvault'],
     })
-    const { excludeDirs } = await loadSettings()
+    const { excludeDirs } = await loadSettingsFlushed()
     expect(excludeDirs).toEqual(['loras', 'embeds', '.modelvault'])
   })
 
   it('收藏/评分排序合法（U2 白名单扩展），未知排序回退 name，sortAsc 仅接受布尔', async () => {
     await updateSettings({ sortBy: 'favorite', sortAsc: false })
-    let s = await loadSettings()
+    let s = await loadSettingsFlushed()
     expect(s.sortBy).toBe('favorite')
     expect(s.sortAsc).toBe(false)
     // sortAsc 非布尔回退默认 true
     await updateSettings({ sortAsc: 'yes' })
-    s = await loadSettings()
+    s = await loadSettingsFlushed()
     expect(s.sortAsc).toBe(true)
   })
 
   it('theme 接受 dark/light/system，未知值回退默认 system', async () => {
     await updateSettings({ theme: 'light' })
-    let s = await loadSettings()
+    let s = await loadSettingsFlushed()
     expect(s.theme).toBe('light')
     await updateSettings({ theme: 'neon' })
-    s = await loadSettings()
+    s = await loadSettingsFlushed()
     expect(s.theme).toBe('system')
   })
 
   it('hashWarmup 接受 candidates/full/off，未知值回退 candidates', async () => {
     for (const mode of ['full', 'off', 'candidates']) {
       await updateSettings({ hashWarmup: mode })
-      const s = await loadSettings()
+      const s = await loadSettingsFlushed()
       expect(s.hashWarmup).toBe(mode)
     }
     await updateSettings({ hashWarmup: 'turbo' })
-    const s = await loadSettings()
+    const s = await loadSettingsFlushed()
     expect(s.hashWarmup).toBe('candidates')
   })
 
   it('autoCheckUpdate 缺省视为开启，显式关闭后持久生效（O-3）', async () => {
-    let s = await loadSettings()
+    let s = await loadSettingsFlushed()
     expect(s.autoCheckUpdate).toBe(true)
     await updateSettings({ autoCheckUpdate: false })
-    s = await loadSettings()
+    s = await loadSettingsFlushed()
     expect(s.autoCheckUpdate).toBe(false)
     // 与 civitaiEnabled 同款宽松语义：仅显式 false 关闭，缺省/其余值回退开启
     await updateSettings({ autoCheckUpdate: undefined })
-    s = await loadSettings()
+    s = await loadSettingsFlushed()
     expect(s.autoCheckUpdate).toBe(true)
   })
 
   it('viewMode 接受 grid/list，未知值回退 grid', async () => {
     await updateSettings({ viewMode: 'list' })
-    let s = await loadSettings()
+    let s = await loadSettingsFlushed()
     expect(s.viewMode).toBe('list')
     await updateSettings({ viewMode: 'kanban' })
-    s = await loadSettings()
+    s = await loadSettingsFlushed()
     expect(s.viewMode).toBe('grid')
   })
 
   it('accentColor 规范化：预设 key 与 #rrggbb 自定义色合法，非法回退默认', async () => {
     await updateSettings({ accentColor: 'violet' })
-    let s = await loadSettings()
+    let s = await loadSettingsFlushed()
     expect(s.accentColor).toBe('violet')
     // 自定义 hex 统一小写
     await updateSettings({ accentColor: '#FF8800' })
-    s = await loadSettings()
+    s = await loadSettingsFlushed()
     expect(s.accentColor).toBe('#ff8800')
     // 非法形态（含 # 但非 hex / 超长 / 非字符串）回退默认 blue
     for (const bad of ['#12345', '#1234567', 'x'.repeat(21), 42]) {
       await updateSettings({ accentColor: bad })
-      s = await loadSettings()
+      s = await loadSettingsFlushed()
       expect(s.accentColor).toBe('blue')
     }
   })
@@ -988,7 +1002,7 @@ describe('应用设置规范化', () => {
         'not-an-object', // 非对象：剔除
       ],
     })
-    const s = await loadSettings()
+    const s = await loadSettingsFlushed()
     expect(s.savedViews).toHaveLength(3)
     expect(s.savedViews[0]).toEqual({
       id: 'v1',
@@ -1025,27 +1039,27 @@ describe('应用设置规范化', () => {
 
   it('hashWarmupConcurrency 规范化：整数收口 1-4，非法值回退（OPT-3）', async () => {
     await updateSettings({ hashWarmupConcurrency: 3 })
-    let s = await loadSettings()
+    let s = await loadSettingsFlushed()
     expect(s.hashWarmupConcurrency).toBe(3)
     // 越界钳制到上限/下限
     await updateSettings({ hashWarmupConcurrency: 9 })
-    s = await loadSettings()
+    s = await loadSettingsFlushed()
     expect(s.hashWarmupConcurrency).toBe(4)
     await updateSettings({ hashWarmupConcurrency: 0 })
-    s = await loadSettings()
+    s = await loadSettingsFlushed()
     expect(s.hashWarmupConcurrency).toBe(1)
     // 非数值回退默认 1；小数向下取整
     await updateSettings({ hashWarmupConcurrency: 'oops' })
-    s = await loadSettings()
+    s = await loadSettingsFlushed()
     expect(s.hashWarmupConcurrency).toBe(1)
     await updateSettings({ hashWarmupConcurrency: 2.9 })
-    s = await loadSettings()
+    s = await loadSettingsFlushed()
     expect(s.hashWarmupConcurrency).toBe(2)
   })
 
   it('savedViews 缺失或非数组时回退空数组，上限 20 个', async () => {
     await updateSettings({ savedViews: 'oops' })
-    let s = await loadSettings()
+    let s = await loadSettingsFlushed()
     expect(s.savedViews).toEqual([])
 
     const many = Array.from({ length: 25 }, (_, i) => ({
@@ -1053,7 +1067,7 @@ describe('应用设置规范化', () => {
       name: `视图${i}`,
     }))
     await updateSettings({ savedViews: many })
-    s = await loadSettings()
+    s = await loadSettingsFlushed()
     expect(s.savedViews).toHaveLength(20)
     expect(s.savedViews[19].id).toBe('v19')
   })
@@ -1136,6 +1150,8 @@ describe('应用设置文件损坏恢复（B2）', () => {
     setStoreSaveErrorListener((err) => errors.push(err))
     try {
       await updateSettings({ modelsFolder: root })
+      // OPT-4：落盘经防抖合并，冲刷待写后失败才上报（通知随写盘任务挂接）
+      await flushSettingsSave()
       expect(errors).toHaveLength(1)
       expect(errors[0].message).toContain('设置保存失败')
       // 失败的写盘已由链内 catch 消化：flush 不会 reject
@@ -1154,6 +1170,8 @@ describe('应用设置文件损坏恢复（B2）', () => {
     setStoreSaveErrorListener((err) => errors.push(err))
     try {
       await updateSettings({ sortBy: 'mtime' })
+      // OPT-4：落盘经防抖合并，冲刷待写后失败才上报
+      await flushSettingsSave()
       // 失败已上报且信息可辨识
       expect(errors).toHaveLength(1)
       expect(errors[0].message).toContain('设置保存失败')
@@ -1166,40 +1184,31 @@ describe('应用设置文件损坏恢复（B2）', () => {
 })
 
 describe('库设置并发落盘串行化（A1）', () => {
-  it('并发 updateSettings 依次落盘：最终文件为最新合并快照，且不产生失败上报', async () => {
+  it('窗口内多次 updateSettings 合并为一次库层落盘：最终文件为最新合并快照，且不产生失败上报（OPT-4）', async () => {
     // 库设置落盘到当前根目录的 .modelvault/settings.json（设置随模型库走）
     const libSettingsFile = path.join(root, '.modelvault', 'settings.json')
+    const settingsRenames = []
     const realRename = fs.rename.bind(fs)
-    let releaseFirstRename = () => {}
-    const firstRenameGate = new Promise((resolve) => {
-      releaseFirstRename = resolve
-    })
-    let gated = false
     vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
-      // 卡住库设置文件的第一次 rename，构造与后续并发写重叠的时间窗口
-      if (!gated && src.includes('settings.json')) {
-        gated = true
-        await firstRenameGate
-      }
+      if (String(dst).includes('settings.json')) settingsRenames.push(dst)
       return realRename(src, dst)
     })
 
     const errors = []
     setStoreSaveErrorListener((err) => errors.push(err))
     try {
-      const first = updateSettings({ theme: 'light' })
-      // 等第一次写进入 rename（临时文件已写好），再发起第二次并发更新
-      await vi.waitFor(() => expect(gated).toBe(true))
-      const second = updateSettings({ cardSize: 'large' })
-      releaseFirstRename()
-      await Promise.all([first, second])
+      await updateSettings({ theme: 'light' })
+      await updateSettings({ cardSize: 'large' })
+      await flushSettingsSave()
 
-      // 串行化后无任何写失败（未串行化时：共享临时文件导致一方 rename ENOENT 被上报）
+      // 串行化后无任何写失败
       expect(errors).toEqual([])
-      // 最终落盘包含两次更新的合并结果（未串行化时可能仅剩先前的旧快照）
+      // 最终落盘包含两次更新的合并结果
       const onDisk = JSON.parse(await fs.readFile(libSettingsFile, 'utf-8'))
       expect(onDisk.theme).toBe('light')
       expect(onDisk.cardSize).toBe('large')
+      // 防抖合并生效：两次补丁只产生一次库层落盘（旧实现逐次全量写盘）
+      expect(settingsRenames).toHaveLength(1)
     } finally {
       setStoreSaveErrorListener(null)
       vi.restoreAllMocks()
@@ -1214,42 +1223,28 @@ describe('库设置并发落盘串行化（A1）', () => {
     roots.push(other)
     const libB = path.join(other, '.modelvault', 'settings.json')
 
-    const realRename = fs.rename.bind(fs)
-    let releaseFirstRename = () => {}
-    const firstRenameGate = new Promise((resolve) => {
-      releaseFirstRename = resolve
-    })
-    let gated = false
-    vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
-      if (!gated && src.includes('settings.json')) {
-        gated = true
-        await firstRenameGate
-      }
-      return realRename(src, dst)
-    })
+    // 两次补丁之间切换根：各补丁的快照与 root 在调用同步段捕获（B-02），
+    // 防抖冲刷后各写各的库——若实现回退为「执行时读取全局 library」，
+    // 第二次补丁会随旧库写入一起落进 A（cardSize 变 large），本用例即失败
+    await updateSettings({ theme: 'light', cardSize: 'normal' })
+    setDataRoot(other)
+    await updateSettings({ cardSize: 'large' })
+    await flushSettingsSave()
 
-    try {
-      // 显式写入 cardSize，避免用例间共享的模块级 library 残留影响断言
-      const first = updateSettings({ theme: 'light', cardSize: 'normal' })
-      await vi.waitFor(() => expect(gated).toBe(true))
-      // 模拟切根窗口：新根已生效，随后又产生一条库字段补丁
-      setDataRoot(other)
-      const second = updateSettings({ cardSize: 'large' })
-      releaseFirstRename()
-      await Promise.all([first, second])
-
-      const onA = JSON.parse(await fs.readFile(libA, 'utf-8'))
-      const onB = JSON.parse(await fs.readFile(libB, 'utf-8'))
-      // 旧实现执行时读取全局 library，会把第二次补丁一并写进旧库 A
-      expect(onA.theme).toBe('light')
-      expect(onA.cardSize).toBe('normal')
-      expect(onB.cardSize).toBe('large')
-    } finally {
-      vi.restoreAllMocks()
-    }
+    const onA = JSON.parse(await fs.readFile(libA, 'utf-8'))
+    const onB = JSON.parse(await fs.readFile(libB, 'utf-8'))
+    expect(onA.theme).toBe('light')
+    expect(onA.cardSize).toBe('normal')
+    expect(onB.cardSize).toBe('large')
   })
 
-  it('flushSettingsSave 等待在途库设置写入完成后再返回（B-02）', async () => {
+  it('flushSettingsSave 冲刷防抖待写并等待在途库设置写入完成后再返回（B-02）', async () => {
+    // 先建立与目标值不同的内存态：变更检测（OPT-4）下仅真实变更才入队写盘，
+    // 直接写 light 可能命中前序用例遗留的相同内存值而零落盘。
+    // 预置冲刷必须在门桩安装前完成——否则 'dark' 写入触发门并在本用例内挂死
+    await updateSettings({ theme: 'dark' })
+    await flushSettingsSave()
+
     const realRename = fs.rename.bind(fs)
     let releaseRename = () => {}
     const gate = new Promise((resolve) => {
@@ -1266,12 +1261,13 @@ describe('库设置并发落盘串行化（A1）', () => {
 
     try {
       const write = updateSettings({ theme: 'light' })
-      await vi.waitFor(() => expect(gated).toBe(true))
-
       let flushed = false
+      // OPT-4：写盘经防抖——flush 先冲刷待写入队，rename 随即进入在途
       const flush = flushSettingsSave().then(() => {
         flushed = true
       })
+      await vi.waitFor(() => expect(gated).toBe(true))
+
       await new Promise((resolve) => setTimeout(resolve, 20))
       expect(flushed).toBe(false)
 
@@ -1303,12 +1299,13 @@ describe('库设置并发落盘串行化（A1）', () => {
 
     try {
       const pendingWrite = updateSettings({ theme: 'light' })
-      await vi.waitFor(() => expect(gated).toBe(true))
-
+      // OPT-4：写盘经防抖——reload 内部的 flushSettingsSave 先冲刷待写入队
       let reloaded = false
       const reload = reloadLibrarySettings(other).then(() => {
         reloaded = true
       })
+      await vi.waitFor(() => expect(gated).toBe(true))
+
       await new Promise((resolve) => setTimeout(resolve, 20))
       // 旧库写在途：重载必须等待，否则会先读到旧状态再被迟到写入影响
       expect(reloaded).toBe(false)
@@ -1321,12 +1318,70 @@ describe('库设置并发落盘串行化（A1）', () => {
       vi.restoreAllMocks()
     }
   })
+
+  describe('设置写盘防抖与变更检测（OPT-4）', () => {
+    it('纯重复更新零落盘：不进入防抖队列、不产生任何写入', async () => {
+      await updateSettings({ theme: 'light' })
+      await flushSettingsSave() // 首次变更落盘，建立磁盘基准
+      const settingsRenames = []
+      const realRename = fs.rename.bind(fs)
+      vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
+        if (String(dst).includes('settings.json')) settingsRenames.push(dst)
+        return realRename(src, dst)
+      })
+
+      try {
+        // 与内存值相同的重复提交（UI 重复点击/状态回写）与空补丁
+        await updateSettings({ theme: 'light' })
+        await updateSettings({ viewMode: getSettings().viewMode })
+        await updateSettings({})
+        await flushSettingsSave()
+
+        expect(settingsRenames).toHaveLength(0)
+        expect(getSettings().theme).toBe('light')
+      } finally {
+        vi.restoreAllMocks()
+      }
+    })
+
+    it('防抖窗口到期自动落盘（无需显式 flush），连续切换合并为一次写', async () => {
+      setSettingsSaveDelayForTests(10)
+      const libSettingsFile = path.join(root, '.modelvault', 'settings.json')
+      const settingsRenames = []
+      const realRename = fs.rename.bind(fs)
+      vi.spyOn(fs, 'rename').mockImplementation(async (src, dst) => {
+        if (String(dst).includes('settings.json')) settingsRenames.push(dst)
+        return realRename(src, dst)
+      })
+
+      try {
+        // 模拟滑块/连续切换：短窗口内多次变更（取值均为合法枚举）
+        await updateSettings({ cardSize: 'large' })
+        await updateSettings({ viewMode: 'list' })
+        await updateSettings({ cardSize: 'compact' })
+        // 不调用 flush：防抖到期自行冲刷
+        await new Promise((resolve) => setTimeout(resolve, 60))
+
+        expect(settingsRenames).toHaveLength(1)
+        const onDisk = JSON.parse(await fs.readFile(libSettingsFile, 'utf-8'))
+        // 合并结果为最后一次全量快照
+        expect(onDisk.cardSize).toBe('compact')
+        expect(onDisk.viewMode).toBe('list')
+        // 内存即时生效（写盘延后不改变运行时可见性）
+        expect(getSettings().cardSize).toBe('compact')
+      } finally {
+        vi.restoreAllMocks()
+      }
+    })
+  })
 })
 
 describe('库设置随模型库存储（双层设置）', () => {
   const settingsFile = path.join(fakeUserData, 'settings.json')
 
   afterEach(async () => {
+    // OPT-4：先冲刷防抖待写再清理，防迟到落盘在删除后重建文件污染下个用例
+    await flushSettingsSave()
     await fs.rm(settingsFile, { force: true }).catch(() => {})
     await fs.rm(`${settingsFile}.bak`, { force: true }).catch(() => {})
   })
@@ -1415,6 +1470,8 @@ describe('库设置随模型库存储（双层设置）', () => {
       expect(getSettings().theme).toBe('light')
       // 引导字段不受影响，照常写入全局文件
       await updateSettings({ modelsFolder: root })
+      // OPT-4：落盘经防抖——冲刷待写后再断言磁盘
+      await flushSettingsSave()
       const onDisk = JSON.parse(await fs.readFile(settingsFile, 'utf-8'))
       expect(onDisk.modelsFolder).toBe(root)
     } finally {

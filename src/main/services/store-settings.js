@@ -384,6 +384,10 @@ async function writeBootstrapFile() {
  * 全局文件仍为旧版完整布局时，激活库完成种子迁移后自动精简为引导字段。
  */
 export async function loadSettings() {
+  // OPT-4：先完整冲刷防抖待写再读盘——重入场景（loadStore 链路会在会话中
+  // 再次调用本函数）若读到滞后的磁盘，会用陈旧引导层重置内存，把尚未落盘的
+  // 激活库/库列表更新静默回滚。无待写时冲刷为立即返回的空操作
+  await flushSettingsSave()
   let rawGlobal = null
   let globalCorrupt = false
   try {
@@ -498,27 +502,129 @@ export function isRegisteredLibrary(dir) {
 }
 
 /**
- * 设置落盘串行队列（A1）：并发 updateSettings 依次写盘，
- * 最终落盘必为最新合并快照。单次写失败经监听器上报后队列继续服务
- * 后续写入，不被中断。引导层与库层各自独立排队。
+ * 设置落盘串行队列（A1）：并发写入依次落盘，最终落盘必为最新合并快照。
+ * 单次写失败经监听器上报后队列继续服务后续写入，不被中断。
+ * 引导层与库层各自独立排队。
  */
 let bootstrapWriteChain = Promise.resolve()
 let libraryWriteChain = Promise.resolve()
 
+/** 库/引导层设置写盘防抖窗口（ms，OPT-4）：与元数据侧 SAVE_DELAY 同值 */
+const SETTINGS_SAVE_DELAY_MS = 500
+/** 防抖最长等待（ms）：持续变更（滑块连点）时保证有限时间内落盘 */
+const SETTINGS_SAVE_MAX_WAIT_MS = 2000
+
+/** 防抖窗口（测试可注入小值；0 表示下一个宏任务即冲刷） */
+let settingsSaveDelayMs = SETTINGS_SAVE_DELAY_MS
+
+/**
+ * 注入设置写盘防抖窗口（仅供单元测试使用；生产代码严禁调用）
+ * @param {number} ms 毫秒
+ */
+export function setSettingsSaveDelayForTests(ms) {
+  settingsSaveDelayMs =
+    Number.isFinite(ms) && ms >= 0 ? ms : SETTINGS_SAVE_DELAY_MS
+}
+
+/**
+ * 防抖窗口内待落盘的快照（OPT-4）。快照与 root 均在 updateSettings 的调用
+ * 同步段捕获（B-02 语义保持：迟到的落盘只写「本次调用所属库」的内容）；
+ * 防抖仅延迟「入队写盘链」的时机：
+ * - 引导层全量快照最新者胜（窗口内多次更新合并为一次写）；
+ * - 库层按序保留且 root 随条目走——防切库窗口内跨库丢写，同库多条目
+ *   由写盘链串行自然「后写覆盖」。
+ */
+let pendingBootstrapSnapshot = null
+const pendingLibrarySaves = []
+let settingsSaveTimer = null
+let firstPendingAt = 0
+
+/** 是否仍有未入队的待写快照 */
+function hasPendingSettingsSaves() {
+  return pendingBootstrapSnapshot !== null || pendingLibrarySaves.length > 0
+}
+
+/** 安排防抖冲刷（重复调用顺延，但受最长等待约束保证前进） */
+function scheduleSettingsSaveFlush() {
+  const now = Date.now()
+  if (!firstPendingAt) firstPendingAt = now
+  if (settingsSaveTimer) clearTimeout(settingsSaveTimer)
+  const elapsed = now - firstPendingAt
+  const delay = Math.max(
+    0,
+    Math.min(settingsSaveDelayMs, SETTINGS_SAVE_MAX_WAIT_MS - elapsed),
+  )
+  settingsSaveTimer = setTimeout(() => {
+    settingsSaveTimer = null
+    flushPendingSettingsSaves()
+  }, delay)
+  settingsSaveTimer.unref?.()
+}
+
+/** 立即将全部待写快照入队写盘链（flushSettingsSave/防抖到期共用） */
+function flushPendingSettingsSaves() {
+  if (settingsSaveTimer) {
+    clearTimeout(settingsSaveTimer)
+    settingsSaveTimer = null
+  }
+  firstPendingAt = 0
+  const bootstrapSnapshot = pendingBootstrapSnapshot
+  pendingBootstrapSnapshot = null
+  if (bootstrapSnapshot) {
+    notifySaveFailure(enqueueBootstrapWrite(bootstrapSnapshot))
+  }
+  const librarySaves = pendingLibrarySaves.splice(0)
+  if (librarySaves.length > 0) {
+    // 同根多条目合并为最新一份（全量快照，旧份严格过时）；跨根保持先后
+    // 顺序（Map 插入序，原地更新 snapshot 不改变次序）
+    const latestByRoot = new Map()
+    for (const save of librarySaves) {
+      const key = save.root.toLowerCase()
+      const prev = latestByRoot.get(key)
+      if (prev) prev.snapshot = save.snapshot
+      else latestByRoot.set(key, { root: save.root, snapshot: save.snapshot })
+    }
+    for (const { root, snapshot } of latestByRoot.values()) {
+      notifySaveFailure(enqueueLibraryWrite(root, snapshot))
+    }
+  }
+}
+
+/** 写失败经监听器通知渲染进程（C7）——防抖路径无调用方等待，通知随任务挂接 */
+function notifySaveFailure(task) {
+  task.catch((err) => {
+    notifyStoreSaveError(
+      Object.assign(new Error(`设置保存失败: ${err.message}`)),
+    )
+  })
+}
+
+/** 将引导层快照排入写盘链（唯一的引导层写入通道，与库层同一串行化语义） */
+function enqueueBootstrapWrite(snapshot) {
+  const task = bootstrapWriteChain.then(() =>
+    atomicWriteFile(getSettingsFilePath(), snapshot),
+  )
+  bootstrapWriteChain = task.catch(() => {})
+  return task
+}
+
 /**
  * 等待设置写盘链完全静止（B-02）：
  * 切库、备份导出/恢复、退出等需要「磁盘已是最新设置」的场景调用。
- * 循环比较链引用，覆盖等待期间又有新写入入队的情况。
+ * 先冲刷防抖窗口内尚未入队的待写快照，再循环比较链引用——覆盖等待期间
+ * 又有新写入入队（或新待写产生）的情况。
  */
 export async function flushSettingsSave() {
   for (;;) {
+    flushPendingSettingsSaves()
     const bootstrapTask = bootstrapWriteChain
     const libraryTask = libraryWriteChain
     // 两条链在入队时已 catch（失败经监听器上报），此处等待不会 reject
     await Promise.all([bootstrapTask, libraryTask])
     if (
       bootstrapTask === bootstrapWriteChain &&
-      libraryTask === libraryWriteChain
+      libraryTask === libraryWriteChain &&
+      !hasPendingSettingsSaves()
     )
       return
   }
@@ -551,50 +657,49 @@ function enqueueLibraryWrite(root, text) {
 }
 
 /**
- * 更新应用设置（规范化后按层拆分落盘，原子写入）：
- * - 引导字段 → %APPDATA%/modelvault/settings.json
- * - 库字段 → <当前模型根目录>/.modelvault/settings.json（无激活根时仅内存生效，
- *   首次选库扫描后经库设置初始化落盘）
+ * 更新应用设置（规范化后按层拆分，内存即时生效，落盘经防抖合并）：
+ * - 内存：规范化结果与当前内存逐层比对，有变化才替换（getSettings 立即可见）；
+ * - 变更检测（OPT-4）：纯重复更新（同一设置重复提交、规范化幂等回退）零磁盘
+ *   IO、不入防抖队列——主题/排序/卡片尺寸等连续切换不再逐次触发全量
+ *   「mkdir + tmp + fsync + rename」；
+ * - 防抖（OPT-4）：短窗口内的多次更新合并为一次落盘（与元数据侧 SAVE_DELAY
+ *   同值 500ms，持续变更受最长等待约束保证前进）；快照与 root 仍在调用
+ *   同步段捕获（B-02），迟到的落盘只写「本次调用所属库」的内容；
+ * - 引导字段 → %APPDATA%/modelvault/settings.json；库字段 →
+ *   <当前模型根目录>/.modelvault/settings.json（无激活根时仅内存生效，
+ *   首次选库扫描后经库设置初始化落盘）。切库/备份/退出经 flushSettingsSave
+ *   冲刷待写快照，落盘时机语义与防抖前一致。
  */
 export async function updateSettings(patch) {
   if (!patch || typeof patch !== 'object') return
-  // 合并规范化（单一校验入口），再按层拆分内存态
+  // 合并规范化（单一校验入口）
   const merged = normalizeSettings({ ...getSettings(), ...patch })
-  bootstrap = normalizeBootstrapSettings(merged)
-  library = normalizeLibrarySettings(merged)
+  const nextBootstrap = normalizeBootstrapSettings(merged)
+  const nextLibrary = normalizeLibrarySettings(merged)
 
   const touchesBootstrap = 'modelsFolder' in patch || 'modelsFolders' in patch
   const touchesLibrary = Object.keys(patch).some((k) => !BOOTSTRAP_KEYS.has(k))
 
-  // 调度时立即序列化快照（B-02）：执行时求值会读取可能已被切库/重载替换的
-  // 全局 library，导致旧库补丁写入新库。此处快照 + root 均在同步段捕获，
-  // 队列任务只写「本次调用所属库」的内容。
-  const bootstrapSnapshot = touchesBootstrap
-    ? JSON.stringify(bootstrap, null, 2)
-    : ''
-  const libraryRoot = touchesLibrary ? getCurrentRoot() : null
-  const librarySnapshot = libraryRoot ? JSON.stringify(library, null, 2) : ''
-
-  const tasks = []
   if (touchesBootstrap) {
-    const task = bootstrapWriteChain.then(() =>
-      atomicWriteFile(getSettingsFilePath(), bootstrapSnapshot),
-    )
-    bootstrapWriteChain = task.catch(() => {})
-    tasks.push(task)
+    const snapshot = JSON.stringify(nextBootstrap, null, 2)
+    if (snapshot !== JSON.stringify(bootstrap, null, 2)) {
+      bootstrap = nextBootstrap
+      pendingBootstrapSnapshot = snapshot
+      scheduleSettingsSaveFlush()
+    }
   }
-  if (libraryRoot) {
-    tasks.push(enqueueLibraryWrite(libraryRoot, librarySnapshot))
-  }
-  for (const task of tasks) {
-    try {
-      await task
-    } catch (err) {
-      // 设置落盘失败与元数据同样经监听器通知渲染进程（C7）：
-      // 否则磁盘满/权限错误时用户无感知，重启后设置静默丢失
-      notifyStoreSaveError(
-        Object.assign(new Error(`设置保存失败: ${err.message}`)),
-      )
+  if (touchesLibrary) {
+    // 调度时立即序列化快照（B-02）：执行时求值会读取可能已被切库/重载替换的
+    // 全局 library，导致旧库补丁写入新库。快照 + root 均在同步段捕获，
+    // 队列任务只写「本次调用所属库」的内容
+    const snapshot = JSON.stringify(nextLibrary, null, 2)
+    if (snapshot !== JSON.stringify(library, null, 2)) {
+      library = nextLibrary
+      const libraryRoot = getCurrentRoot()
+      if (libraryRoot) {
+        pendingLibrarySaves.push({ root: libraryRoot, snapshot })
+        scheduleSettingsSaveFlush()
+      }
     }
   }
 }
