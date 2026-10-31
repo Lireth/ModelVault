@@ -49,6 +49,7 @@ export async function batchAssignCivitaiTags() {
     let unmapped = 0
     let notFound = 0
     let failed = 0
+    let firstError = ''
     for (let i = 0; i < loraIds.length; i++) {
       if (state.multiSelect.cancelRequested) break
       const id = loraIds[i]
@@ -63,6 +64,7 @@ export async function batchAssignCivitaiTags() {
       }
       if (res.error) {
         failed += 1
+        if (!firstError) firstError = res.error
         continue
       }
       if (res.skipped) {
@@ -92,7 +94,8 @@ export async function batchAssignCivitaiTags() {
       )
     if (unmapped > 0) parts.push(`类型未映射 ${unmapped} 个`)
     if (notFound > 0) parts.push(`未收录 ${notFound} 个`)
-    if (failed > 0) parts.push(`失败 ${failed} 个`)
+    if (failed > 0)
+      parts.push(`失败 ${failed} 个${firstError ? `（${firstError}）` : ''}`)
     if (done < loraIds.length) {
       toast(
         'warn',
@@ -127,14 +130,16 @@ const BATCH_CIVITAI_IMAGES_PER_MODEL = 4
  * found=false（哈希未被 Civitai 收录，如自训模型）不算失败，计入 notFound。
  * @param {string[]} ids 模型 id 列表
  * @param {string} label 进度文案前缀（如「识别中」）
- * @returns {Promise<{metas: Map<string, object>, notFound: number, failed: number, cancelled: boolean}>}
- *   metas 为识别成功模型 id → 最新元数据（含 civitaiUrl）；cancelled 为用户请求取消后提前收尾
+ * @returns {Promise<{metas: Map<string, object>, notFound: number, failed: number, firstError: string, cancelled: boolean}>}
+ *   metas 为识别成功模型 id → 最新元数据（含 civitaiUrl）；firstError 为首条
+ *   失败原因（供汇总提示定位，如网络抖动）；cancelled 为用户请求取消后提前收尾
  */
 async function identifySequentially(ids, label) {
   const byId = modelById.value
   const metas = new Map()
   let notFound = 0
   let failed = 0
+  let firstError = ''
   for (let i = 0; i < ids.length; i++) {
     if (state.multiSelect.cancelRequested) break
     const id = ids[i]
@@ -149,6 +154,7 @@ async function identifySequentially(ids, label) {
     }
     if (res.error) {
       failed += 1
+      if (!firstError) firstError = res.error
       continue
     }
     if (!res.found) {
@@ -162,6 +168,7 @@ async function identifySequentially(ids, label) {
     metas,
     notFound,
     failed,
+    firstError,
     cancelled: metas.size + notFound + failed < ids.length,
   }
 }
@@ -175,10 +182,8 @@ export async function batchCivitaiIdentify() {
   if (ids.length === 0 || state.multiSelect.busy) return
   state.multiSelect.busy = true
   try {
-    const { metas, notFound, failed, cancelled } = await identifySequentially(
-      ids,
-      '识别中',
-    )
+    const { metas, notFound, failed, firstError, cancelled } =
+      await identifySequentially(ids, '识别中')
     const ok = applyMetaUpdates(metas, (meta, cur) => ({
       civitaiUrl: meta.civitaiUrl || '',
       // 基底模型识别回填（F-2）：与单模型识别同一合并语义（本地已有值优先）
@@ -187,7 +192,8 @@ export async function batchCivitaiIdentify() {
     const done = ok + notFound + failed
     const parts = []
     if (notFound > 0) parts.push(`未收录 ${notFound} 个`)
-    if (failed > 0) parts.push(`失败 ${failed} 个`)
+    if (failed > 0)
+      parts.push(`失败 ${failed} 个${firstError ? `（${firstError}）` : ''}`)
     if (cancelled) {
       toast(
         'warn',
@@ -238,6 +244,7 @@ export async function batchCivitaiImages() {
     let addedTotal = 0
     let notFound = 0
     let failed = 0
+    let firstError = ''
     for (let i = 0; i < targets.length; i++) {
       if (state.multiSelect.cancelRequested) break
       const id = targets[i]
@@ -253,6 +260,7 @@ export async function batchCivitaiImages() {
       }
       if (res.error) {
         failed += 1
+        if (!firstError) firstError = res.error
         continue
       }
       if (res.meta) metas.set(id, res.meta)
@@ -304,7 +312,8 @@ export async function batchCivitaiImages() {
     const parts = []
     if (skippedHasCover > 0) parts.push(`已有示例图跳过 ${skippedHasCover} 个`)
     if (notFound > 0) parts.push(`未收录或无示例图 ${notFound} 个`)
-    if (failed > 0) parts.push(`失败 ${failed} 个`)
+    if (failed > 0)
+      parts.push(`失败 ${failed} 个${firstError ? `（${firstError}）` : ''}`)
     const done = okModels + notFound + failed
     if (done < targets.length) {
       // 用户请求取消后提前收尾：已导入部分保留，汇总剩余未处理数量

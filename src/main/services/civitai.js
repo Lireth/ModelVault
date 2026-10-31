@@ -1,7 +1,11 @@
 import logger from '../logger'
 import { readResponseBytesLimited, readResponseTextLimited } from '../utils'
 import { computeFileHashOffThread } from './hash-worker-pool'
-import { REQUEST_TIMEOUT_MS, fetchWithValidatedRedirects } from './net-fetch'
+import {
+  REQUEST_TIMEOUT_MS,
+  fetchWithValidatedRedirects,
+  isTransientNetworkError,
+} from './net-fetch'
 
 /**
  * Civitai 在线识别服务：
@@ -46,6 +50,30 @@ const CIVITAI_429_MAX_RETRIES = 3
 const CIVITAI_429_FALLBACK_WAIT_S = 60
 /** 429 Retry-After 等待上限（秒），防止异常大值卡死批量链路 */
 const CIVITAI_429_MAX_WAIT_S = 90
+/**
+ * 连接级瞬时网络错误重试次数上限（1 次，与 update-download 的 OPT-01 同款）：
+ * 批量识别/分类一次几十上百个请求，网络抖动（ECONNRESET/ERR_NETWORK_CHANGED
+ * 等）若不重试，会把抖动窗口内的模型全部计入失败。判定器复用 net-fetch.js
+ * 的 isTransientNetworkError 单一实现——只匹配连接建立/重置类特征，超时
+ * 中止（重试会成倍拉长等待）与服务端 4xx/5xx（非网络层失败）不在此重试，
+ * 由各自既有语义处理。
+ */
+const CIVITAI_TRANSIENT_MAX_RETRIES = 1
+/** 瞬时错误重试的退避间隔（ms） */
+const CIVITAI_TRANSIENT_RETRY_DELAY_MS = 500
+/** 瞬时错误重试退避时长（测试可注入 0 避免真实等待） */
+let civitaiTransientRetryDelayMs = CIVITAI_TRANSIENT_RETRY_DELAY_MS
+
+/**
+ * 注入瞬时错误重试退避时长（仅供单元测试使用；生产代码严禁调用）
+ * @param {number} ms 毫秒
+ */
+export function setCivitaiTransientRetryDelayForTests(ms) {
+  civitaiTransientRetryDelayMs =
+    Number.isFinite(ms) && ms >= 0
+      ? ms
+      : CIVITAI_TRANSIENT_RETRY_DELAY_MS
+}
 
 /** 上次 Civitai API 请求时刻（节流基准） */
 let lastCivitaiApiAt = 0
@@ -114,9 +142,13 @@ function isAllowedCivitaiApiUrl(url) {
 }
 
 /**
- * 发起 Civitai API JSON 请求（全局节流 + 429 退避重试）：
- * 429 时按 Retry-After 等待后重试（无头兜底 60s，等待上限 90s），
- * 超出重试次数后把最后一次 429 响应交回调用方按 HTTP 错误处理。
+ * 发起 Civitai API JSON 请求（全局节流 + 双层退避重试）：
+ * - 429 时按 Retry-After 等待后重试（无头兜底 60s，等待上限 90s），
+ *   超出重试次数后把最后一次 429 响应交回调用方按 HTTP 错误处理；
+ * - 连接级瞬时网络错误（ECONNRESET/ERR_NETWORK_CHANGED 等）退避后重试
+ *   1 次（OPT-01 同款：响应到达前 fetch 拒绝，本次无任何业务副作用，重试
+ *   幂等）；超时中止与非瞬时错误不重试，按既有语义交回调用方。瞬时重试
+ *   与 429 重试独立计数——抖动后重试再遇限流仍可获得完整的 429 退避预算。
  * 超时按 attempt 独立计时（Civitai 429 修复）：在全局节流等待之后创建
  * AbortSignal.timeout，避免等待 Retry-After（最长 90s）后复用第一次请求
  * 已过期的 signal，使重试必然以 AbortError 失败。
@@ -126,6 +158,7 @@ function isAllowedCivitaiApiUrl(url) {
  *   两属性互斥：成功时仅 response，网络/超时失败时仅 networkError
  */
 async function fetchCivitaiApi(url, options = {}) {
+  let transientRetries = 0
   for (let attempt = 0; ; attempt++) {
     await throttleCivitaiApi()
     let response
@@ -138,6 +171,17 @@ async function fetchCivitaiApi(url, options = {}) {
         { useSessionCookies: true },
       )
     } catch (err) {
+      if (
+        transientRetries < CIVITAI_TRANSIENT_MAX_RETRIES &&
+        isTransientNetworkError(err)
+      ) {
+        transientRetries += 1
+        logger.warn(
+          `Civitai API 连接级失败，${civitaiTransientRetryDelayMs}ms 后重试: ${err.message}`,
+        )
+        await sleep(civitaiTransientRetryDelayMs)
+        continue
+      }
       return {
         networkError: err instanceof Error ? err : new Error(String(err)),
       }

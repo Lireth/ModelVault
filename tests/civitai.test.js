@@ -23,12 +23,15 @@ import {
   normalizeVersionInfo,
   parseCivitaiModelId,
   setCivitaiApiInterval,
+  setCivitaiTransientRetryDelayForTests,
   stripHtml,
 } from '../src/main/services/civitai'
 import { net } from 'electron'
 
-// 测试环境关闭请求节流：避免真实等待 1.2s 间隔拖慢用例
+// 测试环境关闭请求节流：避免 vitest 真实等待 1.2s 间隔拖慢用例
 setCivitaiApiInterval(0)
+// 同理关闭瞬时错误重试的真实退避等待（500ms → 0）
+setCivitaiTransientRetryDelayForTests(0)
 
 /**
  * civitai.js 单元测试（纯函数 + 类型查询，不真实触网）：
@@ -196,6 +199,71 @@ describe('fetchCivitaiModelType', () => {
       vi.mocked(net.fetch).mockReset()
       timeoutSpy.mockRestore()
     }
+  })
+
+  it('连接级瞬时错误自动重试一次后成功（对齐 update-download OPT-01）', async () => {
+    let attempts = 0
+    vi.mocked(net.fetch).mockImplementation(async () => {
+      attempts += 1
+      if (attempts === 1) {
+        // 镜像 Electron net 栈真实形态：Error + cause 链携带 errno code
+        const err = new Error('net::ERR_CONNECTION_RESET')
+        err.cause = Object.assign(new Error('connect ECONNRESET'), {
+          code: 'ECONNRESET',
+        })
+        throw err
+      }
+      return new Response(JSON.stringify({ id: 1, type: 'LORA', tags: [] }), {
+        status: 200,
+      })
+    })
+    const res = await fetchCivitaiModelType('123')
+    expect(res).toEqual({ found: true, type: 'LORA', tags: [] })
+    expect(attempts).toBe(2)
+  })
+
+  it('瞬时错误重试后仍失败时按既有网络错误语义返回', async () => {
+    let attempts = 0
+    vi.mocked(net.fetch).mockImplementation(async () => {
+      attempts += 1
+      throw new Error('net::ERR_NETWORK_CHANGED')
+    })
+    const res = await fetchCivitaiModelType('123')
+    expect(res.found).toBe(false)
+    expect(res.error).toContain('网络请求失败')
+    expect(attempts).toBe(2)
+  })
+
+  it('超时中止不触发连接级重试（按既有超时语义返回）', async () => {
+    // isTransientNetworkError 明确排除超时中止：重试会成倍拉长等待
+    let attempts = 0
+    vi.mocked(net.fetch).mockImplementation(async () => {
+      attempts += 1
+      throw new DOMException('请求超时', 'TimeoutError')
+    })
+    const res = await fetchCivitaiModelType('123')
+    expect(res.found).toBe(false)
+    expect(res.error).toContain('请求超时')
+    expect(attempts).toBe(1)
+  })
+
+  it('瞬时重试与 429 退避独立计数：抖动重试后遇限流仍可退避重试', async () => {
+    let attempts = 0
+    vi.mocked(net.fetch).mockImplementation(async () => {
+      attempts += 1
+      if (attempts === 1) throw new Error('net::ERR_CONNECTION_RESET')
+      if (attempts === 2)
+        return new Response('', {
+          status: 429,
+          headers: { 'Retry-After': '0' },
+        })
+      return new Response(JSON.stringify({ id: 1, type: 'LORA', tags: [] }), {
+        status: 200,
+      })
+    })
+    const res = await fetchCivitaiModelType('123')
+    expect(res).toEqual({ found: true, type: 'LORA', tags: [] })
+    expect(attempts).toBe(3)
   })
 })
 

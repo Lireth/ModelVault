@@ -511,6 +511,34 @@ describe('批量操作单次状态合并（O2）', () => {
     expect(state.multiSelect.progress).toBe('')
   })
 
+  it('批量 Civitai 识别：首条失败原因聚合到汇总提示', async () => {
+    state.models = [makeModel('a'), makeModel('b'), makeModel('c')]
+    state.multiSelect.ids = ['a', 'b', 'c']
+    api.models.civitaiIdentify.mockImplementation((id) => {
+      if (id === 'a')
+        return Promise.resolve({
+          found: true,
+          meta: { civitaiUrl: 'https://civitai.com/models/1' },
+        })
+      if (id === 'b')
+        return Promise.resolve({
+          found: false,
+          error: '网络请求失败: net::ERR_CONNECTION_RESET',
+        })
+      return Promise.resolve({
+        found: false,
+        error: 'Civitai 查询失败（HTTP 500）',
+      })
+    })
+    await batchCivitaiIdentify()
+    const toast = state.toasts.find((t) => t.text.includes('失败 2 个'))
+    expect(toast).toBeTruthy()
+    // 首条失败原因随汇总提示透出：网络抖动类失败无需逐个排查
+    expect(toast.text).toContain(
+      '失败 2 个（网络请求失败: net::ERR_CONNECTION_RESET）',
+    )
+  })
+
   it('批量 Civitai 识别：识别期间更新逐个进度文案', async () => {
     state.models = [makeModel('a'), makeModel('b')]
     state.multiSelect.ids = ['a', 'b']
