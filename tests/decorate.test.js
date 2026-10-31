@@ -866,3 +866,75 @@ describe('metaSignature（装饰缓存签名，A-08 记忆化表征）', () => {
     )
   })
 })
+
+describe('局部扫描装饰缓存文件级复核（OPT-8）', () => {
+  /** 创建真实模型文件并返回与扫描一致的 model 对象（mtime 取自真实 stat） */
+  async function makeRealModel(rel, content = 'x'.repeat(10)) {
+    const abs = path.join(root, rel)
+    await fs.writeFile(abs, content)
+    const { mtimeMs, size } = await fs.stat(abs)
+    return { ...makeModel(abs, { mtimeMs, size }) }
+  }
+
+  it('forceRefresh 下 sidecar 家族未变：照常命中缓存（不再一刀切重装饰）', async () => {
+    const model = await makeRealModel('unchanged.safetensors')
+    const [first] = await decorateModels([model])
+    const cachedDecorated = decorateCache.get(model.id).decorated
+    expect(first).toBe(cachedDecorated)
+
+    // 局部扫描（forceRefresh）对未变化的模型：sidecar 家族事实与缓存一致
+    // → 复用同一装饰对象。旧实现在此无条件完整重装饰（新对象），子树内
+    // 全部模型随每轮局部扫描重做 16MB 级 safetensors 头解析
+    const [second] = await decorateModels([{ ...model }], null, {
+      forceRefresh: true,
+    })
+    expect(second).toBe(cachedDecorated)
+  })
+
+  it('新增 sidecar 文本：forceRefresh 复核到事实变化，完整重装饰并导入', async () => {
+    const model = await makeRealModel('late-txt.safetensors')
+    await decorateModels([model])
+    const before = decorateCache.get(model.id).decorated
+
+    // 下载器补写同名说明文本（模型 mtime 不变）：事实签名变化 → 重装饰，
+    // sidecar 导入把文本填入空缺触发词（LoRA 类型需覆盖 model.type）。
+    // findSidecarText 在本文件被 mock（E3 竞态用例），此处注入真实返回
+    findSidecarText.mockResolvedValue('master piece, best')
+    const loraModel = { ...model, type: 'lora' }
+    await fs.writeFile(path.join(root, 'late-txt.txt'), 'master piece, best')
+    const [second] = await decorateModels([loraModel], null, {
+      forceRefresh: true,
+    })
+    expect(second).not.toBe(before)
+    expect(second.triggerWords).toBe('master piece, best')
+    expect(getModelMeta(model.id).triggerWordsSource).toBe('sidecar')
+  })
+
+  it('sidecar 内容变化（mtime 变化）：复核到事实变化并完整重装饰', async () => {
+    const model = await makeRealModel('rewritten.safetensors')
+    await fs.writeFile(path.join(root, 'rewritten.txt'), 'v1')
+    await decorateModels([{ ...model, type: 'lora' }])
+    const before = decorateCache.get(model.id).decorated
+
+    await fs.writeFile(path.join(root, 'rewritten.txt'), 'v2 words')
+    const [second] = await decorateModels([{ ...model, type: 'lora' }], null, {
+      forceRefresh: true,
+    })
+    expect(second).not.toBe(before)
+  })
+
+  it('sidecar 预览图删除：回退默认封面被复核清空（事实变化 → 重装饰）', async () => {
+    const model = await makeRealModel('preview-only.safetensors')
+    const preview = path.join(root, 'preview-only.png')
+    await fs.writeFile(preview, PNG_MAGIC)
+    await decorateModels([model])
+    // 无元数据封面时默认封面回退 sidecar 预览图
+    expect(decorateCache.get(model.id).decorated.cover).toBe(preview)
+
+    await fs.rm(preview)
+    const [second] = await decorateModels([{ ...model }], null, {
+      forceRefresh: true,
+    })
+    expect(second.cover).toBe('')
+  })
+})

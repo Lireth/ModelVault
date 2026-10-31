@@ -7,6 +7,7 @@ import {
   findSidecarCivitaiInfo,
   findSidecarPreview,
   findSidecarText,
+  sidecarFilesFor,
   sidecarImportPatch,
 } from '../../services/scanner'
 import { isValidImageFile } from '../../services/covers'
@@ -377,11 +378,36 @@ async function cachedThumbMissing(cached) {
 }
 
 /**
+ * 采集 sidecar 家族的文件级事实签名（OPT-8）：
+ * 模型同名 sidecar（txt / civitai.info / 预览图候选，即 sidecarFilesFor 全集）
+ * 的 mtime+size 串接签名。这些文件的变化不会改变模型 mtime 与元数据签名，
+ * 是局部扫描 forceRefresh 语义的真实判定依据——缓存内的签名与文件现状一致
+ * ⇒ 重装饰结论必然一致（sidecar 导入只依赖这些文件与当前元数据，而元数据
+ * 签名已在命中条件中核对）。缺失的文件统一记 '-'，新增/删除均使签名变化。
+ * @param {string} id 模型绝对路径
+ * @returns {Promise<string>} 事实签名
+ */
+async function statSidecarFacts(id) {
+  const stats = await Promise.all(
+    sidecarFilesFor(id).map((p) =>
+      fs.stat(p).then(
+        (s) => `${s.mtimeMs}:${s.size}`,
+        () => '-',
+      ),
+    ),
+  )
+  return stats.join('|')
+}
+
+/**
  * 单模型的元数据装饰（封面列表校验、默认封面回退 sidecar 预览图）。
  * @param {Record<string, any>} model 扫描出的模型
  * @param {Set<string>} usedThumbs 缩略图保留名单
- * @param {boolean} [forceRefresh] 跳过装饰缓存（局部扫描变更子树使用：
- *   sidecar/封面文件变化不会改变模型 mtime，不能靠 mtime + 元数据签名识别）
+ * @param {boolean} [forceRefresh] 局部扫描变更子树使用：sidecar/封面文件变化
+ *   不会改变模型 mtime，不能靠 mtime + 元数据签名识别。OPT-8 细化：置位时
+ *   不再一刀切跳过缓存，而是以缓存内记录的 sidecar 家族文件级事实复核——
+ *   与文件现状一致则缓存仍然有效（跳过 16MB 级 safetensors 头解析等重装饰），
+ *   仅真实变化（或旧缓存无事实记录）的模型走完整重装饰
  */
 async function decorateOne(model, usedThumbs, forceRefresh = false) {
   const meta0 = getModelMeta(model.id) || {}
@@ -390,28 +416,35 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
   //（命中路径仅做缩略图引用的存在性探针（A6），其余不做文件 IO，
   // sidecar 导入仅发生在缓存未命中时）。
   // forceRefresh 由局部扫描在变更子树上置位：即使模型文件 mtime 未变，
-  // 也必须重新检查 sidecar/封面文件，避免新增/修改的 sidecar 被缓存遮蔽。
+  // 也必须重新检查 sidecar/封面文件，避免新增/修改的 sidecar 被缓存遮蔽
+  //（OPT-8：检查细化为缓存事实签名与文件现状的比对，见 statSidecarFacts）
   if (
-    !forceRefresh &&
     cached &&
     cached.mtimeMs === model.mtimeMs &&
     cached.signature === metaSignature(meta0)
   ) {
-    if (await cachedThumbMissing(cached)) {
-      // A6：引用的缩略图已不存在——丢弃缓存走完整重建（getThumbPathDeferred
-      // 会登记缺失缩略图的后台补生成），坏图自愈而不是持续到元数据变化
-      decorateCache.delete(model.id)
-    } else {
-      // 刷新插入顺序实现简易 LRU
-      decorateCache.delete(model.id)
-      decorateCache.set(model.id, cached)
-      if (cached.thumbPath) usedThumbs.add(path.basename(cached.thumbPath))
-      // OPT-1：轮播封面缩略图同样计入保留名单——漏计会被 pruneThumbs 误删，
-      // 且缓存命中路径不会重新生成，坏图将持续到元数据变化
-      for (const cv of cached.decorated.covers) {
-        if (cv.thumbPath) usedThumbs.add(path.basename(cv.thumbPath))
+    let sidecarVerified = !forceRefresh
+    if (forceRefresh) {
+      const facts = await statSidecarFacts(model.id)
+      sidecarVerified = facts === cached.sidecarFacts
+    }
+    if (sidecarVerified) {
+      if (await cachedThumbMissing(cached)) {
+        // A6：引用的缩略图已不存在——丢弃缓存走完整重建（getThumbPathDeferred
+        // 会登记缺失缩略图的后台补生成），坏图自愈而不是持续到元数据变化
+        decorateCache.delete(model.id)
+      } else {
+        // 刷新插入顺序实现简易 LRU
+        decorateCache.delete(model.id)
+        decorateCache.set(model.id, cached)
+        if (cached.thumbPath) usedThumbs.add(path.basename(cached.thumbPath))
+        // OPT-1：轮播封面缩略图同样计入保留名单——漏计会被 pruneThumbs 误删，
+        // 且缓存命中路径不会重新生成，坏图将持续到元数据变化
+        for (const cv of cached.decorated.covers) {
+          if (cv.thumbPath) usedThumbs.add(path.basename(cv.thumbPath))
+        }
+        return cached.decorated
       }
-      return cached.decorated
     }
   }
 
@@ -515,11 +548,22 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
     suspect,
     autoInfo,
   }
+  // 采集 sidecar 文件级事实（OPT-8）：sidecar 导入只读不写这些文件，
+  // 装饰前后等价；缓存放进事实签名供下一次局部扫描的文件级缓存判定。
+  // 仅缓存未命中（真实变化/新模型）的模型支付这 ~9 次轻量 stat
+  const sidecarFacts = await statSidecarFacts(model.id)
   // 写入装饰缓存（容量超限时按 LRU 顺序淘汰最旧条目，C4 共享工具）
   boundedMapSet(
     decorateCache,
     model.id,
-    { mtimeMs: model.mtimeMs, signature, thumbPath, deferredCover, decorated },
+    {
+      mtimeMs: model.mtimeMs,
+      signature,
+      thumbPath,
+      deferredCover,
+      sidecarFacts,
+      decorated,
+    },
     getDecorateCacheLimit(),
   )
   return decorated
@@ -552,8 +596,11 @@ function pruneDecorateCache(validIds) {
  *   清理会把子树外有效缩略图全部误删——且装饰缓存命中路径不会重新生成，
  *   坏图将持续到元数据变化。失效缩略图与孤儿封面同一约定（scan.js：
  *   「不做孤儿清理，全量扫描兜底」）。
- *   forceRefresh=true 跳过缓存重新装饰（局部扫描必传）：变更子树内的
- *   sidecar/封面文件可能变化而未改动模型 mtime，缓存命中会遮蔽这些变化。
+ *   forceRefresh=true 启用「文件级缓存复核」（局部扫描必传）：变更子树内的
+ *   sidecar/封面文件可能变化而未改动模型 mtime，纯 mtime + 签名命中会遮蔽
+ *   这些变化。OPT-8：置位不再一刀切重装饰——以缓存内的 sidecar 家族文件级
+ *   事实签名（statSidecarFacts）与文件现状比对，全部未变的模型照常命中缓存
+ *  （跳过 16MB 级 safetensors 头解析），仅真实变化的模型完整重装饰；
  *   adaptCacheSize=true 表示本次是全量库快照（OPT-04）：按模型总数调整
  *   LRU 容量，并清理不在当前库中的缓存条目；局部扫描不得传。
  */

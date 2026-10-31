@@ -375,9 +375,11 @@ export function registerScanHandlers() {
         // usedThumbs 清理会把子树外模型的全部缩略图误删（缓存命中路径不会重新
         // 生成，坏图将持续到元数据变化）。失效缩略图与孤儿封面同一约定：
         // 由下一次全量扫描兜底清理。
-        // forceRefresh（OPT-07）：变更子树内的 sidecar/封面文件变化不会改动
-        // 模型 mtime，必须跳过装饰缓存重新检查，否则新增/修改的 sidecar 与
-        // 预览图会被旧缓存遮蔽。
+        // forceRefresh（OPT-07/OPT-08）：变更子树内的 sidecar/封面文件变化不
+        // 会改动模型 mtime，必须启用文件级缓存复核，否则新增/修改的 sidecar
+        // 与预览图会被旧缓存遮蔽。OPT-8 起复核细化为 sidecar 家族文件级事实
+        // 比对：子树内未变化的模型照常命中缓存（不再随每轮局部扫描重做
+        // 16MB 级 safetensors 头解析），仅真实变化的模型完整重装饰
         const decorated = await decorateModels(models, signal, {
           pruneThumbs: false,
           forceRefresh: true,
