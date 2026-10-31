@@ -8,6 +8,7 @@ import {
 import {
   applyThumbUpdates,
   coverThumbUrl,
+  modelById,
   modelCoverUrl,
   deleteModel,
   replaceModels,
@@ -84,6 +85,34 @@ describe('标注操作响应传播（shallowReactive 回归）', () => {
     expect(selectedModel.value.favorite).toBe(true)
     expect(selectedModel.value.nsfw).toBe(true)
     expect(selectedModel.value.rating).toBe(3)
+  })
+
+  it('元素级替换：映射值增量同步且下游传播保持（OPT-1，不再整表重建）', async () => {
+    // 与真实扫描一致：列表经 replaceModels 装配（数组为 shallowReactive 代理）
+    replaceModels([
+      makeModel('m1', { favorite: false }),
+      makeModel('m2', { favorite: false }),
+    ])
+    state.selectedId = 'm1'
+    expect(modelById.value.get('m1').favorite).toBe(false)
+
+    api.models.setMetaFlags.mockResolvedValue({
+      meta: { favorite: true, nsfw: false, rating: 5 },
+    })
+    await toggleFavorite('m1')
+
+    // 值经增量同步即时更新——旧实现在此整表重建新 Map（数千模型库上
+    // 每次标注点击一次 O(n) 哈希+分配，即本优化消除的热点）
+    expect(modelById.value.get('m1').favorite).toBe(true)
+    expect(modelById.value.get('m2')).toBe(state.models[1])
+    // 下游派生传播保持（Vue 3.4+ 以 Object.is 判定 computed 值变化并决定
+    // 是否向下游传播）：selectedModel 必须读到新对象
+    expect(selectedModel.value.favorite).toBe(true)
+
+    // 数组整体替换（切库/重扫语义）→ 全量重建，旧键不残留
+    replaceModels([makeModel('m3')])
+    expect(modelById.value.get('m1')).toBeUndefined()
+    expect(modelById.value.get('m3')).toBe(state.models[0])
   })
 
   it('未经 replaceModels 装配的原始数组不具备该保证（守卫约定边界）', async () => {
