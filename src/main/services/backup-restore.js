@@ -274,7 +274,12 @@ async function restorePartialLibrary(root, filePath, manifest) {
       })
       const storeBytes = unzipped[`${LIB_PREFIX}${DATA_FILE}`]
       if (!storeBytes) throw new Error('备份缺少库元数据')
-      const parsed = JSON.parse(new TextDecoder().decode(storeBytes))
+      // B1：与全量恢复（restoreLibraryLocked）同一降载语义——大库备份内的
+      // store.json（上限 256MB）解析移出主线程，合并恢复期间主进程不再冻结
+      // 数百毫秒至秒级（OPT-5）；小文本由 parseJsonOffThread 按阈值留在主线程
+      const parsed = await parseJsonOffThread(
+        new TextDecoder().decode(storeBytes),
+      )
       const sanitized = normalizeStoreData(parsed)
       const stamp = Date.now()
       const backupPath = await snapshotSelectiveStore(root, stamp)
