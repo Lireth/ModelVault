@@ -15,6 +15,10 @@ import {
   MODEL_EXTENSION_NAMES,
   MODEL_EXTENSION_SET,
 } from '../../../shared/model-extensions'
+import {
+  MAX_ORGANIZE_MOVES,
+  MAX_TRANSFER_IDS,
+} from '../../../shared/ipc-schema'
 import { SIDECAR_PREVIEW_EXTS, sidecarBaseOf } from '../../services/scanner'
 import {
   maintenanceBusyMessage,
@@ -540,8 +544,8 @@ export function registerFilesHandlers() {
       if (!Array.isArray(ids) || ids.length === 0) {
         return { error: '没有可传输的模型' }
       }
-      if (ids.length > 500) {
-        return { error: '单次最多传输 500 个模型' }
+      if (ids.length > MAX_TRANSFER_IDS) {
+        return { error: `单次最多传输 ${MAX_TRANSFER_IDS} 个模型` }
       }
       return transferModelsToLibrary({ ids, targetRoot, mode })
     },
@@ -558,8 +562,8 @@ export function registerFilesHandlers() {
       if (!Array.isArray(moves) || moves.length === 0) {
         return { error: '没有需要移动的模型' }
       }
-      if (moves.length > 10000) {
-        return { error: '单次最多移动 10000 个模型' }
+      if (moves.length > MAX_ORGANIZE_MOVES) {
+        return { error: `单次最多移动 ${MAX_ORGANIZE_MOVES} 个模型` }
       }
       const root = getCurrentRoot()
       if (!root) return { error: '未选择模型库根目录' }

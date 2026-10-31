@@ -139,9 +139,11 @@ describe('computeAndCacheHash', () => {
     const { mtimeMs } = await fs.stat(id)
     computeFileHash.mockResolvedValue(fakeHash(30))
     await computeAndCacheHash(id, mtimeMs, { priority: true })
+    // OPT-13：第二参为请求级 AbortSignal（同 id 新 mtime 请求取代旧任务时
+    // 中止其读盘，避免大文件双倍读盘）
     expect(computeFileHash).toHaveBeenCalledWith(
       id,
-      undefined,
+      expect.any(AbortSignal),
       expect.any(Function),
       { priority: true },
     )

@@ -309,12 +309,12 @@ function delay(ms) {
  *   totalBytes: number, hash: string}} snap 进度快照
  * @returns {Promise<string>} SHA256
  */
-async function computeHashWithRetry(id, priority, snap) {
+async function computeHashWithRetry(id, priority, snap, signal) {
   for (let attempt = 0; ; attempt++) {
     try {
       return await computeFileHash(
         id,
-        undefined,
+        signal,
         (hashedBytes, totalBytes) => {
           snap.hashedBytes = hashedBytes
           snap.totalBytes = totalBytes
@@ -360,6 +360,10 @@ export function computeAndCacheHash(id, mtimeMs, options = {}) {
   const priority = options.priority === true
   const current = inflight.get(id)
   if (current && current.mtimeMs === mtimeMs) return current.promise
+  // OPT-13：同 id 不同 mtime 的新请求取代旧任务——旧结果本就会因完成后
+  // mtime 复查被丢弃，此处直接中止其读盘，避免 1-10GB 文件被并行双倍读盘
+  if (current) current.controller?.abort()
+  const controller = new AbortController()
   const promise = (async () => {
     // 本次计算的进度快照（识别与预热链路共用，事件按 id 供渲染层匹配；
     // hash 完成后回填，随完成事件送达渲染层——FEAT-1 重复检测数据源）
@@ -373,7 +377,7 @@ export function computeAndCacheHash(id, mtimeMs, options = {}) {
     }
     try {
       emitProgress(snap, true)
-      const hash = await computeHashWithRetry(id, priority, snap)
+      const hash = await computeHashWithRetry(id, priority, snap, controller.signal)
       // 竞态防护：大文件哈希耗时数十秒，期间文件可能被同名覆盖（重新下载/
       // 同步工具写入）。此时哈希对应旧版本或新旧混合内容，若仍以计算前的
       // mtime 落盘，缓存会与 knownInfo 的旧 mtime 判定为有效（hasValidCachedHash），
@@ -401,7 +405,7 @@ export function computeAndCacheHash(id, mtimeMs, options = {}) {
       emitProgress(snap, true)
     }
   })()
-  const entry = { mtimeMs, promise }
+  const entry = { mtimeMs, promise, controller }
   inflight.set(id, entry)
   // 完成后清理映射；拒绝场景下 finally 派生的 promise 由尾部 catch 消费
   // （预热为后台任务可能无调用方 await，防 unhandledRejection；识别链路
@@ -714,6 +718,12 @@ async function drainLane() {
           queued.add(id)
           queue.push({ id, force: false, mode: task.mode })
         }
+        continue
+      }
+      if (err?.name === 'AbortError') {
+        // OPT-13：任务被同 id 新 mtime 请求取代（文件已被改写）——静默跳过，
+        // 新版本由下一次扫描/按需请求照常入队，不计入失败负缓存
+        logger.info(`后台哈希任务被新版本请求取代，已跳过: ${id}`)
         continue
       }
       // OPT-6：记入负缓存（mtime 键控 + 指数退避），静默期内批量预热跳过

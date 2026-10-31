@@ -72,7 +72,8 @@ export async function removeJournalDir() {
 /**
  * 回放增量日志（O5）：snapshotSeq 之前的批次已并入 store.json，跳过；
  * 之后批次按 seq 升序应用 set/del。日志文件由 atomicWriteFile 原子写入，
- * 损坏文件之后的批次不再应用（缺失前序 delta 时继续应用会造成状态错乱）。
+ * 损坏批次隔离（删除）后继续回放后续批次——一个坏文件不让之后所有增量
+ * 永久无法加载；被隔离批次的变更随之丢失（幽灵键由健康检查治理）。
  * 批次内容 seq 必须与文件名 seq 一致且在合法区间内（B-04：不一致/越界按
  * 损坏批次隔离——内容与代际错位的批次无法安全判定新旧）。
  * @param {number} snapshotSeq 快照已合并到的日志代际

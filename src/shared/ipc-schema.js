@@ -49,6 +49,18 @@ import { MAX_PARTIAL_SCAN_DIRS_INPUT } from './scan-dirs'
  */
 export const DEFAULT_MAX_OBJECT_KEYS = 64
 export const DEFAULT_MAX_ARRAY_ITEMS = 1024
+
+/**
+ * 业务上限常量（OPT-13 单一来源）：schema 声明与 handler 内语义校验共用，
+ * 此前两侧各写一份魔数（500/10000/20），调限时只改一侧即出现
+ * 「schema 拒绝但文案不同」或 handler 死代码。
+ */
+/** 跨库传输单批模型数上限 */
+export const MAX_TRANSFER_IDS = 500
+/** 按标签整理单批移动数上限 */
+export const MAX_ORGANIZE_MOVES = 10000
+/** 单次导入 Civitai 示例图数量上限 */
+export const MAX_IMPORT_IMAGES = 20
 /** 对象/数组最大嵌套深度（顶层 payload 为第 1 层） */
 const DEFAULT_MAX_DEPTH = 5
 
@@ -194,10 +206,20 @@ export function validateValue(value, rule, label, depth = 1) {
       return typeof value === 'boolean' ? '' : `${label} 须为布尔值`
     case 'int': {
       if (!Number.isInteger(value)) return `${label} 须为整数`
+      // OPT-13：越界错误回显允许区间——hashWarmupConcurrency 之类的
+      // 1-4 档设置越界时，日志/提示直接可见合法范围而非裸「超限」
+      const range =
+        rule.min !== undefined && rule.max !== undefined
+          ? `（允许 ${rule.min}–${rule.max}）`
+          : rule.min !== undefined
+            ? `（≥${rule.min}）`
+            : rule.max !== undefined
+              ? `（≤${rule.max}）`
+              : ''
       if (rule.min !== undefined && value < rule.min)
-        return `${label} 超出允许范围`
+        return `${label} 超出允许范围${range}`
       if (rule.max !== undefined && value > rule.max)
-        return `${label} 超出允许范围`
+        return `${label} 超出允许范围${range}`
       return ''
     }
     case 'array': {
@@ -435,7 +457,11 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'models:transferToLibrary': vObj({
     max: 20,
     fields: {
-      ids: vArr({ required: true, max: 500, items: vStr({ max: 1000 }) }),
+      ids: vArr({
+        required: true,
+        max: MAX_TRANSFER_IDS,
+        items: vStr({ max: 1000 }),
+      }),
       targetRoot: vStr({ required: true, max: 1000 }),
       mode: vStr({ required: true, max: 8 }),
     },
@@ -512,7 +538,7 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'models:organizeByTags': vObj({
     fields: {
       moves: vArr({
-        max: 10000,
+        max: MAX_ORGANIZE_MOVES,
         // 条目宽松：缺 id/非法标签的条目由 handler 逐项跳过（批量语义）
         items: vObj({
           max: 8,
@@ -529,10 +555,10 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'models:civitaiImportImages': vObj({
     fields: {
       id: ID,
-      // 数量上限与 handler MAX_IMPORT_IMAGES 一致；URL 域名白名单在
+      // 数量上限与 handler 共用 shared 常量；URL 域名白名单在
       // downloadCivitaiImage 内校验，此处只查类型与长度
       images: vArr({
-        max: 20,
+        max: MAX_IMPORT_IMAGES,
         items: vObj({ max: 4, fields: { url: vStr({ max: 2000 }) } }),
       }),
     },

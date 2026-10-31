@@ -33,9 +33,16 @@ export async function renameReplacing(tmp, file) {
       return
     } catch (err) {
       const retriable =
-        err.code === 'EPERM' || err.code === 'EEXIST' || err.code === 'EBUSY'
+        err.code === 'EPERM' ||
+        err.code === 'EEXIST' ||
+        err.code === 'EBUSY' ||
+        err.code === 'EACCES'
       if (!retriable || attempt >= RENAME_MAX_ATTEMPTS) throw err
-      await new Promise((resolve) => setTimeout(resolve, 20 * attempt))
+      // OPT-13：线性 20ms×5（总 300ms）在杀毒/索引器占用窗口面前偏短，
+      // 改指数退避（25→50→100→200→400，总 ~775ms）覆盖更长的占用窗口
+      await new Promise((resolve) =>
+        setTimeout(resolve, 25 * 2 ** (attempt - 1)),
+      )
     }
   }
 }
@@ -69,7 +76,11 @@ export async function atomicWriteFile(
     try {
       await fs.rm(tmp, { force: true })
     } catch {
-      /* 清理失败可忽略 */
+      // OPT-13：占用 rename 的同一把锁（杀毒/索引器）也可能让 rm 失败——
+      // 短暂退避后重试一次，减少库目录内 .tmp 残留；仍失败则残留（罕见，
+      // 临时名带进程内序号不会被复用覆盖）
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      await fs.rm(tmp, { force: true }).catch(() => {})
     }
     throw err
   }

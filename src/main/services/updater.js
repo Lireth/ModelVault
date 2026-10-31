@@ -89,6 +89,18 @@ async function fetchReleaseJson(url, current) {
     updateRequestOptions(current),
   )
   if (!response.ok) {
+    // OPT-13：GitHub API 限流（未鉴权 60 req/h/IP，触发时 x-ratelimit-remaining
+    // 为 0）给出可辨识文案——裸 403 会让用户误判为服务故障
+    const remaining = response.headers?.get?.('x-ratelimit-remaining')
+    if (
+      (response.status === 403 || response.status === 429) &&
+      remaining === '0'
+    ) {
+      return {
+        error: 'GitHub API 限流（每小时配额已用尽），请稍后再试',
+        status: response.status,
+      }
+    }
     return {
       error: `更新检查失败（HTTP ${response.status}）`,
       status: response.status,

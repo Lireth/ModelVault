@@ -83,8 +83,8 @@ describe('IPC schema 校验器（validateValue）', () => {
     const rating = vInt({ min: 0, max: 5 })
     expect(validateValue(3, rating, 'f')).toBe('')
     expect(validateValue(2.5, rating, 'f')).toBe('f 须为整数')
-    expect(validateValue(6, rating, 'f')).toBe('f 超出允许范围')
-    expect(validateValue(-1, rating, 'f')).toBe('f 超出允许范围')
+    expect(validateValue(6, rating, 'f')).toBe('f 超出允许范围（允许 0–5）')
+    expect(validateValue(-1, rating, 'f')).toBe('f 超出允许范围（允许 0–5）')
   })
 
   it('array：元素数上限与逐元素规则（错误信息带下标）', () => {

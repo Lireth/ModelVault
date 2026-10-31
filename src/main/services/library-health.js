@@ -196,12 +196,18 @@ async function collectHealth(root) {
   }
   const referenced = getReferencedCovers()
   const orphanCovers = []
-  for (const entry of coverEntries) {
-    const rel = `${DATA_DIR}/${COVERS_DIR}/${entry.name}`
-    if (referenced.has(rel)) continue
-    const { stat } = await statOutcome(path.join(coversDir, entry.name))
-    orphanCovers.push({ name: entry.name, sizeBytes: stat?.size || 0 })
-  }
+  // OPT-13：孤儿封面 stat 并发化——此前逐个串行 await，数百孤儿封面时
+  // 报告生成时间线性放大（机械盘尤甚）；与元数据循环同用有界并发池
+  await runWithConcurrency(
+    coverEntries.filter(
+      (entry) => !referenced.has(`${DATA_DIR}/${COVERS_DIR}/${entry.name}`),
+    ),
+    async (entry) => {
+      const { stat } = await statOutcome(path.join(coversDir, entry.name))
+      orphanCovers.push({ name: entry.name, sizeBytes: stat?.size || 0 })
+    },
+    HEALTH_IO_CONCURRENCY,
+  )
   orphanCovers.sort((a, b) => a.name.localeCompare(b.name))
 
   const duplicateHashes = groupDuplicates(existingHashes)

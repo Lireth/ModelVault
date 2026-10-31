@@ -133,6 +133,9 @@ class Logger {
       this.overflowWarned = false
       this.stream?.end()
       this.stream = null
+      // OPT-13：过期清理不再只在进程首次写日志时执行——长期驻留场景下
+      // 14 天保留在跨天滚动时顺带复核，日志目录不会随月份只增不减
+      cleanExpiredLogs(this.logDir)
     }
     if (!this.stream) {
       // 单日分片数用尽（异常刷屏）：仅保留控制台输出，写盘到此为止

@@ -47,8 +47,8 @@ import { wrapHandler, checkModelIdInRoot } from '../handler'
  * 元数据的 hash/hashMtime 字段（文件未变更时免重算，与 relink 履书共用）。
  */
 
-/** 单次导入的示例图数量上限 */
-const MAX_IMPORT_IMAGES = 20
+// OPT-13：单次导入的示例图数量上限与 schema 共用 shared 单一来源
+import { MAX_IMPORT_IMAGES } from '../../../shared/ipc-schema'
 
 /**
  * Civitai 网络入口统一隐私门禁（OPT-03）：设置页的 civitaiEnabled 此前

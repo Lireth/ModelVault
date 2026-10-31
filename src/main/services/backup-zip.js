@@ -1,6 +1,5 @@
 import { createReadStream, createWriteStream } from 'node:fs'
 import {
-  strToU8,
   Unzip,
   UnzipInflate,
   unzip,
@@ -153,8 +152,11 @@ export function writeBackupZipToFile(filePath, contents) {
     /**
      * 分块喂入文本条目（A4）：整个文本一次性 push 会让 deflate 同步产出
      * 全部输出并在 out 写缓冲堆积；按块喂入 + 逐块等待 drain。
-     * 字节整体编码后再切片——按字符串切片会把 UTF-8 多字节序列（含代理对）
-     * 切开产生替换字符，损坏非 ASCII 内容。
+     * OPT-13：改为逐块 UTF-8 编码——此前 strToU8 整体编码让输入侧在喂入前
+     * 同时持有全量文本（UTF-16）与全量字节副本，大 store.json 备份的内存
+     * 峰值约为文本体积的 3 倍；分块后字节副本峰值降为单块大小。
+     * 块边界按字符切分，块尾为高代理时回退一位保持代理对完整（astral
+     * 字符不被切开产生替换字符）。
      * @param {string} name 条目名
      * @param {string} text 文本内容
      * @returns {Promise<void>}
@@ -162,18 +164,27 @@ export function writeBackupZipToFile(filePath, contents) {
     const addText = async (name, text) => {
       const file = new ZipDeflate(name, { level: ZIP_LEVEL })
       archive.add(file)
-      const bytes = strToU8(text)
-      if (bytes.length === 0) {
+      if (text.length === 0) {
         file.push(new Uint8Array(0), true)
         return
       }
-      for (let i = 0; i < bytes.length; i += TEXT_CHUNK) {
+      const encoder = new TextEncoder()
+      let offset = 0
+      while (offset < text.length) {
         await waitDrain()
-        const final = i + TEXT_CHUNK >= bytes.length
-        file.push(
-          final ? bytes.subarray(i) : bytes.subarray(i, i + TEXT_CHUNK),
-          final,
-        )
+        let end = Math.min(offset + TEXT_CHUNK, text.length)
+        if (
+          end < text.length &&
+          text.charCodeAt(end - 1) >= 0xd800 &&
+          text.charCodeAt(end - 1) < 0xdc00
+        ) {
+          // 块尾是高代理：回退一位保持代理对完整（TEXT_CHUNK ≥ 2 时不会死循环）
+          end -= 1
+        }
+        const bytes = encoder.encode(text.slice(offset, end))
+        const final = end >= text.length
+        file.push(bytes, final)
+        offset = end
       }
     }
 
