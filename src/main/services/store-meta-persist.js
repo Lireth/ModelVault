@@ -59,8 +59,14 @@ const ROOT_PROBE_TTL_MS = 1000
 /** 离线跳过后自动重试落盘的间隔（ms）：库恢复可用时无需用户再次编辑即可补写 */
 const OFFLINE_RETRY_MS = 10000
 
-/** 当前模型根目录是否可用（O5：离线库跳过落盘，不重建目录树） */
-async function isCurrentRootAvailable() {
+/**
+ * 当前模型根目录是否可用（O5/OPT-14 共享写链门禁）：
+ * 离线库跳过落盘，不重建目录树。成功结果短 TTL 缓存（ROOT_PROBE_TTL_MS）；
+ * 失败不缓存——每次写入重新探测。与各写入点的「非递归 mkdir」配合构成
+ * 双保险：即便门禁通过后根目录恰好消失，非递归 mkdir 也只是失败（ENOENT）
+ * 而非把整棵根目录树重建到失效路径。
+ */
+export async function isCurrentRootAvailable() {
   const root = getCurrentRoot()
   if (!root) return false
   const now = Date.now()
@@ -78,6 +84,30 @@ async function isCurrentRootAvailable() {
   } catch {
     return false
   }
+}
+
+/**
+ * 确保库关联存储下的子目录存在（OPT-14 共享原语，供封面/缩略图/civ 缓存
+ * 写入点复用）：根可用性门禁 + 两层非递归 mkdir（.modelvault → 子目录）。
+ * 根离线时返回 false 且绝不重建目录树；门禁与 mkdir 之间根恰好消失时，
+ * 非递归 mkdir 失败（ENOENT）同样返回 false——双保险下不存在任何能
+ * 在失效路径重建目录树的代码路径。
+ * @param {string} dir 目标子目录绝对路径（须位于当前根的 .modelvault 下）
+ * @returns {Promise<boolean>} 子目录可用时为 true
+ */
+export async function ensureLibrarySubdir(dir) {
+  if (!(await isCurrentRootAvailable())) return false
+  try {
+    await fs.mkdir(getDataDir())
+  } catch (err) {
+    if (err.code !== 'EEXIST') return false
+  }
+  try {
+    await fs.mkdir(dir)
+  } catch (err) {
+    if (err.code !== 'EEXIST') return false
+  }
+  return true
 }
 
 /**

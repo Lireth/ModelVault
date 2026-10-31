@@ -5,6 +5,7 @@ import logger from '../logger'
 // 直连存储叶子模块而非聚合门面（与 covers.js 同理：避免门面重导出链
 // 在模块初始化顺序变化时拿到未就绪绑定）
 import { getCurrentRoot } from './store-paths'
+import { ensureLibrarySubdir } from './store-meta-persist'
 import { runWithConcurrency } from '../utils'
 import { renderThumbFromPath } from './thumb-renderer'
 import { toImageUrl } from '../protocol'
@@ -97,7 +98,9 @@ async function generateThumb(absCover, thumbPath) {
     quality: JPEG_QUALITY / 100,
   })
   if ('small' in result) return ''
-  await fs.mkdir(getThumbsDir(), { recursive: true })
+  // OPT-14：库根离线时跳过缩略图落盘（此前的递归 mkdir 会把根目录树重建到
+  // 失效路径）——延迟任务保留，库恢复后的下一轮 drain 自动补生成
+  if (!(await ensureLibrarySubdir(getThumbsDir()))) return ''
   await fs.writeFile(thumbPath, result.jpeg)
   return thumbPath
 }

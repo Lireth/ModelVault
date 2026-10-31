@@ -5,7 +5,7 @@ import logger from '../logger'
 import { samePathIgnoreCase } from '../utils'
 import { atomicWriteFile } from './atomic-write'
 import { parseJsonOffThread, serializeJsonOffThread } from './json-serializer'
-import { getIndexFilePath } from './store-paths'
+import { DATA_DIR, getIndexFilePath } from './store-paths'
 import { isRelDirInScope } from '../../shared/scan-dirs'
 
 /**
@@ -246,7 +246,20 @@ async function writeIndexBody(root, models, durationMs) {
       return false
     }
     const text = `${prefix}${serialized.text}}`
-    await atomicWriteFile(getIndexFilePath(root), text)
+    // OPT-14/O5 对齐：非递归确保 .modelvault（根离线时 mkdir 失败 → 跳过
+    // 写入，绝不通过 recursive mkdir 把根目录树重建到失效路径），随后
+    // createDirs=false 原子写
+    // 目录锚定写入入参的 root（而非当前激活根）：根离线时 mkdir 失败 →
+    // 跳过写入（绝不通过 recursive mkdir 把根目录树重建到失效路径）
+    try {
+      await fs.mkdir(path.join(root, DATA_DIR))
+    } catch (err) {
+      if (err.code !== 'EEXIST') {
+        logger.warn(`本地索引目录不可用，跳过写入: ${err.message}`)
+        return false
+      }
+    }
+    await atomicWriteFile(getIndexFilePath(root), text, { createDirs: false })
     lastWrittenHash.set(key, serialized.hash)
     lastWrittenSize.set(key, bytes)
     return true

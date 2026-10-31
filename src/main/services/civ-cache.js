@@ -5,6 +5,7 @@ import logger from '../logger'
 // 直连存储叶子模块而非聚合门面（与 thumbs.js/covers.js 同理：避免门面
 // 重导出链在模块初始化顺序变化时拿到未就绪绑定）
 import { getCurrentRoot } from './store-paths'
+import { ensureLibrarySubdir } from './store-meta-persist'
 
 /**
  * civimg:// 远程图磁盘缓存（O-5）：
@@ -96,7 +97,14 @@ export async function saveCivImageCache(url, buf) {
   if (!dir) return
   const file = path.join(dir, cacheFileName(url))
   try {
-    await fs.mkdir(path.dirname(file), { recursive: true })
+    // OPT-14：库根离线时跳过缓存写入（此前的递归 mkdir 会把根目录树重建到
+    // 失效路径）——缓存是 best-effort，下次请求重新回源
+    if (!(await ensureLibrarySubdir(path.dirname(file)))) return
+    try {
+      await fs.mkdir(path.dirname(file))
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err
+    }
     // 临时文件 + rename：进程内单调序号防同 URL 并发写入互相截断
     const tmp = `${file}.${process.pid}.${++tmpSeq}.tmp`
     await fs.writeFile(tmp, buf)

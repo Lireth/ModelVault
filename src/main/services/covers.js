@@ -19,6 +19,7 @@ import {
   relativizeCover,
 } from './store-paths'
 import { getReferencedCovers, wasDataReset } from './store-meta'
+import { ensureLibrarySubdir } from './store-meta-persist'
 
 /**
  * 封面图片管理：用户在详情页上传的预览图会复制到
@@ -123,7 +124,12 @@ export async function importCoverFromPath(source) {
     if (!(await hasImageMagic(source))) {
       return { error: '文件内容不是有效的图片，已拒绝导入' }
     }
-    await fs.mkdir(getCoversDir(), { recursive: true })
+    // OPT-14：库根离线时拒绝保存（此前的递归 mkdir 会把根目录树重建到
+    // 失效路径）；ensureLibrarySubdir = 门禁 + 两层非递归 mkdir，与门禁
+    // 竞态时也只是失败而非重建
+    if (!(await ensureLibrarySubdir(getCoversDir()))) {
+      return { error: '模型库目录不可用，封面暂无法保存（库恢复后可重试）' }
+    }
     const baseName = sanitizeBaseName(path.basename(source, ext))
     const fileName = `${Date.now()}-${baseName}${ext}`
     const dest = path.join(getCoversDir(), fileName)
@@ -159,8 +165,11 @@ export async function saveCoverBuffer(buf, ext) {
   if (!isImageBuffer(buf)) {
     return { error: '文件内容不是有效的图片，已拒绝导入' }
   }
+  // OPT-14：库根离线时拒绝保存（见 importCoverFromPath 内说明）
+  if (!(await ensureLibrarySubdir(getCoversDir()))) {
+    return { error: '模型库目录不可用，封面暂无法保存（库恢复后可重试）' }
+  }
   try {
-    await fs.mkdir(getCoversDir(), { recursive: true })
     const dest = path.join(
       getCoversDir(),
       `${Date.now()}-civitai${normalizedExt}`,
@@ -251,7 +260,10 @@ export async function saveClipboardImage() {
         error: `图片文件过大（上限 ${Math.floor(MAX_COVER_BYTES / 1024 / 1024)}MB），请压缩后再导入`,
       }
     }
-    await fs.mkdir(getCoversDir(), { recursive: true })
+    // OPT-14：库根离线时拒绝保存（见 importCoverFromPath 内说明）
+    if (!(await ensureLibrarySubdir(getCoversDir()))) {
+      return { error: '模型库目录不可用，封面暂无法保存（库恢复后可重试）' }
+    }
     const dest = path.join(
       getCoversDir(),
       `${Date.now()}-clipboard${MIME_EXT[mime]}`,

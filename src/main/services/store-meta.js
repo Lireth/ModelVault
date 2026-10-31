@@ -19,6 +19,7 @@ import { parseJsonOffThread } from './json-serializer'
 import { preserveCorruptedFile } from '../utils'
 import {
   clearOfflineRetry,
+  ensureLibrarySubdir,
   flushStoreSave,
   saveStoreNow,
   scheduleSave,
@@ -191,7 +192,10 @@ async function migrateLegacyData() {
       if (legacyCover) {
         try {
           await fs.access(legacyCover)
-          await fs.mkdir(getCoversDir(), { recursive: true })
+          // OPT-14：库根离线时跳过封面迁移（此前的递归 mkdir 会把根目录树
+          // 重建到失效路径）——迁移幂等，库恢复后下次加载重跑补齐
+          if (!(await ensureLibrarySubdir(getCoversDir())))
+            throw new Error('库根离线')
           const destName = `${createHash('md5').update(legacyCover.toLowerCase()).digest('hex')}${path.extname(legacyCover)}`
           const newRel = `${DATA_DIR}/${COVERS_DIR}/${destName}`
           await fs.copyFile(legacyCover, path.join(getCoversDir(), destName))

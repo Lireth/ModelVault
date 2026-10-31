@@ -27,6 +27,7 @@ import {
   isValidImageFile,
   pruneOrphanCovers,
   saveClipboardImage,
+  saveCoverBuffer,
 } from '../src/main/services/covers'
 import {
   getCoversDir,
@@ -298,5 +299,42 @@ describe('saveClipboardImage（剪贴板图片大小上限）', () => {
     ])
     const res = await saveClipboardImage()
     expect(res.error).toContain('剪贴板中没有图片')
+  })
+})
+
+describe('OPT-14 离线库写链不重建目录树', () => {
+  /** 将激活根切到不存在的路径（模拟盘符未挂载/库目录被移动） */
+  function goOffline() {
+    const offlineRoot = path.join(root, 'offline', 'deeply', 'nested')
+    setDataRoot(offlineRoot)
+    return offlineRoot
+  }
+
+  it('importCoverFromPath：库根离线时拒绝保存且不重建目录树', async () => {
+    const src = path.join(root, 'source.png')
+    await fs.writeFile(src, PNG_MAGIC)
+    const offlineRoot = goOffline()
+    try {
+      const res = await importCoverFromPath(src)
+      expect(res.error).toContain('模型库目录不可用')
+      // 关键回归：失效路径上没有任何目录被重建（旧实现 recursive mkdir
+      // 会把 <root>/.modelvault/covers 整棵树重建出来）
+      await expect(fs.access(path.join(offlineRoot, '.modelvault'))).rejects.toThrow()
+      await expect(fs.access(offlineRoot)).rejects.toThrow()
+    } finally {
+      setDataRoot(root)
+    }
+  })
+
+  it('saveCoverBuffer：库根离线时拒绝保存且不重建目录树', async () => {
+    const offlineRoot = goOffline()
+    try {
+      const res = await saveCoverBuffer(PNG_MAGIC, '.png')
+      expect(res.error).toContain('模型库目录不可用')
+      await expect(fs.access(path.join(offlineRoot, '.modelvault'))).rejects.toThrow()
+      await expect(fs.access(offlineRoot)).rejects.toThrow()
+    } finally {
+      setDataRoot(root)
+    }
   })
 })

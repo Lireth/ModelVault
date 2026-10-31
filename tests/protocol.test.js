@@ -32,7 +32,10 @@ import {
   toImageUrl,
 } from '../src/main/protocol'
 import { setDataRoot, updateSettings } from '../src/main/services/store'
-import { getCivImageCachePath } from '../src/main/services/civ-cache'
+import {
+  getCivImageCachePath,
+  saveCivImageCache,
+} from '../src/main/services/civ-cache'
 
 /** 最小 PNG 文件头（mvimg 魔数校验所需字节均在文件头 12 字节内） */
 const PNG_MAGIC = Buffer.from([
@@ -691,5 +694,25 @@ describe('civimg 上游失败负缓存（OPT-7）', () => {
     const third = await civHandler({ url: makeCivUrl(target) })
     expect(third.status).toBe(200)
     expect(net.fetch).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('OPT-14 civimg 缓存离线写链', () => {
+  it('库根离线时 saveCivImageCache 跳过写入且不重建目录树', async () => {
+    const offlineRoot = path.join(root, 'offline-lib')
+    setDataRoot(offlineRoot)
+    try {
+      await saveCivImageCache(
+        'https://image.civitai.com/opt14/cached.png',
+        Buffer.from('img-bytes'),
+      )
+      // 关键回归：失效路径上没有任何目录被重建
+      await expect(
+        fs.access(path.join(offlineRoot, '.modelvault')),
+      ).rejects.toThrow()
+      await expect(fs.access(offlineRoot)).rejects.toThrow()
+    } finally {
+      setDataRoot(root)
+    }
   })
 })
