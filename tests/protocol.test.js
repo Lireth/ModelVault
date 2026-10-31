@@ -28,6 +28,7 @@ import {
   isCivitaiVideoUrl,
   registerImageProtocolHandler,
   registerImageScheme,
+  setCivimgFailTtlForTests,
   toImageUrl,
 } from '../src/main/protocol'
 import { setDataRoot, updateSettings } from '../src/main/services/store'
@@ -557,5 +558,138 @@ describe('civimg 协议（Civitai 示例图远程代理）', () => {
     // 损坏条目已删除并重新拉取
     expect(vi.mocked(net.fetch)).toHaveBeenCalledTimes(2)
     expect(Buffer.from(await res.arrayBuffer())).toEqual(PNG_BYTES)
+  })
+})
+
+describe('mvimg 条件请求（OPT-7）', () => {
+  it('200 响应携带弱 ETag；If-None-Match 命中返回 304 跳过全量 body 读取', async () => {
+    const file = path.join(root, 'sidecar-cover.png')
+    await fs.writeFile(file, PNG_MAGIC)
+    const first = await handler(makeRequest(file))
+    expect(first.status).toBe(200)
+    const etag = first.headers.get('etag')
+    expect(etag).toMatch(/^W\//)
+
+    // 304 短路跳过全量 body 流：304 路径仅剩魔数校验的一次 open（sidecar
+    // 内容可被外部替换的既有安全设计），body 建流的第二次 open 未发生——
+    // 对照组为不带条件头的 200 请求（魔数校验 + 建流共两次）
+    const openSpy = vi.spyOn(fs, 'open')
+    try {
+      const second = await handler({
+        url: toImageUrl(file),
+        headers: new Headers({ 'If-None-Match': etag }),
+      })
+      expect(second.status).toBe(304)
+      expect(second.body).toBeNull()
+      expect(openSpy).toHaveBeenCalledTimes(1)
+      // 304 携带缓存策略与验证器（供 Chromium 缓存更新元数据）
+      expect(second.headers.get('cache-control')).toBe('no-cache')
+      expect(second.headers.get('etag')).toBe(etag)
+
+      openSpy.mockClear()
+      const third = await handler(makeRequest(file))
+      expect(third.status).toBe(200)
+      expect(openSpy).toHaveBeenCalledTimes(2)
+    } finally {
+      openSpy.mockRestore()
+    }
+  })
+
+  it('If-Modified-Since 命中返回 304；INM 未命中时不降级 IMS 判定', async () => {
+    const file = path.join(root, 'sidecar-ims.png')
+    await fs.writeFile(file, PNG_MAGIC)
+    const stat = await fs.stat(file)
+    const lastModified = new Date(stat.mtimeMs).toUTCString()
+
+    const hit = await handler({
+      url: toImageUrl(file),
+      headers: new Headers({ 'If-Modified-Since': lastModified }),
+    })
+    expect(hit.status).toBe(304)
+
+    // RFC 7232：携带 If-None-Match 时忽略 IMS——INM 未命中返回 200 全量
+    const miss = await handler({
+      url: toImageUrl(file),
+      headers: new Headers({
+        'If-None-Match': '"bogus"',
+        'If-Modified-Since': lastModified,
+      }),
+    })
+    expect(miss.status).toBe(200)
+  })
+
+  it('不可变资产（covers/thumbs）304 响应携带 immutable 缓存策略', async () => {
+    const coversDir = path.join(root, '.modelvault', 'covers')
+    await fs.mkdir(coversDir, { recursive: true })
+    const file = path.join(coversDir, 'c1.png')
+    await fs.writeFile(file, PNG_MAGIC)
+    const first = await handler(makeRequest(file))
+    expect(first.status).toBe(200)
+    const second = await handler({
+      url: toImageUrl(file),
+      headers: new Headers({ 'If-None-Match': first.headers.get('etag') }),
+    })
+    expect(second.status).toBe(304)
+    expect(second.headers.get('cache-control')).toContain('immutable')
+  })
+})
+
+describe('civimg 上游失败负缓存（OPT-7）', () => {
+  /** 构造 civimg 请求（与渲染进程 civimg://remote/<encodeURIComponent(url)> 格式一致） */
+  function makeCivUrl(target) {
+    return `civimg://remote/${encodeURIComponent(target)}`
+  }
+
+  /** 捕获 civimg 协议处理器（registerImageProtocolHandler 已在 beforeEach 注册） */
+  function getCivHandler() {
+    const call = vi
+      .mocked(protocol.handle)
+      .mock.calls.find(([scheme]) => scheme === 'civimg')
+    return call?.[1]
+  }
+
+  afterEach(() => {
+    setCivimgFailTtlForTests(60000)
+  })
+
+  it('上游失败记入负缓存：静默期内同 URL 零回源直接返回失败', async () => {
+    setCivimgFailTtlForTests(60000)
+    const civHandler = getCivHandler()
+    const target = 'https://image.civitai.com/opt7/deleted-1.png'
+    vi.mocked(net.fetch).mockRejectedValue(new Error('网络不可达'))
+
+    const first = await civHandler({ url: makeCivUrl(target) })
+    expect(first.status).toBe(502)
+    expect(net.fetch).toHaveBeenCalledTimes(1)
+
+    // 静默期内再次请求（画廊滚动重复触发）：零回源直接失败——
+    // 旧实现每次 <img> 都重走完整回源（白名单校验 + fetch + 超时等待）
+    const second = await civHandler({ url: makeCivUrl(target) })
+    expect(second.status).toBe(502)
+    expect(net.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('静默期到期自动恢复回源；成功后由磁盘缓存服务且失败记录已清除', async () => {
+    setCivimgFailTtlForTests(20)
+    const civHandler = getCivHandler()
+    const target = 'https://image.civitai.com/opt7/relisted-2.png'
+    vi.mocked(net.fetch).mockRejectedValue(new Error('网络不可达'))
+    expect((await civHandler({ url: makeCivUrl(target) })).status).toBe(502)
+
+    // 静默期（20ms）到期：恢复回源，本次成功（真实 PNG 魔数入磁盘缓存）
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response(PNG_MAGIC, {
+        status: 200,
+        headers: { 'Content-Type': 'image/png' },
+      }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect((await civHandler({ url: makeCivUrl(target) })).status).toBe(200)
+    expect(net.fetch).toHaveBeenCalledTimes(2)
+
+    // 成功即清除失败记录：第三次请求命中磁盘缓存（200 而非负缓存的 502）
+    const third = await civHandler({ url: makeCivUrl(target) })
+    expect(third.status).toBe(200)
+    expect(net.fetch).toHaveBeenCalledTimes(2)
   })
 })

@@ -162,18 +162,74 @@ function isImmutableAssetPath(realPath) {
  * 无该头时 CORS 校验不通过，画布被污染导致 convertToBlob 抛错（回退原图）。
  * mvimg 响应体本就限定在当前库根目录内的图片文件，放开跨源读不扩大可读范围。
  */
+function cacheControlValue(immutable) {
+  return immutable
+    ? 'public, max-age=31536000, immutable'
+    : 'no-cache'
+}
+
 function withCacheHeaders(upstream, immutable) {
   const headers = new Headers(upstream.headers || undefined)
-  headers.set(
-    'Cache-Control',
-    immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
-  )
+  headers.set('Cache-Control', cacheControlValue(immutable))
   headers.set('Access-Control-Allow-Origin', '*')
   return new Response(upstream.body, {
     status: upstream.status || 200,
     statusText: upstream.statusText,
     headers,
   })
+}
+
+/**
+ * 由文件 stat 构造弱 ETag（OPT-7 条件请求支持）：
+ * mtime+size 即内容指纹——mvimg 资产语义与 Last-Modified 同一假设
+ * （mtime 未变时内容未变；sidecar 同名图被替换必改 mtime）。
+ * @param {{mtimeMs: number, size: number}} stat 文件 stat 结果
+ * @returns {string} 弱 ETag（W/ 前缀，允许语义等价比较）
+ */
+function etagForStat(stat) {
+  return `W/"${stat.mtimeMs}-${stat.size}"`
+}
+
+/**
+ * 判定条件请求是否命中（OPT-7）：命中即 304 短路，验证过程零读盘。
+ * 渲染层对 no-cache 资产（sidecar 同名图）的每次重验证从「全量重读」
+ * 降为「零开销确认」，命中时 Chromium 直接复用本地缓存字节。
+ * If-None-Match 优先（RFC 7232：携带 INM 时忽略 IMS）；弱比较剥离 W/
+ * 前缀后比较不透明值，`*` 匹配任意现存资源；INM 未命中时返回 false
+ * （不降级 IMS 判定），由调用方走 200 全量。
+ * @param {Request|undefined} request 协议请求（测试桩可能无 headers）
+ * @param {{mtimeMs: number, size: number}} stat 当前文件 stat
+ * @returns {boolean}
+ */
+function isConditionalHit(request, stat) {
+  const headers = request?.headers
+  const inm = headers?.get?.('if-none-match')
+  if (typeof inm === 'string' && inm) {
+    const opaque = etagForStat(stat).replace(/^W\//, '')
+    return inm.split(',').some((candidate) => {
+      const value = candidate.trim()
+      return value === '*' || value.replace(/^W\//, '') === opaque
+    })
+  }
+  const ims = headers?.get?.('if-modified-since')
+  if (typeof ims === 'string' && ims) {
+    const since = Date.parse(ims)
+    if (Number.isFinite(since)) {
+      // Last-Modified 与 IMS 均为秒级粒度：毫秒截断后比较
+      return stat.mtimeMs - (stat.mtimeMs % 1000) <= since
+    }
+  }
+  return false
+}
+
+/** 构造 304 响应：携带缓存策略与验证器（ETag/Last-Modified）供缓存更新元数据 */
+function notModifiedResponse(immutable, etag, lastModified) {
+  const headers = new Headers()
+  headers.set('Cache-Control', cacheControlValue(immutable))
+  headers.set('Access-Control-Allow-Origin', '*')
+  headers.set('ETag', etag)
+  headers.set('Last-Modified', lastModified)
+  return new Response(null, { status: 304, headers })
 }
 
 /**
@@ -287,16 +343,23 @@ function registerMvimgHandler() {
       }
       // PERF-6：net.fetch(file://) 需经一轮 Chromium URL 载入栈，仅为读本地
       // 文件；改为 Node 流式直读（fh.createReadStream → Readable.toWeb），
-      // Content-Type/Content-Length/Last-Modified 由本方下发，响应头确定化。
-      // 文件句柄随流 autoClose（流结束/出错/取消时关闭）；open 与建流之间的
-      // 失败显式关闭句柄。校验到读盘之间文件被删除属瞬态竞态：流中断由
-      // 渲染层 <img> 错误回退原图，与既有失效处理一致。
+      // Content-Type/Content-Length/Last-Modified/ETag 由本方下发，响应头
+      // 确定化。OPT-7：stat 前置以构造验证器并判定条件请求——命中即 304
+      // 短路（跳过全量 body 流；12 字节魔数校验仍保留，sidecar 内容可被
+      // 外部替换的既有安全设计不变），未命中才打开文件建流。文件句柄随流
+      // autoClose（流结束/出错/取消时关闭）；open 与建流之间的失败显式关闭
+      // 句柄。校验到读盘之间文件被删除/替换属瞬态竞态：流中断由渲染层
+      // <img> 错误回退原图，与既有失效处理一致。
       const immutable = isImmutableAssetPath(realPath)
+      const stat = await fs.promises.stat(realPath)
+      const etag = etagForStat(stat)
+      const lastModified = new Date(stat.mtimeMs).toUTCString()
+      if (isConditionalHit(request, stat)) {
+        return notModifiedResponse(immutable, etag, lastModified)
+      }
       const fh = await fs.promises.open(realPath, 'r')
       let body
-      let stat
       try {
-        stat = await fh.stat()
         body = Readable.toWeb(fh.createReadStream())
       } catch (err) {
         await fh.close().catch(() => {})
@@ -308,7 +371,8 @@ function registerMvimgHandler() {
           headers: {
             'Content-Type': imageMimeType(realPath),
             'Content-Length': String(stat.size),
-            'Last-Modified': stat.mtime.toUTCString(),
+            'Last-Modified': lastModified,
+            ETag: etag,
           },
         }),
         immutable,
@@ -367,10 +431,63 @@ function acquireCivimgSlot() {
 const civimgInflight = new Map()
 
 /**
- * 图片共享回源（OPT-05 去重 + 并发约束）：
+ * civimg 上游失败负缓存（OPT-7）：URL → retryAt。
+ * 已失效/已删除的 CDN 图（404/403）与网络故障在画廊滚动时会随每次 <img>
+ * 请求反复回源（域名校验 + fetch + 30s 超时，30 张失效图即 30 次全等待）。
+ * 短 TTL 记录失败结果：静默期内同 URL 直接返回失败状态（零回源零读盘），
+ * 到期惰性删除恢复重试（网络恢复/图重新上架的自愈通道）；成功回源即清除。
+ * 仅覆盖图片路径：视频流式代理失败不落缓存（头部阶段失败本就轻量）。
+ */
+const CIVIMG_FAIL_TTL_MS = 60_000
+/** 负缓存容量上限（病态防御，超过丢弃最旧记录） */
+const CIVIMG_FAIL_MAX_ENTRIES = 2048
+const civimgFailures = new Map()
+
+/** 失败 TTL（测试可注入小值验证到期重试） */
+let civimgFailTtlMs = CIVIMG_FAIL_TTL_MS
+
+/**
+ * 注入 civimg 失败负缓存 TTL（仅供单元测试使用；生产代码严禁调用）
+ * @param {number} ms 毫秒数
+ */
+export function setCivimgFailTtlForTests(ms) {
+  civimgFailTtlMs = Number.isFinite(ms) && ms > 0 ? ms : CIVIMG_FAIL_TTL_MS
+}
+
+/**
+ * 静默期内同 URL 的缓存失败状态（无记录/已到期返回 0）。
+ * 到期即惰性删除，下一次请求正常回源。
+ * @param {string} target 图片 URL
+ * @returns {number} 失败状态码（0 = 不在负缓存）
+ */
+function peekCivimgFailure(target) {
+  const retryAt = civimgFailures.get(target)
+  if (retryAt === undefined) return 0
+  if (Date.now() >= retryAt) {
+    civimgFailures.delete(target)
+    return 0
+  }
+  return 502
+}
+
+/**
+ * 记录一次 civimg 上游失败（OPT-7）：容量超限时丢弃最旧记录（Map 插入序）。
+ * @param {string} target 图片 URL
+ */
+function recordCivimgFailure(target) {
+  if (!civimgFailures.has(target) && civimgFailures.size >= CIVIMG_FAIL_MAX_ENTRIES) {
+    const oldest = civimgFailures.keys().next().value
+    if (oldest !== undefined) civimgFailures.delete(oldest)
+  }
+  civimgFailures.set(target, Date.now() + civimgFailTtlMs)
+}
+
+/**
+ * 图片共享回源（OPT-05 去重 + 并发约束；OPT-7 失败记入负缓存）：
  * 图片路径整体读入 Buffer，各调用方从共享结果自建 Response——上游拉取、
  * 体积上限校验与磁盘缓存写入对同 URL 并发请求只发生一次；失败同样共享
- * （缓存未写入，下一个请求自然重新回源）。
+ * （并统一记入负缓存：HTTP 非成功、内容读取失败与网络层异常三条路径，
+ * 静默期内同 URL 零回源）。
  * @param {string} target 已通过白名单校验的图片 URL
  * @returns {Promise<{buf?: Buffer, upstream?: Response, errorStatus?: number}>}
  */
@@ -385,6 +502,7 @@ function fetchCivImageShared(target) {
         logger.warn(
           `civimg 上游响应异常（HTTP ${upstream.status}）: ${target.slice(0, 200)}`,
         )
+        recordCivimgFailure(target)
         return { errorStatus: 502 }
       }
       // 整体读入后回写磁盘缓存（best-effort，失败不影响返回）；仅缓存
@@ -395,12 +513,20 @@ function fetchCivImageShared(target) {
         buf = await readCivitaiImageBody(upstream)
       } catch (err) {
         logger.warn(`civimg 上游内容读取失败: ${err.message}`)
+        recordCivimgFailure(target)
         return { errorStatus: 502 }
       }
+      // OPT-7：成功回源即清除失败记录（失效图重新上架的自愈即刻生效）
+      civimgFailures.delete(target)
       if (isImageBuffer(buf)) {
         await saveCivImageCache(target, buf)
       }
       return { buf, upstream }
+    } catch (err) {
+      // 网络层失败（离线/超时/连接重置）同样记入负缓存：离线滚动画廊
+      // 不再逐图等待完整超时（记录后由调用方统一按 502 语义返回）
+      recordCivimgFailure(target)
+      throw err
     } finally {
       release()
     }
@@ -442,6 +568,13 @@ function registerCivimgHandler() {
       if (isCivitaiVideoUrl(target)) {
         return proxyCivitaiVideo(target, request, acquireCivimgSlot)
       }
+      // OPT-7 负缓存：近期上游失败的 URL 静默期内直接返回失败状态——
+      // 画廊滚动对已失效图零回源零读盘（记录只在缓存未命中时产生，
+      // 命中的 URL 不可能与负缓存共存，置于磁盘缓存读取之前可一并省去读盘）
+      const failStatus = peekCivimgFailure(target)
+      if (failStatus) {
+        return new Response('Upstream Error', { status: failStatus })
+      }
       // 缓存命中路径：魔数校验失败（半写/损坏/被篡改）时删除条目自愈并回源
       const cached = await getCivImageFromCache(target)
       if (cached) {
@@ -456,8 +589,15 @@ function registerCivimgHandler() {
         }
         await removeCivImageCache(target)
       }
-      // 回源（在途去重 + 并发上限，OPT-05）
-      const shared = await fetchCivImageShared(target)
+      // 回源（在途去重 + 并发上限，OPT-05）；网络层失败统一按上游错误
+      // 语义返回 502（OPT-7 起同时已记入负缓存，静默期内同 URL 零回源）
+      let shared
+      try {
+        shared = await fetchCivImageShared(target)
+      } catch (err) {
+        logger.warn(`civimg 回源网络失败: ${err.message}`)
+        return new Response('Upstream Error', { status: 502 })
+      }
       if (shared.errorStatus) {
         return new Response('Upstream Error', { status: shared.errorStatus })
       }
