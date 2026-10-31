@@ -182,6 +182,8 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
     snapshot: new Map(),
     // O4：内容快照（withStats=true）与最近一次内容校验时刻；null 表示需重建基线
     statSnapshot: null,
+    // OPT-9：每目录最近一次内容校验时刻（渐进分桶的轮转依据）
+    contentCheckedAt: new Map(),
     lastContentCheckAt: 0,
     contentCheckInterval:
       timing.contentCheckInterval ?? DEFAULT_CONTENT_CHECK_INTERVAL,

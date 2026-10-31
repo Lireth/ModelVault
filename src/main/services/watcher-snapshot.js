@@ -190,6 +190,52 @@ export function namesFromSnapshot(statSnapshot) {
 }
 
 /**
+ * 对选定目录补齐内容条目（OPT-9 渐进内容校验）：
+ * 以名称快照为事实清单，仅 stat 选中目录内的条目（同名覆盖写入检测），
+ * 未选中目录由调用方沿用旧内容条目。条目形状与 collectDirSnapshot(true)
+ * 完全一致（目录条目仅记 isDir，stat 失败记 null，名称排序），两套结果
+ * 可直接合并参与 computeStatSnapshotDiff。
+ * @param {Map<string, string[]>} nameSnapshot 名称快照（全树，已按可见性过滤）
+ * @param {Iterable<string>} selectedDirs 本轮 stat 的目录绝对路径集合
+ * @param {{dirConcurrency?: number}} [options] 目录间并发上限（目录内文件
+ *   stat 沿用 STAT_CONCURRENCY，与 collectDirSnapshot 同款有界并发）
+ * @returns {Promise<Map<string, SnapshotEntry[]>>} 选中目录的内容条目
+ */
+export async function statSelectedDirEntries(
+  nameSnapshot,
+  selectedDirs,
+  options = {},
+) {
+  const dirs = [...selectedDirs].filter((dir) => nameSnapshot.has(dir))
+  const out = new Map()
+  await runWithConcurrency(
+    dirs,
+    async (dir) => {
+      const names = nameSnapshot.get(dir) || []
+      const entries = new Array(names.length)
+      await runWithConcurrency(
+        names,
+        async (name, index) => {
+          try {
+            const stat = await fs.stat(path.join(dir, name))
+            entries[index] = stat.isDirectory()
+              ? { name, isDir: true }
+              : { name, size: stat.size, mtimeMs: stat.mtimeMs }
+          } catch {
+            // stat 间隙被删除/锁定：记空值，下一轮内容校验会恢复或再次发现
+            entries[index] = { name, size: null, mtimeMs: null }
+          }
+        },
+        STAT_CONCURRENCY,
+      )
+      out.set(dir, entries.sort(compareEntryName))
+    },
+    normalizeConcurrency(options.dirConcurrency),
+  )
+  return out
+}
+
+/**
  * 比较两份目录快照是否一致：键集合相同且各目录的条目名列表逐项相等。
  * @param {Map<string, string[]>} a 快照 A
  * @param {Map<string, string[]>} b 快照 B

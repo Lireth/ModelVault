@@ -39,8 +39,11 @@ export const DEFAULT_BACKOFF = [2000, 5000, 10000, 30000]
 export const DEFAULT_BROADCAST_DEBOUNCE = 3000
 /**
  * 内容校验间隔（ms，O4）：名称快照只能发现条目增删/重命名，同名覆盖写入
- * （下载器原地替换、工具覆写）不会改变条目名。以低频全树 stat 对比
- * size/mtime 检出这类变更——默认 60s，避免每轮轮询都对所有文件 stat。
+ * （下载器原地替换、工具覆写）不会改变条目名。以低频内容校验对比
+ * size/mtime 检出这类变更——默认 60s。OPT-9 起内容校验渐进分桶：stat 按目录
+ * 轮转覆盖（热点子树与名称变化目录当轮必检，其余按上次校验时间最旧优先），
+ * 全量覆盖窗口 ≈ fullWalkInterval × 本间隔，大库稳态的常驻 stat 底噪按
+ * 配额比例下降；基线缺失（扫描/切换后）时仍整树 stat 重建。
  */
 export const DEFAULT_CONTENT_CHECK_INTERVAL = 60000
 /** 目录遍历的并发上限（O4）：避免无界 Promise.all 在大库上耗尽句柄 */
@@ -63,6 +66,7 @@ export const DEFAULT_FULL_WALK_INTERVAL = 5
  * @property {Set<string>} excludeNames 用户排除目录名小写集合
  * @property {Map<string, string[]>} snapshot 名称快照（目录绝对路径 -> 条目名列表）
  * @property {Map<string, import('./watcher-snapshot').SnapshotEntry[]>|null} statSnapshot 内容快照（null 表示需重建基线）
+ * @property {Map<string, number>} contentCheckedAt 每目录最近一次内容校验时刻（OPT-9 渐进分桶的轮转依据；目录绝对路径 -> Date.now()）
  * @property {number} lastContentCheckAt 最近一次内容校验时刻（Date.now()）
  * @property {number} contentCheckInterval 内容校验间隔（ms，≤0 关闭）
  * @property {number} traversalConcurrency 目录遍历并发上限

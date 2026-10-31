@@ -1054,3 +1054,80 @@ describe('A-07b 自适应轮询', () => {
     expect(started).toContain('空闲退避至 30000ms')
   })
 })
+
+describe('OPT-9 渐进内容校验（冷区轮转 + 热区即时）', () => {
+  /** 构造多目录夹具：每个目录一个模型文件（目录数超过轮转配额下限 32） */
+  async function makeRotationFixture(count) {
+    for (let i = 0; i < count; i++) {
+      const dir = path.join(root, `rot-${i}`)
+      await fs.mkdir(dir, { recursive: true })
+      await fs.writeFile(path.join(dir, 'x.safetensors'), 'v1')
+    }
+  }
+
+  it('冷目录同名覆盖经轮转渐进检出（无需名称变化）', async () => {
+    await makeRotationFixture(40)
+    syncWatcher(root, true, [], {
+      pollInterval: 10,
+      broadcastDebounce: 20,
+      // 目录数 41 > 配额下限 32：每轮内容校验仅 stat ceil(41/5)~32 个目录，
+      // 全量覆盖窗口 ≈ fullWalkInterval × 内容校验周期，轮转必然到达冷目录
+      contentCheckInterval: 30,
+      isVisible: () => true,
+      onPollScheduled: () => {},
+    })
+    await sleep(80) // 基准轮（全树 stat 建立内容基线）完成
+    sentEvents.length = 0
+
+    // 冷目录同名覆盖写入（条目名不变，仅 size/mtime 变化）
+    await fs.writeFile(path.join(root, 'rot-37', 'x.safetensors'), 'v2')
+    await waitFor(
+      () =>
+        sentEvents.some(
+          (e) =>
+            e.channel === 'models:fsChanged' && e.payload.dirs.includes('rot-37'),
+        ),
+      '轮转未覆盖到冷目录的同名覆盖',
+      3000,
+    )
+  })
+
+  it('热子树内容覆盖在下一内容轮即时检出（不等待轮转）', async () => {
+    await fs.mkdir(path.join(root, 'hot'), { recursive: true })
+    await fs.writeFile(path.join(root, 'hot', 'a.safetensors'), 'v1')
+    syncWatcher(root, true, [], {
+      pollInterval: 10,
+      broadcastDebounce: 20,
+      contentCheckInterval: 30,
+      isVisible: () => true,
+      onPollScheduled: () => {},
+    })
+    await sleep(80)
+    sentEvents.length = 0
+
+    // 第一步：子树内新增文件（名称变化）→ 名称轮检出并记入热点
+    await fs.writeFile(path.join(root, 'hot', 'b.safetensors'), 'new')
+    await waitFor(
+      () =>
+        sentEvents.some(
+          (e) =>
+            e.channel === 'models:fsChanged' && e.payload.dirs.includes('hot'),
+        ),
+      '名称变化未检出',
+      3000,
+    )
+
+    // 第二步：同子树内既有文件同名覆盖（纯内容变化）→ 热点目录在下一
+    // 内容轮必被 stat，即时检出而不等待冷区轮转
+    await fs.writeFile(path.join(root, 'hot', 'a.safetensors'), 'v2')
+    await waitFor(
+      () =>
+        sentEvents.filter(
+          (e) =>
+            e.channel === 'models:fsChanged' && e.payload.dirs.includes('hot'),
+        ).length >= 2,
+      '热子树内容覆盖未检出',
+      3000,
+    )
+  })
+})
