@@ -238,6 +238,25 @@ describe('路径关联', () => {
     expect(renameModelMeta(newAbs, 'D:\\库外\\x.safetensors')).toBe(false)
   })
 
+  it('不安全键（__proto__）拒绝迁移：双向防线上下文一致（FIX-6）', async () => {
+    const oldAbs = await touchModel('safe-old.safetensors')
+    setModelMeta(oldAbs, { alias: '防护验证', rating: 4 })
+
+    // newKey 为字面名 __proto__：旧实现会执行 models.__proto__ = meta 的
+    // 原型写入（内存污染直至重载；journal/快照写侧不持久化但内存失真）
+    expect(renameModelMeta(oldAbs, path.join(root, '__proto__'))).toBe(false)
+    // 裸读 models['__proto__'] 恒返回对象原型（Object.prototype，无 alias
+    // 字段）；若旧实现污染了原型，此处会读到迁移过去的源标注
+    expect(getModelMeta(path.join(root, '__proto__'))?.alias).toBeUndefined()
+
+    // oldKey 为字面名 __proto__：裸读返回 Object.prototype（真值），旧实现
+    // 会把它当作 meta 顶替目标键的真实标注（数据损坏）
+    expect(renameModelMeta(path.join(root, '__proto__'), oldAbs)).toBe(false)
+    // 源标注完好：拒绝 ≠ 丢失，真实 meta 未被原型对象覆盖
+    expect(getModelMeta(oldAbs)?.alias).toBe('防护验证')
+    expect(getModelMeta(oldAbs)?.rating).toBe(4)
+  })
+
   it('迁移目标键已有幽灵标注时被源标注顶替，且告警不静默（防标注丢失）', async () => {
     const oldAbs = await touchModel('ghost-old.safetensors')
     setModelMeta(oldAbs, { alias: '真实跟随', rating: 5 })

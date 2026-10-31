@@ -289,13 +289,22 @@ export function removeModelMeta(modelId) {
  * 身份字段有绑错文件的风险（宁可不绑也绝不绑错）。
  * @param {string} oldId 旧绝对路径
  * @param {string} newId 新绝对路径
- * @returns {boolean} 迁移成功返回 true（无旧数据/越界返回 false）
+ * @returns {boolean} 迁移成功返回 true（无旧数据/越界/不安全键返回 false）
  */
 export function renameModelMeta(oldId, newId) {
   if (!metaState.data) return false
   const oldKey = toRelKey(oldId)
   const newKey = toRelKey(newId)
   if (!oldKey || !newKey || oldKey === newKey) return false
+  // FIX-6：与 setModelMeta/loadJournal 同一防线（isUnsafeModelKey）——
+  // newKey 写入 models 表会触发 __proto__ 原型 setter（内存污染直至重载，
+  // journal/快照写侧不持久化但内存已失真）；oldKey 裸读 `models[__proto__]`
+  // 会误取 Object.prototype（真值）作为 meta 顶替目标键的真实标注。
+  // 概率极低（需字面名为 __proto__ 的文件路径），但写入口防线必须一致
+  if (isUnsafeModelKey(oldKey) || isUnsafeModelKey(newKey)) {
+    logger.warn(`元数据键迁移涉及不安全键，忽略: ${oldKey} -> ${newKey}`)
+    return false
+  }
   const meta = metaState.data.models[oldKey]
   if (!meta) return false
   const displaced = metaState.data.models[newKey]
