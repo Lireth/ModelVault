@@ -64,6 +64,98 @@ export function setHashRetryDelayForTests(ms) {
 }
 
 /**
+ * 哈希失败负缓存（OPT-6）：
+ * 损坏/被占用（EACCES/EBUSY）等永久失败的文件，若每轮全量扫描都重新入队，
+ * 意味着每次都完整读盘失败一遍（10GB 文件一次数分钟）。失败记录以
+ * 「文件 mtime + 指数退避静默期」键控：
+ * - 同版本（mtime 未变）且静默期未到：批量预热跳过该文件的读盘重试；
+ * - 文件被修改（mtime 变化）：记录自动失效，新版本立即恢复预热资格；
+ * - 静默期到期：自动恢复重试（占用释放/外部修复的自愈通道）；
+ * - 任意一次计算成功：记录清除；
+ * - 详情页/识别的 priority 按需任务不受限制（用户显式等待结果）；
+ * - 让路重排（PreemptedError）不是失败，不入记录。
+ */
+const HASH_FAIL_RETRY_BASE_MS = 5 * 60 * 1000
+/** 静默期上限：连续失败的退避封顶（24h） */
+const HASH_FAIL_RETRY_MAX_MS = 24 * 60 * 60 * 1000
+/** 退避倍率：同版本每次失败 ×4（5min → 20min → 80min → 5.3h → 封顶） */
+const HASH_FAIL_BACKOFF_FACTOR = 4
+/** 记录数上限（防御病态库；超过即丢弃最旧记录腾位） */
+const HASH_FAIL_MAX_ENTRIES = 10000
+
+/** 负缓存记录：id -> { mtimeMs, failAt, retryAt, attempts } */
+const hashFailures = new Map()
+
+/** 静默期基准（测试可注入小值验证到期重试） */
+let hashFailRetryBaseMs = HASH_FAIL_RETRY_BASE_MS
+
+/**
+ * 注入哈希失败静默期基准（仅供单元测试使用；生产代码严禁调用）
+ * @param {number} ms 毫秒数
+ */
+export function setHashFailRetryBaseForTests(ms) {
+  hashFailRetryBaseMs =
+    Number.isFinite(ms) && ms >= 0 ? ms : HASH_FAIL_RETRY_BASE_MS
+}
+
+/**
+ * 同版本近期失败且静默期未到时为 true（批量预热跳过读盘重试）。
+ * 文件已修改（mtime 变化）时记录自动失效并返回 false——新版本立即可预热。
+ * @param {string} id 模型绝对路径
+ * @param {number|null} mtimeMs 当前已知文件 mtime（未知时仅按静默期判定，
+ *   drain 侧会以实时 stat 复核）
+ * @returns {boolean}
+ */
+function isHashFailSuppressed(id, mtimeMs) {
+  const record = hashFailures.get(id)
+  if (!record) return false
+  if (
+    Number.isFinite(mtimeMs) &&
+    Number.isFinite(record.mtimeMs) &&
+    record.mtimeMs !== mtimeMs
+  ) {
+    hashFailures.delete(id)
+    return false
+  }
+  return Date.now() < record.retryAt
+}
+
+/**
+ * 记录一次哈希失败（OPT-6）：同版本连续失败按 ×4 递增静默期（封顶 24h），
+ * 新版本（mtime 变化）从基准重新计起。
+ * @param {string} id 模型绝对路径
+ * @param {number|null} mtimeMs 失败时已知的文件 mtime（drain stat 结果）
+ * @param {Error} err 失败原因（仅用于日志）
+ */
+function recordHashFailure(id, mtimeMs, err) {
+  const prev = hashFailures.get(id)
+  const sameVersion = Boolean(
+    prev && prev.mtimeMs === (Number.isFinite(mtimeMs) ? mtimeMs : null),
+  )
+  const attempts = sameVersion ? prev.attempts + 1 : 1
+  const backoff = Math.min(
+    hashFailRetryBaseMs * HASH_FAIL_BACKOFF_FACTOR ** (attempts - 1),
+    HASH_FAIL_RETRY_MAX_MS,
+  )
+  if (hashFailures.size >= HASH_FAIL_MAX_ENTRIES && !prev) {
+    // 病态防御：丢弃最旧记录（Map 保持插入序）为新记录腾位
+    const oldest = hashFailures.keys().next().value
+    if (oldest !== undefined) hashFailures.delete(oldest)
+  }
+  hashFailures.set(id, {
+    mtimeMs: Number.isFinite(mtimeMs) ? mtimeMs : null,
+    failAt: Date.now(),
+    retryAt: Date.now() + backoff,
+    attempts,
+  })
+  logger.warn(
+    `后台哈希预热失败，已记入负缓存` +
+      `（第 ${attempts} 次，${Math.round(backoff / 1000)}s 内批量预热跳过）` +
+      `: ${id} ${err.message}`,
+  )
+}
+
+/**
  * 哈希预热策略（O1）：
  * - candidates：仅对「存在同尺寸文件」的模型计算 SHA256——内容相同的文件
  *   必然大小相同，大小唯一的模型不可能存在重复副本，无需读盘哈希；
@@ -300,6 +392,8 @@ export function computeAndCacheHash(id, mtimeMs, options = {}) {
       // 写盘前重读最新元数据：哈希计算期间用户可能已并发保存其他字段
       const latest = getModelMeta(id) || {}
       setModelMeta(id, { ...latest, hash, hashMtime: mtimeMs })
+      // OPT-6：计算成功即清除失败记录（占用释放/外部修复后的首次成功自愈）
+      hashFailures.delete(id)
       return hash
     } finally {
       // 完成即熄灭本快照（active=false），渲染层据此清除当前模型的进度标识
@@ -440,6 +534,8 @@ function enqueueCollisionPeers(size, excludeId = undefined) {
     if (id === excludeId) continue
     if (queued.has(id) || inflight.has(id)) continue
     if (hasValidCachedHash(id)) continue
+    // OPT-6：同版本近期失败的模型不重复入队（drain 侧实时 stat 复核兜底）
+    if (isHashFailSuppressed(id, knownInfo.get(id)?.mtimeMs ?? null)) continue
     if (pushQueue(id, false, 'candidates')) added = true
   }
   return added
@@ -494,8 +590,13 @@ export function requestHashWarmup(items, opts = {}) {
       // loadStore 路径传入的 mtime 即最新事实（扫描为实时 stat、索引为上次
       // 扫描快照）；mtime 未知的裸 id 保守入队（hasValidCachedHash 为 false），
       // 行为与旧实现一致。识别链路 ensureHash 以实时 stat 复核缓存，跳过方
-      // 不引入陈旧哈希风险
-      if (!hasValidCachedHash(item.id) && pushQueue(item.id, false, 'full'))
+      // 不引入陈旧哈希风险。
+      // OPT-6：同版本近期失败的条目同样免入队（负缓存，静默期内不重读盘）
+      if (
+        !hasValidCachedHash(item.id) &&
+        !isHashFailSuppressed(item.id, item.mtimeMs) &&
+        pushQueue(item.id, false, 'full')
+      )
         added = true
       continue
     }
@@ -593,6 +694,10 @@ async function drainLane() {
     }
     const meta = getModelMeta(id)
     if (meta?.hash && meta.hashMtime === stat.mtimeMs) continue // 缓存有效，免计算
+    // OPT-6 负缓存：同版本近期失败且静默期未到——跳过本轮读盘重试，
+    // 消除「损坏/被占用的 10GB 文件每轮扫描完整读盘失败一遍」的持续成本。
+    // force（详情页/识别 priority）任务不受限：用户显式等待结果
+    if (!task.force && isHashFailSuppressed(id, stat.mtimeMs)) continue
     try {
       // 详情页/识别 priority 任务走线程池前台通道；后台批量保持普通优先级
       await computeAndCacheHash(id, stat.mtimeMs, { priority: task.force })
@@ -611,7 +716,8 @@ async function drainLane() {
         }
         continue
       }
-      logger.warn(`后台哈希预热失败: ${id} ${err.message}`)
+      // OPT-6：记入负缓存（mtime 键控 + 指数退避），静默期内批量预热跳过
+      recordHashFailure(id, stat.mtimeMs, err)
     }
   }
 }
@@ -661,6 +767,8 @@ export function resetHashWarmupForTests() {
   knownInfo.clear()
   sizeIndex.clear()
   consumedIds.clear()
+  hashFailures.clear()
+  hashFailRetryBaseMs = HASH_FAIL_RETRY_BASE_MS
   paused = false
   draining = false
   doneCount = 0

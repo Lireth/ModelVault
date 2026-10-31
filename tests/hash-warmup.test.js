@@ -28,6 +28,7 @@ import {
   requestHashWarmup,
   resetHashWarmupForTests,
   resumeHashWarmup,
+  setHashFailRetryBaseForTests,
   setHashRetryDelayForTests,
   setWarmupProgressListener,
   whenWarmupIdle,
@@ -675,5 +676,78 @@ describe('进度事件推送', () => {
     requestHashWarmup([id], { delayMs: 0 })
     await whenWarmupIdle()
     expect(getModelMeta(id).hash).toBe(fakeHash(10))
+  })
+})
+
+describe('哈希失败负缓存（OPT-6）', () => {
+  it('失败后同版本批量预热静默期内不再读盘重试', async () => {
+    const id = await makeModel('bad.safetensors')
+    computeFileHash.mockRejectedValue(new Error('EACCES: 文件被占用'))
+    await requestHashWarmup([id], { delayMs: 0 })
+    await whenWarmupIdle()
+    expect(computeFileHash).toHaveBeenCalledTimes(1)
+
+    // 再次全量预热：负缓存命中（同版本静默期未到），不重复读盘——
+    // 旧实现每次全量扫描都会把损坏/被占用的 10GB 文件完整读盘失败一遍
+    await requestHashWarmup([id], { delayMs: 0, full: true })
+    await whenWarmupIdle()
+    expect(computeFileHash).toHaveBeenCalledTimes(1)
+  })
+
+  it('文件被修改（mtime 变化）后记录自动失效，新版本恢复预热资格', async () => {
+    const id = await makeModel('bad.safetensors')
+    computeFileHash.mockRejectedValue(new Error('EACCES: 文件被占用'))
+    await requestHashWarmup([id], { delayMs: 0 })
+    await whenWarmupIdle()
+    expect(computeFileHash).toHaveBeenCalledTimes(1)
+
+    // 文件被修改（显式 utimes 保证 mtime 必然变化）：旧失败记录失效，
+    // 新版本立即重新获得预热资格并计算成功
+    computeFileHash.mockResolvedValue(fakeHash(1))
+    const later = new Date(Date.now() + 5000)
+    await fs.utimes(id, later, later)
+    const { mtimeMs } = await fs.stat(id)
+    await requestHashWarmup([{ id, mtimeMs }], { delayMs: 0, full: true })
+    await whenWarmupIdle()
+    expect(computeFileHash).toHaveBeenCalledTimes(2)
+    expect(getModelMeta(id)?.hash).toBe(fakeHash(1))
+  })
+
+  it('静默期到期后自动恢复重试（占用释放的自愈通道）', async () => {
+    setHashFailRetryBaseForTests(20)
+    const id = await makeModel('bad.safetensors')
+    computeFileHash.mockRejectedValue(new Error('EBUSY: 资源暂时不可用'))
+    await requestHashWarmup([id], { delayMs: 0 })
+    await whenWarmupIdle()
+    expect(computeFileHash).toHaveBeenCalledTimes(1)
+
+    // 静默期（20ms）到期：再次批量预热重新尝试，本次成功并回写缓存
+    computeFileHash.mockResolvedValue(fakeHash(2))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    await requestHashWarmup([id], { delayMs: 0, full: true })
+    await whenWarmupIdle()
+    expect(computeFileHash).toHaveBeenCalledTimes(2)
+    expect(getModelMeta(id)?.hash).toBe(fakeHash(2))
+  })
+
+  it('priority 按需任务不受负缓存限制，成功即清除失败记录', async () => {
+    setHashFailRetryBaseForTests(60000)
+    const id = await makeModel('bad.safetensors')
+    computeFileHash.mockRejectedValue(new Error('EACCES: 文件被占用'))
+    await requestHashWarmup([id], { delayMs: 0 })
+    await whenWarmupIdle()
+    expect(computeFileHash).toHaveBeenCalledTimes(1)
+
+    // 用户打开详情/点击识别：priority 任务立即重试（不受静默期约束）
+    computeFileHash.mockResolvedValue(fakeHash(3))
+    await requestHashWarmup([id], { priority: true, delayMs: 0 })
+    await whenWarmupIdle()
+    expect(computeFileHash).toHaveBeenCalledTimes(2)
+    expect(getModelMeta(id)?.hash).toBe(fakeHash(3))
+
+    // 成功后清除失败记录：后续批量预热走缓存有效路径正常跳过
+    await requestHashWarmup([id], { delayMs: 0, full: true })
+    await whenWarmupIdle()
+    expect(computeFileHash).toHaveBeenCalledTimes(2)
   })
 })
