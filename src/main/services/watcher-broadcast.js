@@ -106,7 +106,11 @@ async function refreshSnapshotScopes(w, relDirs) {
  * - 轮询已确认的变更（confirmedDirs）直接参与广播；
  * - 原生事件候选（nativeDirs）先回填快照，再与回填前的基线做差异比较，
  *   只有真实变化才广播——重复/噪声事件不再触发第二次局部扫描；
- * - 两类来源取并集并去重，仍保持「一次防抖窗只广播一次」。
+ * - 两类来源取并集并去重，仍保持「一次防抖窗只广播一次」；
+ * - 回填期间进入扫描期（FIX-4 交付竞态）：不广播也不丢弃——回填已把变更
+ *   写入基线，丢弃会让下一轮轮询 diff 为空，变更将永远不再被检出；改为把
+ *   差异比较确认的真实变化写回待广播集合，由停扫补发链路承接（若后续扫描
+ *   覆盖了这些子树，clearScannedPendingDirs 会按 scopes 去重清理）。
  * @param {WatcherState} w 监控状态
  * @param {string[]} nativeDirs 原生事件候选子树
  * @param {string[]} confirmedDirs 轮询已确认的变更子树
@@ -120,7 +124,7 @@ async function deliverBroadcast(w, nativeDirs, confirmedDirs, needsRefresh) {
     const before = new Map(w.snapshot)
     const beforeStats = w.statSnapshot ? new Map(w.statSnapshot) : null
     await refreshSnapshotScopes(w, nativeDirs)
-    if (w !== getWatcher() || w.scanning) return
+    if (w !== getWatcher()) return
     const refreshed =
       beforeStats && w.statSnapshot
         ? computeStatSnapshotDiff(w.root, beforeStats, w.statSnapshot)
@@ -129,6 +133,16 @@ async function deliverBroadcast(w, nativeDirs, confirmedDirs, needsRefresh) {
   }
   if (dirs.length === 0) {
     // 原生事件未产生任何快照差异（重复/噪声事件）：不广播，避免重复局部扫描
+    return
+  }
+  if (w.scanning) {
+    // FIX-4：基线已含本次变更，静默丢弃 = 永久丢失（见函数 JSDoc）。
+    // 写回 pendingConfirmedDirs：变更已经差异比较确认为真实变化且基线
+    // 已更新，语义与轮询确认项一致，停扫补发无需再次回填。
+    for (const d of dirs) w.pendingConfirmedDirs.add(d)
+    logger.info(
+      `扫描期检出目录变更，转停扫补发: ${w.root}（${dirs.length} 个子树）`,
+    )
     return
   }
   logger.info(

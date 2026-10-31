@@ -99,7 +99,9 @@ export function setWatcherScanning(scanning) {
       clearTimeout(w.debounceTimer)
       w.debounceTimer = null
     }
-    // 已进入交付队列但尚未广播的批次同样作废（在途批次会检查 scanning 后跳过）
+    // 已进入交付队列但尚未广播的批次作废：队列内批次尚未回填基线，其变更
+    // 仍可被后续轮询检出并重新累积；已在途交付的批次（deliverBroadcast 执行
+    // 中）会在回填完成后把差异确认的真实变化写回待广播集合，停扫补发（FIX-4）
     w.deliverQueue.length = 0
     return
   }

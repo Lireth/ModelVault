@@ -15,7 +15,7 @@ import { fakeUserData } from './setup'
  * - 根目录消失时停止监控且不崩溃
  */
 
-const { win, sentEvents } = vi.hoisted(() => {
+const { win, sentEvents, refreshGate } = vi.hoisted(() => {
   const sentEvents = []
   const win = {
     isDestroyed: () => false,
@@ -23,13 +23,31 @@ const { win, sentEvents } = vi.hoisted(() => {
       send: (channel, payload) => sentEvents.push({ channel, payload }),
     },
   }
-  return { win, sentEvents }
+  // FIX-4 竞态测试用门控：非 null 时 collectDirSnapshot 挂起至测试放行，
+  // 用于把 setWatcherScanning 精确插入回填（refreshSnapshotScopes）窗口内
+  const refreshGate = { current: null }
+  return { win, sentEvents, refreshGate }
 })
 
 vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
   BrowserWindow: { getAllWindows: vi.fn(() => [win]) },
 }))
+
+// 回填门控：默认（current=null）透传原实现，仅竞态用例激活挂起；spread
+// 保留其余快照原语的原实现引用，不影响本文件其他用例与轮询链路
+vi.mock('../src/main/services/watcher-snapshot', async (importOriginal) => {
+  const mod = await importOriginal()
+  return {
+    ...mod,
+    collectDirSnapshot: (...args) => {
+      const gate = refreshGate.current
+      if (!gate) return mod.collectDirSnapshot(...args)
+      gate.markStarted()
+      return gate.blocked.then(() => mod.collectDirSnapshot(...args))
+    },
+  }
+})
 
 import {
   collectDirSnapshot,
@@ -87,6 +105,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  refreshGate.current = null
   stopWatcher()
   for (const dir of [...roots, ...bundles]) {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
@@ -654,6 +673,101 @@ describe('OPT-02 扫描/监控基线协同', () => {
     await fs.writeFile(path.join(root, 'covered.safetensors'), 'x')
     const snapshot = await collectDirSnapshot(root)
     // 模拟全量扫描成功后的基线回写
+    syncWatcher(root, true, [], { baseline: snapshot })
+    setWatcherScanning(false)
+
+    await sleep(200)
+    expect(sentEvents).toHaveLength(0)
+  })
+
+  /** 激活回填门控：collectDirSnapshot 挂起直至 release，started 标记已进入回填 */
+  function armRefreshGate() {
+    const gate = {
+      started: false,
+      blocked: null,
+      release: () => {},
+      markStarted: () => {},
+    }
+    gate.blocked = new Promise((resolve) => {
+      gate.release = resolve
+    })
+    gate.markStarted = () => {
+      gate.started = true
+    }
+    refreshGate.current = gate
+    return gate
+  }
+
+  it('回填期间进入扫描期：变更转停扫补发而非静默丢失（FIX-4）', async () => {
+    syncWatcher(root, true, [], {
+      nativeWatch: true,
+      // 轮询拉到很长：本用例的广播只能来自原生事件交付链路
+      pollInterval: 100000,
+      broadcastDebounce: 30,
+      contentCheckInterval: 0,
+      isVisible: () => true,
+      onPollScheduled: () => {},
+    })
+    await sleep(80) // 启动静默基准遍历完成
+    sentEvents.length = 0
+
+    // 先挂起回填，再制造真实变更：deliverBroadcast 将在回填窗口内被扫描打断
+    const gate = armRefreshGate()
+    await fs.mkdir(path.join(root, 'race'), { recursive: true })
+    await fs.writeFile(path.join(root, 'race', 'x.safetensors'), 'x')
+    await waitFor(() => gate.started, '回填未开始', 3000)
+
+    // 回填挂起期间进入扫描期，随后放行回填
+    setWatcherScanning(true)
+    gate.release()
+    refreshGate.current = null
+
+    // 修复后：变更写回待广播集合——扫描期不广播，也绝不静默丢弃
+    // （旧实现在此直接 return：基线已含变更，下一轮轮询 diff 为空，永久丢失）
+    await sleep(60)
+    expect(sentEvents).toHaveLength(0)
+
+    // 停扫补发：写回项被重新广播且仅一次（防抖语义保持）
+    setWatcherScanning(false)
+    await waitFor(() => sentEvents.length >= 1, '停扫未补发竞态变更', 3000)
+    expect(sentEvents[0].channel).toBe('models:fsChanged')
+    expect(sentEvents[0].payload.root).toBe(root)
+    expect(sentEvents[0].payload.dirs).toContain('race')
+    await sleep(150)
+    expect(sentEvents).toHaveLength(1)
+  })
+
+  it('竞态转补发的变更被全量基线覆盖后，停扫不再重复广播（FIX-4 配套）', async () => {
+    syncWatcher(root, true, [], {
+      nativeWatch: true,
+      pollInterval: 100000,
+      broadcastDebounce: 30,
+      contentCheckInterval: 0,
+      isVisible: () => true,
+      onPollScheduled: () => {},
+    })
+    await sleep(80)
+    sentEvents.length = 0
+
+    const infoSpy = vi.spyOn(logger, 'info')
+    const gate = armRefreshGate()
+    await fs.mkdir(path.join(root, 'race2'), { recursive: true })
+    await fs.writeFile(path.join(root, 'race2', 'x.safetensors'), 'x')
+    await waitFor(() => gate.started, '回填未开始', 3000)
+    setWatcherScanning(true)
+    gate.release()
+    refreshGate.current = null
+
+    // 以「转停扫补发」日志确认写回已完成，保证后续基线覆盖清理作用于已写回项
+    await waitFor(
+      () => infoSpy.mock.calls.some((c) => String(c[0]).includes('转停扫补发')),
+      '竞态变更未写回待广播集合',
+      3000,
+    )
+    infoSpy.mockRestore()
+
+    // 模拟全量扫描完成：基线覆盖全部变更，clearScannedPendingDirs 清掉写回项
+    const snapshot = await collectDirSnapshot(root)
     syncWatcher(root, true, [], { baseline: snapshot })
     setWatcherScanning(false)
 
