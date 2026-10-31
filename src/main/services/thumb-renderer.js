@@ -38,7 +38,7 @@ let readyPromise = null
 /** 任务派发序号 */
 let nextTaskId = 0
 
-/** 在途任务表：id -> { resolve, reject, timer } */
+/** 在途任务表：id -> { resolve, reject, timer, payload, requeued } */
 const pending = new Map()
 
 /** 空闲回收定时器（无在途任务时启动） */
@@ -107,7 +107,11 @@ export function setThumbRendererIdleTimeoutForTests(ms) {
   idleTimeoutMs = Number.isFinite(ms) && ms > 0 ? ms : IDLE_DESTROY_MS
 }
 
-/** 拒绝全部在途任务并清空任务表 */
+/**
+ * 拒绝全部在途任务并清空任务表（崩溃/销毁路径专用）：进程已死或服务关闭时
+ * 在途任务无渲染载体，重排无意义；超时路径走 handleTaskTimeout 的
+ * 单任务隔离与其余任务重排（FIX-7），不再经由此处连坐。
+ */
 function failAll(err) {
   for (const task of pending.values()) {
     clearTimeout(task.timer)
@@ -142,6 +146,76 @@ function settleTask(id, outcome) {
   if (outcome.error) task.reject(outcome.error)
   else task.resolve(outcome.value)
   scheduleIdleDestroy()
+}
+
+/**
+ * 单任务渲染超时处理（FIX-7 连坐修复，超时路径专用）：
+ * 仅拒绝触发超时的任务（消费方按既有链路回退原图），其余在途任务携带原
+ * 载荷重排到重建后的窗口继续渲染一次——旧实现 failAll 连坐拒绝全部在途
+ * 任务：一张 64MB 上限的大图解码超时，同窗口其余正常任务一并失败回退
+ * 原图，且本轮 drain 不再补做，直到下次全量扫描才可能再生。
+ * 窗口仍按旧语义销毁（渲染进程可能挂死/GPU 异常，不可信），其余任务
+ * 重排时消耗各自一次 requeued 预算：再次超时按单任务失败，不无限重排。
+ * 崩溃路径（render-process-gone）与销毁路径维持 failAll：进程已死/服务
+ * 关闭时在途任务无渲染载体，重排无意义。
+ * @param {number} id 超时任务 id
+ */
+function handleTaskTimeout(id) {
+  const task = pending.get(id)
+  if (!task) return
+  pending.delete(id)
+  // 拒绝消息区分首试/重排：重排后仍未完成说明窗口重建也救不回该任务，
+  // 消费方日志可直接看出与首试超时的差别
+  task.reject(
+    new Error(
+      task.requeued
+        ? `缩略图渲染超时（重排后仍未完成，${renderTimeoutMs}ms）`
+        : `缩略图渲染超时（${renderTimeoutMs}ms）`,
+    ),
+  )
+  // 渲染进程已不可信：销毁窗口，重排任务经 ensureWindowReady 重建全新实例
+  destroyWindow()
+  for (const [otherId, other] of [...pending]) {
+    pending.delete(otherId)
+    clearTimeout(other.timer)
+    if (other.requeued) {
+      other.reject(new Error(`缩略图渲染超时（重排后仍未完成，${renderTimeoutMs}ms）`))
+      continue
+    }
+    // 重排一次：新 id、新超时计时器；resolve/reject 原样复用（含 PERF-2
+    // 观测闭环，整任务仍只结算一次）。旧 id 的迟到结果随窗口销毁自然失效
+    const requeuedId = nextTaskId++
+    pending.set(requeuedId, {
+      resolve: other.resolve,
+      reject: other.reject,
+      timer: setTimeout(() => handleTaskTimeout(requeuedId), renderTimeoutMs),
+      payload: other.payload,
+      requeued: true,
+    })
+    sendThumbTask(requeuedId)
+  }
+}
+
+/**
+ * 向渲染窗口发送任务载荷（窗口就绪后异步执行）：
+ * 等待期间任务可能已被结算/销毁（destroyThumbRenderer、超时重排），发送前
+ * 复查在途表；readyPromise 失败按任务错误结算（消费方回退原图）。
+ * @param {number} id 任务 id（payload 取自 pending 表）
+ * @returns {void}
+ */
+function sendThumbTask(id) {
+  const task = pending.get(id)
+  if (!task) return
+  ensureWindowReady()
+    .then(() => {
+      const w = win
+      if (!w || w.isDestroyed()) throw new Error('缩略图渲染窗口不可用')
+      if (!pending.has(id)) return
+      w.webContents.send('thumb:render', { id, ...task.payload })
+    })
+    .catch((err) => {
+      settleTask(id, { error: err })
+    })
 }
 
 /**
@@ -243,7 +317,6 @@ export async function renderThumbFromPath(url, opts) {
  */
 function dispatchThumbTask(payload) {
   clearIdleTimer()
-  const ready = ensureWindowReady()
   const id = nextTaskId++
   // PERF-2：单张缩略图渲染静默观测——首屏批量生成会产生数百条任务，
   // 低于 2s 完全不写日志；超过阈值的慢任务（超大源图/GPU 卡顿）以 warn 显形
@@ -259,23 +332,13 @@ function dispatchThumbTask(payload) {
         reject(err)
       },
       timer: null,
+      // 超时重排（FIX-7）需要原载荷；requeued 限定重排预算至多一次
+      payload,
+      requeued: false,
     }
     pending.set(id, task)
-    task.timer = setTimeout(() => {
-      // 超时：渲染进程已不可信（挂死/GPU 异常），拒绝全部在途任务并销毁窗口，
-      // 下次任务经 ensureWindowReady 重建全新实例
-      failAll(new Error(`缩略图渲染超时（${renderTimeoutMs}ms）`))
-      destroyWindow()
-    }, renderTimeoutMs)
-    ready
-      .then(() => {
-        const w = win
-        if (!w || w.isDestroyed()) throw new Error('缩略图渲染窗口不可用')
-        w.webContents.send('thumb:render', { id, ...payload })
-      })
-      .catch((err) => {
-        settleTask(id, { error: err })
-      })
+    task.timer = setTimeout(() => handleTaskTimeout(id), renderTimeoutMs)
+    sendThumbTask(id)
   })
 }
 

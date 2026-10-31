@@ -6,6 +6,7 @@ import { fakeUserData } from './setup'
  * 以 BrowserWindow 桩模拟隐藏渲染窗口，验证主进程侧编排逻辑：
  * - 成功/小图/错误三类响应的结算语义
  * - 单任务超时兜底（窗口销毁 + 任务拒绝）
+ * - 多任务超时隔离与其余任务重排预算（FIX-7：不再连坐失败）
  * - 渲染进程崩溃（render-process-gone）自愈
  * - destroyThumbRenderer 拒绝在途任务（主窗口关闭链路）
  */
@@ -207,6 +208,86 @@ it('渲染超时：拒绝任务并销毁窗口（下次任务重建）', async (
   })
   expect(onlyWindow().destroyed).toBe(true)
   warnSpy.mockRestore()
+})
+
+it('多任务超时隔离：仅超时任务失败，其余任务重排到新窗口一次（FIX-7）', async () => {
+  vi.useFakeTimers()
+  setThumbRenderTimeoutForTests(10)
+  const p1 = renderThumbJpeg(Buffer.from('slow'), {
+    thumbWidth: 640,
+    minSourceWidth: 720,
+    quality: 0.82,
+  })
+  const p2 = renderThumbJpeg(Buffer.from('fine'), {
+    thumbWidth: 640,
+    minSourceWidth: 720,
+    quality: 0.82,
+  })
+  const outcome1 = p1.then(
+    () => 'resolved',
+    (err) => err,
+  )
+  const outcome2 = p2.then(
+    () => 'resolved',
+    (err) => err,
+  )
+  await vi.advanceTimersByTimeAsync(11)
+
+  // 任务1 超时拒绝（旧实现此时连坐拒绝任务2，两者一并回退原图）
+  expect(await outcome1).toMatchObject({
+    message: expect.stringContaining('缩略图渲染超时'),
+  })
+  // 任务2 未失败：窗口已销毁重建，任务2 携带原载荷重排到新窗口
+  expect(FakeBrowserWindow.instances).toHaveLength(2)
+  const w2 = FakeBrowserWindow.instances[1]
+  expect(w2.webContents.sent).toHaveLength(1)
+  const requeued = w2.webContents.sent[0].payload
+  expect(requeued.buf.toString()).toBe('fine')
+
+  // 重建窗口正常回传：任务2 以渲染结果结算而非回退原图
+  w2.webContents.emit('ipc-message', {}, 'thumb:done', {
+    id: requeued.id,
+    jpeg: new Uint8Array([7, 8]),
+  })
+  expect(await outcome2).toBe('resolved')
+  await expect(p2).resolves.toEqual({ jpeg: Buffer.from([7, 8]) })
+})
+
+it('重排预算：重排任务再次超时按单任务失败，不无限重排（FIX-7）', async () => {
+  vi.useFakeTimers()
+  setThumbRenderTimeoutForTests(10)
+  const p1 = renderThumbJpeg(Buffer.from('slow'), {
+    thumbWidth: 640,
+    minSourceWidth: 720,
+    quality: 0.82,
+  })
+  const p2 = renderThumbJpeg(Buffer.from('also-slow'), {
+    thumbWidth: 640,
+    minSourceWidth: 720,
+    quality: 0.82,
+  })
+  const outcome1 = p1.then(
+    () => 'resolved',
+    (err) => err,
+  )
+  const outcome2 = p2.then(
+    () => 'resolved',
+    (err) => err,
+  )
+
+  await vi.advanceTimersByTimeAsync(11) // 任务1 超时 → 任务2 重排到新窗口
+  expect(await outcome1).toMatchObject({
+    message: expect.stringContaining('缩略图渲染超时'),
+  })
+  expect(FakeBrowserWindow.instances).toHaveLength(2)
+
+  await vi.advanceTimersByTimeAsync(11) // 重排后的任务2 再超时 → 单任务拒绝
+  expect(await outcome2).toMatchObject({
+    message: expect.stringContaining('重排后仍未完成'),
+  })
+  // 无第三次重排：不重建窗口、不再发送任务
+  expect(FakeBrowserWindow.instances).toHaveLength(2)
+  expect(FakeBrowserWindow.instances[1].destroyed).toBe(true)
 })
 
 it('渲染进程崩溃（render-process-gone）：在途任务拒绝，窗口销毁待重建', async () => {
