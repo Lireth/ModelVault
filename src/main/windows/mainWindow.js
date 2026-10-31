@@ -1,4 +1,4 @@
-import { BrowserWindow, app, screen } from 'electron'
+import { BrowserWindow, app, dialog, screen } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
@@ -9,6 +9,126 @@ import { themeColors } from '../theme'
 /** 默认窗口尺寸 */
 const DEFAULT_WIDTH = 1200
 const DEFAULT_HEIGHT = 800
+
+/**
+ * 渲染进程崩溃自动恢复参数（OPT-12）：
+ * - 自动重载至多 2 次（退避 1s × 次数）——页面状态由本地索引秒开自愈
+ *   （loadStore 秒开语义即为此设计），重载是唯一低成本的恢复手段；
+ * - 加载成功并存活 10s 视为已恢复，连续崩溃计数清零；
+ * - 连续崩溃超限（慢性崩溃循环）或会话累计恢复达上限：弹原生框交用户
+ *   决策（手动重载 / 退出），不再静默循环；
+ * - clean-exit 属窗口关闭链路（page 自行退出），恢复重载会与关闭编排竞争。
+ */
+const RENDERER_RELOAD_MAX = 2
+const RENDERER_RELOAD_DELAY_MS = 1000
+const RENDERER_SURVIVAL_RESET_MS = 10000
+/** 会话内自动恢复总次数上限（防御慢性崩溃循环） */
+const RENDERER_RECOVER_TOTAL_MAX = 20
+
+/**
+ * 渲染进程崩溃恢复编排（OPT-12，依赖注入便于单测）：
+ * 全应用此前唯一没有 UI 兜底的错误面——GPU 异常/OOM 后用户面对白窗只能
+ * 手动重启。与主进程侧 fatal-error 的「落盘→提示→恢复」范式对齐。
+ * @param {{isDestroyed?: () => boolean, webContents: {reload: () => void}}} win
+ *   主窗口最小结构接口
+ * @param {{showGiveUpDialog?: (count: number, reload: () => void) => void}} [hooks]
+ *   showGiveUpDialog：自动恢复放弃时的用户决策入口（生产为原生对话框：
+ *   重新加载 → reload()，退出 → app.quit()）
+ * @param {{maxAutoReloads?: number, reloadDelayMs?: number,
+ *   survivalResetMs?: number, recoverTotalMax?: number}} [timing] 测试可注入
+ * @returns {{onRendererGone: (details?: {reason?: string}) => void,
+ *   onRendererLoaded: () => void, manualReload: () => void, dispose: () => void}}
+ */
+export function createRendererCrashRecovery(win, hooks = {}, timing = {}) {
+  const maxAutoReloads =
+    Number.isFinite(timing.maxAutoReloads) && timing.maxAutoReloads > 0
+      ? timing.maxAutoReloads
+      : RENDERER_RELOAD_MAX
+  const reloadDelayMs =
+    Number.isFinite(timing.reloadDelayMs) && timing.reloadDelayMs >= 0
+      ? timing.reloadDelayMs
+      : RENDERER_RELOAD_DELAY_MS
+  const survivalResetMs =
+    Number.isFinite(timing.survivalResetMs) && timing.survivalResetMs >= 0
+      ? timing.survivalResetMs
+      : RENDERER_SURVIVAL_RESET_MS
+  const recoverTotalMax =
+    Number.isFinite(timing.recoverTotalMax) && timing.recoverTotalMax >= 0
+      ? timing.recoverTotalMax
+      : RENDERER_RECOVER_TOTAL_MAX
+
+  /** 连续崩溃计数（加载存活 survivalResetMs 后清零） */
+  let consecutive = 0
+  /** 会话累计自动恢复次数（防慢性循环的总闸） */
+  let totalRecovered = 0
+  let reloadTimer = null
+  let survivalTimer = null
+
+  const isDestroyed = () =>
+    typeof win.isDestroyed === 'function' ? win.isDestroyed() : false
+
+  function clearTimers() {
+    if (reloadTimer) {
+      clearTimeout(reloadTimer)
+      reloadTimer = null
+    }
+    if (survivalTimer) {
+      clearTimeout(survivalTimer)
+      survivalTimer = null
+    }
+  }
+
+  const api = {
+    /** render-process-gone 事件入口 */
+    onRendererGone(details = {}) {
+      // clean-exit：页面正常退出（窗口关闭链路），重载会与关闭编排竞争
+      if (details.reason === 'clean-exit' || isDestroyed()) return
+      clearTimers()
+      consecutive += 1
+      // 连续超限或会话累计达上限：停止静默循环，交用户决策
+      if (consecutive > maxAutoReloads || totalRecovered >= recoverTotalMax) {
+        logger.error(
+          `渲染进程自动恢复放弃（连续 ${consecutive} 次/累计 ${totalRecovered} 次），交由用户决策`,
+        )
+        hooks.showGiveUpDialog?.(consecutive, () => api.manualReload())
+        return
+      }
+      // 退避重载：页面重新加载后由渲染层启动链路经 loadStore 秒开恢复状态
+      reloadTimer = setTimeout(
+        () => {
+          reloadTimer = null
+          if (isDestroyed()) return
+          totalRecovered += 1
+          logger.info(
+            `渲染进程恢复：重载页面（第 ${consecutive}/${maxAutoReloads} 次，累计 ${totalRecovered}）`,
+          )
+          win.webContents.reload()
+        },
+        reloadDelayMs * consecutive,
+      )
+      reloadTimer.unref?.()
+    },
+    /** did-finish-load 事件入口：页面重新可用；存活一段时间后清零连续计数 */
+    onRendererLoaded() {
+      if (survivalTimer) clearTimeout(survivalTimer)
+      survivalTimer = setTimeout(() => {
+        survivalTimer = null
+        consecutive = 0
+      }, survivalResetMs)
+      survivalTimer.unref?.()
+    },
+    /** 用户在放弃弹框中选择「重新加载」：重置计数后重载 */
+    manualReload() {
+      consecutive = 0
+      if (!isDestroyed()) win.webContents.reload()
+    },
+    /** 销毁路径清理（窗口关闭/测试收尾） */
+    dispose() {
+      clearTimers()
+    },
+  }
+  return api
+}
 
 /** 窗口状态持久化文件（保存在 %APPDATA%\modelvault\） */
 const WINDOW_STATE_FILE = 'window-state.json'
@@ -188,11 +308,39 @@ export async function createMainWindow(windowStateOverride = undefined) {
     logger.warn('已阻止渲染页面的导航请求')
   })
 
-  // 渲染进程异常退出时的错误处理
+  // OPT-12 渲染进程崩溃自动恢复：crashed/oom/killed 等异常退出按退避自动
+  // 重载（页面状态由本地索引秒开自愈）；连续超限弹原生框交用户决策；
+  // clean-exit 属窗口关闭链路不恢复（详见 createRendererCrashRecovery）
+  const rendererRecovery = createRendererCrashRecovery(mainWindow, {
+    showGiveUpDialog: (count, reload) => {
+      dialog
+        .showMessageBox(mainWindow, {
+          type: 'error',
+          title: '模匣',
+          message: `渲染进程连续异常退出（${count} 次）`,
+          detail:
+            '自动恢复未成功。可重新加载页面（界面状态会从本地索引恢复），或退出应用。',
+          buttons: ['重新加载', '退出'],
+          defaultId: 0,
+          cancelId: 1,
+          noLink: true,
+        })
+        .then(({ response }) => {
+          if (response === 0) reload()
+          else app.quit()
+        })
+        .catch((err) => logger.warn(`崩溃恢复弹框展示失败: ${err.message}`))
+    },
+  })
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     logger.error(
       `渲染进程异常退出: ${details.reason} (exitCode=${details.exitCode})`,
     )
+    rendererRecovery.onRendererGone(details)
+  })
+  // 页面加载完成（含崩溃恢复后的重载）：存活一段时间后清零连续崩溃计数
+  mainWindow.webContents.on('did-finish-load', () => {
+    rendererRecovery.onRendererLoaded()
   })
 
   // 渲染进程加载失败时的错误处理
