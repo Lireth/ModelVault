@@ -29,6 +29,7 @@ import {
   getThumbPathDeferred,
   drainDeferredThumbs,
   clearDeferredJobs,
+  setThumbFailTtlForTests,
 } from '../src/main/services/thumbs'
 import { setDataRoot } from '../src/main/services/store'
 import { renderThumbFromPath } from '../src/main/services/thumb-renderer'
@@ -224,5 +225,113 @@ describe('命中结果 TTL 缓存（PERF-5）', () => {
     clearDeferredJobs()
     // 缓存已清：重新探测磁盘发现缓存缺失 → 未命中登记
     expect(await getThumbPathDeferred(source)).toBe('')
+    // 收尾消费登记：deferredJobs 为模块级队列，跨用例存续——遗留任务会
+    // 混入后续用例的 drain 计数（P1-3 负缓存断言依赖精确的渲染次数）
+    const trailing = []
+    await drainDeferredThumbs((_, p) => trailing.push(p))
+    expect(trailing).toEqual([thumbPath])
+  })
+})
+
+describe('缩略图负缓存（P1-3）', () => {
+  it('小图判定入负缓存：静默期内不再重复读盘解码与登记', async () => {
+    mockRender({ mode: 'small' })
+    expect(await generateNow(source)).toBe('')
+    expect(renderThumbFromPath).toHaveBeenCalledTimes(1)
+    // 下一轮请求：负缓存命中（TTL 内零系统调用），drain 无任务、零渲染
+    expect(await getThumbPathDeferred(source)).toBe('')
+    const out = []
+    await drainDeferredThumbs((_, p) => out.push(p))
+    expect(out).toHaveLength(0)
+    expect(renderThumbFromPath).toHaveBeenCalledTimes(1)
+  })
+
+  it('渲染失败按 TTL 静默：期内不重试，到期后恢复生成（自愈通道）', async () => {
+    setThumbFailTtlForTests(30)
+    try {
+      mockRender({ mode: 'broken' })
+      expect(await generateNow(source)).toBe('')
+      expect(renderThumbFromPath).toHaveBeenCalledTimes(1)
+      // 静默期内：负缓存短路，不重复登记/渲染
+      expect(await getThumbPathDeferred(source)).toBe('')
+      const quiet = []
+      await drainDeferredThumbs((_, p) => quiet.push(p))
+      expect(quiet).toHaveLength(0)
+      expect(renderThumbFromPath).toHaveBeenCalledTimes(1)
+
+      // TTL 到期：负缓存惰性失效，重新登记；渲染恢复后成功生成
+      await new Promise((resolve) => setTimeout(resolve, 45))
+      mockRender({ mode: 'wide' })
+      expect(await getThumbPathDeferred(source)).toBe('')
+      const recovered = []
+      await drainDeferredThumbs((_, p) => recovered.push(p))
+      expect(recovered).toHaveLength(1)
+      expect(renderThumbFromPath).toHaveBeenCalledTimes(2)
+    } finally {
+      setThumbFailTtlForTests(0) // 复位默认静默期
+    }
+  })
+
+  it('源图被替换（mtime 变化）后负判定失效，重新判定并生成', async () => {
+    mockRender({ mode: 'small' })
+    expect(await generateNow(source)).toBe('')
+    expect(renderThumbFromPath).toHaveBeenCalledTimes(1)
+
+    // 显式把 mtime 推到 1 小时前（Windows 同毫秒重写不改变 mtimeMs，重写
+    // 内容的时序不能保证判定失效；utimes 提供确定性的失效前提），随后镜像
+    // 短路与命中条目同有 ≤30s 的既定陈旧窗口（见 PERF-5 一致性边界注释），
+    // 推进时间越过镜像 TTL 后：stat → mtime 与负判定记录不一致 → 判定失效
+    const past = new Date(Date.now() - 3_600_000)
+    await fs.utimes(source, past, past)
+    vi.useFakeTimers({ now: Date.now() + 31_000 })
+    try {
+      mockRender({ mode: 'wide' })
+      expect(await getThumbPathDeferred(source)).toBe('')
+      const out = []
+      await drainDeferredThumbs((_, p) => out.push(p))
+      expect(out).toHaveLength(1)
+      expect(renderThumbFromPath).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('库根离线不入负缓存（OPT-14 瞬态）：恢复后补生成', async () => {
+    // 根在线时登记任务后切到不存在的根：渲染已付但目录准备失败 → offline
+    mockRender({ mode: 'wide' })
+    expect(await getThumbPathDeferred(source)).toBe('')
+    setDataRoot(path.join(root, 'gone'))
+    try {
+      const first = []
+      await drainDeferredThumbs((_, p) => first.push(p))
+      expect(first).toHaveLength(0)
+      expect(renderThumbFromPath).toHaveBeenCalledTimes(1)
+
+      // 根恢复：offline 未入负缓存，下一次请求重新登记并补生成
+      setDataRoot(root)
+      expect(await getThumbPathDeferred(source)).toBe('')
+      const recovered = []
+      await drainDeferredThumbs((_, p) => recovered.push(p))
+      expect(recovered).toHaveLength(1)
+      expect(renderThumbFromPath).toHaveBeenCalledTimes(2)
+    } finally {
+      setDataRoot(root)
+    }
+  })
+
+  it('源图删除（stat 失败）为瞬态：不入负缓存', async () => {
+    mockRender({ mode: 'wide' })
+    expect(await getThumbPathDeferred(source)).toBe('')
+    await fs.rm(source)
+    const out = []
+    await drainDeferredThumbs((_, p) => out.push(p))
+    expect(out).toHaveLength(0)
+    // 瞬态失败不缓存：源图恢复（重写同名文件）后可正常生成
+    await fs.writeFile(source, Buffer.from('png-bytes'))
+    mockRender({ mode: 'wide' })
+    expect(await getThumbPathDeferred(source)).toBe('')
+    const recovered = []
+    await drainDeferredThumbs((_, p) => recovered.push(p))
+    expect(recovered).toHaveLength(1)
   })
 })

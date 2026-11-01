@@ -18,6 +18,10 @@ import { toImageUrl } from '../protocol'
  *   随模型文件夹一起移动），文件名为「路径哈希-源图修改时间」，
  *   源图变化自动失效并重新生成；
  * - 生成失败（不支持的格式、损坏文件等）时回退使用原图，不影响功能；
+ * - 负缓存（P1-3）：小图/超大图/渲染失败的「不生成」结论按确定性分级记录
+ *   （small/oversize 随 mtime 永久生效、failed 短 TTL 静默重试），重复扫描
+ *   不再为重新判定小图而反复读盘解码（与 hashFailures/civimgFailures 同一
+ *   负缓存范式）；
  * - 解码/缩放/编码经隐藏渲染进程执行（thumb-renderer，P2 主进程非阻塞
  *   改造），主进程仅承担 stat/读盘/落盘。
  */
@@ -53,15 +57,90 @@ const THUMB_GEN_CONCURRENCY = 4
  */
 const THUMB_HIT_TTL_MS = 30_000
 const THUMB_HIT_CACHE_MAX = 4096
-/** @type {Map<string, {hit: boolean, thumbPath: string, mtimeMs: number, expiresAt: number}>} */
+/** @type {Map<string, {hit: boolean, verdict?: string, thumbPath: string, mtimeMs: number, expiresAt: number}>} */
 const hitCache = new Map()
 
-/** 写入命中缓存（key 为源图小写路径；超限按插入序淘汰最旧） */
-function putThumbHitCache(key, entry) {
+/* ---------------- 负缓存（P1-3） ---------------- */
+
+/**
+ * 缩略图负缓存：记录「不生成缩略图」的确定性结论，避免每轮扫描重付。
+ * - small / oversize：判定是源图字节的确定性属性（宽度不足 / 超出体积上限），
+ *   mtime 变化前不会改变——永久生效（mtime 校验失效，与 hashFailures 同一
+ *   语义），免去「每轮重新读盘解码一次，只为再次判定小图」的浪费；
+ * - failed（渲染失败）：可能瞬时（渲染进程异常/解码资源不足），按 TTL 静默
+ *   到期重试（对齐 civimgFailures 的短 TTL 自愈范式），不永久拉黑；
+ * - offline（库根离线，OPT-14）：瞬态，不入负缓存——库恢复后的下一次请求
+ *   重新登记，保留自动补生成通道。
+ */
+const THUMB_FAIL_TTL_MS = 5 * 60 * 1000
+/** 负缓存容量上限（病态防御，超过丢弃最旧记录） */
+const THUMB_NEG_MAX = 8192
+/** @type {Map<string, {verdict: 'small'|'oversize'|'failed', mtimeMs: number, retryAt: number}>} */
+const thumbNegatives = new Map()
+/** 渲染失败静默期（测试可注入小值验证到期重试） */
+let thumbFailTtlMs = THUMB_FAIL_TTL_MS
+
+/**
+ * 注入渲染失败静默期（仅供单元测试使用；生产代码严禁调用）。
+ * @param {number} ms 毫秒
+ */
+export function setThumbFailTtlForTests(ms) {
+  thumbFailTtlMs = Number.isFinite(ms) && ms > 0 ? ms : THUMB_FAIL_TTL_MS
+}
+
+/**
+ * 记录一条负判定（容量超限丢弃最旧，Map 插入序）。
+ * @param {string} key 源图小写路径
+ * @param {'small'|'oversize'|'failed'} verdict 判定
+ * @param {number} mtimeMs 判定时的源图 mtime（失效依据）
+ */
+function recordThumbNegative(key, verdict, mtimeMs) {
+  if (!thumbNegatives.has(key) && thumbNegatives.size >= THUMB_NEG_MAX) {
+    thumbNegatives.delete(thumbNegatives.keys().next().value)
+  }
+  thumbNegatives.set(key, {
+    verdict,
+    mtimeMs,
+    retryAt: verdict === 'failed' ? Date.now() + thumbFailTtlMs : Infinity,
+  })
+}
+
+/**
+ * 查询负缓存：mtime 一致且（永久判定或静默期未到）返回判定与剩余静默期；
+ * mtime 变化（源图被替换）或 failed 静默期到期即惰性删除，恢复重新判定。
+ * @param {string} key 源图小写路径
+ * @param {number} mtimeMs 当前 stat 到的源图 mtime
+ * @returns {{verdict: 'small'|'oversize'|'failed', remainingMs: number}|null}
+ */
+function peekThumbNegative(key, mtimeMs) {
+  const entry = thumbNegatives.get(key)
+  if (!entry) return null
+  if (entry.mtimeMs !== mtimeMs) {
+    thumbNegatives.delete(key)
+    return null
+  }
+  if (entry.verdict === 'failed') {
+    const remainingMs = entry.retryAt - Date.now()
+    if (remainingMs <= 0) {
+      thumbNegatives.delete(key)
+      return null
+    }
+    return { verdict: entry.verdict, remainingMs }
+  }
+  return { verdict: entry.verdict, remainingMs: Infinity }
+}
+
+/** 写入命中缓存（key 为源图小写路径；超限按插入序淘汰最旧）。
+ * ttlMs 可选：负判定镜像条目须与负缓存自身一同到期（failed 的静默期可短于
+ * 命中缓存 TTL——镜像若独立存续会遮蔽到期重试通道） */
+function putThumbHitCache(key, entry, ttlMs) {
   if (hitCache.size >= THUMB_HIT_CACHE_MAX) {
     hitCache.delete(hitCache.keys().next().value)
   }
-  hitCache.set(key, { ...entry, expiresAt: Date.now() + THUMB_HIT_TTL_MS })
+  hitCache.set(key, {
+    ...entry,
+    expiresAt: Date.now() + (ttlMs ?? THUMB_HIT_TTL_MS),
+  })
 }
 
 /** 缩略图缓存目录（位于模型根目录内） */
@@ -84,25 +163,37 @@ function thumbFileName(absCover, mtimeMs) {
  * 解码/缩放/JPEG 编码运行在独立渲染进程（P2 改造）：此前 nativeImage 的
  * createFromBuffer/resize/toJPEG 为同步 API，大封面图会阻塞主进程事件循环
  * （B5），扫描后台补齐缩略图期间所有 IPC 处理会随之停摆。
- * @returns {Promise<string>} 成功返回缩略图路径；源图过小/损坏返回 ''（回退原图）
+ * P1-3：不生成结论结构化返回（small/oversize/failed 可负缓存；offline 为
+ * 瞬态不负缓存），源图 stat 失败与落盘失败照常抛出由调用方容错（瞬态，
+ * 不入负缓存）。
+ * @returns {Promise<{ok: true, thumbPath: string}
+ *   | {ok: false, verdict: 'small'|'oversize'|'failed'|'offline'}>}
  */
 async function generateThumb(absCover, thumbPath) {
   // 大文件跳过（B2）：先 stat 校验字节数，避免超大图整读入内存
   const sourceStat = await fs.stat(absCover)
-  if (sourceStat.size > MAX_SOURCE_BYTES) return ''
+  if (sourceStat.size > MAX_SOURCE_BYTES)
+    return { ok: false, verdict: 'oversize' }
   // OP-03：只传源图地址，由隐藏渲染进程经 mvimg:// 自行读取。主进程不再
   // 读入整图并经 IPC 结构化克隆（单图可达 64MB，4 并发时峰值成倍放大）。
-  const result = await renderThumbFromPath(toImageUrl(absCover), {
-    thumbWidth: THUMB_WIDTH,
-    minSourceWidth: MIN_SOURCE_WIDTH,
-    quality: JPEG_QUALITY / 100,
-  })
-  if ('small' in result) return ''
+  let result
+  try {
+    result = await renderThumbFromPath(toImageUrl(absCover), {
+      thumbWidth: THUMB_WIDTH,
+      minSourceWidth: MIN_SOURCE_WIDTH,
+      quality: JPEG_QUALITY / 100,
+    })
+  } catch {
+    // 渲染失败（损坏文件/不支持格式/渲染进程异常）：按 failed 走 TTL 静默
+    return { ok: false, verdict: 'failed' }
+  }
+  if ('small' in result) return { ok: false, verdict: 'small' }
   // OPT-14：库根离线时跳过缩略图落盘（此前的递归 mkdir 会把根目录树重建到
-  // 失效路径）——延迟任务保留，库恢复后的下一轮 drain 自动补生成
-  if (!(await ensureLibrarySubdir(getThumbsDir()))) return ''
+  // 失效路径）——瞬态结论不入负缓存，库恢复后的下一轮 drain 自动补生成
+  if (!(await ensureLibrarySubdir(getThumbsDir())))
+    return { ok: false, verdict: 'offline' }
   await fs.writeFile(thumbPath, result.jpeg)
-  return thumbPath
+  return { ok: true, thumbPath }
 }
 
 /* ---------------- 后台延迟生成（扫描装饰阶段专用） ---------------- */
@@ -138,6 +229,8 @@ export async function getThumbPathDeferred(absCover) {
   const cached = hitCache.get(key)
   if (cached && cached.expiresAt > Date.now()) {
     if (cached.hit) return cached.thumbPath
+    // P1-3：负缓存静默期内零系统调用、零重复登记（小图/超大图/失败静默期）
+    if (cached.verdict) return ''
     // 未命中缓存：免系统调用直接重新登记后台任务（生成成功后缓存升级为命中）
     deferredJobs.set(cached.thumbPath, {
       absCover,
@@ -151,6 +244,17 @@ export async function getThumbPathDeferred(absCover) {
       getThumbsDir(),
       thumbFileName(absCover, stat.mtimeMs),
     )
+    // P1-3：负缓存判定（mtime 校验）——小图/超大图/静默期内的失败不再
+    // 重新读盘解码与登记；镜像条目与负缓存一同到期（不遮蔽到期重试）
+    const neg = peekThumbNegative(key, stat.mtimeMs)
+    if (neg) {
+      putThumbHitCache(
+        key,
+        { hit: false, verdict: neg.verdict, thumbPath, mtimeMs: stat.mtimeMs },
+        Math.min(THUMB_HIT_TTL_MS, neg.remainingMs),
+      )
+      return ''
+    }
     let hit = false
     try {
       await fs.access(thumbPath)
@@ -179,6 +283,8 @@ export function clearDeferredJobs() {
   // PERF-5：命中缓存一并清空——切库后 thumbPath 依赖当前根目录，
   // 虽然缓存 key 含绝对路径本就跨根安全，清空可避免旧根条目占位
   hitCache.clear()
+  // P1-3：负缓存同策略清空（跨根安全但避免旧根判定占位）
+  thumbNegatives.clear()
 }
 
 /**
@@ -208,17 +314,39 @@ export async function drainDeferredThumbs(
         thumbFileName(absCover, mtimeMs),
       )
       try {
-        const generated = await generateThumb(absCover, thumbPath)
-        if (generated) {
+        const outcome = await generateThumb(absCover, thumbPath)
+        // 判别收窄用 in 守卫：checkJs 非 strict 下 ok 的字面量类型可能放宽
+        if ('verdict' in outcome) {
+          if (outcome.verdict !== 'offline') {
+            // P1-3：确定性不生成结论入负缓存（offline 瞬态除外，保留补生成
+            // 通道）；hitCache 同步负判定镜像（与负缓存一同到期）——静默期内
+            // 同源图零系统调用且不再重复登记渲染
+            const key = absCover.toLowerCase()
+            recordThumbNegative(key, outcome.verdict, mtimeMs)
+            putThumbHitCache(
+              key,
+              {
+                hit: false,
+                verdict: outcome.verdict,
+                thumbPath,
+                mtimeMs,
+              },
+              outcome.verdict === 'failed'
+                ? Math.min(THUMB_HIT_TTL_MS, thumbFailTtlMs)
+                : THUMB_HIT_TTL_MS,
+            )
+          }
+        } else {
           // PERF-5：生成成功，命中缓存由未命中就地升级（下轮请求零系统调用）
           putThumbHitCache(absCover.toLowerCase(), {
             hit: true,
-            thumbPath,
+            thumbPath: outcome.thumbPath,
             mtimeMs,
           })
-          onGenerated(absCover, generated)
+          onGenerated(absCover, outcome.thumbPath)
         }
       } catch (err) {
+        // 源图 stat 失败/落盘失败等瞬态异常：仅记日志，不负缓存
         logger.warn(`后台缩略图生成失败（回退原图）: ${err.message}`)
       }
     },
