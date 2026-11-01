@@ -24,6 +24,8 @@ import {
  *   完成后补写一次，绝不丢失；
  * - 库目录离线（被移动/盘符未挂载）时跳过序列化与写盘，脏数据保留在内存
  *   并安排恢复后的自动补写——绝不重建模型根目录树（O5）；
+ * - 写盘异常（EPERM/EBUSY 等瞬时占用，OPT-15）与离线同属「暂时不可写」：
+ *   同样自动重试（指数退避封顶 5 分钟，连续超限后暂停），成功后计数归零；
  * - 恢复重载窗口（saveSuppressed，B-02）内丢弃保存请求：旧内存不得写回
  *   刚恢复的文件。
  */
@@ -58,6 +60,23 @@ export function setSnapshotWorkerThresholdForTests(count) {
 const ROOT_PROBE_TTL_MS = 1000
 /** 离线跳过后自动重试落盘的间隔（ms）：库恢复可用时无需用户再次编辑即可补写 */
 const OFFLINE_RETRY_MS = 10000
+/**
+ * 写盘异常自动重试的起始间隔（ms）与退避上限（OPT-15）：杀毒/索引器占用
+ * store.json（EPERM/EBUSY）等瞬时故障与离线同属「暂时不可写」，同样自动
+ * 补写；指数退避（10s 起）封顶 5 分钟，防止长期占用时的无限刷日志。
+ */
+const SAVE_RETRY_BASE_MS = 10000
+const SAVE_RETRY_MAX_MS = 5 * 60 * 1000
+/** 写盘异常连续失败自动重试上限：超过后暂停（修改保留在内存，编辑/退出仍会尝试） */
+const SAVE_RETRY_MAX_FAILURES = 6
+
+/** 重试基准间隔（测试可注入缩小；生产代码严禁调用注入器） */
+let saveRetryBaseMs = SAVE_RETRY_BASE_MS
+
+/** 注入写盘异常重试的基准间隔（指数退避由此起算；仅供单元测试使用） */
+export function setSaveRetryDelayForTests(ms) {
+  saveRetryBaseMs = Number.isFinite(ms) && ms >= 0 ? ms : SAVE_RETRY_BASE_MS
+}
 
 /**
  * 当前模型根目录是否可用（O5/OPT-14 共享写链门禁）：
@@ -142,6 +161,34 @@ export function clearOfflineRetry() {
   if (!metaState.offlineRetryTimer) return
   clearTimeout(metaState.offlineRetryTimer)
   metaState.offlineRetryTimer = null
+}
+
+/**
+ * 写盘异常后的自动重试（OPT-15）：与离线补写共用 offlineRetryTimer 单飞，
+ * 按连续失败次数指数退避（SAVE_RETRY_BASE_MS 起，SAVE_RETRY_MAX_MS 封顶），
+ * 连续超过 SAVE_RETRY_MAX_FAILURES 次后暂停自动重试——修改仍保留在内存，
+ * 用户下次编辑（scheduleSave）与退出落盘路径仍会尝试写入。
+ */
+function scheduleSaveRetry() {
+  metaState.saveRetryFailures += 1
+  if (metaState.saveRetryFailures === SAVE_RETRY_MAX_FAILURES + 1) {
+    logger.warn(
+      `元数据写盘连续失败 ${SAVE_RETRY_MAX_FAILURES} 次，已暂停自动重试（修改保留在内存，恢复后重新编辑或退出时仍会落盘）`,
+    )
+  }
+  if (metaState.saveRetryFailures > SAVE_RETRY_MAX_FAILURES) return
+  if (metaState.offlineRetryTimer || metaState.saveSuppressed) return
+  const delay = Math.min(
+    saveRetryBaseMs * 2 ** (metaState.saveRetryFailures - 1),
+    SAVE_RETRY_MAX_MS,
+  )
+  metaState.offlineRetryTimer = setTimeout(() => {
+    metaState.offlineRetryTimer = null
+    if (getCurrentRoot() && !metaState.saveSuppressed) {
+      saveStoreDeltaNow().catch(notifyStoreSaveError)
+    }
+  }, delay)
+  metaState.offlineRetryTimer.unref?.()
 }
 
 /** 防抖保存：短时间内多次修改只落盘一次 */
@@ -282,12 +329,20 @@ async function runSave(forceSnapshot) {
     } else if (keys.length > 0) {
       wrote = await writeDeltaJournal(keys)
     }
-    if (wrote) clearOfflineRetry()
-    else if (metaState.dirtyKeys.size > 0 || metaState.journalEntryCount > 0) {
+    if (wrote) {
+      metaState.saveRetryFailures = 0
+      clearOfflineRetry()
+    } else if (
+      metaState.dirtyKeys.size > 0 ||
+      metaState.journalEntryCount > 0
+    ) {
       scheduleOfflineRetry()
     }
   } catch (err) {
     notifyStoreSaveError(err)
+    // OPT-15：异常路径（EPERM/EBUSY 等瞬时占用）与离线路径同为「暂时不可写」
+    // ——不重试则脏数据滞留内存，用户不再编辑则退出前不落盘，期间崩溃即丢失
+    scheduleSaveRetry()
   } finally {
     metaState.saving = false
     if (metaState.pendingSave) {

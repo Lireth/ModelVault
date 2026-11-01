@@ -52,6 +52,11 @@ import {
   updateSettings,
 } from '../src/main/services/store'
 import { getDataDir } from '../src/main/services/store-paths'
+import {
+  getMaintenanceState,
+  releaseMaintenance,
+  tryAcquireMaintenance,
+} from '../src/main/services/maintenance-lock'
 
 let root
 const roots = []
@@ -120,6 +125,25 @@ describe('runAutoBackupIfDue（到期判定与跳过）', () => {
     setDataRoot(null)
     const res = await runAutoBackupIfDue()
     expect(res).toEqual({ skipped: 'no-root' })
+  })
+
+  it('维护锁被占时静默跳过（OPT-15：不与恢复/扫描交错产生半状态备份）', async () => {
+    setModelMeta(path.join(root, 'a.safetensors'), { alias: 'a' })
+    const token = tryAcquireMaintenance('restore', root)
+    try {
+      const res = await runAutoBackupIfDue()
+      expect(res).toEqual({ skipped: 'maintenance' })
+      expect(await listAutoBackups()).toEqual([])
+    } finally {
+      releaseMaintenance(token)
+    }
+  })
+
+  it('备份完成后释放维护锁（下轮检查可正常获取）', async () => {
+    setModelMeta(path.join(root, 'a.safetensors'), { alias: 'a' })
+    const res = await runAutoBackupIfDue()
+    expect(res.skipped).toBeUndefined()
+    expect(getMaintenanceState()).toBeNull()
   })
 
   it('库尚无标注时跳过（刚建库是正常状态，不产出空备份）', async () => {

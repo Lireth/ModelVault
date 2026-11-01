@@ -29,6 +29,7 @@ const KIND_LABELS = {
   health: '检查模型库',
   repair: '修复模型库',
   import: '导入模型',
+  backup: '备份数据',
   'file-op': '执行文件操作',
 }
 
@@ -41,7 +42,7 @@ let nextTokenId = 0
 
 /**
  * 同步尝试获取维护锁。
- * @param {'scan'|'partial-scan'|'switch'|'load'|'restore'|'health'|'repair'|'import'|'file-op'} kind 维护类型
+ * @param {'scan'|'partial-scan'|'switch'|'load'|'restore'|'health'|'repair'|'import'|'backup'|'file-op'} kind 维护类型
  * @param {string|null} [root] 操作绑定的模型根目录（诊断与审计用）
  * @returns {{id: number, kind: string, root: string|null, startedAt: number}|null}
  *   成功返回令牌；与大维护操作或 file-op 互斥冲突时返回 null
@@ -105,7 +106,7 @@ export function maintenanceBusyMessage() {
 /**
  * 在维护锁内执行操作（拿不到锁时抛出 code=EBUSY 的错误）。
  * @template T
- * @param {'scan'|'partial-scan'|'switch'|'load'|'restore'|'health'|'repair'|'import'|'file-op'} kind 维护类型
+ * @param {'scan'|'partial-scan'|'switch'|'load'|'restore'|'health'|'repair'|'import'|'backup'|'file-op'} kind 维护类型
  * @param {string|null} root 操作绑定的模型根目录
  * @param {(token: {id: number, kind: string, root: string|null, startedAt: number}) => Promise<T>} fn 操作体
  * @returns {Promise<T>}

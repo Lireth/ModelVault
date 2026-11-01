@@ -67,6 +67,8 @@ export async function loadData() {
   metaState.hasSnapshot = false
   metaState.pendingSnapshot = false
   metaState.mutationVersion = 0
+  // 新根从零累计写盘重试计数（OPT-15）：上一根的失败退避不延续到新根
+  metaState.saveRetryFailures = 0
   if (!getCurrentRoot()) {
     metaState.data = { version: 1, models: {} }
     return metaState.data
@@ -336,9 +338,10 @@ export function renameModelMeta(oldId, newId) {
  */
 export async function switchDataRoot(root) {
   await flushStoreSave()
-  // O5：切根后旧根的可用性缓存与离线重试定时器一并作废
+  // O5：切根后旧根的可用性缓存与离线重试定时器一并作废（含 OPT-15 退避计数）
   clearOfflineRetry()
   metaState.rootProbe = { root: null, at: 0 }
+  metaState.saveRetryFailures = 0
   setDataRoot(root)
 }
 

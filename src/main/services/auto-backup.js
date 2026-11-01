@@ -5,6 +5,7 @@ import logger from '../logger'
 import { renameReplacing } from './atomic-write'
 import { samePathIgnoreCase } from '../utils'
 import { DATA_DIR, getCurrentRoot, getSettings } from './store'
+import { releaseMaintenance, tryAcquireMaintenance } from './maintenance-lock'
 import { buildBackupParts } from './backup-export'
 import { writeBackupZipToFile } from './backup-zip'
 
@@ -20,6 +21,9 @@ import { writeBackupZipToFile } from './backup-zip'
  * 设计要点：
  * - 是否执行由触发时刻的设置值决定（用户关闭开关即时生效，无需重启）；
  * - 无激活库 / 库尚无标注 / 上次备份不足 24h / 已有备份在途时静默跳过；
+ * - 与扫描/备份恢复/跨库传输共用全局维护锁（OPT-15）：组装读取 store.json
+ *   期间恰好叠加恢复操作的整目录交换，会把半恢复状态写进备份包——拿不到
+ *   锁本轮静默跳过，下轮周期检查重试；
  * - 正式包原子落点（A4）：先写 <final>.tmp 并 fsync，再经 renameReplacing
  *   带退避更名——进程强退只可能留下 .tmp 半成品（不在识别/滚动清单内，
  *   下次备份前清扫），半截正式包自此不可能出现；
@@ -203,6 +207,14 @@ export async function runAutoBackupIfDue(now = Date.now()) {
   const root = getCurrentRoot()
   if (!root) return { skipped: 'no-root' }
   if (running) return { skipped: 'busy' }
+  // 维护锁（OPT-15/R4）：备份组装（flush + 读 store.json）与备份恢复的
+  // 整目录交换、扫描 relink、跨库传输互斥——否则可能把半恢复状态写进
+  // 备份包。拿不到锁本轮静默跳过（下轮周期检查重试），绝不排队悬挂
+  const token = tryAcquireMaintenance('backup', root)
+  if (!token) {
+    logger.info('自动备份跳过：维护操作进行中（下轮检查重试）')
+    return { skipped: 'maintenance' }
+  }
   running = true
   try {
     const dir = path.join(root, DATA_DIR, BACKUP_DIR_NAME)
@@ -255,6 +267,7 @@ export async function runAutoBackupIfDue(now = Date.now()) {
     return { path: target, models: built.models }
   } finally {
     running = false
+    releaseMaintenance(token)
   }
 }
 

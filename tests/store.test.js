@@ -38,7 +38,11 @@ import {
 } from '../src/main/services/store'
 import logger from '../src/main/logger'
 import { setSettingsSaveDelayForTests } from '../src/main/services/store-settings'
-import { setSnapshotWorkerThresholdForTests } from '../src/main/services/store-meta-persist'
+import {
+  setSaveRetryDelayForTests,
+  setSnapshotWorkerThresholdForTests,
+} from '../src/main/services/store-meta-persist'
+import { metaState } from '../src/main/services/store-meta-state'
 import { fakeUserData } from './setup'
 
 /**
@@ -73,6 +77,13 @@ beforeEach(async () => {
 afterEach(async () => {
   await flushSettingsSave()
   setSettingsSaveDelayForTests(500)
+  // OPT-15：落盘失败用例（含下方 B1 既有用例）会排程 10s 起的自动重试
+  // 定时器——不清理则在后续用例的新根上触发补写，干扰他用例的磁盘断言
+  if (metaState.offlineRetryTimer) {
+    clearTimeout(metaState.offlineRetryTimer)
+    metaState.offlineRetryTimer = null
+  }
+  metaState.saveRetryFailures = 0
 })
 
 // 只清理本文件创建的临时目录：删除整个系统临时目录会连带摧毁
@@ -398,6 +409,111 @@ describe('落盘失败通知（B1）', () => {
       // 失败已上报且保存流程未被监听器异常中断：内存态已更新，无未捕获异常
       expect(notified).toBeGreaterThanOrEqual(1)
       expect(getModelMeta(abs).alias).toBe('测试')
+    } finally {
+      setStoreSaveErrorListener(null)
+    }
+  })
+})
+
+describe('写盘异常自动重试（OPT-15）', () => {
+  // 重试链路含真实 fs IO：vitest 假定时器的推进不让路给真实 IO 宏任务，
+  // 在途写入会饿死到 useRealTimers 才续跑——故注入毫秒级基准间隔走真实
+  // 时钟，以轮询等待替代 advanceTimersByTimeAsync（注入模式同
+  // setSettingsSaveDelayForTests / setSnapshotWorkerThresholdForTests）
+  const RETRY_BASE_MS = 20
+
+  /** 将 .modelvault 占位为普通文件，使原子写临时文件必然失败（ENOTDIR） */
+  async function occupyDataDir() {
+    const dataDir = path.join(root, '.modelvault')
+    await fs.rm(dataDir, { recursive: true, force: true })
+    await fs.writeFile(dataDir, 'x')
+    return dataDir
+  }
+
+  /** 轮询等待条件成立（真实时钟；deadline 内不成立返回 false） */
+  async function waitFor(fn, deadlineMs = 5000) {
+    const start = Date.now()
+    while (!fn()) {
+      if (Date.now() - start > deadlineMs) return false
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    return true
+  }
+
+  /** 丢弃 setModelMeta 附带的防抖定时器：失败计数只由显式保存与重试链驱动 */
+  function discardDebouncedSave() {
+    if (metaState.saveTimer) {
+      clearTimeout(metaState.saveTimer)
+      metaState.saveTimer = null
+    }
+  }
+
+  beforeEach(() => {
+    setSaveRetryDelayForTests(RETRY_BASE_MS)
+  })
+
+  afterEach(() => {
+    setSaveRetryDelayForTests()
+  })
+
+  it('写盘异常后安排自动重试，恢复后补写成功并清零计数', async () => {
+    const abs = await touchModel('retry-recover.safetensors')
+    const dataDir = await occupyDataDir()
+    const errors = []
+    setStoreSaveErrorListener((err) => errors.push(err))
+    try {
+      setModelMeta(abs, { alias: '占用期修改' })
+      discardDebouncedSave()
+      await saveStoreNow()
+      expect(errors.length).toBeGreaterThanOrEqual(1)
+      // 异常路径与离线路径同等对待：脏数据保留在内存并排程自动补写
+      expect(metaState.saveRetryFailures).toBe(1)
+      expect(metaState.offlineRetryTimer).not.toBeNull()
+
+      // 解除占用（目录由重试路径自行重建）：退避重试应自动补写成功
+      await fs.rm(dataDir, { force: true })
+      expect(
+        await waitFor(
+          () =>
+            metaState.saveRetryFailures === 0 && !metaState.offlineRetryTimer,
+        ),
+      ).toBe(true)
+      const text = await fs.readFile(
+        path.join(root, '.modelvault', 'store.json'),
+        'utf-8',
+      )
+      const key = path.relative(root, abs).split(path.sep).join('/')
+      expect(JSON.parse(text).models[key].alias).toBe('占用期修改')
+    } finally {
+      setStoreSaveErrorListener(null)
+    }
+  })
+
+  it('连续失败按指数退避，超限后暂停；再次编辑仍尝试但不再排程', async () => {
+    const abs = await touchModel('retry-cap.safetensors')
+    await occupyDataDir()
+    setStoreSaveErrorListener(() => {})
+    try {
+      setModelMeta(abs, { alias: '首版' })
+      discardDebouncedSave()
+      await saveStoreNow()
+      // 首次失败 + 5 次重试失败：退避 20/40/80/160/320ms 逐级翻倍
+      expect(await waitFor(() => metaState.saveRetryFailures >= 6)).toBe(true)
+      // 第 6 次重试（退避 640ms）失败后超上限：暂停自动重试，不再排程
+      expect(
+        await waitFor(
+          () =>
+            metaState.saveRetryFailures >= 7 && !metaState.offlineRetryTimer,
+        ),
+      ).toBe(true)
+
+      // 用户再次编辑仍会尝试落盘（失败后内存数据保留，不排程新重试）
+      setModelMeta(abs, { alias: '超限后编辑' })
+      discardDebouncedSave()
+      await saveStoreNow()
+      expect(metaState.saveRetryFailures).toBeGreaterThanOrEqual(8)
+      expect(metaState.offlineRetryTimer).toBeNull()
+      expect(getModelMeta(abs).alias).toBe('超限后编辑')
     } finally {
       setStoreSaveErrorListener(null)
     }

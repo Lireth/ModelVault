@@ -104,6 +104,13 @@ describe('状态快照与忙文案', () => {
     releaseMaintenance(t2)
     expect(maintenanceBusyMessage()).toBe('')
   })
+
+  it('backup 类型使用专用文案（OPT-15）', () => {
+    const t = tryAcquireMaintenance('backup', null)
+    expect(maintenanceBusyMessage()).toBe('正在备份数据，请稍候')
+    releaseMaintenance(t)
+    expect(maintenanceBusyMessage()).toBe('')
+  })
 })
 
 describe('runMaintenance', () => {

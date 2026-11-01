@@ -17,6 +17,11 @@ export const metaState = {
   rootProbe: { root: null, at: 0 },
   /** 离线跳过后自动重试落盘的定时器（库恢复可用时无需用户再次编辑即可补写） */
   offlineRetryTimer: null,
+  /**
+   * 写盘异常（EPERM/EBUSY 等瞬时占用）后的连续失败次数（OPT-15）：
+   * 驱动重试的指数退避与上限暂停；成功落盘或切库/加载重置时归零。
+   */
+  saveRetryFailures: 0,
   /** 当前根目录的元数据，键为相对路径（'/' 分隔） */
   data: null,
   saveTimer: null,
