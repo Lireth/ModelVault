@@ -536,14 +536,46 @@ export function sidecarFilesFor(absModelPath) {
 }
 
 /**
+ * sidecar 全集一次性并行 stat 快照（P1-2）：
+ * 首扫装饰路径此前对同一批候选最多重复 stat 三遍（txt/info 导入各一遍、
+ * 预览图候选串行至多 7 遍、缓存事实签名再全量一遍）——装饰未命中路径
+ * 以本快照一次并行 stat 供四方复用，串行预览探测的多次往返同步消除。
+ * @param {string} modelPath 模型文件绝对路径
+ * @returns {Promise<{files: string[], stats: Array<import('node:fs').Stats|null>}>}
+ *   files 与 stats 一一对应（顺序同 sidecarFilesFor：[0]=txt，[1]=civitai.info，
+ *   其后为图片候选）；stat 失败/不存在的条目为 null
+ */
+export async function statSidecarSet(modelPath) {
+  const files = sidecarFilesFor(modelPath)
+  const stats = await Promise.all(
+    files.map((p) => fs.stat(p).catch(() => null)),
+  )
+  return { files, stats }
+}
+
+/**
  * 查找模型文件的自动预览图（ComfyUI/WebUI 生成的同名 sidecar 图片）。
  * 命中顺序见 SIDECAR_PREVIEW_EXTS。
  * @param {string} modelPath 模型文件绝对路径
+ * @param {{files: string[], stats: Array<import('node:fs').Stats|null>}} [snapshot]
+ *   statSidecarSet 快照（装饰路径传入以复用批量 stat 结果，缺省自行逐个探测）
  * @returns {Promise<string>} 预览图绝对路径，未找到返回 ''
  */
-export async function findSidecarPreview(modelPath) {
+export async function findSidecarPreview(modelPath, snapshot = null) {
   const dir = path.dirname(modelPath)
   const base = sidecarBaseOf(modelPath)
+  if (snapshot) {
+    // 图片候选位于快照尾部（前两位为 txt/info），按命中优先级顺序取首个存在项
+    for (
+      let i = snapshot.files.length - SIDECAR_PREVIEW_EXTS.length;
+      i < snapshot.files.length;
+      i++
+    ) {
+      const stat = snapshot.stats[i]
+      if (stat && stat.isFile()) return snapshot.files[i]
+    }
+    return ''
+  }
   const candidates = SIDECAR_PREVIEW_EXTS.map((ext) =>
     path.join(dir, `${base}${ext}`),
   )
@@ -565,16 +597,24 @@ const SIDECAR_TEXT_MAX_BYTES = 256 * 1024
  * 读取模型文件同名的 sidecar 说明文本（WebUI 惯例：name.txt，
  * 内容为训练说明或标签文本）。
  * @param {string} modelPath 模型文件绝对路径
+ * @param {{files: string[], stats: Array<import('node:fs').Stats|null>}} [snapshot]
+ *   statSidecarSet 快照（装饰路径传入以复用批量 stat 结果，[0] 为 txt 条目；
+ *   快照内为 null 即文件不存在，不再重复 stat）
  * @returns {Promise<string>} 文本内容（已修剪首尾空白），未找到/过大/读取失败返回 ''
  */
-export async function findSidecarText(modelPath) {
+export async function findSidecarText(modelPath, snapshot = null) {
   const txtPath = path.join(
     path.dirname(modelPath),
     `${sidecarBaseOf(modelPath)}.txt`,
   )
   try {
-    const stat = await fs.stat(txtPath)
-    if (!stat.isFile() || stat.size === 0 || stat.size > SIDECAR_TEXT_MAX_BYTES)
+    const stat = snapshot ? snapshot.stats[0] : await fs.stat(txtPath)
+    if (
+      !stat ||
+      !stat.isFile() ||
+      stat.size === 0 ||
+      stat.size > SIDECAR_TEXT_MAX_BYTES
+    )
       return ''
     const text = await fs.readFile(txtPath, 'utf8')
     return text.trim()
@@ -615,16 +655,24 @@ const CIVITAI_INFO_MAX_BYTES = 1024 * 1024
  * 读取模型文件同名的 civitai.info 元数据（F8：Civitai 下载器随模型保存的
  * modelVersion JSON，社区下载的模型普遍携带），解析出 trainedWords/nsfw。
  * @param {string} modelPath 模型文件绝对路径
+ * @param {{files: string[], stats: Array<import('node:fs').Stats|null>}} [snapshot]
+ *   statSidecarSet 快照（装饰路径传入以复用批量 stat 结果，[1] 为 info 条目；
+ *   快照内为 null 即文件不存在，不再重复 stat）
  * @returns {Promise<object|null>} 解析后的 JSON 对象；未找到/过大/损坏返回 null
  */
-export async function findSidecarCivitaiInfo(modelPath) {
+export async function findSidecarCivitaiInfo(modelPath, snapshot = null) {
   const infoPath = path.join(
     path.dirname(modelPath),
     `${sidecarBaseOf(modelPath)}.civitai.info`,
   )
   try {
-    const stat = await fs.stat(infoPath)
-    if (!stat.isFile() || stat.size === 0 || stat.size > CIVITAI_INFO_MAX_BYTES)
+    const stat = snapshot ? snapshot.stats[1] : await fs.stat(infoPath)
+    if (
+      !stat ||
+      !stat.isFile() ||
+      stat.size === 0 ||
+      stat.size > CIVITAI_INFO_MAX_BYTES
+    )
       return null
     const text = await fs.readFile(infoPath, 'utf8')
     const parsed = JSON.parse(text)

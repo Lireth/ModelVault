@@ -10,6 +10,7 @@ import {
   findSidecarPreview,
   findSidecarText,
   isExcludedScanName,
+  statSidecarSet,
   isVisibleScanEntry,
   modelAddedMs,
   scanModels,
@@ -545,6 +546,55 @@ describe('findSidecarPreview', () => {
     expect(await findSidecarPreview(modelPath4)).toBe(
       path.join(dir, 'model4.bmp'),
     )
+  })
+
+  it('statSidecarSet 快照：一次并行 stat 供预览/文本/info 三方复用（P1-2）', async () => {
+    const modelPath = path.join(dir, 'model5.safetensors')
+    await fs.writeFile(modelPath, 'x')
+    await fs.writeFile(path.join(dir, 'model5.txt'), '触发词说明')
+    await fs.writeFile(path.join(dir, 'model5.png'), 'x')
+    // model5.jpg 故意缺失：验证缺失条目为 null 且不影响命中顺序
+
+    const { files, stats } = await statSidecarSet(modelPath)
+    // 形状：与 sidecarFilesFor 一一对应——[0]=txt，[1]=civitai.info，其后为图片候选
+    expect(files).toHaveLength(stats.length)
+    expect(files[0]).toBe(path.join(dir, 'model5.txt'))
+    expect(files[1]).toBe(path.join(dir, 'model5.civitai.info'))
+    expect(files[2]).toBe(path.join(dir, 'model5.png'))
+    expect(stats[0]).not.toBeNull()
+    expect(stats[0].isFile()).toBe(true)
+    expect(stats[1]).toBeNull() // civitai.info 不存在
+
+    // 快照消费：预览命中 png（jpg 缺失跳过）、文本读到内容、info 返回 null
+    expect(await findSidecarPreview(modelPath, snapshotOf(files, stats))).toBe(
+      path.join(dir, 'model5.png'),
+    )
+    expect(await findSidecarText(modelPath, snapshotOf(files, stats))).toBe(
+      '触发词说明',
+    )
+    expect(
+      await findSidecarCivitaiInfo(modelPath, snapshotOf(files, stats)),
+    ).toBeNull()
+
+    // 无任何 sidecar：预览返回空串、文本/信息返回空值（缺失条目不再重复 stat）
+    const empty = await statSidecarSet(path.join(dir, 'none.safetensors'))
+    expect(
+      await findSidecarPreview(
+        path.join(dir, 'none.safetensors'),
+        snapshotOf(empty.files, empty.stats),
+      ),
+    ).toBe('')
+    expect(
+      await findSidecarText(
+        path.join(dir, 'none.safetensors'),
+        snapshotOf(empty.files, empty.stats),
+      ),
+    ).toBe('')
+
+    /** 组装 statSidecarSet 形状的快照（保持测试与实现解耦的显式构造） */
+    function snapshotOf(fsFiles, fsStats) {
+      return { files: fsFiles, stats: fsStats }
+    }
   })
 })
 

@@ -7,8 +7,8 @@ import {
   findSidecarCivitaiInfo,
   findSidecarPreview,
   findSidecarText,
-  sidecarFilesFor,
   sidecarImportPatch,
+  statSidecarSet,
 } from '../../services/scanner'
 import { isValidImageFile } from '../../services/covers'
 import {
@@ -295,7 +295,7 @@ export function startThumbDrain(win) {
  * @param {Record<string, any>} meta 当前元数据
  * @returns {Promise<Record<string, any>>} 导入后的最新元数据（未导入时原样返回）
  */
-async function importSidecarMeta(model, meta) {
+async function importSidecarMeta(model, meta, snapshot = null) {
   const needNote = !meta.note
   const needTxtTriggers = model.type === 'lora' && !meta.triggerWords
   // civitai.info：触发词（任意类型）或 NSFW 标记可补时尝试读取
@@ -303,9 +303,11 @@ async function importSidecarMeta(model, meta) {
   if (!needNote && !needTxtTriggers && !needCivitai) return meta
   const [text, civitaiInfo] = await Promise.all([
     needNote || needTxtTriggers
-      ? findSidecarText(model.id)
+      ? findSidecarText(model.id, snapshot)
       : Promise.resolve(''),
-    needCivitai ? findSidecarCivitaiInfo(model.id) : Promise.resolve(null),
+    needCivitai
+      ? findSidecarCivitaiInfo(model.id, snapshot)
+      : Promise.resolve(null),
   ])
   // await 间隙后重读最新元数据：读取与写盘之间用户可能已并发保存
   // （saveModelData/setMetaFlags 为同步读-改-写），基于旧 meta 展开写回
@@ -371,25 +373,29 @@ async function cachedThumbMissing(cached) {
 }
 
 /**
+ * 由 sidecar 全集 stat 结果合成文件级事实签名（P1-2 纯函数化）：
+ * 缺失/stat 失败的文件统一记 '-'，新增/删除均使签名变化。
+ * @param {Array<import('node:fs').Stats|null>} stats statSidecarSet 的 stats
+ *   （顺序同 sidecarFilesFor）
+ * @returns {string} 事实签名
+ */
+function sidecarFactsOf(stats) {
+  return stats.map((s) => (s ? `${s.mtimeMs}:${s.size}` : '-')).join('|')
+}
+
+/**
  * 采集 sidecar 家族的文件级事实签名（OPT-8）：
  * 模型同名 sidecar（txt / civitai.info / 预览图候选，即 sidecarFilesFor 全集）
  * 的 mtime+size 串接签名。这些文件的变化不会改变模型 mtime 与元数据签名，
  * 是局部扫描 forceRefresh 语义的真实判定依据——缓存内的签名与文件现状一致
  * ⇒ 重装饰结论必然一致（sidecar 导入只依赖这些文件与当前元数据，而元数据
- * 签名已在命中条件中核对）。缺失的文件统一记 '-'，新增/删除均使签名变化。
+ * 签名已在命中条件中核对）。P1-2：经 statSidecarSet 一次并行 stat。
  * @param {string} id 模型绝对路径
  * @returns {Promise<string>} 事实签名
  */
 async function statSidecarFacts(id) {
-  const stats = await Promise.all(
-    sidecarFilesFor(id).map((p) =>
-      fs.stat(p).then(
-        (s) => `${s.mtimeMs}:${s.size}`,
-        () => '-',
-      ),
-    ),
-  )
-  return stats.join('|')
+  const { stats } = await statSidecarSet(id)
+  return sidecarFactsOf(stats)
 }
 
 /**
@@ -441,9 +447,14 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
     }
   }
 
+  // P1-2：sidecar 全集一次并行 stat，供文本/info 导入、预览图命中与缓存
+  // 事实签名四方复用——此前同一批候选最多重复 stat 三遍（导入 2 次 +
+  // 预览图候选串行至多 7 次 + 事实签名 9 次），万级库首扫每模型多付
+  // 9-18 次系统调用，且串行预览探测的多次 IO 往返一并消除
+  const sidecar = await statSidecarSet(model.id)
   // sidecar 导入可能更新元数据（首扫或元数据重置后的恢复），
   // 缓存签名按导入后的 meta 计算，确保下一次扫描稳定命中
-  const meta = await importSidecarMeta(model, meta0)
+  const meta = await importSidecarMeta(model, meta0, sidecar)
   const signature = metaSignature(meta)
 
   // 校验多封面列表，过滤已丢失的文件。
@@ -462,7 +473,7 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
     covers.find((c) => c.rel === meta.cover) || covers[0] || null
   let cover = defaultEntry ? defaultEntry.path : ''
   if (!cover) {
-    cover = await findSidecarPreview(model.id)
+    cover = await findSidecarPreview(model.id, sidecar)
   }
   // OPT-1 全部封面登记缩略图：卡片悬停轮播此前预加载的是各封面原图
   // （多 MB 级），内存峰值与解码开销随封面数线性放大；改为与默认封面共用
@@ -543,8 +554,8 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
   }
   // 采集 sidecar 文件级事实（OPT-8）：sidecar 导入只读不写这些文件，
   // 装饰前后等价；缓存放进事实签名供下一次局部扫描的文件级缓存判定。
-  // 仅缓存未命中（真实变化/新模型）的模型支付这 ~9 次轻量 stat
-  const sidecarFacts = await statSidecarFacts(model.id)
+  // P1-2：直接由开头的一次并行 stat 快照合成，零额外系统调用
+  const sidecarFacts = sidecarFactsOf(sidecar.stats)
   // 写入装饰缓存（容量超限时按 LRU 顺序淘汰最旧条目，C4 共享工具）
   boundedMapSet(
     decorateCache,
