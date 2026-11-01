@@ -18,6 +18,11 @@ import {
   checkModelIdInRootReal,
   getRealRootPath,
 } from '../handler'
+import {
+  maintenanceBusyMessage,
+  releaseMaintenance,
+  tryAcquireMaintenance,
+} from '../../services/maintenance-lock'
 import { isPathRealWithin } from '../../utils'
 
 /**
@@ -62,37 +67,46 @@ export function registerMiscHandlers() {
   wrapHandler(
     'models:deleteModel',
     async (event, { id } = {}) => {
-      // O6：破坏性操作按 realpath 校验归属，拦截库内 junction 指向库外的删除
-      const invalid = await checkModelIdInRootReal(id, {
-        message: '模型不在当前根目录内，无法删除',
-      })
-      if (invalid) return { error: invalid }
+      // 维护锁（OPT-14）：删除与扫描/备份恢复/跨库传输互斥——恢复期间删除
+      // 会让恢复结果与元数据指向错位。file-op 彼此兼容：渲染层批量删除按
+      // 8 路并发调用本通道，严格互斥会让其中 7 路误报忙失败
+      const token = tryAcquireMaintenance('file-op', getCurrentRoot())
+      if (!token) return { error: maintenanceBusyMessage() }
       try {
-        const stat = await fs.stat(id)
-        if (!stat.isFile()) {
-          return { error: '无效的模型文件' }
-        }
-      } catch {
-        return { error: '模型文件不存在' }
-      }
-      try {
-        await shell.trashItem(id)
-      } catch (err) {
-        logger.warn(`模型删除失败: ${err.message}`)
-        return { error: `删除失败: ${err.message}` }
-      }
-      // 同步移除同名的 sidecar 预览图/说明文件（失败不阻塞）
-      for (const f of sidecarFilesFor(id)) {
-        await shell.trashItem(f).catch((err) => {
-          // 回收失败（权限/被占用）不应无声无息：标注/物理文件状态可能不一致
-          logger.warn(`sidecar 清理失败（不影响删除）: ${f} ${err.message}`)
+        // O6：破坏性操作按 realpath 校验归属，拦截库内 junction 指向库外的删除
+        const invalid = await checkModelIdInRootReal(id, {
+          message: '模型不在当前根目录内，无法删除',
         })
+        if (invalid) return { error: invalid }
+        try {
+          const stat = await fs.stat(id)
+          if (!stat.isFile()) {
+            return { error: '无效的模型文件' }
+          }
+        } catch {
+          return { error: '模型文件不存在' }
+        }
+        try {
+          await shell.trashItem(id)
+        } catch (err) {
+          logger.warn(`模型删除失败: ${err.message}`)
+          return { error: `删除失败: ${err.message}` }
+        }
+        // 同步移除同名的 sidecar 预览图/说明文件（失败不阻塞）
+        for (const f of sidecarFilesFor(id)) {
+          await shell.trashItem(f).catch((err) => {
+            // 回收失败（权限/被占用）不应无声无息：标注/物理文件状态可能不一致
+            logger.warn(`sidecar 清理失败（不影响删除）: ${f} ${err.message}`)
+          })
+        }
+        removeModelMeta(id)
+        // O8：即时从本地索引移除，切库秒开不再回放已删除模型
+        await updateLibraryIndex(getCurrentRoot(), { removeIds: [id] })
+        logger.info(`模型已移入回收站: ${id}`)
+        return { ok: true }
+      } finally {
+        releaseMaintenance(token)
       }
-      removeModelMeta(id)
-      // O8：即时从本地索引移除，切库秒开不再回放已删除模型
-      await updateLibraryIndex(getCurrentRoot(), { removeIds: [id] })
-      logger.info(`模型已移入回收站: ${id}`)
-      return { ok: true }
     },
     { errorPrefix: '删除失败' },
   )

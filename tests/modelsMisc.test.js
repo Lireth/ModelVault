@@ -40,6 +40,10 @@ import {
   setModelMeta,
   setDataRoot,
 } from '../src/main/services/store'
+import {
+  releaseMaintenance,
+  tryAcquireMaintenance,
+} from '../src/main/services/maintenance-lock'
 
 const roots = []
 let root
@@ -165,6 +169,44 @@ describe('models:deleteModel', () => {
     expect(res.error).toBe('模型不在当前根目录内，无法删除')
     expect(vi.mocked(shell.trashItem)).not.toHaveBeenCalled()
     await expect(fs.access(outsideFile)).resolves.toBeUndefined()
+  })
+
+  it('大维护操作持锁期间删除被拒（OPT-14 互斥）', async () => {
+    const abs = path.join(root, 'busy.safetensors')
+    await fs.writeFile(abs, 'x')
+    const token = tryAcquireMaintenance('scan', root)
+    try {
+      const handler = getRegisteredHandler('models:deleteModel')
+      const res = await handler(makeEvent(), { id: abs })
+      expect(res).toEqual({ error: '正在扫描中，请稍候' })
+      expect(vi.mocked(shell.trashItem)).not.toHaveBeenCalled()
+      expect(getModelMeta(abs)).toBeNull() // 未发生任何删除副作用
+    } finally {
+      releaseMaintenance(token)
+    }
+  })
+
+  it('并发多路删除全部成功（file-op 彼此兼容，OPT-14）', async () => {
+    // 渲染层批量删除按 8 路并发调用本通道：锁的 file-op 层必须放行并发，
+    // 严格互斥会让其中 7 路误报「忙」失败
+    const ids = []
+    for (let i = 0; i < 8; i++) {
+      const abs = path.join(root, `batch-${i}.safetensors`)
+      await fs.writeFile(abs, 'x')
+      ids.push(abs)
+    }
+    vi.mocked(shell.trashItem).mockImplementation(
+      () => new Promise((resolve) => setTimeout(resolve, 5)),
+    )
+    const handler = getRegisteredHandler('models:deleteModel')
+    const results = await Promise.all(
+      ids.map((id) => handler(makeEvent(), { id })),
+    )
+    expect(results.every((r) => r.ok === true)).toBe(true)
+    // 全部释放后大维护操作恢复可入
+    const t = tryAcquireMaintenance('scan', root)
+    expect(t).not.toBeNull()
+    releaseMaintenance(t)
   })
 })
 

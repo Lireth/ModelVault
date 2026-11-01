@@ -394,23 +394,31 @@ export function registerFilesHandlers() {
       const newPath = disabled
         ? `${id}.disabled`
         : id.replace(/\.disabled$/i, '')
+      // 维护锁（OPT-14）：改名与扫描/备份恢复/跨库传输互斥——扫描 relink
+      // 不得绑定到改名中途的路径。file-op 彼此兼容（批量启用为串行调用）
+      const token = tryAcquireMaintenance('file-op', getCurrentRoot())
+      if (!token) return { error: maintenanceBusyMessage() }
       try {
-        await fs.access(newPath)
-        return { error: '目标文件名已存在' }
-      } catch {
-        /* 不存在，可改名 */
+        try {
+          await fs.access(newPath)
+          return { error: '目标文件名已存在' }
+        } catch {
+          /* 不存在，可改名 */
+        }
+        try {
+          await fs.rename(id, newPath)
+        } catch (err) {
+          logger.warn(`禁用/启用改名失败: ${id} ${err.message}`)
+          return { error: `改名失败: ${err.message}` }
+        }
+        renameModelMeta(id, newPath)
+        logger.info(
+          `模型已${disabled ? '禁用' : '启用'}: ${path.basename(newPath)}`,
+        )
+        return { path: newPath }
+      } finally {
+        releaseMaintenance(token)
       }
-      try {
-        await fs.rename(id, newPath)
-      } catch (err) {
-        logger.warn(`禁用/启用改名失败: ${id} ${err.message}`)
-        return { error: `改名失败: ${err.message}` }
-      }
-      renameModelMeta(id, newPath)
-      logger.info(
-        `模型已${disabled ? '禁用' : '启用'}: ${path.basename(newPath)}`,
-      )
-      return { path: newPath }
     },
     { errorPrefix: '禁用/启用失败' },
   )
@@ -427,56 +435,64 @@ export function registerFilesHandlers() {
       if (plan.path === id) {
         return { path: id, renamedSidecars: 0, sidecarWarnings: [] }
       }
-      // 目标存在则拒绝；仅大小写变化的改名（Windows 大小写不敏感）跳过存在性检查
-      if (plan.path.toLowerCase() !== id.toLowerCase()) {
-        try {
-          await fs.access(plan.path)
-          return { error: '目标文件名已存在' }
-        } catch {
-          /* 不存在，可改名 */
-        }
-      }
+      // 维护锁（OPT-14）：改名 + sidecar 迁移 + 元数据键迁移与扫描 relink、
+      // 备份恢复互斥——恢复中途改路径会让恢复结果与元数据指向错位
+      const token = tryAcquireMaintenance('file-op', getCurrentRoot())
+      if (!token) return { error: maintenanceBusyMessage() }
       try {
-        await fs.rename(id, plan.path)
-      } catch (err) {
-        if (err.code === 'EXDEV') {
-          return { error: '不支持跨磁盘重命名（目标须与模型在同一磁盘）' }
-        }
-        logger.warn(`模型重命名失败: ${id} ${err.message}`)
-        return { error: `重命名失败: ${err.message}` }
-      }
-      const dir = path.dirname(id)
-      const oldBase = path.basename(id, path.extname(id))
-      const newBase = path.basename(plan.path, path.extname(plan.path))
-      let renamedSidecars = 0
-      const sidecarWarnings = []
-      for (const f of sidecarFilesFor(id)) {
-        const suffix = path.basename(f).slice(oldBase.length)
-        const target = path.join(dir, `${newBase}${suffix}`)
-        // 仅大小写变化时目标即源文件本身（Windows 大小写不敏感），不做事前冲突检查
-        if (target.toLowerCase() !== f.toLowerCase()) {
+        // 目标存在则拒绝；仅大小写变化的改名（Windows 大小写不敏感）跳过存在性检查
+        if (plan.path.toLowerCase() !== id.toLowerCase()) {
           try {
-            await fs.access(target)
-            sidecarWarnings.push(`${path.basename(f)} 的目标已存在，已跳过`)
-            continue
+            await fs.access(plan.path)
+            return { error: '目标文件名已存在' }
           } catch {
-            /* 目标不存在，可改名 */
+            /* 不存在，可改名 */
           }
         }
         try {
-          await fs.rename(f, target)
-          renamedSidecars += 1
+          await fs.rename(id, plan.path)
         } catch (err) {
-          if (err.code !== 'ENOENT') {
-            sidecarWarnings.push(`${path.basename(f)}: ${err.message}`)
+          if (err.code === 'EXDEV') {
+            return { error: '不支持跨磁盘重命名（目标须与模型在同一磁盘）' }
+          }
+          logger.warn(`模型重命名失败: ${id} ${err.message}`)
+          return { error: `重命名失败: ${err.message}` }
+        }
+        const dir = path.dirname(id)
+        const oldBase = path.basename(id, path.extname(id))
+        const newBase = path.basename(plan.path, path.extname(plan.path))
+        let renamedSidecars = 0
+        const sidecarWarnings = []
+        for (const f of sidecarFilesFor(id)) {
+          const suffix = path.basename(f).slice(oldBase.length)
+          const target = path.join(dir, `${newBase}${suffix}`)
+          // 仅大小写变化时目标即源文件本身（Windows 大小写不敏感），不做事前冲突检查
+          if (target.toLowerCase() !== f.toLowerCase()) {
+            try {
+              await fs.access(target)
+              sidecarWarnings.push(`${path.basename(f)} 的目标已存在，已跳过`)
+              continue
+            } catch {
+              /* 目标不存在，可改名 */
+            }
+          }
+          try {
+            await fs.rename(f, target)
+            renamedSidecars += 1
+          } catch (err) {
+            if (err.code !== 'ENOENT') {
+              sidecarWarnings.push(`${path.basename(f)}: ${err.message}`)
+            }
           }
         }
+        renameModelMeta(id, plan.path)
+        logger.info(
+          `模型已重命名: ${path.basename(id)} -> ${path.basename(plan.path)}`,
+        )
+        return { path: plan.path, renamedSidecars, sidecarWarnings }
+      } finally {
+        releaseMaintenance(token)
       }
-      renameModelMeta(id, plan.path)
-      logger.info(
-        `模型已重命名: ${path.basename(id)} -> ${path.basename(plan.path)}`,
-      )
-      return { path: plan.path, renamedSidecars, sidecarWarnings }
     },
     { errorPrefix: '重命名失败' },
   )
@@ -506,32 +522,42 @@ export function registerFilesHandlers() {
       }
       if (newPath === id)
         return { path: id, targetRelDir: toRelKey(targetDir) ?? '' }
+      // 维护锁（OPT-14）：在对话框与校验之后、移动之前取锁——持锁等待用户
+      // 选择目录会长时间冻结扫描/恢复等大操作。file-op 彼此兼容
+      const token = tryAcquireMaintenance('file-op', getCurrentRoot())
+      if (!token) return { error: maintenanceBusyMessage() }
       try {
-        await fs.access(newPath)
-        return { error: '目标位置已存在同名文件' }
-      } catch {
-        /* 不存在，可移动 */
-      }
-      try {
-        await fs.rename(id, newPath)
-      } catch (err) {
-        if (err.code === 'EXDEV') {
-          return { error: '不支持跨磁盘移动（目标文件夹须与模型库在同一磁盘）' }
+        try {
+          await fs.access(newPath)
+          return { error: '目标位置已存在同名文件' }
+        } catch {
+          /* 不存在，可移动 */
         }
-        logger.warn(`模型移动失败: ${id} ${err.message}`)
-        return { error: `移动失败: ${err.message}` }
+        try {
+          await fs.rename(id, newPath)
+        } catch (err) {
+          if (err.code === 'EXDEV') {
+            return {
+              error: '不支持跨磁盘移动（目标文件夹须与模型库在同一磁盘）',
+            }
+          }
+          logger.warn(`模型移动失败: ${id} ${err.message}`)
+          return { error: `移动失败: ${err.message}` }
+        }
+        // 同名 sidecar（预览图/说明文本）一并移动：整理场景下说明与模型不应分家
+        for (const f of sidecarFilesFor(id)) {
+          await fs
+            .rename(f, path.join(targetDir, path.basename(f)))
+            .catch(() => {})
+        }
+        renameModelMeta(id, newPath)
+        logger.info(`模型已移动: ${id} -> ${newPath}`)
+        // targetRelDir：渲染层据此对目标子树做局部扫描（OPT-03）；
+        // 目标为库根时 toRelKey 返回 null，映射为 ''（根直属文件子树）
+        return { path: newPath, targetRelDir: toRelKey(targetDir) ?? '' }
+      } finally {
+        releaseMaintenance(token)
       }
-      // 同名 sidecar（预览图/说明文本）一并移动：整理场景下说明与模型不应分家
-      for (const f of sidecarFilesFor(id)) {
-        await fs
-          .rename(f, path.join(targetDir, path.basename(f)))
-          .catch(() => {})
-      }
-      renameModelMeta(id, newPath)
-      logger.info(`模型已移动: ${id} -> ${newPath}`)
-      // targetRelDir：渲染层据此对目标子树做局部扫描（OPT-03）；
-      // 目标为库根时 toRelKey 返回 null，映射为 ''（根直属文件子树）
-      return { path: newPath, targetRelDir: toRelKey(targetDir) ?? '' }
     },
     { errorPrefix: '移动失败' },
   )
@@ -569,77 +595,85 @@ export function registerFilesHandlers() {
       if (!root) return { error: '未选择模型库根目录' }
       const rootReal = await getRealRootPath()
       if (!rootReal) return { error: '模型库根目录不可访问' }
-      // 逐项校验归属（O6：realpath 后仍须在库内）：非法项跳过而非整体失败
-      const valid = []
-      const skipped = []
-      for (const item of moves) {
-        if (!item || typeof item.id !== 'string') continue
-        if (await checkModelIdInRootReal(item.id, { realRoot: rootReal })) {
-          skipped.push({ id: item.id, reason: 'out-of-root' })
-          continue
-        }
-        valid.push(item)
-      }
-      const { planned, skipped: planSkipped } = planOrganizeMoves(valid, root)
-      skipped.push(...planSkipped)
-      if (planned.length === 0) {
-        return { moved: 0, failed: [], skipped }
-      }
-      // 创建 LoRA 一级目录与 7 个标签子文件夹（recursive：已存在时静默保持原样）。
-      // O6：已存在的 LoRA 目录若是指向库外的 junction，拒绝整理（避免 mkdir 跟随到库外）
-      const loraDir = path.join(root, LORA_DIR)
-      let loraExists = true
+      // 维护锁（OPT-14）：批量移动与扫描 relink/备份恢复互斥；归属校验一并
+      // 纳入锁内，保证「校验-移动」与并发大操作的原子边界。file-op 彼此兼容
+      const token = tryAcquireMaintenance('file-op', root)
+      if (!token) return { error: maintenanceBusyMessage() }
       try {
-        await fs.access(loraDir)
-      } catch {
-        loraExists = false
-      }
-      if (loraExists && !(await isPathRealWithin(loraDir, rootReal))) {
-        return { error: 'LoRA 文件夹真实路径不在当前模型库内' }
-      }
-      try {
-        await fs.mkdir(loraDir, { recursive: true })
-        for (const folder of TAG_FOLDER_NAMES) {
-          await fs.mkdir(path.join(loraDir, folder), { recursive: true })
+        // 逐项校验归属（O6：realpath 后仍须在库内）：非法项跳过而非整体失败
+        const valid = []
+        const skipped = []
+        for (const item of moves) {
+          if (!item || typeof item.id !== 'string') continue
+          if (await checkModelIdInRootReal(item.id, { realRoot: rootReal })) {
+            skipped.push({ id: item.id, reason: 'out-of-root' })
+            continue
+          }
+          valid.push(item)
         }
-      } catch (err) {
-        return { error: `创建分类文件夹失败: ${err.message}` }
-      }
-      let moved = 0
-      const failed = []
-      for (const { id, newPath } of planned) {
-        // 目标标签子文件夹同样做真实路径校验（已存在指库外的 junction 时拒绝）
-        if (!(await isPathRealWithin(path.dirname(newPath), rootReal))) {
-          failed.push({ id, error: '目标文件夹真实路径不在当前模型库内' })
-          continue
+        const { planned, skipped: planSkipped } = planOrganizeMoves(valid, root)
+        skipped.push(...planSkipped)
+        if (planned.length === 0) {
+          return { moved: 0, failed: [], skipped }
         }
+        // 创建 LoRA 一级目录与 7 个标签子文件夹（recursive：已存在时静默保持原样）。
+        // O6：已存在的 LoRA 目录若是指向库外的 junction，拒绝整理（避免 mkdir 跟随到库外）
+        const loraDir = path.join(root, LORA_DIR)
+        let loraExists = true
         try {
-          await fs.access(newPath)
-          failed.push({ id, error: '目标位置已存在同名文件' })
-          continue
+          await fs.access(loraDir)
         } catch {
-          /* 不存在，可移动 */
+          loraExists = false
+        }
+        if (loraExists && !(await isPathRealWithin(loraDir, rootReal))) {
+          return { error: 'LoRA 文件夹真实路径不在当前模型库内' }
         }
         try {
-          await fs.rename(id, newPath)
+          await fs.mkdir(loraDir, { recursive: true })
+          for (const folder of TAG_FOLDER_NAMES) {
+            await fs.mkdir(path.join(loraDir, folder), { recursive: true })
+          }
         } catch (err) {
-          logger.warn(`一键移动失败: ${id} ${err.message}`)
-          failed.push({ id, error: err.message })
-          continue
+          return { error: `创建分类文件夹失败: ${err.message}` }
         }
-        // 同名 sidecar（预览图/说明文本）一并移动，与 moveModelTo 同一约定
-        for (const f of sidecarFilesFor(id)) {
-          await fs
-            .rename(f, path.join(path.dirname(newPath), path.basename(f)))
-            .catch(() => {})
+        let moved = 0
+        const failed = []
+        for (const { id, newPath } of planned) {
+          // 目标标签子文件夹同样做真实路径校验（已存在指库外的 junction 时拒绝）
+          if (!(await isPathRealWithin(path.dirname(newPath), rootReal))) {
+            failed.push({ id, error: '目标文件夹真实路径不在当前模型库内' })
+            continue
+          }
+          try {
+            await fs.access(newPath)
+            failed.push({ id, error: '目标位置已存在同名文件' })
+            continue
+          } catch {
+            /* 不存在，可移动 */
+          }
+          try {
+            await fs.rename(id, newPath)
+          } catch (err) {
+            logger.warn(`一键移动失败: ${id} ${err.message}`)
+            failed.push({ id, error: err.message })
+            continue
+          }
+          // 同名 sidecar（预览图/说明文本）一并移动，与 moveModelTo 同一约定
+          for (const f of sidecarFilesFor(id)) {
+            await fs
+              .rename(f, path.join(path.dirname(newPath), path.basename(f)))
+              .catch(() => {})
+          }
+          renameModelMeta(id, newPath)
+          moved += 1
         }
-        renameModelMeta(id, newPath)
-        moved += 1
+        logger.info(
+          `一键移动文件完成: 移动 ${moved}，失败 ${failed.length}，跳过 ${skipped.length}`,
+        )
+        return { moved, failed, skipped }
+      } finally {
+        releaseMaintenance(token)
       }
-      logger.info(
-        `一键移动文件完成: 移动 ${moved}，失败 ${failed.length}，跳过 ${skipped.length}`,
-      )
-      return { moved, failed, skipped }
     },
     { errorPrefix: '一键移动文件失败' },
   )

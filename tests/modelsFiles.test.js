@@ -39,6 +39,10 @@ import {
   setModelMeta,
 } from '../src/main/services/store'
 import { sidecarFilesFor } from '../src/main/services/scanner'
+import {
+  releaseMaintenance,
+  tryAcquireMaintenance,
+} from '../src/main/services/maintenance-lock'
 import { dialog } from 'electron'
 
 /** 本文件创建的全部临时目录（afterAll 只清理这些，不动系统临时目录） */
@@ -686,5 +690,22 @@ describe('破坏性文件操作的 realpath 归属（O6）', () => {
     expect(res.moved).toBe(0)
     expect(res.skipped).toContainEqual({ id, reason: 'out-of-root' })
     await expect(fs.readFile(outsideFile, 'utf8')).resolves.toBe('outside-data')
+  })
+
+  it('大维护操作持锁期间一键移动被拒（OPT-14 互斥）', async () => {
+    const token = tryAcquireMaintenance('restore', root)
+    try {
+      const res = await getRegisteredHandler('models:organizeByTags')(
+        makeEvent(),
+        {
+          moves: [
+            { id: path.join(root, 'a.safetensors'), subCategory: 'role' },
+          ],
+        },
+      )
+      expect(res).toEqual({ error: '正在恢复备份，请稍候' })
+    } finally {
+      releaseMaintenance(token)
+    }
   })
 })
