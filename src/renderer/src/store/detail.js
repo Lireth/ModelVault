@@ -28,6 +28,19 @@ export async function openDetail(id) {
   window.api.models.warmupHash(id).catch(() => {})
 }
 
+/**
+ * 静默清除当前详情选中（FIX-9）：删除/重命名等操作使模型消失或 id 变化、
+ * 详情被强制关闭时调用。此时 MetaForm 已随详情卸载
+ * （ModelDetail 的 v-if="selectedModel"），其 formDirty watcher 不会再
+ * 写回——只清 selectedId 会残留 detailDirty=true，下一次 openDetail
+ * 误弹「放弃修改」确认（幽灵确认框）。openDetail 的切换路径不受影响：
+ * 组件未卸载，fillForm 重填后 formDirty 归零自愈。
+ */
+export function clearSelectedModel() {
+  state.selectedId = null
+  state.detailDirty = false
+}
+
 /** 关闭模型详情。表单有未保存的修改时先确认放弃（C8/U4） */
 export async function closeDetail() {
   if (
@@ -36,5 +49,6 @@ export async function closeDetail() {
   ) {
     return
   }
-  state.selectedId = null
+  // 用户已明确放弃修改：关闭时同步清脏（FIX-9），与强制关闭同一出口
+  clearSelectedModel()
 }

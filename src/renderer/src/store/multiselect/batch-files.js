@@ -2,6 +2,7 @@ import { state, replaceModels } from '../state'
 import { toast, confirmDialog } from '../toast'
 import { applyMetaUpdates, mapWithConcurrency } from '../meta-apply'
 import { modelById } from '../selectors'
+import { clearSelectedModel } from '../detail'
 import { LORA_DIR, LORA_TAG_KEYS } from '../../../../shared/model-categories'
 
 /**
@@ -202,7 +203,7 @@ export async function batchDeleteModels() {
     if (deletedIds.size > 0) {
       // 单趟移除：整体替换数组（须经 replaceModels 保持数组代理），selectedId 与多选选区同步按 Set 清理
       replaceModels(state.models.filter((m) => !deletedIds.has(m.id)))
-      if (deletedIds.has(state.selectedId)) state.selectedId = null
+      if (deletedIds.has(state.selectedId)) clearSelectedModel()
       state.multiSelect.ids = state.multiSelect.ids.filter(
         (id) => !deletedIds.has(id),
       )

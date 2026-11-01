@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import ModelDetail from '../src/renderer/src/components/ModelDetail.vue'
 import {
   acceptConfirm,
+  openDetail,
   rejectConfirm,
   replaceModels,
   state,
@@ -294,6 +295,29 @@ describe('ModelDetail 关闭保护与快捷操作', () => {
     acceptConfirm()
     await flushPromises()
     expect(state.selectedId).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('ESC 确认关闭后 detailDirty 同步清除，下次打开不再误弹确认（FIX-9）', async () => {
+    selectModel()
+    const wrapper = mountDetail()
+    await flushPromises()
+    await wrapper.find('input[maxlength="100"]').setValue('未保存')
+    expect(state.detailDirty).toBe(true)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+    acceptConfirm()
+    await flushPromises()
+    expect(state.selectedId).toBeNull()
+    // 关闭即清脏（MetaForm 已卸载、formDirty watcher 无人写回），
+    // 而非残留到下一次打开时触发
+    expect(state.detailDirty).toBe(false)
+    // 幽灵确认框症状断言：下一次打开其他模型静默完成，不弹「放弃修改」确认
+    replaceModels([makeDetailModel('m1'), makeDetailModel('m2')])
+    await openDetail('m2')
+    await flushPromises()
+    expect(state.confirm.visible).toBe(false)
+    expect(state.selectedId).toBe('m2')
     wrapper.unmount()
   })
 

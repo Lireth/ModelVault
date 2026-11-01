@@ -1,7 +1,7 @@
 import { state, replaceModels, modelIndexOf } from './state'
 import { toast, confirmDialog } from './toast'
 import { applyMetaFlags } from './meta-apply'
-import { openDetail } from './detail'
+import { clearSelectedModel, openDetail } from './detail'
 import { openTransferToLibrary } from './transfer'
 
 /**
@@ -75,7 +75,7 @@ export async function deleteModel(id, opts = {}) {
     // O3 约定：整体替换须经 replaceModels（保持数组代理，元素级更新才可触发）
     replaceModels(state.models.filter((m) => m.id !== id))
   }
-  if (state.selectedId === id) state.selectedId = null
+  if (state.selectedId === id) clearSelectedModel()
   if (!opts.silent) toast('success', '模型已移入回收站')
   return true
 }
@@ -297,8 +297,8 @@ export async function renameModel(id, name) {
   } else {
     toast('success', `已重命名为「${trimmed}」`)
   }
-  // 文件 id 已变化：关闭当前详情，所在子树局部扫描收敛新文件名
-  state.selectedId = null
+  // 文件 id 已变化：关闭当前详情（同步清脏，FIX-9），所在子树局部扫描收敛新文件名
+  clearSelectedModel()
   await refreshAfterFileChange([id])
   return true
 }

@@ -3,6 +3,7 @@ import { clearModelCoverOverrides } from './cover-overrides'
 import { toast } from './toast'
 import { scanModels } from './library'
 import { modelById } from './selectors'
+import { clearSelectedModel } from './detail'
 import {
   MAX_PARTIAL_SCAN_DIRS,
   collapseDirsToTopLevel,
@@ -258,8 +259,7 @@ export async function partialScanModels(dirs) {
       )
     }
     if (state.selectedId && removedIds.includes(state.selectedId)) {
-      state.selectedId = null
-      state.detailDirty = false
+      clearSelectedModel()
     }
 
     if (res.relinked > 0) {

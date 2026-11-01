@@ -294,6 +294,21 @@ describe('批量操作单次状态合并（O2）', () => {
     ).toBe(true)
   })
 
+  it('批量删除：删除当前打开模型时同步清除 detailDirty（FIX-9）', async () => {
+    state.models = [makeModel('a'), makeModel('b')]
+    state.selectedId = 'a'
+    state.detailDirty = true
+    state.multiSelect.active = true
+    state.multiSelect.ids = ['a']
+    api.models.deleteModel.mockResolvedValue({ ok: true })
+    const p = batchDeleteModels()
+    acceptConfirm()
+    await p
+    // MetaForm 已随详情卸载、无人写回脏标记，残留会让下一次 openDetail 误弹确认
+    expect(state.selectedId).toBeNull()
+    expect(state.detailDirty).toBe(false)
+  })
+
   it('批量删除按文件操作并发上限执行：同时在途 IPC 不超过上限', async () => {
     const ids = Array.from({ length: 40 }, (_, i) => `d${i}`)
     state.models = ids.map((id) => makeModel(id))

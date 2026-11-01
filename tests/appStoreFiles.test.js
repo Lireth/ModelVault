@@ -5,6 +5,7 @@ import {
   makeModel,
 } from './helpers/storeTest'
 import {
+  deleteModel,
   moveModelTo,
   renameModel,
   revealModel,
@@ -165,5 +166,37 @@ describe('文件操作编排（F10/F11）', () => {
     api.models.renameModel.mockRejectedValue(new Error('通道断开'))
     expect(await renameModel('m1', 'b')).toBe(false)
     expect(state.toasts.some((t) => t.text.includes('重命名失败'))).toBe(true)
+  })
+
+  it('deleteModel 删除当前打开模型：selectedId 与 detailDirty 同步清除（FIX-9）', async () => {
+    api.models.deleteModel.mockResolvedValue({ ok: true })
+    replaceModels([makeModel('m1'), makeModel('m2')])
+
+    // 删除非当前打开模型：选中与脏标记不受影响
+    state.selectedId = 'm2'
+    state.detailDirty = true
+    expect(await deleteModel('m1')).toBe(true)
+    expect(state.selectedId).toBe('m2')
+    expect(state.detailDirty).toBe(true)
+
+    // 删除当前打开模型：详情被强制关闭，MetaForm 已卸载、无人写回脏标记，
+    // 不同步清除会让下一次 openDetail 误弹「放弃修改」确认（幽灵确认框）
+    expect(await deleteModel('m2')).toBe(true)
+    expect(state.selectedId).toBeNull()
+    expect(state.detailDirty).toBe(false)
+  })
+
+  it('renameModel 重命名当前打开模型：detailDirty 同步清除（FIX-9）', async () => {
+    api.models.renameModel.mockResolvedValue({
+      path: 'D:\\models\\b.safetensors',
+      sidecarWarnings: [],
+    })
+    replaceModels([makeModel('m1')])
+    state.selectedId = 'm1'
+    state.detailDirty = true
+
+    expect(await renameModel('m1', 'b')).toBe(true)
+    expect(state.selectedId).toBeNull()
+    expect(state.detailDirty).toBe(false)
   })
 })
