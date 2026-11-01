@@ -3,6 +3,7 @@ import path from 'node:path'
 import { BrowserWindow } from 'electron'
 import logger from '../logger'
 import { atomicWriteFile } from './atomic-write'
+import { parseJsonOffThread } from './json-serializer'
 import { runMaintenance } from './maintenance-lock'
 import { sidecarFilesFor } from './scanner'
 import { getCurrentRoot, isInRoot, toRelKey } from './store-paths'
@@ -89,8 +90,10 @@ async function readTargetStore(targetRoot) {
   }
   try {
     // B-04：磁盘文件同样按不可信输入处理（与 loadData 的损坏口径一致：
-    // 解析与清洗任一失败均视为损坏，normalizeStoreData 本身不抛异常）
-    return normalizeStoreData(JSON.parse(text))
+    // 解析与清洗任一失败均视为损坏，normalizeStoreData 本身不抛异常）。
+    // B1/P0-4：大库 store.json 的解析移出主线程（阈值内仍在主线程，
+    // 语义不变）——数十 MB 元数据不再冻结主进程数百 ms 到秒级
+    return normalizeStoreData(await parseJsonOffThread(text))
   } catch (err) {
     throw new Error(`目标库元数据文件损坏，无法解析: ${file} ${err.message}`, {
       cause: err,

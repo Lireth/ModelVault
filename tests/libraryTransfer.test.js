@@ -37,6 +37,10 @@ import {
   setModelMeta,
   getModelMeta,
 } from '../src/main/services/store-meta'
+import {
+  resetJsonSerializerForTests,
+  setParseWorkerThresholdForTests,
+} from '../src/main/services/json-serializer'
 import { transferModelsToLibrary } from '../src/main/services/library-transfer'
 
 /**
@@ -331,6 +335,54 @@ describe('transferModelsToLibrary（F-3 跨库传输）', () => {
     await expect(
       fsp.access(path.join(targetRoot, 'c.safetensors')),
     ).rejects.toThrow()
+  })
+
+  it('强制 worker 解析路径（阈值 0）：损坏中止与成功合并语义均与主线程一致（P0-4）', async () => {
+    // readTargetStore 已改走 parseJsonOffThread（大文件下放 worker，B1 对齐）。
+    // 注入阈值 0 强制全部解析经 worker，锁定两条语义不受解析通道影响：
+    // ① worker 解析错误照常触发损坏中止（错误消息透传、损坏文件原样保留）；
+    // ② worker 回传值经 normalizeStoreData 后合并行为与主线程一致
+    setParseWorkerThresholdForTests(0)
+    try {
+      const corrupted = '{"version":1,"models":{"kept.safetensors":'
+      await fsp.mkdir(path.join(targetRoot, '.modelvault'), { recursive: true })
+      await fsp.writeFile(
+        path.join(targetRoot, '.modelvault', 'store.json'),
+        corrupted,
+      )
+      const abs = await writeModel(sourceRoot, 'w.safetensors', 'x')
+      setModelMeta(abs, { note: 'n' })
+
+      const res = await transferModelsToLibrary({
+        ids: [abs],
+        targetRoot,
+        mode: 'copy',
+      })
+      expect(res.error).toContain('已中止传输')
+      expect(res.error).toContain('损坏')
+      expect(
+        await fsp.readFile(
+          path.join(targetRoot, '.modelvault', 'store.json'),
+          'utf-8',
+        ),
+      ).toBe(corrupted)
+
+      // 修复损坏文件后重试：worker 解析成功，迁移照常完成
+      await fsp.writeFile(
+        path.join(targetRoot, '.modelvault', 'store.json'),
+        JSON.stringify({ version: 1, models: {} }),
+      )
+      const retry = await transferModelsToLibrary({
+        ids: [abs],
+        targetRoot,
+        mode: 'copy',
+      })
+      expect(retry.error).toBeUndefined()
+      expect(retry.transferred).toBe(1)
+    } finally {
+      // 复位阈值并终止 worker，避免泄漏到后续用例
+      await resetJsonSerializerForTests()
+    }
   })
 
   it('目标库 store.json 不可读（非 ENOENT）时中止迁移（fail-closed）', async () => {
