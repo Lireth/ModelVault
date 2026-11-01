@@ -17,11 +17,13 @@ import {
 import {
   civitaiCompletePatch,
   downloadCivitaiImage,
+  fetchCivitaiImage,
   fetchCivitaiModelType,
   fetchCivitaiVideo,
   isAllowedCivitaiImageUrl,
   normalizeVersionInfo,
   parseCivitaiModelId,
+  readCivitaiImageBody,
   setCivitaiApiInterval,
   setCivitaiTransientRetryDelayForTests,
   stripHtml,
@@ -752,5 +754,87 @@ describe('fetchCivitaiVideo（头部阶段超时）', () => {
         headers: expect.objectContaining({ Range: 'bytes=100-200' }),
       }),
     )
+  })
+})
+
+describe('fetchCivitaiImage（头部阶段超时，OPT-17①）', () => {
+  const IMAGE_URL = 'https://image.civitai.com/generation/x-123.png'
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.mocked(net.fetch).mockReset()
+  })
+
+  it('上游连接挂死（响应头迟迟不到）时按超时中止而非无限悬挂', async () => {
+    vi.useFakeTimers()
+    vi.mocked(net.fetch).mockImplementation(
+      (_url, opts) =>
+        new Promise((_resolve, reject) => {
+          opts?.signal?.addEventListener('abort', () =>
+            reject(
+              new DOMException('This operation was aborted', 'AbortError'),
+            ),
+          )
+        }),
+    )
+
+    // 原实现为覆盖整个请求含 body 的总量 30s（AbortSignal.timeout）：
+    // 慢链路大图必然假性超时。改为头部阶段超时后，挂死连接的中止语义不变
+    const pending = fetchCivitaiImage(IMAGE_URL)
+    const assertion = expect(pending).rejects.toThrow('图片上游 30s 内未响应')
+    await vi.advanceTimersByTimeAsync(30000)
+    await assertion
+  })
+
+  it('响应头按时到达后解除定时器，慢速大图 body 不再被总量时限截断', async () => {
+    vi.useFakeTimers()
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response('image-bytes', { status: 200 }),
+    )
+
+    const response = await fetchCivitaiImage(IMAGE_URL)
+    expect(response.status).toBe(200)
+    // 远超原总量 30s 窗口后 body 仍可完整读取（协议代理与导入路径共用此语义：
+    // body 限时由消费方接力——导入路径逐段空闲计时，代理流式回传不设总量）
+    await vi.advanceTimersByTimeAsync(120000)
+    expect(await response.text()).toBe('image-bytes')
+  })
+})
+
+describe('readCivitaiImageBody（body 逐段空闲超时，OPT-17①）', () => {
+  it('body 持续停滞超过空闲窗口时中止并给出停滞文案', async () => {
+    // 先出一块字节后永久停滞：毫秒级真实时钟窗口驱动（假定时器会伪造
+    // 流的微任务调度，见 store.test.js OPT-15 同款取舍）
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('head'))
+      },
+    })
+    const response = new Response(stream, { status: 200 })
+    await expect(
+      readCivitaiImageBody(response, { idleTimeoutMs: 30 }),
+    ).rejects.toMatchObject({
+      name: 'TimeoutError',
+      message: expect.stringContaining('图片内容停滞'),
+    })
+  })
+
+  it('持续传输的慢速大图不受空闲超时影响', async () => {
+    // 每 5ms 到达一段、共 4 段，空闲窗口 50ms：单段间隔均小于窗口——
+    // 合法慢速传输（总量远超原 30s 限制的场景）必须完整读满
+    const stream = new ReadableStream({
+      start(controller) {
+        for (const [i, ch] of ['a', 'b', 'c', 'd'].entries()) {
+          setTimeout(() => {
+            controller.enqueue(new TextEncoder().encode(ch))
+            if (i === 3) controller.close()
+          }, i * 5)
+        }
+      },
+    })
+    const response = new Response(stream, { status: 200 })
+    await expect(
+      readCivitaiImageBody(response, { idleTimeoutMs: 50 }),
+    ).resolves.toEqual(Buffer.from('abcd'))
   })
 })

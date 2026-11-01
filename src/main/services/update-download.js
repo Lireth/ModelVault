@@ -6,7 +6,11 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { app } from 'electron'
 import logger from '../logger'
-import { isAllowedExternalUrl, readResponseTextLimited } from '../utils'
+import {
+  isAllowedExternalUrl,
+  raceIdleTimeout,
+  readResponseTextLimited,
+} from '../utils'
 import {
   REQUEST_TIMEOUT_MS,
   fetchWithValidatedRedirects,
@@ -50,6 +54,21 @@ const ALLOWED_UPDATE_HOSTS = new Set([
 const VERSION_PATTERN = /^\d{1,5}\.\d{1,5}\.\d{1,5}$/
 /** 进度推送节流间隔（ms） */
 const PROGRESS_INTERVAL_MS = 200
+/**
+ * 下载流的空闲超时（ms，OPT-17①）：600MB 更新包在慢链路下的合法耗时
+ * 远超任何总量阈值，故不设总量限时；改为逐段空闲计时——每收到一段字节
+ * 重置，TCP 停滞超过 60s 判死中止（.part 保留供 Range 续传）。
+ */
+const DOWNLOAD_IDLE_TIMEOUT_MS = 60 * 1000
+
+/** 下载空闲超时（测试可注入缩小；生产代码严禁调用注入器） */
+let downloadIdleTimeoutMs = DOWNLOAD_IDLE_TIMEOUT_MS
+
+/** 注入下载流空闲超时（仅供单元测试使用） */
+export function setDownloadIdleTimeoutForTests(ms) {
+  downloadIdleTimeoutMs =
+    Number.isFinite(ms) && ms >= 0 ? ms : DOWNLOAD_IDLE_TIMEOUT_MS
+}
 /** 拉起新实例后退出当前实例的延迟（ms），给 spawn 完成进程创建留出时间 */
 const QUIT_DELAY_MS = 500
 /** Authenticode 验签子进程超时（ms）：PowerShell 冷启动 + 大 EXE 解析留足余量 */
@@ -611,7 +630,17 @@ export async function downloadUpdatePackage(onProgress) {
     const fh = await fsp.open(partPath, writeFlag)
     try {
       for (;;) {
-        const { done, value } = await reader.read()
+        // OPT-17①：逐段空闲计时——持续到达的数据不断重置计时器，TCP 停滞
+        // 超过 DOWNLOAD_IDLE_TIMEOUT_MS 判死中止（取消底层读取并保留 .part
+        // 供续传）。总量不设限：慢链路的合法下载耗时不可预估
+        const { done, value } = await raceIdleTimeout(
+          reader.read(),
+          downloadIdleTimeoutMs,
+          `更新包下载停滞超过 ${DOWNLOAD_IDLE_TIMEOUT_MS / 1000}s 无数据，已中止（已下载部分保留，可续传）`,
+          () => {
+            reader.cancel().catch(() => {})
+          },
+        )
         if (done) break
         received += value.byteLength
         if (received > MAX_UPDATE_BYTES) {
@@ -660,6 +689,12 @@ export async function downloadUpdatePackage(onProgress) {
     if (err instanceof Error && err.name === 'AbortError') {
       logger.info('更新包下载已取消（已下载部分保留，可续传）')
       return { canceled: true }
+    }
+    // OPT-17①：空闲超时判死——.part 同样保留供续传，错误文案已自带
+    // 「已下载部分保留」说明，不再叠加「更新包下载失败」前缀
+    if (err instanceof Error && err.name === 'TimeoutError') {
+      logger.warn(`更新包下载停滞中止: ${err.message}`)
+      return { error: err.message }
     }
     logger.warn(`更新包下载失败: ${err?.message || err}`)
     return { error: `更新包下载失败: ${err?.message || err}` }

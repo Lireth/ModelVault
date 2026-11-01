@@ -185,6 +185,63 @@ describe('网络响应体积上限（V-06）', () => {
       readResponseBytesLimited(response, 1024, '测试响应'),
     ).resolves.toEqual(Buffer.from('hello'))
   })
+
+  it('启用空闲超时后停滞的响应体按 TimeoutError 中止（OPT-17①）', async () => {
+    // 先出一块字节后永久停滞：模拟 TCP 停滞。以毫秒级真实时钟窗口驱动
+    // （假定时器会伪造流的微任务调度，见 store.test.js OPT-15 同款取舍）
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('head'))
+      },
+    })
+    const response = new Response(stream, { status: 200 })
+    await expect(
+      readResponseBytesLimited(response, 1024, '测试响应', {
+        idleTimeoutMs: 30,
+      }),
+    ).rejects.toMatchObject({
+      name: 'TimeoutError',
+      message: expect.stringContaining('测试响应停滞'),
+    })
+  })
+
+  it('持续到达的慢速流不受空闲超时影响，正常读满（OPT-17①）', async () => {
+    // 每 5ms 到达一段、共 3 段，空闲窗口 50ms：合法慢速传输必须完整读满
+    const stream = new ReadableStream({
+      start(controller) {
+        setTimeout(() => controller.enqueue(new TextEncoder().encode('a')), 5)
+        setTimeout(() => controller.enqueue(new TextEncoder().encode('b')), 10)
+        setTimeout(() => {
+          controller.enqueue(new TextEncoder().encode('c'))
+          controller.close()
+        }, 15)
+      },
+    })
+    const response = new Response(stream, { status: 200 })
+    await expect(
+      readResponseBytesLimited(response, 1024, '测试响应', {
+        idleTimeoutMs: 50,
+      }),
+    ).resolves.toEqual(Buffer.from('abc'))
+  })
+
+  it('未启用空闲超时时保持原语义（停滞流由请求级 signal 兜底）', async () => {
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('x'))
+      },
+    })
+    const response = new Response(stream, { status: 200 })
+    const pending = readResponseBytesLimited(response, 1024, '测试响应')
+    await expect(
+      Promise.race([
+        pending,
+        new Promise((resolve) =>
+          setTimeout(() => resolve('still-pending'), 50),
+        ),
+      ]),
+    ).resolves.toBe('still-pending')
+  })
 })
 
 describe('更新启动等待（V-06）', () => {

@@ -20,8 +20,15 @@ import {
 const CIVITAI_API_BASE = 'https://civitai.red/api/v1'
 /** 关闭 Civitai 开关时主进程统一拒绝文案（IPC 与 civimg 代理共用） */
 export const CIVITAI_DISABLED_ERROR = 'Civitai 功能已关闭'
-/** 图片下载超时（ms）：示例图普遍数 MB，放宽到 30s */
-const IMAGE_TIMEOUT_MS = 30000
+/**
+ * 图片「头部阶段」超时（ms）：与视频链路同级——上游响应头到达前挂起
+ * 超过此时限即中止（导入路径报错、协议层转 502）。OPT-17① 起不再覆盖
+ * body：示例图普遍数 MB，总量计时在慢链路（1.5MB/s 下载 50MB）必然
+ * 假性超时，协议代理的大图流也会被拦腰截断。
+ */
+const IMAGE_HEADER_TIMEOUT_MS = 30000
+/** 图片 body 读取的空闲超时（ms）：导入路径逐段计时，停滞即中止 */
+const IMAGE_BODY_IDLE_TIMEOUT_MS = 30000
 /**
  * 示例视频「头部阶段」超时（ms）：与图片链路同级——上游响应头到达前
  * 挂起超过此时限即中止（协议层转 502，不再无限悬挂占住套接字）；
@@ -516,23 +523,42 @@ export function civitaiCompletePatch(meta, info) {
  * 不自定义 UA（保持 Electron 的 Chromium 默认 UA，规避 CDN 反爬挑战），
  * 携带 Referer 与 Accept 提高直连成功率。
  * 重定向改为手动跟随并逐跳校验 CDN 白名单（V-06），返回最终响应。
+ * OPT-17①：仅对「响应头到达」设总量超时（原实现为覆盖整个请求含 body
+ * 读取的 AbortSignal.timeout，慢链路大图必然假性超时）——头部到达即解除，
+ * body 由消费方接力：导入路径 readCivitaiImageBody 逐段空闲计时，协议
+ * 代理与视频一致（renderer 背压驱动的流式回传不设总量时限）。
  * @param {string} url 已通过 isAllowedCivitaiImageUrl 校验的图片地址
  * @returns {Promise<Response>}
  */
 export async function fetchCivitaiImage(url) {
-  return fetchWithValidatedRedirects(
-    url,
-    {
-      headers: {
-        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-        Referer: 'https://civitai.red/',
+  // 头部阶段超时：与 fetchCivitaiVideo 同一模型，CDN 连接挂死时中止而非无限悬挂
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), IMAGE_HEADER_TIMEOUT_MS)
+  try {
+    return await fetchWithValidatedRedirects(
+      url,
+      {
+        headers: {
+          Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+          Referer: 'https://civitai.red/',
+        },
+        signal: controller.signal,
       },
-      signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS),
-    },
-    isAllowedCivitaiImageUrl,
-    'Civitai 图片请求',
-    { useSessionCookies: true },
-  )
+      isAllowedCivitaiImageUrl,
+      'Civitai 图片请求',
+      { useSessionCookies: true },
+    )
+  } catch (err) {
+    if (controller.signal.aborted && err?.name === 'AbortError') {
+      throw new Error(
+        `图片上游 ${IMAGE_HEADER_TIMEOUT_MS / 1000}s 内未响应（连接挂起），已中止`,
+        { cause: err },
+      )
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /**
@@ -598,11 +624,17 @@ export async function fetchCivitaiVideo(url, range = '') {
 /**
  * 读取 Civitai 图片响应体并强制大小上限（V-06）。
  * 协议代理与图片导入共用，避免任意大小响应进入主进程堆。
+ * OPT-17①：导入路径启用逐段空闲计时（每收到一段字节重置）——持续传输
+ * 的慢速大图不再受总量限制，TCP 停滞超过 30s 判死中止。
  * @param {Response} response fetch 响应
+ * @param {{idleTimeoutMs?: number}} [options] 空闲超时；协议代理的流式
+ *   回传由 renderer 背压驱动（读取节奏取决于消费方），不启用
  * @returns {Promise<Buffer>} 图片字节
  */
-export function readCivitaiImageBody(response) {
-  return readResponseBytesLimited(response, MAX_IMAGE_BYTES, '图片内容')
+export function readCivitaiImageBody(response, { idleTimeoutMs = 0 } = {}) {
+  return readResponseBytesLimited(response, MAX_IMAGE_BYTES, '图片内容', {
+    idleTimeoutMs,
+  })
 }
 
 /**
@@ -632,7 +664,9 @@ export async function downloadCivitaiImage(url) {
   }
   let buf
   try {
-    buf = await readCivitaiImageBody(response)
+    buf = await readCivitaiImageBody(response, {
+      idleTimeoutMs: IMAGE_BODY_IDLE_TIMEOUT_MS,
+    })
   } catch (err) {
     return { error: `图片内容读取失败: ${err.message}` }
   }

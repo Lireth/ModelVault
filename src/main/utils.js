@@ -217,18 +217,60 @@ function formatByteLimit(bytes) {
 }
 
 /**
+ * 为单次异步读取套「空闲超时」（OPT-17①）：大体积响应体不能按总量计时
+ * （慢链路的合法耗时远超任何总量阈值，必然假性超时），也不能不设防
+ * （TCP 停滞时读取永久悬挂）。每收到一段字节由调用方对下一段读取重新
+ * 调用本函数，即实现空闲计时逐段重置——持续传输时永不触发。
+ * 超时先触发 onCancel（调用方用于取消底层流/读取器），再抛出
+ * name=TimeoutError 的错误。
+ * @template T
+ * @param {Promise<T>} promise 单次异步读取
+ * @param {number} ms 空闲上限（毫秒）
+ * @param {string} message 超时错误文案
+ * @param {() => void} [onCancel] 超时时的底层清理（如 reader.cancel()）
+ * @returns {Promise<T>}
+ */
+export function raceIdleTimeout(promise, ms, message, onCancel) {
+  let timer = null
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const err = new Error(message)
+        err.name = 'TimeoutError'
+        // 先落定竞速再清理：onCancel（如 reader.cancel()）会以 {done:true}
+        // 落定挂起的读取——若先执行，竞速会被「正常完成」抢先判胜，
+        // 停滞中止退化为静默提前结束
+        reject(err)
+        try {
+          onCancel?.()
+        } catch {
+          /* 清理失败不影响中止 */
+        }
+      }, ms)
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
+}
+
+/**
  * 读取响应体并强制字节上限（V-06 网络边界）：
  * 先看 Content-Length 提前拒绝，再流式累计实际字节——上游缺失/伪造
  * Content-Length 时仍会在超限处取消读取，避免整包进入主进程堆。
  * @param {Response} response fetch 响应
  * @param {number} maxBytes 允许的最大字节数
  * @param {string} [label] 错误文案中的资源名
+ * @param {{idleTimeoutMs?: number}} [options] 空闲超时（OPT-17①）：每收到
+ *   一段字节重置；超过时限判定连接停滞，取消读取并抛 TimeoutError。
+ *   不传则保持原语义（由调用方的请求级 signal 兜底）
  * @returns {Promise<Buffer>} 不超过上限的响应内容
  */
 export async function readResponseBytesLimited(
   response,
   maxBytes,
   label = '响应',
+  { idleTimeoutMs = 0 } = {},
 ) {
   const declared = Number(response.headers?.get?.('content-length'))
   if (Number.isFinite(declared) && declared > maxBytes) {
@@ -246,7 +288,19 @@ export async function readResponseBytesLimited(
   let total = 0
   try {
     for (;;) {
-      const { done, value } = await reader.read()
+      // OPT-17①：逐段空闲计时——持续到达的数据不断重置，停滞即中止；
+      // 未启用空闲超时（idleTimeoutMs<=0）时保持原语义
+      const { done, value } =
+        idleTimeoutMs > 0
+          ? await raceIdleTimeout(
+              reader.read(),
+              idleTimeoutMs,
+              `${label}停滞超过 ${Math.round(idleTimeoutMs / 1000)}s 无数据，已中止`,
+              () => {
+                reader.cancel().catch(() => {})
+              },
+            )
+          : await reader.read()
       if (done) break
       total += value.byteLength
       if (total > maxBytes) {

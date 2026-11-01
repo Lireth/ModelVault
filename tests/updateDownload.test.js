@@ -41,6 +41,7 @@ import {
   evaluateUpdateSignature,
   verifyUpdateSignature,
   setAuthenticodeQueryForTests,
+  setDownloadIdleTimeoutForTests,
   setSignerThumbprintForTests,
   setTransientRetryDelayForTests,
 } from '../src/main/services/update-download'
@@ -398,6 +399,45 @@ describe('downloadUpdatePackage（下载 + SHA256 校验闭环）', () => {
       return Promise.reject(err)
     })
     await expect(downloadUpdatePackage()).resolves.toEqual({ canceled: true })
+  })
+
+  it('下载流停滞（空闲超时无数据）时中止并保留 .part 供续传（OPT-17①）', async () => {
+    // 毫秒级注入窗口 + 真实时钟（假定时器会饿死真实 fs 落盘，见
+    // store.test.js OPT-15 同款取舍）：更新包响应先出一块字节后永久停滞
+    setDownloadIdleTimeoutForTests(30)
+    try {
+      vi.mocked(net.fetch).mockImplementation((url) => {
+        if (String(url).endsWith('.sha256')) {
+          return Promise.resolve(new Response(CHECKSUM_BODY, { status: 200 }))
+        }
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(EXE_BYTES.subarray(0, 8))
+            // 不 close：停滞
+          },
+        })
+        return Promise.resolve(
+          new Response(stream, {
+            status: 200,
+            headers: { 'content-length': String(EXE_BYTES.length) },
+          }),
+        )
+      })
+      setPendingUpdate(ASSETS, '0.2.0')
+
+      const res = await downloadUpdatePackage()
+      expect(res.error).toContain('更新包下载停滞')
+      expect(res.error).toContain('已下载部分保留')
+
+      // .part 保留：已下载的 8 字节可供下次 Range 续传（OP-06 语义）
+      const partPath = path.join(
+        updateDir(),
+        'ModelVault-0.2.0.exe.download.part',
+      )
+      expect(await fs.readFile(partPath)).toEqual(EXE_BYTES.subarray(0, 8))
+    } finally {
+      setDownloadIdleTimeoutForTests()
+    }
   })
 
   it('版本号非法时拒绝下载，不发起网络请求（V-06 路径注入防护）', async () => {
