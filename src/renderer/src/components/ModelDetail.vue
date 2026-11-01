@@ -308,6 +308,7 @@ watch(
 }
 
 .detail-header {
+  position: relative; /* 序列导航的绝对定位基准（FEA-01 固定居中） */
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -321,14 +322,23 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* 标题宽度上限：右侧截止于居中导航组之前，超长省略——长文件名
+     不得滑入固定导航区（导航位置恒定，不随标题长短漂移） */
+  flex: 1;
+  min-width: 0;
+  max-width: calc(50% - 76px);
 }
 
-/* 序列导航（FEA-01）：标题与操作按钮之间的 ‹ 位置 › 组 */
+/* 序列导航（FEA-01）：‹ 位置 › 组绝对定位于头部水平中点——脱离文档流，
+ * 位置恒定不随标题长度/操作按钮变化；标题上限见 h2 规则 */
 .detail-nav {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
 }
 
 .detail-nav-pos {
