@@ -737,4 +737,32 @@ describe('installUpdatePackage（拉起新版本并等待旧实例退出）', ()
       vi.useRealTimers()
     }
   })
+
+  it('已下载文件被外部删除时拒绝（stat ENOENT，P0-5 异步化后语义不变）', async () => {
+    mockFetchFlow(EXE_BYTES)
+    setPendingUpdate(ASSETS, '0.2.0')
+    const dl = await downloadUpdatePackage()
+    expect(dl.error).toBeUndefined()
+    await fs.unlink(dl.path)
+
+    expect(await installUpdatePackage()).toEqual({
+      error: '更新包不存在，请重新下载更新',
+    })
+    // 未触达验签与启动链路
+    expect(spawn).not.toHaveBeenCalled()
+  })
+
+  it('更新包路径被同名目录占位时拒绝（stat 非文件，P0-5 异步化后语义不变）', async () => {
+    mockFetchFlow(EXE_BYTES)
+    setPendingUpdate(ASSETS, '0.2.0')
+    const dl = await downloadUpdatePackage()
+    expect(dl.error).toBeUndefined()
+    await fs.unlink(dl.path)
+    await fs.mkdir(dl.path) // 同名目录占位：stat 成功但非文件
+
+    expect(await installUpdatePackage()).toEqual({
+      error: '更新包不存在，请重新下载更新',
+    })
+    expect(spawn).not.toHaveBeenCalled()
+  })
 })

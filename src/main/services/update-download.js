@@ -737,7 +737,9 @@ export async function installUpdatePackage() {
     return { error: '更新包路径异常，请重新下载更新' }
   }
   try {
-    if (!fs.statSync(resolved).isFile()) {
+    // P0-5：主线程同步 IO 清零（数百 MB 更新包的 stat 在网络盘/挂起盘上
+    // 可能阻塞主进程，与文件内其余路径的 fsp 异步口径一致）
+    if (!(await fsp.stat(resolved)).isFile()) {
       return { error: '更新包不存在，请重新下载更新' }
     }
   } catch {
