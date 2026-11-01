@@ -7,7 +7,7 @@ import {
   getModelMeta,
   removeModelMeta,
 } from '../../services/store'
-import { updateLibraryIndex } from '../../services/library-index'
+import { queueLibraryIndexUpdate } from '../../services/library-index'
 import {
   checkLibraryHealth,
   repairLibraryHealth,
@@ -101,8 +101,12 @@ export function registerMiscHandlers() {
           })
         }
         removeModelMeta(id)
-        // O8：即时从本地索引移除，切库秒开不再回放已删除模型
-        await updateLibraryIndex(getCurrentRoot(), { removeIds: [id] })
+        // O8/OPT-03：索引移除并入合并队列（P0-3）——渲染层 8 路并发批量删除
+        // 时 N 次全量索引读改写合并为 1 次，且不再占用删除响应路径（此前
+        // 串行链让最后一路删除等待前面全部写盘）。删除的真实落盘以回收站
+        // +元数据移除为准，索引仅展示缓存：退出经 flushIndexWrites 收尾，
+        // 防抖窗口内的切库回放由切库流程既有的后台磁盘校验兜底
+        queueLibraryIndexUpdate(getCurrentRoot(), { removeIds: [id] })
         logger.info(`模型已移入回收站: ${id}`)
         return { ok: true }
       } finally {

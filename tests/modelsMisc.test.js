@@ -31,6 +31,8 @@ vi.mock('electron', () => ({
 
 import { registerModelIpcHandlers } from '../src/main/ipc/models/index'
 import {
+  flushIndexWrites,
+  getQueuedIndexUpdateCountForTests,
   readLibraryIndex,
   writeLibraryIndex,
 } from '../src/main/services/library-index'
@@ -89,7 +91,7 @@ describe('models:deleteModel', () => {
     expect(getModelMeta(abs)).toBeNull()
   })
 
-  it('删除后即时从本地索引移除（O8）', async () => {
+  it('删除后从本地索引移除（O8，经合并队列落定）', async () => {
     const abs = path.join(root, 'indexed.safetensors')
     await fs.writeFile(abs, 'x')
     await writeLibraryIndex(root, {
@@ -109,8 +111,52 @@ describe('models:deleteModel', () => {
     const handler = getRegisteredHandler('models:deleteModel')
     expect(await handler(makeEvent(), { id: abs })).toEqual({ ok: true })
 
+    // 索引写已并入合并队列（P0-3），移出删除响应路径：落定后再断言
+    //（与 modelsScan P1-3 的局部扫描索引断言同模式）
+    await flushIndexWrites()
     const cached = await readLibraryIndex(root)
     expect(cached.models.some((m) => m.id === abs)).toBe(false)
+  })
+
+  it('批量删除合并入队：多次删除共享同一待合并条目，落定后一次移除', async () => {
+    // P0-3 回归锁：8 路并发批量删除时 N 次全量索引读改写必须合并为 1 次
+    const absA = path.join(root, 'del-a.safetensors')
+    const absB = path.join(root, 'del-b.safetensors')
+    await fs.writeFile(absA, 'x')
+    await fs.writeFile(absB, 'x')
+    await writeLibraryIndex(root, {
+      models: [
+        {
+          id: absA,
+          name: 'del-a.safetensors',
+          type: 'lora',
+          ext: '.safetensors',
+          size: 1,
+          mtimeMs: 1,
+          relDir: '',
+        },
+        {
+          id: absB,
+          name: 'del-b.safetensors',
+          type: 'lora',
+          ext: '.safetensors',
+          size: 1,
+          mtimeMs: 1,
+          relDir: '',
+        },
+      ],
+    })
+
+    const handler = getRegisteredHandler('models:deleteModel')
+    expect(await handler(makeEvent(), { id: absA })).toEqual({ ok: true })
+    expect(await handler(makeEvent(), { id: absB })).toEqual({ ok: true })
+    // 同根键合并：两次删除进入同一条待合并条目，而非各自即时读改写
+    expect(getQueuedIndexUpdateCountForTests()).toBe(1)
+
+    await flushIndexWrites()
+    expect(getQueuedIndexUpdateCountForTests()).toBe(0)
+    const cached = await readLibraryIndex(root)
+    expect(cached.models.some((m) => m.id === absA || m.id === absB)).toBe(false)
   })
 
   it('无效模型标识拒绝', async () => {

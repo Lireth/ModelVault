@@ -356,6 +356,44 @@ describe('scanModels', () => {
     ).rejects.toMatchObject({ name: 'AbortError' })
   })
 
+  it('遍历进行中取消：在途目录 stat 池中止经 processDir 拒绝终止整次遍历', async () => {
+    // OPT-02 并发遍历的取消路径：中止信号落在某个在途目录的 stat 池窗口内
+    //（池任务在下一个中止检查点抛出 → runWithConcurrency 拒绝 → processDir
+    // 拒绝 → pump 的 .catch 以该错误终止遍历 → walkDone 拒绝上抛）。
+    // 确定性构造：quick 与 busy 的 processDir 并发启动，quick 仅 1 个模型、
+    // busy 铺 300 个（真实 stat 池窗口 ≈ 数十 ms，远长于 quick 提交时机）——
+    // quick 提交触发 onProgress 的中止落下时 busy 必然仍有未启动的池任务；
+    // 目录名前缀保证 quick 的 seq 先于 busy 提交。
+    const cancelRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-scan-cancel-'),
+    )
+    try {
+      await fs.mkdir(path.join(cancelRoot, 'aa-quick'), { recursive: true })
+      await fs.mkdir(path.join(cancelRoot, 'zz-busy'), { recursive: true })
+      await fs.writeFile(path.join(cancelRoot, 'aa-quick', 'a.safetensors'), 'x')
+      await Promise.all(
+        Array.from({ length: 300 }, (_, i) =>
+          fs.writeFile(
+            path.join(cancelRoot, 'zz-busy', `m${i}.safetensors`),
+            'x',
+          ),
+        ),
+      )
+      const controller = new AbortController()
+      await expect(
+        scanModels(
+          cancelRoot,
+          (p) => {
+            if (String(p.current).includes('aa-quick')) controller.abort()
+          },
+          { signal: controller.signal },
+        ),
+      ).rejects.toMatchObject({ name: 'AbortError' })
+    } finally {
+      await fs.rm(cancelRoot, { recursive: true, force: true })
+    }
+  })
+
   it('子树重复/重叠时按 id 去重，扫描结果不含重复模型（B-01 防御）', async () => {
     await fs.mkdir(path.join(root, 'lora', 'sub'), { recursive: true })
     await fs.writeFile(

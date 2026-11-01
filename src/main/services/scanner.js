@@ -275,8 +275,11 @@ export async function scanModels(root, onProgress, options = {}) {
   let qi = 0
   let active = 0
   let settled = false
-  /** 结束遍历（err 非空时以该错误拒绝整体 Promise，如 stat 池的取消中止） */
-  let settleWalk = /** @type {(err?: Error) => void} */ (() => {})
+  // 结束遍历（err 非空时以该错误拒绝整体 Promise，如 stat 池的取消中止）：
+  // 实现在紧随其后的 walkDone executor 内同步赋值（不设占位函数体——
+  // 占位箭头在覆盖率函数计数中是结构性死项，永远不可能被调用）
+  /** @type {(err?: Error) => void} */
+  let settleWalk
   const walkDone = /** @type {Promise<void>} */ (
     new Promise((resolve, reject) => {
       settleWalk = (err) => {
