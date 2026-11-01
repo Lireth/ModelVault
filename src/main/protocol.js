@@ -263,6 +263,21 @@ const PROXY_SAFE_RESPONSE_HEADERS = [
 ]
 
 /**
+ * Buffer → Uint8Array 零拷贝视图（OPT-22）：满足 Response BodyInit 类型
+ * 要求的同时消除逐字节复制——`new Uint8Array(buf)` 是复制构造，画廊滚动
+ * 的大图会在主进程产生同量级的瞬时分配与 GC 压力；视图只暴露 buffer 自身
+ * 的 [byteOffset, byteOffset+byteLength) 区间，对 Buffer 池分配同样安全。
+ * 仅用于只读 Buffer（civ 缓存与回源共享 buf 均不可变）。
+ * @param {Buffer} buf
+ * @returns {Uint8Array<ArrayBuffer>} Buffer 的池分配必为普通 ArrayBuffer
+ */
+function toBodyView(buf) {
+  return /** @type {Uint8Array<ArrayBuffer>} */ (
+    new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+  )
+}
+
+/**
  * 按白名单重建代理响应头。
  * @param {Response} upstream 上游响应
  * @param {string[]} [extra] 额外放行的头（流式视频需 Content-Length 配合
@@ -585,8 +600,11 @@ function registerCivimgHandler() {
           if (mime) headers.set('Content-Type', mime)
           // 内容来自本地缓存且 URL 即键，与远程回源路径同等下发按天缓存
           headers.set('Cache-Control', 'public, max-age=86400')
-          // Buffer → Uint8Array 拷贝视图：满足 Response BodyInit 类型要求
-          return new Response(new Uint8Array(cached), { status: 200, headers })
+          // Buffer → Uint8Array 零拷贝视图（OPT-22）：new Uint8Array(buf) 是
+          // 逐字节复制——画廊滚动 30 张 5MB 图即 ~300MB 瞬时分配；视图只暴露
+          // buffer 的 [byteOffset, byteOffset+byteLength) 区间，对 Buffer 池
+          // 分配同样安全，BodyInit 接受 ArrayBufferView 类型
+          return new Response(toBodyView(cached), { status: 200, headers })
         }
         await removeCivImageCache(target)
       }
@@ -604,11 +622,12 @@ function registerCivimgHandler() {
       }
       // 远程图内容一般不可变，按天缓存减轻 CDN 与代理压力。
       // 响应头按白名单重建（不透传上游 Set-Cookie 等）；响应体为完整
-      // Buffer（经 Uint8Array 视图满足 BodyInit 类型，与缓存命中路径一致），
+      // Buffer（经零拷贝视图满足 BodyInit 类型，与缓存命中路径一致；
+      // 在途去重的并发请求共享同一不可变 Buffer 的各自视图，内容只读），
       // 长度由 Response 自动计算，不继承上游可能失真的 Content-Length
       const headers = proxyMediaHeaders(shared.upstream)
       headers.set('Cache-Control', 'public, max-age=86400')
-      return new Response(new Uint8Array(shared.buf), {
+      return new Response(toBodyView(shared.buf), {
         status: shared.upstream.status,
         statusText: shared.upstream.statusText,
         headers,

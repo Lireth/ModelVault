@@ -111,6 +111,20 @@ async function generateThumb(absCover, thumbPath) {
 const deferredJobs = new Map()
 
 /**
+ * 查询源图的缩略图命中缓存（OPT-22，供装饰命中路径的存在性探针免打扰）：
+ * TTL 内已知存在（hit=true）的条目直接返回，调用方可跳过 fs.access——
+ * 万级库全量重扫的缓存命中路径此前对每封面各付一次存在性探针。
+ * 仅信任 hit=true 条目（deferred 在途条目尚无文件可依赖）；过期返回 null。
+ * @param {string} absCover 源图绝对路径
+ * @returns {{hit: boolean, thumbPath: string, mtimeMs: number}|null}
+ */
+export function peekThumbHitCache(absCover) {
+  const entry = hitCache.get(String(absCover).toLowerCase())
+  if (!entry || entry.expiresAt <= Date.now()) return null
+  return entry
+}
+
+/**
  * 请求封面缩略图（延迟生成模式，供扫描装饰阶段使用）：
  * - 缓存命中：立即返回缩略图路径；
  * - 缓存未命中：登记后台生成任务并返回 ''（调用方回退原图，

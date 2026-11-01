@@ -14,8 +14,10 @@ import { isValidImageFile } from '../../services/covers'
 import {
   drainDeferredThumbs,
   getThumbPathDeferred,
+  peekThumbHitCache,
   pruneThumbs,
 } from '../../services/thumbs'
+import { createBatchedSender } from './batched-sender'
 import {
   checkSafetensorsHealthy,
   readSafetensorsInfo,
@@ -148,20 +150,61 @@ export function trackDeferredOwner(modelId, absCover) {
 }
 
 /**
- * 缩略图完成事件合批（O2）：
+ * 缩略图完成事件合批（O2，OPT-22 起机器收敛于 batched-sender 单一实现）：
  * drain 每生成一张缩略图都会产生一次更新；数千个封面时若逐条 IPC 推送，
  * 渲染层每个事件都要做一次回填（旧实现每次重建全量 id→下标 Map）。
- * 这里在时间窗内累积更新，一次事件携带整批（上限兜底），
- * drain 结束时强制刷新，保证「响应先返回、后台补齐」的最终一致性。
+ * 时间窗内累积更新，一次事件携带整批（上限兜底），drain 结束时强制刷新，
+ * 保证「响应先返回、后台补齐」的最终一致性。
  */
 const THUMB_EVENT_FLUSH_MS = 120
 const THUMB_EVENT_MAX_BATCH = 200
 
-/** 待发送批次：{ win, updates, timer }（同一时刻只服务一个窗口） */
-let pendingThumbBatch = null
+const thumbReadySender = createBatchedSender({
+  flushMs: THUMB_EVENT_FLUSH_MS,
+  maxBatch: THUMB_EVENT_MAX_BATCH,
+  // 底层投递（不做批次刷新，避免 flush 递归）；已销毁窗口静默跳过
+  deliver: (updates, win) => {
+    if (
+      !win ||
+      typeof win.isDestroyed !== 'function' ||
+      win.isDestroyed() ||
+      !updates?.length
+    ) {
+      return
+    }
+    win.webContents.send('models:thumbsReady', { updates })
+  },
+})
 
-/** 底层发送（不做批次刷新，避免 flush 递归） */
-function deliverThumbReady(win, updates) {
+/** 立即发送已累积的缩略图更新并清空定时器 */
+export function flushThumbReadyUpdates() {
+  thumbReadySender.flush()
+}
+
+/** 累积一条/一批缩略图更新；ctx=目标窗口，切换时先送达上一窗口 */
+function queueThumbReady(win, updates) {
+  if (
+    !win ||
+    typeof win.isDestroyed !== 'function' ||
+    win.isDestroyed() ||
+    !updates?.length
+  ) {
+    return
+  }
+  thumbReadySender.push(updates, win)
+}
+
+/**
+ * 向窗口推送若干卡片的缩略图就绪事件（载荷格式为 {updates}）。
+ * update 形状：{ id, coverUrl?, coverThumb? }——coverUrl 为默认封面缩略图
+ * （OPT-1 前 updates 恒有此字段），coverThumb 为轮播封面条目更新
+ * { path, thumbUrl }（OPT-1：轮播复用缩略图管线后新增，二者至少其一）。
+ * 直接发送入口（封面缓存命中链路）：先送达已累积批次，保证新旧更新顺序。
+ * @param {import('electron').BrowserWindow|null} win 来源窗口（null/已销毁时静默跳过）
+ * @param {Array<{id:string, coverUrl?:string, coverThumb?:{path:string, thumbUrl:string}}>} updates
+ */
+export function sendThumbReady(win, updates) {
+  flushThumbReadyUpdates()
   if (
     !win ||
     typeof win.isDestroyed !== 'function' ||
@@ -173,65 +216,6 @@ function deliverThumbReady(win, updates) {
   win.webContents.send('models:thumbsReady', { updates })
 }
 
-/** 立即发送已累积的缩略图更新并清空定时器 */
-export function flushThumbReadyUpdates() {
-  if (!pendingThumbBatch) return
-  const batch = pendingThumbBatch
-  pendingThumbBatch = null
-  if (batch.timer) clearTimeout(batch.timer)
-  deliverThumbReady(batch.win, batch.updates)
-}
-
-/** 丢弃尚未发送的旧批次（切根/窗口关闭时避免把旧根更新推给新库） */
-function dropPendingThumbBatch() {
-  if (!pendingThumbBatch) return
-  if (pendingThumbBatch.timer) clearTimeout(pendingThumbBatch.timer)
-  pendingThumbBatch = null
-}
-
-/** 累积一条/一批缩略图更新；达到阈值立即发送，否则在时间窗后合并发送 */
-function queueThumbReady(win, updates) {
-  if (
-    !win ||
-    typeof win.isDestroyed !== 'function' ||
-    win.isDestroyed() ||
-    !updates?.length
-  ) {
-    return
-  }
-  // 多窗口场景：切换目标窗口前先送达上一窗口，避免更新错投/丢失
-  if (pendingThumbBatch && pendingThumbBatch.win !== win)
-    flushThumbReadyUpdates()
-  if (!pendingThumbBatch) {
-    pendingThumbBatch = { win, updates: [], timer: null }
-  }
-  pendingThumbBatch.updates.push(...updates)
-  if (pendingThumbBatch.updates.length >= THUMB_EVENT_MAX_BATCH) {
-    flushThumbReadyUpdates()
-    return
-  }
-  if (pendingThumbBatch.timer) return
-  pendingThumbBatch.timer = setTimeout(
-    flushThumbReadyUpdates,
-    THUMB_EVENT_FLUSH_MS,
-  )
-  pendingThumbBatch.timer.unref?.()
-}
-
-/**
- * 向窗口推送若干卡片的缩略图就绪事件（载荷格式为 {updates}）。
- * update 形状：{ id, coverUrl?, coverThumb? }——coverUrl 为默认封面缩略图
- * （OPT-1 前 updates 恒有此字段），coverThumb 为轮播封面条目更新
- * { path, thumbUrl }（OPT-1：轮播复用缩略图管线后新增，二者至少其一）。
- * 直接发送入口（封面缓存命中链路）：先送达已累积批次，保证新旧更新顺序。
- * @param {object|null} win 来源窗口（null/已销毁时静默跳过）
- * @param {Array<{id:string, coverUrl?:string, coverThumb?:{path:string, thumbUrl:string}}>} updates
- */
-export function sendThumbReady(win, updates) {
-  flushThumbReadyUpdates()
-  deliverThumbReady(win, updates)
-}
-
 /**
  * 清空延迟缩略图归属表（切换模型根目录时调用，C5）。
  * 残留的旧根条目会在下一轮 startThumbDrain 中把新根生成的缩略图
@@ -239,7 +223,8 @@ export function sendThumbReady(win, updates) {
  */
 export function clearDeferredOwners() {
   deferredOwners.clear()
-  dropPendingThumbBatch()
+  // 丢弃未发送的旧根批次（切根时避免把旧根更新推给新库）
+  thumbReadySender.drop()
 }
 
 /**
@@ -356,23 +341,31 @@ export function resolveCoverSafe(cover) {
  * 后，命中路径持续返回失效 thumbPath 且永不重建——未命中路径的
  * getThumbPathDeferred 有存在性校验，命中路径此前没有。任一引用失效即
  * 判缓存失效，走完整装饰重建。
- * @param {{thumbPath?: string, decorated?: {covers?: Array<{thumbPath?: string}>}}} cached 装饰缓存条目
+ * OPT-22：thumbs 命中缓存（TTL 30s）内「已知存在且路径一致」的缩略图
+ * 零探针直接放行——万级库全量重扫的命中路径此前对每封面各付一次
+ * fs.access（2 万+ 次系统调用），是重扫耗时中除头部解析外的主要 IO。
+ * @param {{thumbPath?: string, decorated?: {cover?: string, covers?: Array<{path?: string, thumbPath?: string}>}}} cached 装饰缓存条目
  * @returns {Promise<boolean>} 有缺失引用返回 true
  */
 async function cachedThumbMissing(cached) {
-  const paths = []
-  if (cached.thumbPath) paths.push(cached.thumbPath)
-  for (const cv of cached.decorated?.covers || []) {
-    if (cv.thumbPath) paths.push(cv.thumbPath)
+  // [源图路径, 缩略图路径] 对：命中缓存以源图为键，据此查询已知存在性
+  const pairs = []
+  if (cached.thumbPath) {
+    pairs.push([cached.decorated?.cover || '', cached.thumbPath])
   }
-  if (paths.length === 0) return false
+  for (const cv of cached.decorated?.covers || []) {
+    if (cv.thumbPath) pairs.push([cv.path || '', cv.thumbPath])
+  }
+  if (pairs.length === 0) return false
   const checks = await Promise.all(
-    paths.map((p) =>
-      fs.access(p).then(
+    pairs.map(([source, thumbPath]) => {
+      const hit = source ? peekThumbHitCache(source) : null
+      if (hit && hit.hit && hit.thumbPath === thumbPath) return false
+      return fs.access(thumbPath).then(
         () => false,
         () => true,
-      ),
-    ),
+      )
+    }),
   )
   return checks.some((missing) => missing)
 }

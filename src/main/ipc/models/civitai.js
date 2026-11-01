@@ -18,6 +18,7 @@ import {
   fetchCivitaiVersionByHash,
   parseCivitaiModelId,
 } from '../../services/civitai'
+import { createBatchedSender } from './batched-sender'
 import {
   civitaiTagsToTag,
   civitaiTypeToTag,
@@ -291,7 +292,7 @@ export function registerCivitaiHandlers() {
 }
 
 /**
- * 哈希完成事件合批（O2）：
+ * 哈希完成事件合批（O2，OPT-22 起机器收敛于 batched-sender 单一实现）：
  * 预热服务对每个模型完成都会推送一条 active=false + id/hash 的事件。
  * 万级模型首轮预热时逐条 IPC 会让渲染层反复执行 O(n) 回填；
  * 这里在时间窗内累积为 { completions: [{id, hash}] } 一次送达。
@@ -300,11 +301,6 @@ export function registerCivitaiHandlers() {
  */
 const HASH_COMPLETION_FLUSH_MS = 150
 const HASH_COMPLETION_MAX_BATCH = 200
-
-/** 待发送完成项与最近一次进度计数（用于批次事件的 done/remaining） */
-let pendingHashCompletions = []
-let pendingHashMeta = null
-let hashCompletionTimer = null
 
 /** 向全部存活窗口广播预热事件 */
 function broadcastWarmupProgress(progress) {
@@ -315,50 +311,35 @@ function broadcastWarmupProgress(progress) {
   }
 }
 
+const warmupCompletionSender = createBatchedSender({
+  flushMs: HASH_COMPLETION_FLUSH_MS,
+  maxBatch: HASH_COMPLETION_MAX_BATCH,
+  // 载荷整形：批次事件的 done/remaining 取最后一条进度计数；
+  // 广播到全部存活窗口（无单窗口上下文）
+  deliver: (items) => {
+    const meta = items[items.length - 1] || {}
+    broadcastWarmupProgress({
+      active: false,
+      id: '',
+      percent: 0,
+      hashedBytes: 0,
+      totalBytes: 0,
+      done: Number.isFinite(meta.done) ? meta.done : 0,
+      remaining: Number.isFinite(meta.remaining) ? meta.remaining : 0,
+      hash: '',
+      completions: items.map((c) => ({ id: c.id, hash: c.hash })),
+    })
+  },
+})
+
 /** 立即送达已累积的哈希完成批次 */
 function flushWarmupCompletionBatch() {
-  if (pendingHashCompletions.length === 0) {
-    if (hashCompletionTimer) {
-      clearTimeout(hashCompletionTimer)
-      hashCompletionTimer = null
-    }
-    return
-  }
-  const completions = pendingHashCompletions
-  const meta = pendingHashMeta || {}
-  pendingHashCompletions = []
-  pendingHashMeta = null
-  if (hashCompletionTimer) {
-    clearTimeout(hashCompletionTimer)
-    hashCompletionTimer = null
-  }
-  broadcastWarmupProgress({
-    active: false,
-    id: '',
-    percent: 0,
-    hashedBytes: 0,
-    totalBytes: 0,
-    done: Number.isFinite(meta.done) ? meta.done : 0,
-    remaining: Number.isFinite(meta.remaining) ? meta.remaining : 0,
-    hash: '',
-    completions,
-  })
+  warmupCompletionSender.flush()
 }
 
 /** 累积一个完成项；达到阈值立即发送，否则在时间窗后合并发送 */
 function queueHashCompletion(progress) {
-  pendingHashCompletions.push({ id: progress.id, hash: progress.hash })
-  pendingHashMeta = progress
-  if (pendingHashCompletions.length >= HASH_COMPLETION_MAX_BATCH) {
-    flushWarmupCompletionBatch()
-    return
-  }
-  if (hashCompletionTimer) return
-  hashCompletionTimer = setTimeout(
-    flushWarmupCompletionBatch,
-    HASH_COMPLETION_FLUSH_MS,
-  )
-  hashCompletionTimer.unref?.()
+  warmupCompletionSender.push(progress)
 }
 
 /**
