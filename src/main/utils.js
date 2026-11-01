@@ -376,3 +376,29 @@ export async function preserveCorruptedFile(file, keep = 3) {
   }
   return backup
 }
+
+/**
+ * 判定 promise 是否在 ms 内 settle（OPT-19 切库 flush 超时守卫）：
+ * 挂起磁盘（死亡网络盘/半挂载 USB）上的 stat/fsync 可在内核层阻塞数十秒，
+ * 「永不卡死」底线场景（切库/退出落盘）需要与超时赛跑。原 promise 无法
+ * 取消也不取消——迟到的 settle 由调用方语义兜底（持久层的同根守卫拦截
+ * 迟到写入，防止旧根数据落进新根目录）。
+ * @template T
+ * @param {Promise<T>} promise 待判定的 promise
+ * @param {number} ms 超时毫秒数
+ * @returns {Promise<boolean>} true=已在时限内 settle（含 reject）；false=超时
+ */
+export function isSettledWithin(promise, ms) {
+  let timer = null
+  return Promise.race([
+    promise.then(
+      () => true,
+      () => true,
+    ),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(false), ms)
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
+}

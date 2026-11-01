@@ -16,7 +16,7 @@ import {
   removeJournalDir,
 } from './store-meta-journal'
 import { parseJsonOffThread } from './json-serializer'
-import { preserveCorruptedFile } from '../utils'
+import { isSettledWithin, preserveCorruptedFile } from '../utils'
 import {
   clearOfflineRetry,
   ensureLibrarySubdir,
@@ -330,14 +330,53 @@ export function renameModelMeta(oldId, newId) {
 }
 
 /**
+ * 切库前 flush 的等待上限（ms）：与 quit.js 的 FLUSH_TIMEOUT_MS 同值——
+ * 挂起磁盘（死亡网络盘/半挂载 USB）上的 stat/fsync 可在内核层阻塞数十秒，
+ * 维护锁期间 UI 卡在「切换中」只能杀进程（退出路径有 5s 底线而切库没有）。
+ */
+export const SWITCH_FLUSH_TIMEOUT_MS = 5000
+
+/** 切库 flush 超时（测试可注入；生产代码严禁调用注入器） */
+let switchFlushTimeoutMs = SWITCH_FLUSH_TIMEOUT_MS
+
+/** 注入切库 flush 超时（仅供单元测试使用） */
+export function setSwitchFlushTimeoutForTests(ms) {
+  switchFlushTimeoutMs =
+    Number.isFinite(ms) && ms >= 0 ? ms : SWITCH_FLUSH_TIMEOUT_MS
+}
+
+/** 当前切库 flush 超时（ensureRootStore 的设置落盘超时共用同一底线） */
+export function getSwitchFlushTimeoutMs() {
+  return switchFlushTimeoutMs
+}
+
+/**
+ * 切库代际：每次 switchDataRoot 自增。超时放弃后 flush 的残尾仍会在后台
+ * 续跑并经过本函数的收尾段——若期间又发生了新的切库，旧收尾必须整体作废，
+ * 否则会把上一个目标根「复活」为当前根（新根数据 + 旧根路径的错配）。
+ */
+let switchSeq = 0
+
+/**
  * 切换关联存储根目录（全域唯一入口，A6）：
  * 先把旧根待落盘数据写入旧目录并静止写盘链，再切换根目录。
  * 若先 setDataRoot 再等待防抖自然触发，迟到定时器会把旧根数据
  * 写进新根目录的 store.json，造成跨库污染。加载新根数据（loadData）
  * 由调用方在本函数返回后执行。
+ *
+ * OPT-19：flush 与 SWITCH_FLUSH_TIMEOUT_MS 赛跑——超时按「放弃本次落盘」
+ * 处理（脏数据留在内存，挂起磁盘恢复后由离线补写机制兜底；无法写盘的
+ * 数据在切库后丢弃，与退出超时同一取舍），继续切库绝不永久卡死维护锁。
+ * 迟到残尾的跨库防护由持久层的同根守卫（writeSnapshot/writeDeltaJournal）
+ * 拦截，收尾段由切库代际守卫作废。
  */
 export async function switchDataRoot(root) {
-  await flushStoreSave()
+  const seq = ++switchSeq
+  const settled = await isSettledWithin(flushStoreSave(), switchFlushTimeoutMs)
+  if (!settled) {
+    logger.warn('切库前写盘等待超时，放弃本次落盘继续切换（脏数据保留在内存）')
+  }
+  if (seq !== switchSeq) return
   // O5：切根后旧根的可用性缓存与离线重试定时器一并作废（含 OPT-15 退避计数）
   clearOfflineRetry()
   metaState.rootProbe = { root: null, at: 0 }

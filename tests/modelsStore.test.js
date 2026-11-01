@@ -1,4 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  afterAll,
+} from 'vitest'
 import { fakeUserData } from './setup'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -41,6 +49,28 @@ vi.mock('../src/main/services/civitai', async (importOriginal) => ({
   computeFileHash: vi.fn(),
 }))
 
+// OPT-19：atomicWriteFile 可按目录前缀挂起（模拟死亡网络盘/半挂载 USB 上
+// fsync/rename 在内核层阻塞），其余调用透传真实实现；挂起的写入在用例
+// 收尾统一 reject 释放，绝不遗留永久 pending 阻塞后续用例的写盘链
+const { awHook } = vi.hoisted(() => ({
+  awHook: { hangPrefix: null, pending: [], hungPaths: [] },
+}))
+vi.mock('../src/main/services/atomic-write', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    atomicWriteFile: (file, content, opts) => {
+      if (awHook.hangPrefix && String(file).startsWith(awHook.hangPrefix)) {
+        awHook.hungPaths.push(file)
+        return new Promise((resolve, reject) => {
+          awHook.pending.push({ resolve, reject })
+        })
+      }
+      return actual.atomicWriteFile(file, content, opts)
+    },
+  }
+})
+
 import {
   paramSummaryFromMeta,
   sidecarFilesFor,
@@ -55,7 +85,15 @@ import {
   resumeHashWarmup,
   whenWarmupIdle,
 } from '../src/main/services/hash-warmup'
-import { getCurrentRoot, loadSettings } from '../src/main/services/store'
+import {
+  getCurrentRoot,
+  getSwitchFlushTimeoutMs,
+  loadSettings,
+  setModelMeta,
+  setSwitchFlushTimeoutForTests,
+} from '../src/main/services/store'
+import { ensureRootStore } from '../src/main/ipc/models/store'
+import { metaState } from '../src/main/services/store-meta-state'
 import { getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
 
 describe('sidecarFilesFor', () => {
@@ -540,5 +578,122 @@ describe('models:loadStore 库路径失效检测（F1-offline）', () => {
       { folder: ok, exists: true },
       { folder: goneOther, exists: false },
     ])
+  })
+})
+
+describe('切库链路超时保护与同根判定（OPT-19 切库防线）', () => {
+  const tmpRoots = []
+
+  /** 丢弃元数据防抖定时器：失败计数与写盘行为只由显式操作驱动 */
+  function discardDebouncedSave() {
+    if (metaState.saveTimer) {
+      clearTimeout(metaState.saveTimer)
+      metaState.saveTimer = null
+    }
+  }
+
+  /** 轮询等待写盘链静止（真实时钟） */
+  async function waitForIdle(deadlineMs = 5000) {
+    const start = Date.now()
+    while (metaState.saving || metaState.pendingSave) {
+      if (Date.now() - start > deadlineMs) return false
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    return true
+  }
+
+  /** 建立旧根 A（已激活）并挂起其后续全部原子写，注入毫秒级切库超时 */
+  async function setupHangOnOldRoot() {
+    const rootA = await fsp.mkdtemp(path.join(os.tmpdir(), 'modelvault-sw-a-'))
+    const rootB = await fsp.mkdtemp(path.join(os.tmpdir(), 'modelvault-sw-b-'))
+    tmpRoots.push(rootA, rootB)
+    await ensureRootStore(rootA)
+    setModelMeta(path.join(rootA, 'a.safetensors'), { alias: '旧根未落盘' })
+    discardDebouncedSave()
+    awHook.hangPrefix = path.join(rootA, '.modelvault')
+    setSwitchFlushTimeoutForTests(50)
+    return { rootA, rootB }
+  }
+
+  afterEach(async () => {
+    // 先恢复透传再释放挂起写入：reject 使残尾走错误路径（通知降级为日志），
+    // 等一个事件循环周转让 catch 内排程的重试定时器落定后再清理
+    awHook.hangPrefix = null
+    for (const p of awHook.pending.splice(0)) {
+      p.reject(new Error('用例收尾：释放挂起写入'))
+    }
+    await new Promise((resolve) => setImmediate(resolve))
+    setSwitchFlushTimeoutForTests()
+    if (metaState.offlineRetryTimer) {
+      clearTimeout(metaState.offlineRetryTimer)
+      metaState.offlineRetryTimer = null
+    }
+    metaState.saveRetryFailures = 0
+  })
+
+  afterAll(() => {
+    for (const dir of tmpRoots) {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('同根大小写变体直接返回：不切根、不重载（R6）', async () => {
+    const rootA = await fsp.mkdtemp(path.join(os.tmpdir(), 'modelvault-sw-c-'))
+    tmpRoots.push(rootA)
+    await ensureRootStore(rootA)
+    const dataBefore = metaState.data
+
+    // 渲染层可能传来的同目录另一种拼写（盘符/路径段大小写差异）
+    await ensureRootStore(rootA.toLowerCase())
+
+    // 内存根保持原拼写（路径键口径不漂移），元数据引用未变（未重载）
+    expect(getCurrentRoot()).toBe(rootA)
+    expect(metaState.data).toBe(dataBefore)
+  })
+
+  it('切库 flush 挂起时超时放弃落盘，切换继续不卡死（R3）', async () => {
+    const { rootA, rootB } = await setupHangOnOldRoot()
+    expect(getSwitchFlushTimeoutMs()).toBe(50)
+
+    const started = Date.now()
+    await ensureRootStore(rootB)
+    // 挂起磁盘场景下不再永久阻塞（退出路径 5s 底线的切库对等物）
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(getCurrentRoot()).toBe(rootB)
+
+    // 放弃落盘语义：旧根 store.json 不含未落盘修改（写入挂起未落地）
+    await expect(
+      fsp.readFile(path.join(rootA, '.modelvault', 'store.json'), 'utf-8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    // 新根未被旧根数据污染：无快照文件
+    await expect(
+      fsp.readFile(path.join(rootB, '.modelvault', 'store.json'), 'utf-8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    // 挂起的写入目标路径全部固定在旧根（路径不随切根漂移）
+    expect(awHook.hungPaths.length).toBeGreaterThan(0)
+    expect(
+      awHook.hungPaths.every((f) =>
+        f.startsWith(path.join(rootA, '.modelvault')),
+      ),
+    ).toBe(true)
+  })
+
+  it('迟到的 flush 残尾完成后续跑不污染新根（同根守卫收尾）', async () => {
+    const { rootB } = await setupHangOnOldRoot()
+    await ensureRootStore(rootB)
+    expect(metaState.hasSnapshot).toBe(false) // 新根空库，无快照基线
+
+    // 模拟磁盘恢复：挂起的旧根写入完成——同根守卫必须跳过收尾段，
+    // 否则 hasSnapshot/日志清理会作用到新根（其增量日志刚被 loadData 回放）
+    awHook.hangPrefix = null
+    for (const p of awHook.pending.splice(0)) p.resolve()
+    expect(await waitForIdle()).toBe(true)
+
+    expect(getCurrentRoot()).toBe(rootB)
+    expect(metaState.hasSnapshot).toBe(false)
+    // 新根 store.json 仍不存在：迟到的写入没有落进新根目录
+    await expect(
+      fsp.readFile(path.join(rootB, '.modelvault', 'store.json'), 'utf-8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

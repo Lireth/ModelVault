@@ -219,9 +219,19 @@ export function scheduleSave() {
  * 写全量快照（O5：紧凑 JSON，不再 pretty 缩进）+ 清空增量日志。
  * 快照携带 journalSeq：即使快照成功后清理日志失败，加载时也会跳过
  * seq ≤ snapshotSeq 的旧批次，不会用旧 delta 回滚快照内容。
+ * @param {string} rootAtStart 发起本次保存时的根目录（OPT-19 同根守卫判据）
  */
-async function writeSnapshot() {
+async function writeSnapshot(rootAtStart) {
   if (!(await ensureDataDir())) return false
+  // OPT-19 同根守卫：切库 flush 超时放弃后，挂起的写入会在根目录切换后
+  // 续跑——此时 getDataFilePath() 已指向新根而 metaState.data 仍是旧根
+  // 数据（loadData 尚未完成），直接写入会把旧库标注写进新库的 store.json。
+  // 目标路径显式固定为守卫通过时的取值，后续 await 期间切根也不漂移
+  if (!samePathIgnoreCase(getCurrentRoot(), rootAtStart)) {
+    logger.warn('写盘期间根目录已切换，丢弃本次快照写入（防跨库污染）')
+    return false
+  }
+  const dataFile = getDataFilePath()
   // 版本快照必须在序列化/写盘之前捕获：序列化与写盘 await 期间若有新变更，
   // dirtyKeys 不能整体清空（否则丢失尚未落盘的修改）
   const versionAtWrite = metaState.mutationVersion
@@ -236,7 +246,14 @@ async function writeSnapshot() {
       ? (await serializeJsonOffThread(payload)).text
       : JSON.stringify(payload)
   // createDirs=false（O5）：目录已由 ensureDataDir 确认，写入阶段绝不重建根目录树
-  await atomicWriteFile(getDataFilePath(), text, { createDirs: false })
+  await atomicWriteFile(dataFile, text, { createDirs: false })
+  // 写盘 await（fsync/rename 退避）期间根目录同样可能已切换：收尾的状态
+  // 变更与日志目录清理只允许作用于写入时的同一根——否则会清掉新根刚回放
+  // 过的增量日志（快照自身已写入旧根路径，内容一致，无需收尾）
+  if (!samePathIgnoreCase(getCurrentRoot(), rootAtStart)) {
+    logger.warn('快照写盘期间根目录已切换，跳过收尾状态变更（防跨库污染）')
+    return true
+  }
   metaState.hasSnapshot = true
   metaState.journalEntryCount = 0
   if (metaState.mutationVersion === versionAtWrite) metaState.dirtyKeys.clear()
@@ -249,8 +266,9 @@ async function writeSnapshot() {
  * 每个批次经 atomicWriteFile 原子落盘（独立文件），避免 append 半行；
  * seq 单调递增，快照合并后旧批次按代际跳过。
  * @param {string[]} keys 脏键列表
+ * @param {string} rootAtStart 发起本次保存时的根目录（OPT-19 同根守卫判据）
  */
-async function writeDeltaJournal(keys) {
+async function writeDeltaJournal(keys, rootAtStart) {
   if (!(await ensureDataDir())) return false
   const seq = metaState.journalSeq + 1
   const entries = []
@@ -275,6 +293,12 @@ async function writeDeltaJournal(keys) {
       return false
     }
   }
+  // OPT-19 同根守卫：同 writeSnapshot——目录句柄指向守卫通过时的根，
+  // 挂起续跑后绝不把旧根增量写进新根的 journal/
+  if (!samePathIgnoreCase(getCurrentRoot(), rootAtStart)) {
+    logger.warn('写盘期间根目录已切换，丢弃本次增量日志写入（防跨库污染）')
+    return false
+  }
   const file = path.join(
     journalDir,
     `delta-${String(seq).padStart(12, '0')}.json`,
@@ -282,6 +306,10 @@ async function writeDeltaJournal(keys) {
   await atomicWriteFile(file, JSON.stringify({ seq, entries }), {
     createDirs: false,
   })
+  if (!samePathIgnoreCase(getCurrentRoot(), rootAtStart)) {
+    logger.warn('增量日志写盘期间根目录已切换，跳过收尾状态变更（防跨库污染）')
+    return true
+  }
   metaState.journalSeq = seq
   metaState.journalEntryCount += entries.length
   for (const [key, metaAtWrite] of written) {
@@ -311,6 +339,11 @@ async function runSave(forceSnapshot) {
   }
   metaState.saving = true
   try {
+    // OPT-19 同根守卫判据：挂起磁盘上的 stat/fsync 可阻塞数十秒，期间
+    // 切库 flush 可能超时放弃并切换根目录——迟到的续跑绝不能把本次捕获的
+    // 内存数据写进切换后的根目录（跨库污染），由 writeSnapshot/
+    // writeDeltaJournal 按此判据丢弃
+    const rootAtStart = getCurrentRoot()
     // O5：库目录离线（被移动/盘符未挂载）时跳过序列化与写盘，
     // 脏数据保留在内存，并安排恢复后的自动补写——绝不重建模型根目录树
     if (!(await isCurrentRootAvailable())) {
@@ -325,9 +358,9 @@ async function runSave(forceSnapshot) {
       !metaState.hasSnapshot ||
       metaState.journalEntryCount + keys.length >= JOURNAL_COMPACT_ENTRIES
     ) {
-      wrote = await writeSnapshot()
+      wrote = await writeSnapshot(rootAtStart)
     } else if (keys.length > 0) {
-      wrote = await writeDeltaJournal(keys)
+      wrote = await writeDeltaJournal(keys, rootAtStart)
     }
     if (wrote) {
       metaState.saveRetryFailures = 0
