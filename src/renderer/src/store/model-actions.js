@@ -1,4 +1,4 @@
-import { state, replaceModels, modelIndexOf } from './state'
+import { state, replaceModels, modelIndexOf, effectiveFavorite } from './state'
 import { toast, confirmDialog } from './toast'
 import { applyMetaFlags } from './meta-apply'
 import { clearSelectedModel, openDetail } from './detail'
@@ -84,7 +84,7 @@ export async function deleteModel(id, opts = {}) {
  * 即时标注操作（收藏/NSFW/评分）按模型串行队列（A5）：
  * toggleFavorite 需先读当前值再发 IPC，IPC 在途窗口内再次点击会读到
  * 同一旧值、发出相同目标值，表现为「第二次点击失效」。同一模型的标注
- * 操作经此队列依次执行——后一次必读到前一次经 applyMetaFlags 落定的
+ * 操作经此队列依次执行——后一次必读到前一次经标注覆盖层落定的
  * 状态；不同模型的键不同，互不阻塞。前一次失败不阻塞后续操作。
  */
 const metaFlagChains = new Map()
@@ -111,8 +111,9 @@ function enqueueMetaFlag(id, task) {
  */
 export function toggleFavorite(id) {
   return enqueueMetaFlag(id, async () => {
+    // P1-1：当前值经有效读取器取覆盖层（元素对象不再被标注写路径更新）
     const idx = modelIndexOf(id)
-    const next = !(idx !== undefined && state.models[idx].favorite)
+    const next = !(idx !== undefined && effectiveFavorite(state.models[idx]))
     let res
     try {
       res = await window.api.models.setMetaFlags({ id, favorite: next })

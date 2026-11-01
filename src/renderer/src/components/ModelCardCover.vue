@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
   coverThumbUrl,
   duplicateIdSet,
+  effectiveNsfw,
   modelCoverUrl,
   state,
   subCategoryInfo,
@@ -186,9 +187,9 @@ const blurMode = computed(() => {
   return v ? 'blur' : 'off'
 })
 
-/** 封面图模糊 class：NSFW 模型按所选样式叠加标准/重度模糊 */
+/** 封面图模糊 class：NSFW 模型按所选样式叠加标准/重度模糊（P1-1：经标注覆盖层读取） */
 const nsfwCoverClass = computed(() =>
-  props.model.nsfw && blurMode.value !== 'off'
+  effectiveNsfw(props.model) && blurMode.value !== 'off'
     ? { blurred: true, 'blurred-heavy': blurMode.value === 'heavy' }
     : {},
 )
@@ -234,12 +235,12 @@ const nsfwCoverClass = computed(() =>
     <span class="type-badge" :style="{ background: info.color }">{{
       info.label
     }}</span>
-    <span v-if="model.nsfw" class="nsfw-badge">NSFW</span>
+    <span v-if="effectiveNsfw(model)" class="nsfw-badge">NSFW</span>
     <!-- 重复角标（FEAT-1）：文件内容与其他模型完全相同；与 NSFW 同在左下角时右移避让 -->
     <span
       v-if="isDuplicate"
       class="dupe-badge"
-      :class="{ offset: model.nsfw }"
+      :class="{ offset: effectiveNsfw(model) }"
       title="文件内容与其他模型完全相同（SHA256 一致），可通过「重复」筛选清理冗余副本"
       >重复</span
     >

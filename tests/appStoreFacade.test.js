@@ -33,6 +33,12 @@ const EXPECTED_EXPORTS = [
   'typeInfo',
   'subCategoryInfo',
   'defaultSettings',
+  // 快捷标注覆盖（O7/P1-1）：收藏/NSFW/评分的有效读取与写入/清理
+  'effectiveFavorite',
+  'effectiveNsfw',
+  'effectiveRating',
+  'setMetaOverride',
+  'clearMetaOverrides',
   // Toast/确认
   'toast',
   'dismissToast',

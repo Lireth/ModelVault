@@ -5,6 +5,9 @@ import {
   SUB_MAP,
   sortDirectional,
   effectiveModelHash,
+  effectiveFavorite,
+  effectiveNsfw,
+  effectiveRating,
 } from './state'
 import { normalizeBaseModel } from '../../../shared/model-categories'
 import { matchSearchFilters, parseSearchQuery } from './search-query'
@@ -15,6 +18,16 @@ import { matchSearchFilters, parseSearchQuery } from './search-query'
 
 /** 中文排序比较器（模块级缓存，O1）：避免排序热路径每次比较都走完整 Intl 构造 */
 const zhCollator = new Intl.Collator('zh-CN')
+
+/**
+ * 结构化搜索 token 的标注解析器（O7/P1-1）：score:/fav:/nsfw: 命中判定走
+ * 标注覆盖层（即时标注后无需重扫即生效），与侧栏筛选/标注排序同一语义。
+ */
+const META_FLAG_RESOLVERS = {
+  favorite: effectiveFavorite,
+  nsfw: effectiveNsfw,
+  rating: effectiveRating,
+}
 
 /** 分类固定顺序映射（模块级常量，O3）：避免按分类排序时每次重算都重建 */
 const TYPE_ORDER = Object.fromEntries(MODEL_TYPES.map((t, i) => [t.key, i]))
@@ -161,10 +174,13 @@ const filteredUnsorted = computed(() => {
       const tags = m.tags || []
       if (!checkTags.every((t) => tags.includes(t))) continue
     }
-    if (showFavoritesOnly && !m.favorite) continue
+    if (showFavoritesOnly && !effectiveFavorite(m)) continue
     if (dupes && !dupes.has(m.id)) continue
     if (keyword && !searchHaystack(m).includes(keyword)) continue
-    if (hasFilters && !matchSearchFilters(m, filters, effectiveModelHash))
+    if (
+      hasFilters &&
+      !matchSearchFilters(m, filters, effectiveModelHash, META_FLAG_RESOLVERS)
+    )
       continue
     list.push(m)
   }
@@ -188,17 +204,21 @@ export const filteredModels = computed(() => {
       list.sort((a, b) => addedMsOf(b) - addedMsOf(a))
       break
     case 'favorite':
-      // 收藏优先，同组内按名称（U2）；固定语义排序，不响应方向翻转（O1）
+      // 收藏优先，同组内按名称（U2）；固定语义排序，不响应方向翻转（O1）。
+      // P1-1：收藏态经标注覆盖层读取（即时标注后排序立即生效）
       list.sort(
         (a, b) =>
-          (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0) ||
+          (effectiveFavorite(b) ? 1 : 0) - (effectiveFavorite(a) ? 1 : 0) ||
           zhCollator.compare(a.name, b.name),
       )
       break
     case 'rating':
-      // 评分高优先，同分按名称（U2）；固定语义排序，不响应方向翻转（O1）
+      // 评分高优先，同分按名称（U2）；固定语义排序，不响应方向翻转（O1）。
+      // P1-1：评分经标注覆盖层读取
       list.sort(
-        (a, b) => b.rating - a.rating || zhCollator.compare(a.name, b.name),
+        (a, b) =>
+          effectiveRating(b) - effectiveRating(a) ||
+          zhCollator.compare(a.name, b.name),
       )
       break
     case 'type':

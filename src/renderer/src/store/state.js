@@ -269,6 +269,67 @@ export function clearHashOverrides(ids = null) {
 }
 
 /**
+ * 快捷标注覆盖（O7/P1-1）：收藏 / NSFW / 评分的即时标注走独立响应式映射，
+ * 不再整体替换元素——元素替换会让 filteredModels/typeCounts/tagCounts/
+ * duplicateGroups 等全量派生反复失效重排（大库下含 O(n log n) 排序），并使
+ * 搜索域 WeakMap 缓存随对象换身失效。语义与 hashOverrides 一致：覆盖值 >
+ * 模型自带值（扫描装饰 metaDisplayFields 烘焙的权威值兜底，持久化已由
+ * IPC 落盘，重扫后覆盖与对象值自然一致）。写方统一经 setMetaOverride
+ * 以主进程返回的三元组整体写入，杜绝元素路径与覆盖路径双源分歧。
+ */
+const metaOverrides = reactive(new Map())
+
+/**
+ * 写入一条快捷标注覆盖（三字段整体写入；调用方传入主进程规范化后的 meta）。
+ * 仅当前列表内的 id 应写入（调用方负责 modelIndexOf 校验），列表外的
+ * 陈旧条目由 replaceModels 统一剪枝。
+ * @param {string} id 模型绝对路径
+ * @param {{favorite?: boolean, nsfw?: boolean, rating?: number}} flags 标注三元组
+ */
+export function setMetaOverride(id, flags) {
+  if (typeof id !== 'string' || !id || !flags) return
+  metaOverrides.set(id, {
+    favorite: flags.favorite === true,
+    nsfw: flags.nsfw === true,
+    rating: Number.isFinite(flags.rating) ? flags.rating : 0,
+  })
+}
+
+/** 模型的有效收藏态（覆盖优先，无覆盖回退模型自带值） */
+export function effectiveFavorite(model) {
+  if (!model) return false
+  const o = metaOverrides.get(model.id)
+  return o ? o.favorite === true : model.favorite === true
+}
+
+/** 模型的有效 NSFW 标记（覆盖优先，无覆盖回退模型自带值） */
+export function effectiveNsfw(model) {
+  if (!model) return false
+  const o = metaOverrides.get(model.id)
+  return o ? o.nsfw === true : model.nsfw === true
+}
+
+/** 模型的有效评分（0-5 整数；覆盖优先，无覆盖回退模型自带值） */
+export function effectiveRating(model) {
+  if (!model) return 0
+  const o = metaOverrides.get(model.id)
+  return o ? o.rating || 0 : model.rating || 0
+}
+
+/**
+ * 清理快捷标注覆盖：不传 ids 清空全部（测试隔离/全量重扫收敛用），
+ * 传数组时仅清理指定模型。
+ * @param {Iterable<string>|null} [ids]
+ */
+export function clearMetaOverrides(ids = null) {
+  if (!ids) {
+    metaOverrides.clear()
+    return
+  }
+  for (const id of ids) metaOverrides.delete(id)
+}
+
+/**
  * 模型 id → 数组下标索引（O2）：批量事件回填时避免每次 O(n) findIndex/重建 Map。
  * 仅在 models 数组引用变化时重建；元素级替换不改变 id 与下标，索引保持有效。
  */
@@ -315,9 +376,13 @@ export function modelIndexOf(id) {
 export function replaceModels(list) {
   state.models = shallowReactive(list)
   rebuildModelIndex()
-  // 哈希覆盖只对当前列表内 id 有意义：移除已不存在的条目，避免陈旧哈希复活
+  // 覆盖映射只对当前列表内 id 有意义：移除已不存在的条目，避免跨库切换
+  // 携带旧库标注、删除模型的覆盖在重扫后复活
   for (const id of hashOverrides.keys()) {
     if (!modelIndexById.has(id)) hashOverrides.delete(id)
+  }
+  for (const id of metaOverrides.keys()) {
+    if (!modelIndexById.has(id)) metaOverrides.delete(id)
   }
 }
 

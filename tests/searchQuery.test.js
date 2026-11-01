@@ -240,6 +240,28 @@ describe('matchSearchFilters 匹配器', () => {
       ),
     ).toBe(false)
   })
+
+  it('resolveFlags 注入时 score:/fav:/nsfw: 经覆盖解析器命中（P1-1）', () => {
+    // filter.js 传入标注覆盖解析器：即时标注后未重扫的值参与 token 命中；
+    // 未注入（默认 null）时回退模型自带字段（纯函数测试路径不受影响）
+    const resolvers = {
+      favorite: (m) => m.id === 'm1',
+      nsfw: (m) => m.id === 'm1',
+      rating: (m) => (m.id === 'm1' ? 4 : 0),
+    }
+    const fav = parseSearchQuery('fav:yes').filters
+    const score = parseSearchQuery('score:>=4').filters
+    const nsfw = parseSearchQuery('nsfw:yes').filters
+    const m1 = model({ id: 'm1', favorite: false, rating: 0, nsfw: false })
+    const m2 = model({ id: 'm2', favorite: false, rating: 0, nsfw: false })
+    expect(matchSearchFilters(m1, fav, undefined, resolvers)).toBe(true)
+    expect(matchSearchFilters(m2, fav, undefined, resolvers)).toBe(false)
+    expect(matchSearchFilters(m1, score, undefined, resolvers)).toBe(true)
+    expect(matchSearchFilters(m2, score, undefined, resolvers)).toBe(false)
+    expect(matchSearchFilters(m1, nsfw, undefined, resolvers)).toBe(true)
+    // 未注入解析器：回退模型自带字段（对象值仍为未标注态）
+    expect(matchSearchFilters(m1, fav)).toBe(false)
+  })
 })
 
 describe('filteredModels 集成（F3 与自由关键词/侧栏筛选叠加）', () => {

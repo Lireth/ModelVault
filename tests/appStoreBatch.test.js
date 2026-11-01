@@ -14,6 +14,7 @@ import {
   batchToggleDisabled,
   batchAssignCivitaiTags,
   batchOrganizeByTags,
+  effectiveFavorite,
   rejectConfirm,
   requestBatchCancel,
   state,
@@ -61,8 +62,9 @@ describe('快速连点竞态（A5）', () => {
       { id: 'm1', favorite: true },
       { id: 'm1', favorite: false },
     ])
-    // 净效果翻两次，回到 false（未串行化时两次都发 true，第二次点击看起来失效）
-    expect(state.models[0].favorite).toBe(false)
+    // 净效果翻两次，回到 false（未串行化时两次都发 true，第二次点击看起来失效）；
+    // P1-1：串行链的「读前值」经标注覆盖层（toggleFavorite 内 effectiveFavorite）
+    expect(effectiveFavorite(state.models[0])).toBe(false)
   })
 
   it('前一次失败不阻塞后续操作：报错后再次点击仍正常生效', async () => {
@@ -77,7 +79,7 @@ describe('快速连点竞态（A5）', () => {
     expect(state.toasts.some((t) => t.text.includes('收藏操作失败'))).toBe(true)
     const ok2 = await toggleFavorite('m1')
     expect(ok2).toBe(true)
-    expect(state.models[0].favorite).toBe(true)
+    expect(effectiveFavorite(state.models[0])).toBe(true)
   })
 
   it('队列按模型粒度：不同模型的操作互不等待（m1 在途时 m2 立即可完成）', async () => {
@@ -101,10 +103,10 @@ describe('快速连点竞态（A5）', () => {
     const p2 = toggleFavorite('m2')
     await expect(p2).resolves.toBe(true) // m2 未因 m1 在途而阻塞
     expect(m1Started).toBe(true)
-    expect(state.models[1].favorite).toBe(true)
+    expect(effectiveFavorite(state.models[1])).toBe(true)
     releaseFirst()
     await expect(p1).resolves.toBe(true)
-    expect(state.models[0].favorite).toBe(true)
+    expect(effectiveFavorite(state.models[0])).toBe(true)
   })
 })
 
@@ -116,7 +118,12 @@ describe('批量操作单次状态合并（O2）', () => {
       meta: { favorite: true, nsfw: false, rating: 0 },
     })
     await batchFavorite(true)
-    expect(state.models.map((m) => m.favorite)).toEqual([true, true, true])
+    // P1-1：批量标记同样写覆盖层——对象保持引用稳定，有效读取器反映新值
+    expect(state.models.map((m) => effectiveFavorite(m))).toEqual([
+      true,
+      true,
+      true,
+    ])
     expect(
       state.toasts.some(
         (t) => t.type === 'success' && t.text.includes('已为 3 个模型收藏'),
@@ -154,9 +161,11 @@ describe('批量操作单次状态合并（O2）', () => {
         : Promise.resolve({ meta: { favorite: true, nsfw: false, rating: 0 } }),
     )
     await batchFavorite(true)
-    expect(state.models.find((m) => m.id === 'a').favorite).toBe(true)
-    expect(state.models.find((m) => m.id === 'b').favorite).toBe(false)
-    expect(state.models.find((m) => m.id === 'c').favorite).toBe(true)
+    expect(effectiveFavorite(state.models.find((m) => m.id === 'a'))).toBe(true)
+    expect(effectiveFavorite(state.models.find((m) => m.id === 'b'))).toBe(
+      false,
+    )
+    expect(effectiveFavorite(state.models.find((m) => m.id === 'c'))).toBe(true)
     expect(
       state.toasts.some(
         (t) => t.type === 'warn' && t.text.includes('成功 2 个，失败 1 个'),
@@ -389,7 +398,7 @@ describe('批量操作单次状态合并（O2）', () => {
       resolve({ meta: { favorite: true, nsfw: false, rating: 0 } })
     await first
     expect(state.multiSelect.busy).toBe(false) // 完成后恢复可用
-    expect(state.models.map((m) => m.favorite)).toEqual([true, true])
+    expect(state.models.map((m) => effectiveFavorite(m))).toEqual([true, true])
   })
 
   it('批量删除在途（含确认层弹出）时连点不重复提交', async () => {

@@ -8,12 +8,18 @@ import {
 import {
   applyThumbUpdates,
   coverThumbUrl,
+  effectiveFavorite,
+  effectiveNsfw,
+  effectiveRating,
+  filteredModels,
   modelById,
   modelCoverUrl,
   deleteModel,
   replaceModels,
   saveSettings,
   selectedModel,
+  setMetaOverride,
+  setRating,
   state,
   toggleFavorite,
 } from '../src/renderer/src/store/appStore'
@@ -30,7 +36,7 @@ beforeEach(() => {
 })
 
 describe('toggleFavorite（A6 错误可见性）', () => {
-  it('成功时以返回的 meta 同步本地状态', async () => {
+  it('成功时以返回的 meta 写入标注覆盖层（P1-1：对象保持引用稳定）', async () => {
     state.models = [makeModel('m1', { favorite: false })]
     api.models.setMetaFlags.mockResolvedValue({
       meta: { favorite: true, nsfw: false, rating: 0 },
@@ -41,7 +47,9 @@ describe('toggleFavorite（A6 错误可见性）', () => {
       id: 'm1',
       favorite: true,
     })
-    expect(state.models[0].favorite).toBe(true)
+    // 元素对象不再被替换（O7：避免全量派生失效重排），有效读取器反映新值
+    expect(state.models[0].favorite).toBe(false)
+    expect(effectiveFavorite(state.models[0])).toBe(true)
   })
 
   it('IPC reject 时 toast 提示且返回 false（不再 unhandledrejection）', async () => {
@@ -58,12 +66,13 @@ describe('toggleFavorite（A6 错误可见性）', () => {
     const ok = await toggleFavorite('m1')
     expect(ok).toBe(false)
     expect(state.models[0].favorite).toBe(false)
+    expect(effectiveFavorite(state.models[0])).toBe(false)
     expect(state.toasts.some((t) => t.text.includes('模型不存在'))).toBe(true)
   })
 })
 
-describe('标注操作响应传播（shallowReactive 回归）', () => {
-  it('元素级更新后派生状态（selectedModel/filteredModels）立即同步，无需整体替换', async () => {
+describe('标注覆盖写入后的读取传播（O7/P1-1 回归）', () => {
+  it('覆盖写入后模型对象引用稳定，详情页经有效读取器立即读到新值', async () => {
     // 与真实扫描一致：列表经 replaceModels 装配（数组为 shallowReactive 代理）
     replaceModels([
       makeModel('m1', { name: '甲', favorite: false }),
@@ -73,41 +82,44 @@ describe('标注操作响应传播（shallowReactive 回归）', () => {
       meta: { favorite: true, nsfw: true, rating: 3 },
     })
     state.selectedId = 'm1'
-    expect(selectedModel.value.favorite).toBe(false)
-    expect(selectedModel.value.nsfw).toBe(false)
+    expect(effectiveFavorite(selectedModel.value)).toBe(false)
+    expect(effectiveNsfw(selectedModel.value)).toBe(false)
 
+    const before = state.models[0]
     await toggleFavorite('m1')
 
-    // 数据层：元素对象已就位替换
-    expect(state.models[0].favorite).toBe(true)
-    // 响应传播层（回归核心）：shallowReactive 下元素级索引赋值必须触发
-    // modelById→selectedModel 重算，否则详情页标注按钮点击后视觉无变化
-    expect(selectedModel.value.favorite).toBe(true)
-    expect(selectedModel.value.nsfw).toBe(true)
-    expect(selectedModel.value.rating).toBe(3)
+    // 数据层：元素对象保持引用稳定（不再触发 filteredModels/typeCounts 等
+    // 全量派生失效重排与搜索域 WeakMap 缓存失效——本优化消除的热点）
+    expect(state.models[0]).toBe(before)
+    // 响应传播层（回归核心）：覆盖映射按覆盖键精确失效，详情页标注按钮
+    // 经有效读取器点击后视觉立即变化
+    expect(effectiveFavorite(selectedModel.value)).toBe(true)
+    expect(effectiveNsfw(selectedModel.value)).toBe(true)
+    expect(effectiveRating(selectedModel.value)).toBe(3)
   })
 
-  it('元素级替换：映射值增量同步且下游传播保持（OPT-1，不再整表重建）', async () => {
+  it('modelById 映射不因标注覆盖重建，元素引用跨标注保持（OPT-1）', async () => {
     // 与真实扫描一致：列表经 replaceModels 装配（数组为 shallowReactive 代理）
     replaceModels([
       makeModel('m1', { favorite: false }),
       makeModel('m2', { favorite: false }),
     ])
     state.selectedId = 'm1'
-    expect(modelById.value.get('m1').favorite).toBe(false)
+    expect(effectiveFavorite(modelById.value.get('m1'))).toBe(false)
 
     api.models.setMetaFlags.mockResolvedValue({
       meta: { favorite: true, nsfw: false, rating: 5 },
     })
     await toggleFavorite('m1')
 
-    // 值经增量同步即时更新——旧实现在此整表重建新 Map（数千模型库上
-    // 每次标注点击一次 O(n) 哈希+分配，即本优化消除的热点）
-    expect(modelById.value.get('m1').favorite).toBe(true)
+    // 标注写入覆盖层：模型对象与映射值引用均保持不变（旧实现在此逐个
+    // 元素替换——数千模型库上每次标注点击使 modelById/filteredModels
+    // 等派生全部失效重算，即本优化消除的热点）
+    expect(effectiveFavorite(modelById.value.get('m1'))).toBe(true)
+    expect(modelById.value.get('m1')).toBe(state.models[0])
     expect(modelById.value.get('m2')).toBe(state.models[1])
-    // 下游派生传播保持（Vue 3.4+ 以 Object.is 判定 computed 值变化并决定
-    // 是否向下游传播）：selectedModel 必须读到新对象
-    expect(selectedModel.value.favorite).toBe(true)
+    // 下游派生传播：selectedModel 引用不变，经有效读取器读到覆盖值
+    expect(effectiveFavorite(selectedModel.value)).toBe(true)
 
     // 数组整体替换（切库/重扫语义）→ 全量重建，旧键不残留
     replaceModels([makeModel('m3')])
@@ -115,18 +127,62 @@ describe('标注操作响应传播（shallowReactive 回归）', () => {
     expect(modelById.value.get('m3')).toBe(state.models[0])
   })
 
-  it('未经 replaceModels 装配的原始数组不具备该保证（守卫约定边界）', async () => {
-    // 直接裸赋值（测试遗留写法）：数据会变，但派生状态不重算——
-    // 固化「数组级更新必须走 replaceModels」的约定，防止约定被悄然破坏
+  it('标注覆盖不依赖数组装配方式：裸赋值数组同样经有效读取器生效', async () => {
+    // 直接裸赋值（测试遗留写法）：覆盖层的响应性来自 reactive Map 本身，
+    // 与数组的 shallowReactive 装配无关——标注值始终即时可读
     state.models = [makeModel('m1', { favorite: false })]
     state.selectedId = 'm1'
-    expect(selectedModel.value.favorite).toBe(false) // 先读一次，建立派生缓存
+    expect(effectiveFavorite(selectedModel.value)).toBe(false) // 先读一次
     api.models.setMetaFlags.mockResolvedValue({
       meta: { favorite: true, nsfw: false, rating: 0 },
     })
     await toggleFavorite('m1')
+    // 元素对象保持引用稳定（无元素写入），有效读取器即时反映新值
+    expect(state.models[0].favorite).toBe(false)
+    expect(effectiveFavorite(selectedModel.value)).toBe(true)
+  })
+
+  it('覆盖优先、对象值兜底；replaceModels 剪枝消失 id（O7 语义）', () => {
+    replaceModels([makeModel('m1', { favorite: true, rating: 2 })])
+    setMetaOverride('m1', { favorite: false, nsfw: true, rating: 4 })
+    expect(effectiveFavorite(state.models[0])).toBe(false)
+    expect(effectiveNsfw(state.models[0])).toBe(true)
+    expect(effectiveRating(state.models[0])).toBe(4)
+    // 模型对象未被污染
     expect(state.models[0].favorite).toBe(true)
-    expect(selectedModel.value.favorite).toBe(false)
+    expect(state.models[0].rating).toBe(2)
+
+    // 列表整体替换：消失 id 的覆盖被剪枝，回归后回退对象自带值
+    replaceModels([makeModel('m2', { favorite: false })])
+    replaceModels([makeModel('m1', { favorite: true, rating: 2 })])
+    expect(effectiveFavorite(state.models[0])).toBe(true)
+    expect(effectiveRating(state.models[0])).toBe(2)
+  })
+
+  it('即时标注后收藏筛选与评分排序立即生效（无需重扫）', async () => {
+    replaceModels([
+      makeModel('m1', { name: '甲', favorite: false, rating: 0 }),
+      makeModel('m2', { name: '乙', favorite: false, rating: 3 }),
+    ])
+    state.sortBy = 'rating'
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['m2', 'm1'])
+
+    // 收藏筛选：收藏 m2 后进入收藏视图（覆盖写入，未重扫）
+    api.models.setMetaFlags.mockResolvedValue({
+      meta: { favorite: true, nsfw: false, rating: 3 },
+    })
+    await toggleFavorite('m2')
+    state.showFavoritesOnly = true
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['m2'])
+
+    // 评分排序：m1 评分覆盖 5 后升至首位（对象值保持 0，排序读覆盖层）
+    api.models.setMetaFlags.mockResolvedValue({
+      meta: { favorite: false, nsfw: false, rating: 5 },
+    })
+    await setRating('m1', 5)
+    state.showFavoritesOnly = false
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['m1', 'm2'])
+    expect(state.models[0].rating).toBe(0)
   })
 })
 

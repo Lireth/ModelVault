@@ -1,6 +1,7 @@
 import { vi } from 'vitest'
 import {
   clearCoverOverrides,
+  clearMetaOverrides,
   replaceModels,
   state,
   transferState,
@@ -64,6 +65,7 @@ export function makeApiMock() {
  */
 export function resetStoreTestState(api) {
   clearCoverOverrides()
+  clearMetaOverrides()
   vi.stubGlobal('window', { api })
   // applyTheme/applyAccent（saveSettings/主题与强调色切换）会触碰 document
   vi.stubGlobal('document', {

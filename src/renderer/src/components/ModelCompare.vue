@@ -3,6 +3,9 @@ import { computed, onBeforeUnmount, onMounted } from 'vue'
 import {
   closeCompare,
   compareState,
+  effectiveFavorite,
+  effectiveNsfw,
+  effectiveRating,
   formatDate,
   formatParamSummary,
   formatSize,
@@ -46,10 +49,17 @@ const FIELD_DEFS = [
   {
     key: 'rating',
     label: '评分',
-    get: (m) => (m.rating > 0 ? `${m.rating} ★` : '未评分'),
+    get: (m) => {
+      const rating = effectiveRating(m)
+      return rating > 0 ? `${rating} ★` : '未评分'
+    },
   },
-  { key: 'favorite', label: '收藏', get: (m) => (m.favorite ? '是' : '否') },
-  { key: 'nsfw', label: 'NSFW', get: (m) => (m.nsfw ? '是' : '否') },
+  {
+    key: 'favorite',
+    label: '收藏',
+    get: (m) => (effectiveFavorite(m) ? '是' : '否'),
+  },
+  { key: 'nsfw', label: 'NSFW', get: (m) => (effectiveNsfw(m) ? '是' : '否') },
   {
     key: 'params',
     label: '推荐参数',

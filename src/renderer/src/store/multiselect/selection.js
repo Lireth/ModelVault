@@ -1,5 +1,5 @@
 import { computed } from 'vue'
-import { state } from '../state'
+import { state, effectiveFavorite, effectiveRating } from '../state'
 import { filteredModels, duplicateGroups } from '../filter'
 import { modelById } from '../selectors'
 import { cancelOrganizeByTags } from './batch-files'
@@ -141,10 +141,15 @@ export function invertSelectionFiltered() {
  * 组内「最优保留」比较：a 是否优于 b。
  * 语义：评分高 > 已收藏 > 文件最新（下载/修改时间）；同哈希文件大小必然
  * 一致，无需参与；id 兜底保证完全平手时的确定性。
+ * P1-1：评分/收藏经标注覆盖层读取（未重扫的即时标注同样参与择优）。
  */
 function betterDuplicate(a, b) {
-  if (a.rating !== b.rating) return a.rating > b.rating
-  if (a.favorite !== b.favorite) return a.favorite
+  const ra = effectiveRating(a)
+  const rb = effectiveRating(b)
+  if (ra !== rb) return ra > rb
+  const fa = effectiveFavorite(a)
+  const fb = effectiveFavorite(b)
+  if (fa !== fb) return fa
   if (a.mtimeMs !== b.mtimeMs) return a.mtimeMs > b.mtimeMs
   return a.id < b.id
 }

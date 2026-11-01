@@ -2,6 +2,9 @@
 import { computed } from 'vue'
 import { handleModelActionKey } from './modelRowActions'
 import {
+  effectiveFavorite,
+  effectiveNsfw,
+  effectiveRating,
   formatDate,
   formatParamSummary,
   formatSize,
@@ -95,9 +98,10 @@ function typeText(m) {
   return sub ? `${base} · ${sub.label}` : base
 }
 
-/** 评分列文本（0 分占位） */
+/** 评分列文本（0 分占位；P1-1：经标注覆盖层读取） */
 function ratingText(m) {
-  return m.rating > 0 ? '★'.repeat(m.rating) + '☆'.repeat(5 - m.rating) : '—'
+  const rating = effectiveRating(m)
+  return rating > 0 ? '★'.repeat(rating) + '☆'.repeat(5 - rating) : '—'
 }
 
 function onRowActivate(m) {
@@ -259,8 +263,8 @@ function onListKeydown(e) {
             ></span>
             <button
               class="row-fav"
-              :class="{ active: m.favorite }"
-              :title="m.favorite ? '取消收藏' : '收藏'"
+              :class="{ active: effectiveFavorite(m) }"
+              :title="effectiveFavorite(m) ? '取消收藏' : '收藏'"
               @click.stop="toggleFavorite(m.id)"
               @keydown.enter.stop.prevent
               @keydown.space.stop.prevent
@@ -269,7 +273,7 @@ function onListKeydown(e) {
                 viewBox="0 0 24 24"
                 width="13"
                 height="13"
-                :fill="m.favorite ? 'currentColor' : 'none'"
+                :fill="effectiveFavorite(m) ? 'currentColor' : 'none'"
                 stroke="currentColor"
                 stroke-width="1.8"
                 stroke-linejoin="round"
@@ -281,7 +285,10 @@ function onListKeydown(e) {
               </svg>
             </button>
             <span class="row-name" :title="m.name">{{ displayName(m) }}</span>
-            <span v-if="m.nsfw" class="mini-badge nsfw" title="NSFW 标记"
+            <span
+              v-if="effectiveNsfw(m)"
+              class="mini-badge nsfw"
+              title="NSFW 标记"
               >NSFW</span
             >
             <span
@@ -304,9 +311,11 @@ function onListKeydown(e) {
           <span v-if="state.settings.showMtime" class="list-cell col-mtime">{{
             formatDate(m.mtimeMs)
           }}</span>
-          <span class="list-cell col-rating" :class="{ rated: m.rating > 0 }">{{
-            ratingText(m)
-          }}</span>
+          <span
+            class="list-cell col-rating"
+            :class="{ rated: effectiveRating(m) > 0 }"
+            >{{ ratingText(m) }}</span
+          >
           <span
             v-if="state.settings.showParams"
             class="list-cell col-params"

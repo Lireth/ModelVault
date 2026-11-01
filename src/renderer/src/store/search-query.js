@@ -136,8 +136,9 @@ function parseFilter(prefix, value) {
   }
 }
 
-/** 单条件命中判定（与 parseFilter 的 kind 一一对应；resolveHash 为 O7 覆盖解析器） */
-function matchFilter(m, f, resolveHash) {
+/** 单条件命中判定（与 parseFilter 的 kind 一一对应；resolveHash/resolveFlags
+ * 为 O7 覆盖解析器——哈希走预热回填覆盖，标注三元组走快捷标注覆盖） */
+function matchFilter(m, f, resolveHash, resolveFlags) {
   switch (f.kind) {
     case 'base': {
       const base = m.baseModel || m.autoInfo?.baseModel || ''
@@ -153,11 +154,18 @@ function matchFilter(m, f, resolveHash) {
     case 'size':
       return compareOp(m.size, f.op, f.bytes)
     case 'score':
-      return compareOp(m.rating, f.op, f.value)
+      return compareOp(
+        resolveFlags ? resolveFlags.rating(m) : m.rating,
+        f.op,
+        f.value,
+      )
     case 'fav':
-      return m.favorite === f.value
+      return (
+        (resolveFlags ? resolveFlags.favorite(m) : m.favorite === true) ===
+        f.value
+      )
     case 'nsfw':
-      return m.nsfw === f.value
+      return (resolveFlags ? resolveFlags.nsfw(m) : m.nsfw === true) === f.value
     case 'mtime': {
       // mtime 为文件修改时间；年龄 = 当前时间 - mtime（缺失值不命中）
       const t = Number(m.mtimeMs)
@@ -224,9 +232,10 @@ export function matchSearchFilters(
   m,
   filters,
   resolveHash = (model) => model.hash || '',
+  resolveFlags = null,
 ) {
   for (const f of filters) {
-    if (!matchFilter(m, f, resolveHash)) return false
+    if (!matchFilter(m, f, resolveHash, resolveFlags)) return false
   }
   return true
 }

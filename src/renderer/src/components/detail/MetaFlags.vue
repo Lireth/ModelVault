@@ -1,5 +1,8 @@
 <script setup>
 import {
+  effectiveFavorite,
+  effectiveNsfw,
+  effectiveRating,
   selectedModel,
   setNsfw,
   setRating,
@@ -11,6 +14,8 @@ import {
  * 详情表单列「收藏 / 评分」行（OPT-01 自 MetaForm.vue 按域拆出）：
  * 收藏切换、NSFW 标记切换、五星评分（点击当前星标清零）。
  * 与表单本地副本无关，直接经 store 即时保存。
+ * P1-1：展示态经标注覆盖层读取——即时标注后模型对象保持引用稳定，
+ * 覆盖写入按覆盖键精确重渲染本组件。
  */
 
 /** 详情页切换收藏 */
@@ -29,7 +34,7 @@ async function onToggleNsfw() {
   const model = selectedModel.value
   if (!model) return
   try {
-    await setNsfw(model.id, !model.nsfw)
+    await setNsfw(model.id, !effectiveNsfw(model))
   } catch (err) {
     toast('error', `NSFW 标记操作失败: ${err.message}`)
   }
@@ -39,7 +44,7 @@ async function onToggleNsfw() {
 async function onSetRating(value) {
   const model = selectedModel.value
   if (!model) return
-  const next = model.rating === value ? 0 : value
+  const next = effectiveRating(model) === value ? 0 : value
   try {
     await setRating(model.id, next)
   } catch (err) {
@@ -52,16 +57,16 @@ async function onSetRating(value) {
   <div class="flags-row">
     <button
       class="fav-toggle"
-      :class="{ active: selectedModel.favorite }"
+      :class="{ active: effectiveFavorite(selectedModel) }"
       type="button"
-      :title="selectedModel.favorite ? '取消收藏' : '收藏该模型'"
+      :title="effectiveFavorite(selectedModel) ? '取消收藏' : '收藏该模型'"
       @click="onToggleFavorite"
     >
       <svg
         viewBox="0 0 24 24"
         width="12"
         height="12"
-        :fill="selectedModel.favorite ? 'currentColor' : 'none'"
+        :fill="effectiveFavorite(selectedModel) ? 'currentColor' : 'none'"
         stroke="currentColor"
         stroke-width="2"
         stroke-linejoin="round"
@@ -71,14 +76,14 @@ async function onSetRating(value) {
           d="M12 3.6l2.5 5.2 5.7.7-4.2 3.9 1.1 5.6L12 16.1 6.9 19l1.1-5.6-4.2-3.9 5.7-.7z"
         />
       </svg>
-      {{ selectedModel.favorite ? '已收藏' : '收藏' }}
+      {{ effectiveFavorite(selectedModel) ? '已收藏' : '收藏' }}
     </button>
     <button
       class="nsfw-toggle"
-      :class="{ active: selectedModel.nsfw }"
+      :class="{ active: effectiveNsfw(selectedModel) }"
       type="button"
       :title="
-        selectedModel.nsfw
+        effectiveNsfw(selectedModel)
           ? '取消 NSFW 标记'
           : '标记为 NSFW（首页预览图将模糊展示，可在设置中关闭）'
       "
@@ -92,7 +97,7 @@ async function onSetRating(value) {
         v-for="i in 5"
         :key="i"
         class="star"
-        :class="{ on: i <= (selectedModel.rating || 0) }"
+        :class="{ on: i <= effectiveRating(selectedModel) }"
         type="button"
         @click="onSetRating(i)"
       >
@@ -100,7 +105,7 @@ async function onSetRating(value) {
           viewBox="0 0 24 24"
           width="16"
           height="16"
-          :fill="i <= (selectedModel.rating || 0) ? 'currentColor' : 'none'"
+          :fill="i <= effectiveRating(selectedModel) ? 'currentColor' : 'none'"
           stroke="currentColor"
           stroke-width="1.8"
           stroke-linejoin="round"

@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import {
+  effectiveFavorite,
   formatDate,
   formatParamSummary,
   formatSize,
@@ -45,8 +46,8 @@ function onToggleFavorite() {
            .prevent 同时阻止 Space 的默认滚动行为（与 article 的处理一致） -->
       <button
         class="fav-btn"
-        :class="{ active: model.favorite }"
-        :title="model.favorite ? '取消收藏' : '收藏'"
+        :class="{ active: effectiveFavorite(model) }"
+        :title="effectiveFavorite(model) ? '取消收藏' : '收藏'"
         @click.stop="onToggleFavorite"
         @keydown.enter.stop.prevent
         @keydown.space.stop.prevent
@@ -55,7 +56,7 @@ function onToggleFavorite() {
           viewBox="0 0 24 24"
           width="15"
           height="15"
-          :fill="model.favorite ? 'currentColor' : 'none'"
+          :fill="effectiveFavorite(model) ? 'currentColor' : 'none'"
           stroke="currentColor"
           stroke-width="1.8"
           stroke-linejoin="round"

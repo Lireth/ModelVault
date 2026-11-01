@@ -1,6 +1,12 @@
 import { filteredModels } from './filter'
 import { formatParamSummary } from './format'
-import { subCategoryInfo, typeInfo } from './state'
+import {
+  subCategoryInfo,
+  typeInfo,
+  effectiveFavorite,
+  effectiveNsfw,
+  effectiveRating,
+} from './state'
 import { toast } from './toast'
 
 /**
@@ -64,9 +70,9 @@ export function buildExportRows(models) {
       sizeBytes: Number.isFinite(m.size) ? m.size : 0,
       mtimeMs,
       mtime: mtimeMs ? new Date(mtimeMs).toISOString() : '',
-      rating: Number.isFinite(m.rating) ? m.rating : 0,
-      favorite: m.favorite === true,
-      nsfw: m.nsfw === true,
+      rating: effectiveRating(m),
+      favorite: effectiveFavorite(m),
+      nsfw: effectiveNsfw(m),
       tags: Array.isArray(m.tags) ? m.tags : [],
       triggerWords: m.triggerWords || '',
       note: m.note || '',

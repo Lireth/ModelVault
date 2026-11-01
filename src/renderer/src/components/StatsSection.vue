@@ -12,6 +12,9 @@ import {
   BASE_MODEL_FAMILIES,
   duplicateGroups,
   duplicateWastedBytes,
+  effectiveFavorite,
+  effectiveNsfw,
+  effectiveRating,
   MODEL_TYPES,
   state,
   typeInfo,
@@ -113,14 +116,15 @@ const stats = computed(() => {
     if (m.alias) withAlias += 1
     if (hasAnyParams(m)) withParams += 1
     if (m.hasManualCover) withCover += 1
-    if (m.favorite) favorites += 1
-    if (m.rating > 0) rated += 1
+    if (effectiveFavorite(m)) favorites += 1
+    if (effectiveRating(m) > 0) rated += 1
     if (m.suspect) suspect += 1
-    if (m.nsfw) nsfwCount += 1
+    if (effectiveNsfw(m)) nsfwCount += 1
     // 近 30 天有文件变动的模型（mtimeMs 为文件修改时间）
     if (Number.isFinite(m.mtimeMs) && now - m.mtimeMs < 30 * 24 * 3600 * 1000)
       recent += 1
-    if (m.rating >= 1 && m.rating <= 5) ratingBuckets[m.rating] += 1
+    const rating = effectiveRating(m)
+    if (rating >= 1 && rating <= 5) ratingBuckets[rating] += 1
     else unrated += 1
   }
   return {

@@ -1,22 +1,51 @@
-import { state, modelIndexOf } from './state'
+import { state, modelIndexOf, setMetaOverride } from './state'
 
 /**
  * 主进程元数据结果应用到本地模型列表的共享工具（A-04 自 appStore.js 拆出）。
  * 仅依赖 state，供单模型操作与封面/批量操作复用。
  */
 
-/** 将快捷标记同步到本地模型列表 */
-export function applyMetaFlags(id, meta) {
-  // O2：走 id→下标索引（O(1)），收藏/评分等高频标注不再全表扫描
-  const idx = modelIndexOf(id)
-  if (idx !== undefined) {
-    state.models[idx] = {
-      ...state.models[idx],
-      favorite: meta.favorite === true,
-      nsfw: meta.nsfw === true,
-      rating: meta.rating || 0,
-    }
+/** 从主进程规范化 meta 提取快捷标注三元组（覆盖层写入的统一形状） */
+function flagsFromMeta(meta) {
+  return {
+    favorite: meta.favorite === true,
+    nsfw: meta.nsfw === true,
+    rating: meta.rating || 0,
   }
+}
+
+/**
+ * 将快捷标注（收藏/NSFW/评分）同步到覆盖映射（O7/P1-1）：
+ * 不再整体替换元素——元素替换会使 filteredModels（大库含 O(n log n) 排序）、
+ * typeCounts/tagCounts/duplicateGroups 等全量派生失效重算，并使搜索域
+ * WeakMap 缓存随对象换身失效；覆盖写入只让真正依赖标注的读取方（收藏筛选、
+ * 标注排序、星标/模糊展示、标注 token）失效重算，且单卡片展示按覆盖键
+ * 精确重渲染。模型对象保持引用稳定；持久化由调用方的 IPC 完成，重扫后
+ * 对象自带权威值与覆盖自然一致。
+ * @param {string} id 模型绝对路径
+ * @param {Record<string, any>|null} meta 主进程返回的完整元数据
+ */
+export function applyMetaFlags(id, meta) {
+  if (!meta || modelIndexOf(id) === undefined) return
+  setMetaOverride(id, flagsFromMeta(meta))
+}
+
+/**
+ * 单趟批量同步快捷标注到覆盖映射（O2/O7）：批量标记（batch-flags）专用
+ * ——与单模型 toggle 同走覆盖层，保证收藏/NSFW/评分三字段单一来源，
+ * 避免批量元素替换与单点覆盖互相盖出陈旧值。
+ * @param {Map<string, object>} metaMap id → 主进程返回的最新元数据
+ * @returns {number} 实际更新的模型数量（列表中不存在的 id 不计入）
+ */
+export function applyMetaFlagUpdates(metaMap) {
+  if (!metaMap || metaMap.size === 0) return 0
+  let updated = 0
+  for (const [id, meta] of metaMap) {
+    if (modelIndexOf(id) === undefined) continue
+    setMetaOverride(id, flagsFromMeta(meta))
+    updated += 1
+  }
+  return updated
 }
 
 /**
