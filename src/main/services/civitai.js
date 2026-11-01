@@ -70,9 +70,7 @@ let civitaiTransientRetryDelayMs = CIVITAI_TRANSIENT_RETRY_DELAY_MS
  */
 export function setCivitaiTransientRetryDelayForTests(ms) {
   civitaiTransientRetryDelayMs =
-    Number.isFinite(ms) && ms >= 0
-      ? ms
-      : CIVITAI_TRANSIENT_RETRY_DELAY_MS
+    Number.isFinite(ms) && ms >= 0 ? ms : CIVITAI_TRANSIENT_RETRY_DELAY_MS
 }
 
 /** 上次 Civitai API 请求时刻（节流基准） */

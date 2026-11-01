@@ -163,9 +163,7 @@ function isImmutableAssetPath(realPath) {
  * mvimg 响应体本就限定在当前库根目录内的图片文件，放开跨源读不扩大可读范围。
  */
 function cacheControlValue(immutable) {
-  return immutable
-    ? 'public, max-age=31536000, immutable'
-    : 'no-cache'
+  return immutable ? 'public, max-age=31536000, immutable' : 'no-cache'
 }
 
 function withCacheHeaders(upstream, immutable) {
@@ -475,7 +473,10 @@ function peekCivimgFailure(target) {
  * @param {string} target 图片 URL
  */
 function recordCivimgFailure(target) {
-  if (!civimgFailures.has(target) && civimgFailures.size >= CIVIMG_FAIL_MAX_ENTRIES) {
+  if (
+    !civimgFailures.has(target) &&
+    civimgFailures.size >= CIVIMG_FAIL_MAX_ENTRIES
+  ) {
     const oldest = civimgFailures.keys().next().value
     if (oldest !== undefined) civimgFailures.delete(oldest)
   }

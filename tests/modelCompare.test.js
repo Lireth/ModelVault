@@ -130,9 +130,7 @@ describe('ModelCompare 焦点管理（O10/OPT-03）', () => {
     openCompare(['a', 'b'])
     await nextTick()
     await nextTick() // watch 触发 + 内部 nextTick 焦点移交
-    expect(document.activeElement).toBe(
-      wrapper.find('.compare-panel').element,
-    )
+    expect(document.activeElement).toBe(wrapper.find('.compare-panel').element)
 
     closeCompare()
     await nextTick()

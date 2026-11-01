@@ -552,9 +552,8 @@ vi.mock('electron', () => ({
   BrowserWindow: vi.fn(),
 }))
 
-const { wrapHandler, setIpcPerfWarnMsForTests } = await import(
-  '../src/main/ipc/handler'
-)
+const { wrapHandler, setIpcPerfWarnMsForTests } =
+  await import('../src/main/ipc/handler')
 const logger = (await import('../src/main/logger')).default
 
 describe('wrapHandler 统一包装与通道观测（O1/O2 运行时契约 + OPT-3）', () => {

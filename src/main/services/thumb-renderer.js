@@ -179,7 +179,9 @@ function handleTaskTimeout(id) {
     pending.delete(otherId)
     clearTimeout(other.timer)
     if (other.requeued) {
-      other.reject(new Error(`缩略图渲染超时（重排后仍未完成，${renderTimeoutMs}ms）`))
+      other.reject(
+        new Error(`缩略图渲染超时（重排后仍未完成，${renderTimeoutMs}ms）`),
+      )
       continue
     }
     // 重排一次：新 id、新超时计时器；resolve/reject 原样复用（含 PERF-2

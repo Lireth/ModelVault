@@ -1086,7 +1086,8 @@ describe('OPT-9 渐进内容校验（冷区轮转 + 热区即时）', () => {
       () =>
         sentEvents.some(
           (e) =>
-            e.channel === 'models:fsChanged' && e.payload.dirs.includes('rot-37'),
+            e.channel === 'models:fsChanged' &&
+            e.payload.dirs.includes('rot-37'),
         ),
       '轮转未覆盖到冷目录的同名覆盖',
       3000,

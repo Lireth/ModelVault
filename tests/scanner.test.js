@@ -334,7 +334,8 @@ describe('scanModels', () => {
       )
       // 深层模型的类型/标签派生与层级一致
       const deep = run1.models.find(
-        (m) => m.id === path.join(root, 'lora', '角色', 'deep', 'd1.safetensors'),
+        (m) =>
+          m.id === path.join(root, 'lora', '角色', 'deep', 'd1.safetensors'),
       )
       expect(deep.type).toBe('lora')
       expect(deep.folderSubCategory).toBe('role')

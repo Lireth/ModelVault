@@ -164,7 +164,8 @@ export function runWalk(w, silent) {
           // OPT-9：基线轮全树已 stat，全部目录记为本轮已校验
           const checkedAt = Date.now()
           w.contentCheckedAt = new Map()
-          for (const dir of snapshot.keys()) w.contentCheckedAt.set(dir, checkedAt)
+          for (const dir of snapshot.keys())
+            w.contentCheckedAt.set(dir, checkedAt)
         } else {
           w.snapshot = snapshot
           w.statSnapshot = null
@@ -271,7 +272,11 @@ export function runWalk(w, silent) {
         // 名称变化目录必 stat：其内容条目已随增删失真，且变更目录正是
         // 内容变化高发处
         const nameChangedDirs = new Set()
-        for (const rel of computeSnapshotDiff(w.root, w.snapshot, nameSnapshot)) {
+        for (const rel of computeSnapshotDiff(
+          w.root,
+          w.snapshot,
+          nameSnapshot,
+        )) {
           nameChangedDirs.add(
             rel === '' ? w.root : path.join(w.root, ...rel.split('/')),
           )

@@ -94,18 +94,15 @@ export function createRendererCrashRecovery(win, hooks = {}, timing = {}) {
         return
       }
       // 退避重载：页面重新加载后由渲染层启动链路经 loadStore 秒开恢复状态
-      reloadTimer = setTimeout(
-        () => {
-          reloadTimer = null
-          if (isDestroyed()) return
-          totalRecovered += 1
-          logger.info(
-            `渲染进程恢复：重载页面（第 ${consecutive}/${maxAutoReloads} 次，累计 ${totalRecovered}）`,
-          )
-          win.webContents.reload()
-        },
-        reloadDelayMs * consecutive,
-      )
+      reloadTimer = setTimeout(() => {
+        reloadTimer = null
+        if (isDestroyed()) return
+        totalRecovered += 1
+        logger.info(
+          `渲染进程恢复：重载页面（第 ${consecutive}/${maxAutoReloads} 次，累计 ${totalRecovered}）`,
+        )
+        win.webContents.reload()
+      }, reloadDelayMs * consecutive)
       reloadTimer.unref?.()
     },
     /** did-finish-load 事件入口：页面重新可用；存活一段时间后清零连续计数 */

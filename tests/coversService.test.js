@@ -319,7 +319,9 @@ describe('OPT-14 离线库写链不重建目录树', () => {
       expect(res.error).toContain('模型库目录不可用')
       // 关键回归：失效路径上没有任何目录被重建（旧实现 recursive mkdir
       // 会把 <root>/.modelvault/covers 整棵树重建出来）
-      await expect(fs.access(path.join(offlineRoot, '.modelvault'))).rejects.toThrow()
+      await expect(
+        fs.access(path.join(offlineRoot, '.modelvault')),
+      ).rejects.toThrow()
       await expect(fs.access(offlineRoot)).rejects.toThrow()
     } finally {
       setDataRoot(root)
@@ -331,7 +333,9 @@ describe('OPT-14 离线库写链不重建目录树', () => {
     try {
       const res = await saveCoverBuffer(PNG_MAGIC, '.png')
       expect(res.error).toContain('模型库目录不可用')
-      await expect(fs.access(path.join(offlineRoot, '.modelvault'))).rejects.toThrow()
+      await expect(
+        fs.access(path.join(offlineRoot, '.modelvault')),
+      ).rejects.toThrow()
       await expect(fs.access(offlineRoot)).rejects.toThrow()
     } finally {
       setDataRoot(root)

@@ -377,7 +377,12 @@ export function computeAndCacheHash(id, mtimeMs, options = {}) {
     }
     try {
       emitProgress(snap, true)
-      const hash = await computeHashWithRetry(id, priority, snap, controller.signal)
+      const hash = await computeHashWithRetry(
+        id,
+        priority,
+        snap,
+        controller.signal,
+      )
       // 竞态防护：大文件哈希耗时数十秒，期间文件可能被同名覆盖（重新下载/
       // 同步工具写入）。此时哈希对应旧版本或新旧混合内容，若仍以计算前的
       // mtime 落盘，缓存会与 knownInfo 的旧 mtime 判定为有效（hasValidCachedHash），
