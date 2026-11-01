@@ -11,7 +11,7 @@
 # 注意：标签版本号必须与 package.json 的 version 一致，否则构建提前失败，
 #       因为 electron-builder 产物路径由 package.json 的 version 决定。
 # 手动触发（workflow_dispatch）需输入版本号：完整演练「解析 → 校验 → 打包 →
-#       归档」流程，但不会创建 GitHub Release（避免基于分支引用误发版）。
+#       冒烟 → 归档」流程，但不会创建 GitHub Release（避免基于分支引用误发版）。
 
 name: Release Build
 
@@ -157,6 +157,21 @@ jobs:
           "path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
           "size=$sizeMB"          >> $env:GITHUB_OUTPUT
 
+      # P0-2：发布产物启动冒烟。portable EXE 仅在标签构建产出（asar 布局、
+      # maximum 压缩与便携桩解压启动链路均与 --dir 产物不同），此前从未真实
+      # 启动验证过，坏产物会直接进入 Release。复用 scripts/smoke.mjs（V-05
+      # 检查项：主窗口/生产页面加载/图片协议/preload+IPC 往返/缩略图渲染），
+      # SMOKE_APP_DIR 指向产物目录，运行器按 ModelVault-<version>.exe 候选
+      # 定位单文件便携版真实启动；便携桩首次启动需解压到临时目录，
+      # 启动超时放宽到 5 分钟。
+      - name: 启动冒烟（portable EXE）
+        shell: pwsh
+        env:
+          SMOKE_APP_DIR: dist/${{ steps.ver.outputs.version }}
+          # 单位毫秒：便携桩首次启动需解压到临时目录，放宽到 5 分钟
+          SMOKE_TIMEOUT_MS: '300000'
+        run: node scripts/smoke.mjs --packaged
+
       # D3：生成 SHA256 校验和文件，供用户校验下载完整性
       - name: 生成 SHA256 校验和
         id: checksum
@@ -257,6 +272,7 @@ jobs:
           | ---- | -- |
           | 产物 | ``ModelVault-$env:VERSION.exe`` |
           | 体积 | $env:SIZE MB |
+          | 启动冒烟 | ✅ portable EXE 启动检查通过 |
           | 运行日志 | [查看详情]($env:RUN_URL) |
 
           $releaseLine
@@ -280,4 +296,5 @@ jobs:
           - 版本号与 ``package.json`` 的 ``version`` 不一致（手动触发时为输入框版本号）
           - 单元测试失败
           - electron-builder 打包报错（检查 ``build/`` 目录与图标配置）
+          - 发布产物启动冒烟失败（便携版 EXE 未能启动或检查项未通过，见「启动冒烟」步骤日志）
           "@

@@ -8,7 +8,9 @@ import electronPath from 'electron'
 /**
  * 启动冒烟/E2E 运行器（V-05）：
  * - 默认目标：`npm run build` 生成的 out/ 三端产物（electron + 仓库根路径）；
- * - `--packaged`：`electron-builder --dir` 生成的 win-unpacked 可执行文件；
+ * - `--packaged`：打包产物可执行文件——默认 `electron-builder --dir` 生成的
+ *   win-unpacked；`SMOKE_APP_DIR` 可指向其他产物目录（如发布流程的
+ *   dist/<version>/，运行器按 ModelVault-<version>.exe 候选定位单文件便携版）；
  * - 以独立 userData 启动应用，等待 main 进程写入检查结果 JSON 后判定成败。
  *
  * 检查项见 src/main/smoke.js：主窗口、生产页面加载、窗口可见、自定义图片协议、
@@ -51,13 +53,18 @@ async function resolveTarget() {
   }
 
   const pkg = await readPackage()
-  // SMOKE_APP_DIR 便于本地用自定义 output 目录验证（CI 使用默认 dist/<version>/win-unpacked）
+  // SMOKE_APP_DIR 便于用自定义 output 目录验证（CI 默认 dist/<version>/win-unpacked；
+  // release 流程指向 dist/<version> 以冒烟最终发布的单文件便携版）
   const dir = process.env.SMOKE_APP_DIR
     ? path.resolve(root, process.env.SMOKE_APP_DIR)
     : path.join(root, 'dist', pkg.version, 'win-unpacked')
+  const productName = pkg.productName || 'ModelVault'
   const candidates = [
-    path.join(dir, `${pkg.productName || 'ModelVault'}.exe`),
+    path.join(dir, `${productName}.exe`),
     path.join(dir, 'ModelVault.exe'),
+    // 单文件便携版（electron-builder.yml artifactName: ${productName}-${version}.exe）：
+    // 仅 SMOKE_APP_DIR 指向 dist/<version> 时命中，win-unpacked 内不存在该命名
+    path.join(dir, `${productName}-${pkg.version}.exe`),
   ]
   for (const candidate of candidates) {
     if (await exists(candidate)) {
@@ -65,7 +72,7 @@ async function resolveTarget() {
     }
   }
   throw new Error(
-    `未找到打包产物（${candidates.join(' 或 ')}），请先运行 npx electron-builder --dir`,
+    `未找到打包产物（${candidates.join(' 或 ')}），请先运行 npx electron-builder --dir，或以 SMOKE_APP_DIR 指向便携版产物目录`,
   )
 }
 
