@@ -156,7 +156,9 @@ describe('models:deleteModel', () => {
     await flushIndexWrites()
     expect(getQueuedIndexUpdateCountForTests()).toBe(0)
     const cached = await readLibraryIndex(root)
-    expect(cached.models.some((m) => m.id === absA || m.id === absB)).toBe(false)
+    expect(cached.models.some((m) => m.id === absA || m.id === absB)).toBe(
+      false,
+    )
   })
 
   it('无效模型标识拒绝', async () => {

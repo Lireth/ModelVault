@@ -370,7 +370,10 @@ describe('scanModels', () => {
     try {
       await fs.mkdir(path.join(cancelRoot, 'aa-quick'), { recursive: true })
       await fs.mkdir(path.join(cancelRoot, 'zz-busy'), { recursive: true })
-      await fs.writeFile(path.join(cancelRoot, 'aa-quick', 'a.safetensors'), 'x')
+      await fs.writeFile(
+        path.join(cancelRoot, 'aa-quick', 'a.safetensors'),
+        'x',
+      )
       await Promise.all(
         Array.from({ length: 300 }, (_, i) =>
           fs.writeFile(
