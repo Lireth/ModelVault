@@ -11,7 +11,16 @@ import globals from 'globals'
  */
 export default [
   {
-    ignores: ['out/**', 'dist/**', 'node_modules/**', 'image/**', 'build/**'],
+    ignores: [
+      'out/**',
+      'dist/**',
+      'node_modules/**',
+      'image/**',
+      'build/**',
+      // 覆盖率报告生成物（istanbul HTML 报告的 prettify/sorter 等脚本）：
+      // 生成物不参与 lint，避免 npm run lint 扫描与 --fix 改写
+      'coverage/**',
+    ],
   },
   js.configs.recommended,
   ...pluginVue.configs['flat/essential'],

@@ -2,4 +2,6 @@ out/
 dist/
 node_modules/
 image/
+# 覆盖率报告生成物：不参与 format，避免 format:check 扫描与 --write 改写
+coverage/
 package-lock.json
