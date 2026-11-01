@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { BrowserWindow } from 'electron'
 import logger from '../logger'
 import { atomicWriteFile } from './atomic-write'
 import { runMaintenance } from './maintenance-lock'
@@ -8,6 +9,7 @@ import { getCurrentRoot, isInRoot, toRelKey } from './store-paths'
 import {
   isPathRealWithin,
   resolveRealPath,
+  runWithConcurrency,
   sameResolvedPathIgnoreCase,
 } from '../utils'
 import { isDeltaBatchName } from './store-meta-journal'
@@ -139,16 +141,39 @@ async function moveFile(src, dest) {
   await fs.rm(src, { force: true })
 }
 
+/** 跨库传输进度推送节流间隔（ms，OPT-18）：批量解压级的高频完成不刷爆 IPC */
+const TRANSFER_PROGRESS_INTERVAL_MS = 200
+/** copy 模式的文件级并发（OPT-18）：重叠磁盘等待；move 保持串行（语义见下） */
+const TRANSFER_COPY_CONCURRENCY = 3
+
+/** 向全部存活窗口广播传输进度（与 warmupProgress 同一广播模式） */
+function broadcastTransferProgress(progress) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send('models:transferProgress', progress)
+    }
+  }
+}
+
 /**
  * 跨库传输模型（IPC 入口）。
- * @param {{ids: string[], targetRoot: string, mode: 'copy'|'move'}} payload
+ * @param {{ids: string[], targetRoot: string, mode: 'copy'|'move',
+ *   signal?: AbortSignal|null}} payload
  *   ids 为当前库内模型绝对路径；targetRoot 必须是已保存的其他模型库；
- *   mode='copy' 复制（源不动）/ 'move' 移动（成功后清理源文件与源元数据）
+ *   mode='copy' 复制（源不动）/ 'move' 移动（成功后清理源文件与源元数据）；
+ *   signal 为 OPT-18 opId 取消信号——模型间隙检查，已传输部分保留，
+ *   计划内未传输条目的目标元数据回滚（先写后传顺序的配套）
  * @returns {Promise<{transferred: number, mode: string, targetRoot: string,
- *   failed: Array<{id: string, error: string}>, skipped: Array<{id: string, reason: string}>}
+ *   failed: Array<{id: string, error: string}>, skipped: Array<{id: string, reason: string}>,
+ *   canceled?: boolean}
  *   | {error: string}>}
  */
-export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
+export async function transferModelsToLibrary({
+  ids,
+  targetRoot,
+  mode,
+  signal,
+}) {
   const currentRoot = getCurrentRoot()
   if (!currentRoot) return { error: '尚未设置模型文件夹' }
   if (!Array.isArray(ids) || ids.length === 0)
@@ -185,7 +210,28 @@ export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
     const failed = []
     const skipped = []
     const planned = []
+    const aborted = () => signal?.aborted === true
+    const transferred = []
+    const rollbackKeys = []
+    // OPT-18：进度节流推送（done/total/字节）； planning 阶段的失败/跳过
+    // 同样计入 done——用户看到的是「已处理/总数」而非仅成功数
+    let lastProgressAt = 0
+    let transferredBytes = 0
+    let totalBytes = 0
+    const reportProgress = (force = false) => {
+      const now = Date.now()
+      if (!force && now - lastProgressAt < TRANSFER_PROGRESS_INTERVAL_MS) return
+      lastProgressAt = now
+      broadcastTransferProgress({
+        done: transferred.length + failed.length + skipped.length,
+        total: ids.length,
+        bytes: transferredBytes,
+        totalBytes,
+        canceled: aborted(),
+      })
+    }
     for (const id of ids) {
+      if (aborted()) break
       if (
         typeof id !== 'string' ||
         !isInRoot(id) ||
@@ -196,8 +242,11 @@ export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
       }
       const meta = getModelMeta(id)
       const targetPath = path.join(targetRoot, toRelKey(id))
+      let plannedSize
       try {
-        await fs.stat(id)
+        const stat = await fs.stat(id)
+        totalBytes += stat.size
+        plannedSize = stat.size
       } catch {
         failed.push({ id, error: '模型文件不存在' })
         continue
@@ -209,7 +258,25 @@ export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
       } catch {
         /* 目标不存在，可传输 */
       }
-      planned.push({ id, meta, targetPath, relKey: toRelKey(id) })
+      planned.push({
+        id,
+        meta,
+        targetPath,
+        relKey: toRelKey(id),
+        size: plannedSize,
+      })
+    }
+    reportProgress(true)
+    // 取消于规划阶段：未写任何目标元数据、未复制任何文件，干净退出
+    if (aborted()) {
+      return {
+        canceled: true,
+        transferred: 0,
+        mode: transferMode,
+        targetRoot,
+        failed,
+        skipped,
+      }
     }
 
     // 先写目标库元数据（一次写回，仅计划内且带元数据的条目；封面文件先复制），
@@ -257,10 +324,9 @@ export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
       }
     }
 
-    // 逐模型传输文件（主文件 + 存在的 sidecar；目标已存在的 sidecar 跳过不覆盖）
-    const transferred = []
-    const rollbackKeys = []
-    for (const item of planned) {
+    // 逐模型传输文件（主文件 + 存在的 sidecar；目标已存在的 sidecar 跳过不覆盖）。
+    // OPT-18：取消在模型间隙检查——在途的单个文件传输不打断，已完成部分保留
+    const transferItem = async (item) => {
       const { id, targetPath, relKey } = item
       try {
         // copyFile/rename 不创建父目录：先确保目标相对目录存在（相对路径镜像）
@@ -294,6 +360,7 @@ export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
         }
         item.copiedSidecars = copiedSidecars
         transferred.push(item)
+        transferredBytes += item.size
       } catch (err) {
         failed.push({ id, error: `文件传输失败: ${err.message}` })
         rollbackKeys.push(relKey)
@@ -304,6 +371,36 @@ export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
         } catch {
           /* 清理失败留待目标库健康检查 */
         }
+      }
+      reportProgress()
+    }
+    if (transferMode === 'copy') {
+      // copy 模式 3 路并发（OPT-18）：文件级 copyFile 相互独立，重叠磁盘等待；
+      // 已取消后未开始的项直接跳过（worker 顶部检查）
+      await runWithConcurrency(
+        planned,
+        async (item) => {
+          if (aborted()) return
+          await transferItem(item)
+        },
+        TRANSFER_COPY_CONCURRENCY,
+      )
+    } else {
+      // move 保持串行：源清理与「先写后传」回滚语义依赖确定性顺序
+      for (const item of planned) {
+        if (aborted()) break
+        await transferItem(item)
+      }
+    }
+    // 取消收尾（OPT-18）：计划内未传输的条目回滚目标元数据——否则目标库
+    // 残留「有标注无文件」的幽灵条目（先写后传顺序的配套措施）
+    if (aborted() && metaWritten > 0) {
+      const settledIds = new Set([
+        ...transferred.map((i) => i.id),
+        ...failed.map((f) => f.id),
+      ])
+      for (const item of planned) {
+        if (!settledIds.has(item.id)) rollbackKeys.push(item.relKey)
       }
     }
     // 失败项回滚目标元数据条目（先写后传顺序的配套措施）
@@ -334,15 +431,17 @@ export async function transferModelsToLibrary({ ids, targetRoot, mode }) {
     }
 
     logger.info(
-      `跨库${transferMode === 'move' ? '移动' : '复制'}完成: ${transferred.length} 个 → ${targetRoot}` +
+      `跨库${transferMode === 'move' ? '移动' : '复制'}${aborted() ? '已取消' : '完成'}: ${transferred.length} 个 → ${targetRoot}` +
         `（跳过 ${skipped.length}，失败 ${failed.length}，元数据迁移 ${metaWritten} 条）`,
     )
+    reportProgress(true)
     return {
       transferred: transferred.length,
       mode: transferMode,
       targetRoot,
       failed,
       skipped,
+      ...(aborted() ? { canceled: true } : {}),
     }
   })
 }

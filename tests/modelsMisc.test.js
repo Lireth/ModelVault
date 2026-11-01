@@ -171,6 +171,13 @@ describe('models:deleteModel', () => {
     await expect(fs.access(outsideFile)).resolves.toBeUndefined()
   })
 
+  it('models:cancelOp 未知令牌返回 ok:false（OPT-18）', async () => {
+    const res = await getRegisteredHandler('models:cancelOp')(makeEvent(), {
+      targetOpId: 'no-such-op',
+    })
+    expect(res).toEqual({ ok: false })
+  })
+
   it('大维护操作持锁期间删除被拒（OPT-14 互斥）', async () => {
     const abs = path.join(root, 'busy.safetensors')
     await fs.writeFile(abs, 'x')

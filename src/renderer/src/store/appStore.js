@@ -144,6 +144,7 @@ export {
   openTransferToLibrary,
   closeTransfer,
   confirmTransfer,
+  cancelTransfer,
 } from './transfer'
 
 // 查找派生

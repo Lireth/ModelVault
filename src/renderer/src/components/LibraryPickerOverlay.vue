@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import {
+  cancelTransfer,
   closeTransfer,
   confirmTransfer,
   targetDisplayName,
@@ -39,7 +40,9 @@ function onKeydown(e) {
   if (e.key === 'Escape') {
     e.preventDefault()
     e.stopPropagation()
-    closeTransfer()
+    // 传输进行中 Esc=中止（OPT-18），空闲=关闭浮层
+    if (transferState.busy) cancelTransfer()
+    else closeTransfer()
   } else if (e.key === 'Enter' && e.target?.tagName !== 'BUTTON') {
     e.preventDefault()
     e.stopPropagation()
@@ -100,14 +103,22 @@ function onKeydown(e) {
           </label>
         </div>
 
+        <div
+          v-if="transferState.busy && transferState.progress"
+          class="transfer-progress"
+        >
+          已处理 {{ transferState.progress.done }}/{{
+            transferState.progress.total
+          }}（{{ transferState.progress.canceled ? '取消中…' : '传输中' }}）
+        </div>
+
         <div class="transfer-actions">
           <button
             ref="cancelBtn"
             class="btn"
-            :disabled="transferState.busy"
-            @click="closeTransfer"
+            @click="transferState.busy ? cancelTransfer() : closeTransfer()"
           >
-            取消
+            {{ transferState.busy ? '中止传输' : '取消' }}
           </button>
           <button
             ref="confirmBtn"
@@ -219,6 +230,12 @@ function onKeydown(e) {
   font-size: var(--font-xs);
   cursor: pointer;
   user-select: none;
+}
+
+.transfer-progress {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
 }
 
 .transfer-actions {

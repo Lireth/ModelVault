@@ -14,6 +14,7 @@ import {
 } from '../../services/library-health'
 import { sidecarFilesFor } from '../../services/scanner'
 import {
+  cancelActiveOp,
   wrapHandler,
   checkModelIdInRootReal,
   getRealRootPath,
@@ -167,6 +168,15 @@ export function registerMiscHandlers() {
       return { ok: true }
     },
     { errorPrefix: '打开菜单失败' },
+  )
+
+  // 取消在途可取消操作（OPT-18 opId 机制）：跨库传输/一键整理等长操作
+  // 的载荷附带 opId，wrapHandler 登记信号；本通道按令牌发出中止信号，
+  // 操作方在模型间隙检查后收尾（已完成部分保留，与批量取消语义一致）
+  wrapHandler(
+    'models:cancelOp',
+    (_event, { opId } = {}) => ({ ok: cancelActiveOp(opId) }),
+    { errorPrefix: '取消操作失败' },
   )
 
   // 在资源管理器中显示模型文件（仅限当前模型根目录内的路径，C6：

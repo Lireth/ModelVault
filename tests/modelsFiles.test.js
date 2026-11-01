@@ -31,6 +31,7 @@ import {
   registerFilesHandlers,
   splitModelFileName,
 } from '../src/main/ipc/models/files'
+import { cancelActiveOp } from '../src/main/ipc/handler'
 import { getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
 import {
   getModelMeta,
@@ -241,6 +242,44 @@ describe('models:organizeByTags handler', () => {
     expect(await handler(makeEvent(), { moves: [] })).toEqual({
       error: '没有需要移动的模型',
     })
+  })
+
+  it('payload 附带 opId 时正常完成（取消令牌经 wrapHandler 剥离，OPT-18）', async () => {
+    // opId 不在通道 schema 内：剥离失败则结构门禁直接拒绝——本用例锁定
+    // 「剥离先于校验」的约定，渲染层取消协议对 schema 透明
+    const id = await makeModel(path.join('lora', 'a.safetensors'), 'role')
+    const res = await handler(makeEvent(), {
+      moves: [{ id, subCategory: 'role' }],
+      opId: 'op-aaaa-bbbb',
+    })
+    expect(res.error).toBeUndefined()
+    expect(res.moved).toBe(1)
+    expect(res.canceled).toBeUndefined()
+    // 元数据键随迁（opId 未污染载荷语义）
+    expect(
+      getModelMeta(path.join(root, 'LoRA', '角色', 'a.safetensors')),
+    ).toMatchObject({ subCategory: 'role', note: '标注' })
+  })
+
+  it('发起后经 cancelOp 中止：条目间隙收尾并返回 canceled（OPT-18）', async () => {
+    // 50 个待移动项：wrapper 同步前缀完成 opId 登记后，首个 realpath await
+    // 期间即可发出中止——校验/移动循环在间隙检查处提前收尾
+    const moves = []
+    for (let i = 0; i < 50; i++) {
+      moves.push({
+        id: await makeModel(path.join('lora', `m${i}.safetensors`), 'role'),
+        subCategory: 'role',
+      })
+    }
+    const p = handler(makeEvent(), {
+      moves,
+      opId: 'op-cancel-me',
+    })
+    cancelActiveOp('op-cancel-me')
+    const res = await p
+    expect(res.canceled).toBe(true)
+    // 已完成部分保留：中止落在规划/移动前段，移动数必然小于总数
+    expect(res.moved).toBeLessThan(50)
   })
 })
 

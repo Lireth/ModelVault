@@ -18,7 +18,23 @@ export const transferState = reactive({
   mode: 'copy',
   /** 传输进行中（浮层确认按钮防连点） */
   busy: false,
+  /** 传输进度（OPT-18：主进程 transferProgress 事件快照；null = 无进行中传输） */
+  progress: null,
 })
+
+/** 在途传输的取消令牌（OPT-18：models:cancelOp 据此中止，浮层取消按钮触发） */
+let activeTransferOpId = null
+
+/**
+ * 请求取消在途跨库传输：主进程在模型间隙收尾，已完成部分保留
+ * （计划内未传输条目的目标元数据由主进程回滚）。
+ */
+export function cancelTransfer() {
+  if (!activeTransferOpId) return
+  window.api.models.cancelOp(activeTransferOpId).catch(() => {
+    /* 取消通道异常不影响传输主流程（结果由传输响应兜底） */
+  })
+}
 
 /** 可选目标库：已保存库列表去掉当前库 */
 export const transferTargets = computed(() =>
@@ -68,17 +84,51 @@ export async function confirmTransfer(targetRoot) {
   if (!targetRoot || transferState.busy || transferState.ids.length === 0)
     return
   transferState.busy = true
+  // OPT-18：附带取消令牌，浮层取消按钮经 models:cancelOp 中止
+  const opId =
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`
+  activeTransferOpId = opId
+  transferState.progress = {
+    done: 0,
+    total: transferState.ids.length,
+    bytes: 0,
+    totalBytes: 0,
+  }
   try {
     const res = await window.api.models.transferToLibrary({
       ids: transferState.ids,
       targetRoot,
       mode: transferState.mode,
+      opId,
     })
     if (res?.error) {
       toast('error', res.error)
       return
     }
     const verb = res.mode === 'move' ? '移动' : '复制'
+    if (res?.canceled) {
+      // 已取消：已完成部分保留（move 已清理源、copy 目标库待扫描），仍需重扫收敛
+      toast(
+        'warn',
+        res.transferred > 0
+          ? `跨库传输已取消（已完成 ${res.transferred} 个，已完成部分保留）`
+          : '跨库传输已取消',
+      )
+      transferState.visible = false
+      transferState.ids = []
+      if (
+        res.transferred > 0 &&
+        !state.scanning &&
+        !state.partialScanning &&
+        !state.importing
+      ) {
+        const { scanModels } = await import('./library')
+        await scanModels()
+      }
+      return
+    }
     const parts = []
     if (res.transferred > 0) parts.push(`${verb} ${res.transferred} 个`)
     if (res.skipped?.length > 0) parts.push(`跳过 ${res.skipped.length} 个`)
@@ -101,6 +151,8 @@ export async function confirmTransfer(targetRoot) {
   } catch (err) {
     toast('error', `跨库传输失败: ${err.message}`)
   } finally {
+    activeTransferOpId = null
+    transferState.progress = null
     transferState.busy = false
   }
 }

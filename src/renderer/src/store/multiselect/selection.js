@@ -2,6 +2,7 @@ import { computed } from 'vue'
 import { state } from '../state'
 import { filteredModels, duplicateGroups } from '../filter'
 import { modelById } from '../selectors'
+import { cancelOrganizeByTags } from './batch-files'
 
 /**
  * 多选选择机制（E4，O-4 自 multiselect.js 按域拆出）：
@@ -186,7 +187,12 @@ export function selectRedundantDuplicates() {
  * （收藏/评分等 Promise.allSettled）无中途取消点，不受影响。
  * 标志位由「所有」批量操作的 finally 统一复位——含不响应取消的并发型
  * 批量，否则取消意图会跨批量泄漏，毒化下一次串行批量（A3）。
+ * 一键整理在主进程单 IPC 内循环（OPT-18）：标志位之外经 models:cancelOp
+ * 主动发出中止信号，主进程在条目间隙收尾（无在途整理时为 no-op）。
  */
 export function requestBatchCancel() {
-  if (state.multiSelect.busy) state.multiSelect.cancelRequested = true
+  if (state.multiSelect.busy) {
+    state.multiSelect.cancelRequested = true
+    cancelOrganizeByTags()
+  }
 }

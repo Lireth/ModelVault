@@ -60,6 +60,7 @@ const EXPECTED_EXPORTS = [
   'relocateFolder',
   'scanModels',
   'cancelScan',
+  'cancelTransfer',
   'applyThumbUpdates',
   'applyHashUpdate',
   // 派生

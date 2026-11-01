@@ -11,6 +11,20 @@ import { LORA_DIR, LORA_TAG_KEYS } from '../../../../shared/model-categories'
  * 涉及文件改名/删除的操作完成后整表重扫收敛（id 全部已变化）。
  */
 
+/** 在途一键整理的取消令牌（OPT-18：models:cancelOp 中止主进程移动循环） */
+let organizeOpId = null
+
+/**
+ * 请求取消在途的一键整理（Esc 批量取消路径调用）：主进程在条目间隙收尾，
+ * 已完成的移动保留（元数据键已即时迁移，状态一致）。
+ */
+export function cancelOrganizeByTags() {
+  if (!organizeOpId) return
+  window.api.models.cancelOp(organizeOpId).catch(() => {
+    /* 取消通道异常不影响整理主流程（结果由整理响应兜底） */
+  })
+}
+
 /**
  * 一键移动文件（自动标签整理）：把选中的 LoRA 模型移动到模型库根目录的
  * LoRA 文件夹——已分配分类标签的移入 LoRA/<标签>/（主进程自动创建缺失的
@@ -42,10 +56,26 @@ export async function batchOrganizeByTags() {
     return
   }
   state.multiSelect.busy = true
+  // OPT-18：附带取消令牌，Esc 批量取消路径经 models:cancelOp 中止主进程循环
+  organizeOpId =
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`
   try {
-    const res = await window.api.models.organizeByTags(moves).catch(() => null)
+    const res = await window.api.models
+      .organizeByTags({ moves, opId: organizeOpId })
+      .catch(() => null)
     if (!res || res.error) {
       toast('error', `一键移动失败: ${res?.error || '未知错误'}`)
+      return
+    }
+    if (res.canceled) {
+      toast(
+        'warn',
+        res.moved > 0
+          ? `一键整理已取消（已完成 ${res.moved} 个，已完成部分保留）`
+          : '一键整理已取消',
+      )
       return
     }
     // id 已变化：源子树 + LoRA 目标子树（根子树覆盖全部标签子目录）一次
@@ -67,6 +97,7 @@ export async function batchOrganizeByTags() {
       )
     else toast('info', `未移动任何模型：${parts.join('，') || '无需移动'}`)
   } finally {
+    organizeOpId = null
     state.multiSelect.busy = false
     state.multiSelect.cancelRequested = false
   }

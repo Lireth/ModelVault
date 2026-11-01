@@ -7,6 +7,7 @@ import {
   partialScanModels,
   state,
   toast,
+  transferState,
 } from '../store/appStore'
 
 /**
@@ -25,6 +26,7 @@ export function useMainProcessEvents() {
   let unsubscribeWarmup = null
   let unsubscribeUpdateAvailable = null
   let unsubscribeWatcherStopped = null
+  let unsubscribeTransferProgress = null
 
   /** 目录变更自动重扫的二级防抖（主进程 3s 静默期后此处再缓冲 1s，E8） */
   let fsChangedTimer = null
@@ -140,6 +142,13 @@ export function useMainProcessEvents() {
         '目录监控已停止（模型库持续不可达或多次异常），恢复后可手动扫描重新启用',
       )
     })
+    // 订阅跨库传输进度事件（OPT-18）：快照写入传输浮层（done/total/字节），
+    // 无进行中传输时事件被浮层状态兜底忽略（finally 置 null）
+    unsubscribeTransferProgress = window.api.models.onTransferProgress?.(
+      (progress) => {
+        if (transferState.busy) transferState.progress = progress
+      },
+    )
   }
 
   function unsubscribeAll() {
@@ -152,6 +161,7 @@ export function useMainProcessEvents() {
     unsubscribeWarmup?.()
     unsubscribeUpdateAvailable?.()
     unsubscribeWatcherStopped?.()
+    unsubscribeTransferProgress?.()
   }
   return { subscribe, unsubscribeAll }
 }

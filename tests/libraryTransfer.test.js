@@ -4,13 +4,33 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-const { getSettingsMock } = vi.hoisted(() => ({ getSettingsMock: vi.fn() }))
+const { getSettingsMock, sentEvents } = vi.hoisted(() => ({
+  getSettingsMock: vi.fn(),
+  sentEvents: [],
+}))
+
+// OPT-18：library-transfer 进度事件经 BrowserWindow 广播——收集到
+// sentEvents 供断言；空窗口列表同样安全（无订阅者时广播为 no-op）
+vi.mock('electron', () => ({
+  app: { getPath: vi.fn(() => fakeUserData), isPackaged: true },
+  BrowserWindow: {
+    getAllWindows: vi.fn(() => [
+      {
+        isDestroyed: () => false,
+        webContents: {
+          send: (channel, payload) => sentEvents.push({ channel, payload }),
+        },
+      },
+    ]),
+  },
+}))
 
 // 跨库传输的目标库注册校验依赖 settings；本文件直接注入受控值
 vi.mock('../src/main/services/store-settings', () => ({
   getSettings: getSettingsMock,
 }))
 
+import { fakeUserData } from './setup'
 import { getCurrentRoot, setDataRoot } from '../src/main/services/store-paths'
 import {
   loadData,
@@ -76,6 +96,7 @@ describe('transferModelsToLibrary（F-3 跨库传输）', () => {
   let targetRoot
 
   beforeEach(async () => {
+    sentEvents.length = 0
     sourceRoot = mkTmp('modelvault-transfer-src-')
     targetRoot = mkTmp('modelvault-transfer-dst-')
     // 目标库注册为已保存库（settings mock 在文件顶部）
@@ -397,5 +418,54 @@ describe('transferModelsToLibrary（F-3 跨库传输）', () => {
     expect(res.transferred).toBe(1)
     const store = await readTargetStore(targetRoot)
     expect(store.models['shell.safetensors']).toBeDefined()
+  })
+
+  it('正常传输推送进度事件：最终 done===total 且未取消（OPT-18）', async () => {
+    const ids = []
+    for (let i = 0; i < 3; i++) {
+      ids.push(await writeModel(sourceRoot, `batch-${i}.safetensors`, 'x'))
+    }
+    const res = await transferModelsToLibrary({
+      ids,
+      targetRoot,
+      mode: 'copy',
+    })
+    expect(res.transferred).toBe(3)
+    const progressEvents = sentEvents.filter(
+      (e) => e.channel === 'models:transferProgress',
+    )
+    expect(progressEvents.length).toBeGreaterThan(0)
+    const last = progressEvents[progressEvents.length - 1].payload
+    expect(last.done).toBe(3)
+    expect(last.total).toBe(3)
+    expect(last.canceled).toBe(false)
+    expect(last.bytes).toBeGreaterThan(0)
+  })
+
+  it('取消信号预先置位：干净退出且无任何目标库写入（OPT-18）', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const abs = await writeModel(sourceRoot, 'cancel-me.safetensors', 'x')
+    setModelMeta(abs, { favorite: true })
+    const res = await transferModelsToLibrary({
+      ids: [abs],
+      targetRoot,
+      mode: 'copy',
+      signal: controller.signal,
+    })
+    expect(res.canceled).toBe(true)
+    expect(res.transferred).toBe(0)
+    // 干净退出：规划阶段即中止——目标库无元数据写入、无文件复制，源完整
+    await expect(
+      fsp.readFile(path.join(targetRoot, '.modelvault', 'store.json'), 'utf-8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(fsp.readFile(abs, 'utf-8')).resolves.toBe('x')
+    const progressEvents = sentEvents.filter(
+      (e) => e.channel === 'models:transferProgress',
+    )
+    expect(progressEvents.length).toBeGreaterThan(0)
+    expect(progressEvents[progressEvents.length - 1].payload.canceled).toBe(
+      true,
+    )
   })
 })

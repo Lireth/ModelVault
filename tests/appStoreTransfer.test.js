@@ -96,10 +96,12 @@ describe('跨库传输编排（F-3）', () => {
 
     await confirmTransfer('D:\\models\\B')
 
+    // OPT-18：载荷携带取消令牌（opId 为渲染层生成的随机串）
     expect(api.models.transferToLibrary).toHaveBeenCalledWith({
       ids: ['a', 'b'],
       targetRoot: 'D:\\models\\B',
       mode: 'copy',
+      opId: expect.any(String),
     })
     expect(transferState.visible).toBe(false)
     expect(transferState.ids).toEqual([])

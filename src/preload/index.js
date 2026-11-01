@@ -189,6 +189,9 @@ const api = {
      */
     transferToLibrary: (payload) =>
       invokeValidated('models:transferToLibrary', payload),
+    /** 中止一个在途可取消操作（OPT-18；opId 为发起该操作时附带的令牌） */
+    cancelOp: (targetOpId) =>
+      invokeValidated('models:cancelOp', { targetOpId }),
     /** 在资源管理器中显示文件 */
     reveal: (path) => invokeValidated('models:reveal', { path }),
     /** 订阅扫描进度，返回取消监听函数 */
@@ -206,6 +209,9 @@ const api = {
     /** 订阅目录监控停止事件（OPT-16：{ root, reason }），返回取消监听函数 */
     onWatcherStopped: (listener) =>
       subscribe('models:watcherStopped', listener),
+    /** 订阅跨库传输进度事件（OPT-18：{ done, total, bytes, totalBytes, canceled? }） */
+    onTransferProgress: (listener) =>
+      subscribe('models:transferProgress', listener),
     /** 订阅右键菜单动作事件，返回取消监听函数 */
     onMenuAction: (listener) => subscribe('models:menuAction', listener),
     /** 加/去 .disabled 后缀（F10），返回 { path } 或 { error } */

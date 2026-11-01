@@ -563,17 +563,18 @@ export function registerFilesHandlers() {
   )
 
   // 跨库移动/复制（F-3）：目标必须是已保存的其他模型库；文件/sidecar/封面/
-  // 元数据保持相对路径整体迁移，安全校验与维护锁在服务层（library-transfer）
+  // 元数据保持相对路径整体迁移，安全校验与维护锁在服务层（library-transfer）。
+  // OPT-18：ctx.signal 为 opId 取消信号（渲染层经 models:cancelOp 中止）
   wrapHandler(
     'models:transferToLibrary',
-    async (event, { ids, targetRoot, mode } = {}) => {
+    async (event, { ids, targetRoot, mode } = {}, { signal } = {}) => {
       if (!Array.isArray(ids) || ids.length === 0) {
         return { error: '没有可传输的模型' }
       }
       if (ids.length > MAX_TRANSFER_IDS) {
         return { error: `单次最多传输 ${MAX_TRANSFER_IDS} 个模型` }
       }
-      return transferModelsToLibrary({ ids, targetRoot, mode })
+      return transferModelsToLibrary({ ids, targetRoot, mode, signal })
     },
     { errorPrefix: '跨库传输失败' },
   )
@@ -584,7 +585,7 @@ export function registerFilesHandlers() {
   // 单个失败（同名冲突等）不中断整批，结果按模型反馈。
   wrapHandler(
     'models:organizeByTags',
-    async (event, { moves } = {}) => {
+    async (event, { moves } = {}, { signal } = {}) => {
       if (!Array.isArray(moves) || moves.length === 0) {
         return { error: '没有需要移动的模型' }
       }
@@ -595,6 +596,9 @@ export function registerFilesHandlers() {
       if (!root) return { error: '未选择模型库根目录' }
       const rootReal = await getRealRootPath()
       if (!rootReal) return { error: '模型库根目录不可访问' }
+      // OPT-18：ctx.signal 为 opId 取消信号（渲染层经 models:cancelOp 中止）；
+      // 取消在条目间隙检查，已完成的移动保留（元数据键已即时迁移，状态一致）
+      const aborted = () => signal?.aborted === true
       // 维护锁（OPT-14）：批量移动与扫描 relink/备份恢复互斥；归属校验一并
       // 纳入锁内，保证「校验-移动」与并发大操作的原子边界。file-op 彼此兼容
       const token = tryAcquireMaintenance('file-op', root)
@@ -604,6 +608,7 @@ export function registerFilesHandlers() {
         const valid = []
         const skipped = []
         for (const item of moves) {
+          if (aborted()) break
           if (!item || typeof item.id !== 'string') continue
           if (await checkModelIdInRootReal(item.id, { realRoot: rootReal })) {
             skipped.push({ id: item.id, reason: 'out-of-root' })
@@ -613,8 +618,13 @@ export function registerFilesHandlers() {
         }
         const { planned, skipped: planSkipped } = planOrganizeMoves(valid, root)
         skipped.push(...planSkipped)
-        if (planned.length === 0) {
-          return { moved: 0, failed: [], skipped }
+        if (planned.length === 0 || aborted()) {
+          return {
+            moved: 0,
+            failed: [],
+            skipped,
+            ...(aborted() ? { canceled: true } : {}),
+          }
         }
         // 创建 LoRA 一级目录与 7 个标签子文件夹（recursive：已存在时静默保持原样）。
         // O6：已存在的 LoRA 目录若是指向库外的 junction，拒绝整理（避免 mkdir 跟随到库外）
@@ -637,10 +647,26 @@ export function registerFilesHandlers() {
           return { error: `创建分类文件夹失败: ${err.message}` }
         }
         let moved = 0
+        let canceled = false
         const failed = []
+        // OPT-22/P4：目标标签子文件夹的真实路径校验按目录缓存——候选目标
+        // 目录只有 8 个（LoRA 根 + 7 标签），万级批次此前逐项重复 realpath；
+        // 目录级 realpath 一次解析后按小写路径缓存判定结果
+        const targetDirOkCache = new Map()
         for (const { id, newPath } of planned) {
+          if (aborted()) {
+            canceled = true
+            break
+          }
           // 目标标签子文件夹同样做真实路径校验（已存在指库外的 junction 时拒绝）
-          if (!(await isPathRealWithin(path.dirname(newPath), rootReal))) {
+          const targetDir = path.dirname(newPath)
+          const dirKey = targetDir.toLowerCase()
+          let dirOk = targetDirOkCache.get(dirKey)
+          if (dirOk === undefined) {
+            dirOk = await isPathRealWithin(targetDir, rootReal)
+            targetDirOkCache.set(dirKey, dirOk)
+          }
+          if (!dirOk) {
             failed.push({ id, error: '目标文件夹真实路径不在当前模型库内' })
             continue
           }
@@ -668,9 +694,14 @@ export function registerFilesHandlers() {
           moved += 1
         }
         logger.info(
-          `一键移动文件完成: 移动 ${moved}，失败 ${failed.length}，跳过 ${skipped.length}`,
+          `一键移动文件${canceled ? '已取消' : '完成'}: 移动 ${moved}，失败 ${failed.length}，跳过 ${skipped.length}`,
         )
-        return { moved, failed, skipped }
+        return {
+          moved,
+          failed,
+          skipped,
+          ...(canceled ? { canceled: true } : {}),
+        }
       } finally {
         releaseMaintenance(token)
       }

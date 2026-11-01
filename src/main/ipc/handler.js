@@ -46,11 +46,65 @@ export function setIpcPerfWarnMsForTests(ms) {
   ipcPerfWarnMs = Number.isFinite(ms) && ms >= 0 ? ms : IPC_PERF_WARN_MS
 }
 
+/* ---------------- 可取消操作注册表（OPT-18 opId 机制） ---------------- */
+
+/**
+ * 在途可取消操作的 AbortController 注册表（opId → controller）：
+ * 渲染层为可取消长操作在 payload 内附带 opId（crypto.randomUUID()），
+ * models:cancelOp 据此中止；约定先于 schema 校验剥离 opId——payload
+ * schema 无需感知取消协议，剥离后的载荷才进入结构门禁。
+ * handler settle 即移除（注册表只容纳在途操作，不设后台 TTL 清扫：
+ * handler 必然 settle，容量上限为异常泄漏场景的自保兜底）。
+ */
+const activeOps = new Map()
+const ACTIVE_OPS_MAX = 64
+
+/**
+ * 提取 payload 中的取消令牌并登记（仅对象载荷且 opId 为 ≤128 字符非空串时）。
+ * @param {any} payload 原始载荷
+ * @returns {{opId: string|null, payload: any, signal: AbortSignal|null}}
+ *   opId 登记的令牌（未附带为 null）；payload 为剥离 opId 后的载荷；
+ *   signal 取消信号（handler 第三参解构消费，旧签名 handler 忽略不受影响）
+ */
+function extractOpSignal(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return { opId: null, payload, signal: null }
+  }
+  const opId = payload.opId
+  if (typeof opId !== 'string' || !opId || opId.length > 128) {
+    return { opId: null, payload, signal: null }
+  }
+  const rest = { ...payload }
+  delete rest.opId
+  if (activeOps.size >= ACTIVE_OPS_MAX) {
+    logger.warn(`可取消操作注册表已满（${ACTIVE_OPS_MAX}），本调用不可取消`)
+    return { opId: null, payload: rest, signal: null }
+  }
+  const controller = new AbortController()
+  activeOps.set(opId, controller)
+  return { opId, payload: rest, signal: controller.signal }
+}
+
+/**
+ * 请求中止一个在途可取消操作（models:cancelOp 的底层实现）。
+ * @param {unknown} opId 渲染层生成并随载荷附带的取消令牌
+ * @returns {boolean} 是否命中在途操作并已发出中止信号
+ */
+export function cancelActiveOp(opId) {
+  if (typeof opId !== 'string' || !opId) return false
+  const controller = activeOps.get(opId)
+  if (!controller) return false
+  controller.abort()
+  return true
+}
+
 /**
  * 注册一个带统一异常兜底的 IPC handler。
  * @param {string} channel 通道名（日志定位用）
- * @param {(event: import('electron').IpcMainInvokeEvent, payload: any) => any} handler
- *   业务处理器；返回值原样回传渲染进程
+ * @param {(event: import('electron').IpcMainInvokeEvent, payload: any,
+ *   ctx?: {signal?: AbortSignal|null}) => any} handler
+ *   业务处理器；返回值原样回传渲染进程。payload 若附带 opId 已被剥离，
+ *   ctx.signal 为对应的取消信号（OPT-18；不需要取消的 handler 忽略第三参）
  * @param {{errorPrefix?: string, perfWarnMs?: number}} [opts]
  *   errorPrefix 为异常兜底文案前缀（默认「操作失败」）；perfWarnMs 覆盖该
  *   通道的慢调用阈值（长耗时通道下调以采集基线，高频通道保持全局默认）
@@ -59,7 +113,7 @@ export function wrapHandler(channel, handler, opts = {}) {
   const prefix = opts.errorPrefix || '操作失败'
   const perfWarnMs =
     typeof opts.perfWarnMs === 'number' ? opts.perfWarnMs : ipcPerfWarnMs
-  ipcMain.handle(channel, async (event, payload) => {
+  ipcMain.handle(channel, async (event, rawPayload) => {
     // OPT-3 通道级观测：覆盖「schema 校验 + 业务处理」全程，label 即通道名
     //（与既有 [perf] 打点同一前缀格式，可统一检索聚合）
     const done = startPerf(channel, { warnMs: perfWarnMs, quiet: true })
@@ -70,6 +124,8 @@ export function wrapHandler(channel, handler, opts = {}) {
       logger.warn(`拒绝来自缩略图渲染窗口的 IPC 调用: ${channel}`)
       return { error: '不允许的 IPC 来源' }
     }
+    // OPT-18：剥离并登记取消令牌（校验针对剥离后的载荷，schema 无感知）
+    const { opId, payload, signal } = extractOpSignal(rawPayload)
     try {
       // O-2 结构门禁：非法 payload 不进入业务代码（语义校验仍在 handler 内）
       const schemaError = validateIpcPayload(channel, payload)
@@ -78,7 +134,7 @@ export function wrapHandler(channel, handler, opts = {}) {
         logger.warn(`IPC ${channel} 入参校验失败: ${schemaError}`)
         return { error: schemaError }
       }
-      const result = await handler(event, payload)
+      const result = await handler(event, payload, { signal })
       done()
       return result
     } catch (err) {
@@ -93,6 +149,8 @@ export function wrapHandler(channel, handler, opts = {}) {
         `IPC ${channel} 处理异常（耗时 ${ms}ms）: ${err.stack || err.message}`,
       )
       return { error: `${prefix}: ${err.message}` }
+    } finally {
+      if (opId) activeOps.delete(opId)
     }
   })
 }

@@ -79,6 +79,7 @@ export const IPC_EVENT_CHANNELS = Object.freeze([
   'models:fsChanged',
   'models:warmupProgress',
   'models:watcherStopped',
+  'models:transferProgress',
 ])
 
 /**
@@ -527,6 +528,12 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'models:deleteModel': vObj({ fields: { id: ID } }),
   'models:reveal': vObj({
     fields: { path: vStr({ max: 2000 }) },
+  }),
+  // OPT-18 opId 取消机制：中止一个在途可取消操作（opId 为渲染层生成并随载荷附带的令牌）
+  'models:cancelOp': vObj({
+    // 字段名用 targetOpId：载荷内名为 opId 的字段会被 wrapHandler 的取消
+    // 协议剥离（本通道的载荷本身就是令牌，须绕开剥离约定，零特判）
+    fields: { targetOpId: vStr({ required: true, max: 128 }) },
   }),
   'models:toggleDisabled': vObj({
     fields: { id: ID, disabled: vBool() },

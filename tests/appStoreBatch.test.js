@@ -253,10 +253,14 @@ describe('批量操作单次状态合并（O2）', () => {
     const p = batchOrganizeByTags()
     acceptConfirm()
     await p
-    expect(api.models.organizeByTags).toHaveBeenCalledWith([
-      { id: 'a', subCategory: 'role' },
-      { id: 'b', subCategory: '' },
-    ])
+    // OPT-18：载荷携带取消令牌（opId 为渲染层生成的随机串）
+    expect(api.models.organizeByTags).toHaveBeenCalledWith({
+      moves: [
+        { id: 'a', subCategory: 'role' },
+        { id: 'b', subCategory: '' },
+      ],
+      opId: expect.any(String),
+    })
     expect(
       state.toasts.some(
         (t) => t.type === 'success' && t.text.includes('已移动 2 个 LoRA 模型'),
