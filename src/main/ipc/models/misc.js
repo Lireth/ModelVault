@@ -172,10 +172,12 @@ export function registerMiscHandlers() {
 
   // 取消在途可取消操作（OPT-18 opId 机制）：跨库传输/一键整理等长操作
   // 的载荷附带 opId，wrapHandler 登记信号；本通道按令牌发出中止信号，
-  // 操作方在模型间隙检查后收尾（已完成部分保留，与批量取消语义一致）
+  // 操作方在模型间隙检查后收尾（已完成部分保留，与批量取消语义一致）。
+  // 令牌字段名为 targetOpId（见 ipc-schema 注册表）：名为 opId 的载荷字段
+  // 会被取消协议剥离，本通道载荷本身就是令牌，须绕开剥离约定
   wrapHandler(
     'models:cancelOp',
-    (_event, { opId } = {}) => ({ ok: cancelActiveOp(opId) }),
+    (_event, { targetOpId } = {}) => ({ ok: cancelActiveOp(targetOpId) }),
     { errorPrefix: '取消操作失败' },
   )
 

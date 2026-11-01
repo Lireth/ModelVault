@@ -178,6 +178,26 @@ describe('models:deleteModel', () => {
     expect(res).toEqual({ ok: false })
   })
 
+  it('models:cancelOp 命中在途令牌返回 ok:true，settle 后令牌移除（OPT-18）', async () => {
+    // reveal 的首个 realpath await 之前 opId 已由 wrapHandler 同步登记——
+    // 在该窗口内经通道取消。正向路径曾被字段错位破坏（handler 解构 opId
+    // 恒为 undefined、cancelActiveOp 恒 false），本用例锁定通道契约
+    const p = getRegisteredHandler('models:reveal')(makeEvent(), {
+      path: path.join(root, 'ghost.safetensors'),
+      opId: 'op-inflight',
+    })
+    const ok = await getRegisteredHandler('models:cancelOp')(makeEvent(), {
+      targetOpId: 'op-inflight',
+    })
+    expect(ok).toEqual({ ok: true })
+    await p // reveal 本身不可取消，照常收尾（无效路径报错，无副作用）
+    // 注册表只容纳在途操作：handler settle 后令牌移除，重复取消返回 ok:false
+    const again = await getRegisteredHandler('models:cancelOp')(makeEvent(), {
+      targetOpId: 'op-inflight',
+    })
+    expect(again).toEqual({ ok: false })
+  })
+
   it('大维护操作持锁期间删除被拒（OPT-14 互斥）', async () => {
     const abs = path.join(root, 'busy.safetensors')
     await fs.writeFile(abs, 'x')

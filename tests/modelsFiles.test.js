@@ -31,7 +31,7 @@ import {
   registerFilesHandlers,
   splitModelFileName,
 } from '../src/main/ipc/models/files'
-import { cancelActiveOp } from '../src/main/ipc/handler'
+import { registerMiscHandlers } from '../src/main/ipc/models/misc'
 import { getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
 import {
   getModelMeta,
@@ -114,6 +114,8 @@ describe('models:organizeByTags handler', () => {
     setDataRoot(root)
     await loadData()
     registerFilesHandlers()
+    // models:cancelOp 属 misc 域：正向取消用例经通道端到端发出中止
+    registerMiscHandlers()
     handler = getRegisteredHandler('models:organizeByTags')
   })
 
@@ -275,7 +277,13 @@ describe('models:organizeByTags handler', () => {
       moves,
       opId: 'op-cancel-me',
     })
-    cancelActiveOp('op-cancel-me')
+    // 经 models:cancelOp 通道取消（端到端）：载荷令牌字段为 targetOpId，
+    // 与 wrapHandler 剥离约定区分；命中在途注册返回 ok:true 并发出中止
+    const cancelRes = await getRegisteredHandler('models:cancelOp')(
+      makeEvent(),
+      { targetOpId: 'op-cancel-me' },
+    )
+    expect(cancelRes).toEqual({ ok: true })
     const res = await p
     expect(res.canceled).toBe(true)
     // 已完成部分保留：中止落在规划/移动前段，移动数必然小于总数
