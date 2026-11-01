@@ -8,7 +8,7 @@ import {
 } from './state'
 import { BASE_FAMILIES } from '../../../shared/model-categories'
 import { saveSettings } from './library'
-import { toast } from './toast'
+import { confirmDialog, toast } from './toast'
 
 /**
  * 智能视图（组合筛选收藏）：
@@ -179,11 +179,16 @@ export async function applySavedView(id) {
 }
 
 /**
- * 删除视图（即时持久化）。
+ * 删除视图（先确认后持久化，P0-8）。
  * @param {string} id 视图 id
  * @returns {Promise<boolean>} 是否删除成功
  */
 export async function deleteSavedView(id) {
+  // P0-8：破坏性操作先确认（与删除模型/封面同规范）——视图含搜索语法
+  // 快照，误触 ✕ 即静默丢失且不可恢复。不存在 id 先短路，不为空操作弹层
+  const view = savedViews.value.find((v) => v.id === id)
+  if (!view) return false
+  if (!(await confirmDialog(`确定删除视图「${view.name}」吗？`))) return false
   const next = savedViews.value.filter((v) => v.id !== id)
   if (next.length === savedViews.value.length) return false
   const ok = await saveSettings({ savedViews: next })

@@ -2,10 +2,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { nextTick } from 'vue'
 import {
+  acceptConfirm,
   activeSavedViewId,
   applySavedView,
   defaultSettings,
   deleteSavedView,
+  rejectConfirm,
   saveCurrentAsView,
   savedViews,
   state,
@@ -207,18 +209,33 @@ describe('智能视图：活动命中与删除', () => {
     expect(activeSavedViewId.value).toBe('')
   })
 
-  it('删除视图并持久化剩余列表', async () => {
+  it('删除视图先确认（P0-8），接受后持久化剩余列表', async () => {
     seedView()
-    const ok = await deleteSavedView('v1')
-    expect(ok).toBe(true)
+    const p = deleteSavedView('v1')
+    // 确认层同步置位且未误删；接受后完成删除
+    expect(state.confirm.visible).toBe(true)
+    expect(window.api.settings.update).not.toHaveBeenCalled()
+    acceptConfirm()
+    expect(await p).toBe(true)
     expect(window.api.settings.update).toHaveBeenCalledWith({ savedViews: [] })
     expect(savedViews.value).toHaveLength(0)
   })
 
-  it('删除不存在的 id 为空操作', async () => {
+  it('删除视图取消（P0-8）后不持久化', async () => {
+    seedView()
+    const p = deleteSavedView('v1')
+    expect(state.confirm.visible).toBe(true)
+    rejectConfirm()
+    expect(await p).toBe(false)
+    expect(window.api.settings.update).not.toHaveBeenCalled()
+    expect(savedViews.value).toHaveLength(1)
+  })
+
+  it('删除不存在的 id 为空操作（不弹确认）', async () => {
     seedView()
     expect(await deleteSavedView('v-x')).toBe(false)
     expect(window.api.settings.update).not.toHaveBeenCalled()
+    expect(state.confirm.visible).toBe(false)
   })
 })
 

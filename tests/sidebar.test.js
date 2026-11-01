@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import Sidebar from '../src/renderer/src/components/Sidebar.vue'
-import { state } from '../src/renderer/src/store/appStore'
+import { state, acceptConfirm } from '../src/renderer/src/store/appStore'
 import { setupComponentTest } from './helpers/componentTest'
 
 /**
@@ -152,7 +152,7 @@ describe('Sidebar 智能视图（组合筛选收藏）', () => {
     wrapper.unmount()
   })
 
-  it('删除视图：键盘 Enter 触发且不冒泡应用视图', async () => {
+  it('删除视图：键盘 Enter 先弹确认（P0-8），接受后持久化且不冒泡应用视图', async () => {
     state.folder = 'D:\\libA'
     seedView()
     echoSettingsUpdate()
@@ -161,6 +161,11 @@ describe('Sidebar 智能视图（组合筛选收藏）', () => {
     expect(remove.attributes('role')).toBe('button')
     expect(remove.attributes('tabindex')).toBe('0')
     await remove.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    // 确认层打开且未误删；接受后完成删除
+    expect(state.confirm.visible).toBe(true)
+    expect(window.api.settings.update).not.toHaveBeenCalled()
+    acceptConfirm()
     await flushPromises()
     expect(window.api.settings.update).toHaveBeenCalledWith({ savedViews: [] })
     // 未冒泡触发应用：筛选保持默认
