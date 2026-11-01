@@ -5,7 +5,13 @@ import { relativeWithin } from '../utils'
 import { dedupeAndPruneDescendants } from '../../shared/scan-dirs'
 import { isVisibleScanEntry } from './scanner'
 import { removeSnapshotSubtree } from './watcher-baseline'
-import { getWatcher, stopWatcher } from './watcher-state'
+import {
+  getWatcher,
+  notifyWatcherStopped,
+  stopWatcher,
+  WATCHER_ERROR_RETRY_LADDER,
+  WATCHER_MAX_ERROR_RETRIES,
+} from './watcher-state'
 import {
   collectDirSnapshot,
   computeSnapshotDiff,
@@ -55,6 +61,64 @@ export function scheduleNextWalk(w) {
   w.timer = setTimeout(() => runWalk(w, false), delay)
   w.timer.unref?.()
   if (typeof w.onPollScheduled === 'function') w.onPollScheduled(delay)
+}
+
+/**
+ * 巡检异常的退避重探（OPT-16）：瞬时故障（USB 唤醒瞬间、杀毒锁定根目录、
+ * 网络抖动的单次 EBUSY/EACCES）此前任何一次异常都直接停监控——autoRescan
+ * 静默失效，用户完全无感知，直到下一次手动扫描/设置变更才恢复。改为
+ * 退避重探：重试期间不读盘，只 stat 根目录（死亡盘上的 stat 由内核最终
+ * 返回，不叠加 readdir 放大 IO），恢复可达即回到常规巡检链——停机期间的
+ * 变更由恢复后的首次比对自然发现。连续失败超过上限才停止监控，并经
+ * models:watcherStopped 事件通知渲染层（状态可见化）。
+ *
+ * 确定性缺陷（代码 bug）同样走此路径：最多多付 5 次重探与日志，终态与
+ * 旧实现一致（停止），无行为退化。
+ * @param {WatcherState} w 监控状态（调用方已保证 w === getWatcher()）
+ * @param {Error} err 巡检异常
+ * @returns {boolean} 是否进入退避重探（true 时调用方暂停常规巡检链）
+ */
+export function handleWalkError(w, err) {
+  const ladder = Array.isArray(w.errorRetryLadder)
+    ? w.errorRetryLadder
+    : WATCHER_ERROR_RETRY_LADDER
+  const maxRetries =
+    Number.isFinite(w.maxErrorRetries) && w.maxErrorRetries > 0
+      ? w.maxErrorRetries
+      : WATCHER_MAX_ERROR_RETRIES
+  w.errorRetries = (w.errorRetries || 0) + 1
+  if (w.errorRetries > maxRetries) {
+    logger.warn(`目录监控连续 ${w.errorRetries} 次异常，已停止: ${err.message}`)
+    stopWatcher()
+    notifyWatcherStopped({ root: w.root, reason: err.message })
+    return false
+  }
+  const delay = ladder[Math.min(w.errorRetries - 1, ladder.length - 1)]
+  logger.warn(
+    `目录监控异常（第 ${w.errorRetries}/${maxRetries} 次，${Math.round(delay / 1000)}s 后重探）: ${err.message}`,
+  )
+  if (w.errorRetryTimer) clearTimeout(w.errorRetryTimer)
+  w.errorRetryTimer = setTimeout(() => {
+    w.errorRetryTimer = null
+    if (w !== getWatcher()) return
+    fs.stat(w.root).then(
+      () => {
+        // 根恢复可达：重置退避并恢复常规巡检链
+        if (w !== getWatcher()) return
+        logger.info('目录监控根目录恢复可达，已恢复巡检')
+        w.errorRetries = 0
+        w.idleRounds = 0
+        scheduleNextWalk(w)
+      },
+      (statErr) => {
+        // 仍不可达：按阶梯继续退避重探
+        if (w !== getWatcher()) return
+        handleWalkError(w, statErr)
+      },
+    )
+  }, delay)
+  w.errorRetryTimer.unref?.()
+  return true
 }
 
 /**
@@ -408,18 +472,22 @@ export function runWalk(w, silent) {
       scheduleBroadcast(w, changedDirs)
     })
     .catch((err) => {
-      // 根目录不可读（被删除/离线）：停止监控，等下次扫描/设置变更重新发起。
+      // OPT-16：异常不再立即停监控——瞬时故障进入退避重探（根目录恢复可达
+      // 后自动恢复巡检），连续失败超限才停止并通知渲染层。
       // 代际校验（B2 修复）：异常来自旧根的在途遍历时，当前监控状态已是新根，
       // 绝不能被误停——只丢弃该次遍历
-      logger.warn(
-        `目录监控异常${w === getWatcher() ? '，已停止' : '（旧根遍历已丢弃）'}: ${err.message}`,
-      )
-      if (w === getWatcher()) stopWatcher()
+      if (w !== getWatcher()) {
+        logger.warn(`目录监控异常（旧根遍历已丢弃）: ${err.message}`)
+        return
+      }
+      return handleWalkError(w, err)
     })
     .finally(() => {
       w.polling = false
       // 基准轮与正常轮都由统一的递归 setTimeout 链安排下一轮；
-      // 基准轮 idleRounds=0，首次延迟即基础间隔（stopWatcher 已清 timer 时不再排）
+      // 基准轮 idleRounds=0，首次延迟即基础间隔（stopWatcher 已清 timer 时不再排）。
+      // OPT-16：退避重探期间常规巡检链暂停——重探定时器恢复可达后自行续排
+      if (w !== getWatcher() || w.errorRetryTimer) return
       scheduleNextWalk(w)
     })
 }

@@ -13,6 +13,7 @@ import { clearDeferredJobs } from '../../services/thumbs'
 import {
   refreshWatcherBaseline,
   setWatcherScanning,
+  setWatcherStoppedListener,
   syncWatcher,
 } from '../../services/watcher'
 import {
@@ -71,6 +72,25 @@ let scanAbort = null
 export function resolveScanExtensions(appSettings) {
   const exts = appSettings?.scanExtensions
   return Array.isArray(exts) && exts.length > 0 ? exts : undefined
+}
+
+/**
+ * 注册目录监控停止的跨窗口广播（OPT-16 状态可见化，副作用注册模式与
+ * setupStoreErrorForwarding 一致）：连续巡检异常超限后监控停止——此前
+ * autoRescan 静默失效、用户完全无感知（「功能悄悄坏了」类缺陷），现经
+ * models:watcherStopped 事件告知渲染层（toast 提示，恢复后可手动扫描
+ * 重新启用）。
+ * 副作用注册：仅可由 registerModelIpcHandlers 调用时触发，严禁漂移到模块 import 时。
+ */
+export function setupWatcherStoppedForwarding() {
+  setWatcherStoppedListener(({ root, reason }) => {
+    logger.warn(`目录监控已停止并通知渲染层: ${root}（${reason}）`)
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('models:watcherStopped', { root, reason })
+      }
+    }
+  })
 }
 
 /** 注册扫描链路的 IPC 处理器 */

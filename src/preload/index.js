@@ -203,6 +203,9 @@ const api = {
     /** 订阅后台哈希预热进度事件（快照: { active, id, percent, hashedBytes, totalBytes, done, remaining }） */
     onWarmupProgress: (listener) =>
       subscribe('models:warmupProgress', listener),
+    /** 订阅目录监控停止事件（OPT-16：{ root, reason }），返回取消监听函数 */
+    onWatcherStopped: (listener) =>
+      subscribe('models:watcherStopped', listener),
     /** 订阅右键菜单动作事件，返回取消监听函数 */
     onMenuAction: (listener) => subscribe('models:menuAction', listener),
     /** 加/去 .disabled 后缀（F10），返回 { path } 或 { error } */

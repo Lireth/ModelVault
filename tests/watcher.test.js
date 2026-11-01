@@ -55,6 +55,7 @@ import {
   computeStatSnapshotDiff,
   refreshWatcherBaseline,
   setWatcherScanning,
+  setWatcherStoppedListener,
   simulateUnlocatedNativeEventForTests,
   snapshotsEqual,
   stopWatcher,
@@ -534,17 +535,54 @@ describe('syncWatcher 目录监控（A8）', () => {
     expect(sentEvents).toHaveLength(1)
   })
 
-  it('根目录被删除时停止监控：不广播、不崩溃', async () => {
-    syncWatcher(root, true, [], timing)
+  it('根目录暂时不可达时退避重探，恢复后自动恢复监控（OPT-16）', async () => {
+    // 旧语义：单次巡检异常即永久停监控，autoRescan 静默失效（USB 唤醒
+    // 瞬间/杀毒锁定的单次 EBUSY 就能触发）。新语义：退避重探期间不读盘
+    // 不广播，根目录恢复可达后自动恢复巡检
+    syncWatcher(root, true, [], {
+      ...timing,
+      errorRetryLadder: [20, 30],
+      maxErrorRetries: 5,
+    })
     await sleep(60)
     await fs.rm(root, { recursive: true, force: true })
-    await sleep(150)
+    // 退避窗口内：常规巡检链暂停，不读盘不广播
+    await sleep(80)
     expect(sentEvents).toHaveLength(0)
-    // 监控已停止：后续轮询不再运行（重建目录也不产生历史积压广播）
+
+    // 根目录恢复可达：重探成功后自动恢复——停机期新增的模型照常广播
     await fs.mkdir(root, { recursive: true })
-    await moveBundleIn(await makeBundle('later'), 'later')
-    await sleep(250)
-    expect(sentEvents).toHaveLength(0)
+    await moveBundleIn(await makeBundle('back'), 'back')
+    await waitFor(
+      () => sentEvents.some((e) => e.channel === 'models:fsChanged'),
+      '恢复可达后自动恢复巡检并广播',
+    )
+  })
+
+  it('根目录持续不可达时连续失败超限后停止并通知（OPT-16）', async () => {
+    const stopped = []
+    setWatcherStoppedListener((info) => stopped.push(info))
+    try {
+      syncWatcher(root, true, [], {
+        ...timing,
+        errorRetryLadder: [20, 30],
+        maxErrorRetries: 2,
+      })
+      await sleep(60)
+      await fs.rm(root, { recursive: true, force: true })
+      // 首次巡检异常 + 2 次重探失败 → 超限停止；毫秒级阶梯内完成
+      await waitFor(() => stopped.length === 1, '停止通知送达')
+      expect(stopped[0].root).toBe(root)
+      expect(typeof stopped[0].reason).toBe('string')
+
+      // 停止后不再巡检：重建目录也不产生广播（等用户下次扫描/设置变更重新发起）
+      await fs.mkdir(root, { recursive: true })
+      await moveBundleIn(await makeBundle('after-stop'), 'after-stop')
+      await sleep(200)
+      expect(sentEvents).toHaveLength(0)
+    } finally {
+      setWatcherStoppedListener(null)
+    }
   })
 
   it('切根后旧根的变更零广播、新根监控不受旧根状态影响（B2 代际防护）', async () => {

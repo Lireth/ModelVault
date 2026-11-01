@@ -4,7 +4,7 @@ import logger from '../logger'
 import { relativeWithin } from '../utils'
 import { dedupeAndPruneDescendants } from '../../shared/scan-dirs'
 import { MAX_SCAN_DEPTH } from './scanner'
-import { getWatcher, stopWatcher } from './watcher-state'
+import { getWatcher } from './watcher-state'
 import {
   collectDirSnapshot,
   computeSnapshotDiff,
@@ -98,10 +98,12 @@ async function refreshSnapshotScopes(w, relDirs, unlocated = false) {
       }
     }
   } catch (err) {
+    // OPT-16：回填失败不再停监控——轮询巡检链独立存续，下一轮巡检会以当前
+    // 基线自然复核（回填只是加速触发）；根目录持续不可达时由轮询异常路径
+    // 统一退避重探/停止，不会出现两条路径各自停止的竞态
     logger.warn(
-      `原生事件快照回填失败${w === getWatcher() ? '，已停止监控' : '（旧根已丢弃）'}: ${err.message}`,
+      `原生事件快照回填失败${w === getWatcher() ? '（轮询链继续，待下轮巡检复核）' : '（旧根已丢弃）'}: ${err.message}`,
     )
-    if (w === getWatcher()) stopWatcher()
   } finally {
     if (w === getWatcher()) {
       // 即便本次回填提前返回/部分更新，也推进代际，令并发中的巡检快照作废

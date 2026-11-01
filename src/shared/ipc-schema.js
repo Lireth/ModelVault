@@ -78,6 +78,7 @@ export const IPC_EVENT_CHANNELS = Object.freeze([
   'models:storeError',
   'models:fsChanged',
   'models:warmupProgress',
+  'models:watcherStopped',
 ])
 
 /**

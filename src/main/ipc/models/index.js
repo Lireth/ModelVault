@@ -1,5 +1,5 @@
 import { setupStoreErrorForwarding, registerStoreHandlers } from './store'
-import { registerScanHandlers } from './scan'
+import { registerScanHandlers, setupWatcherStoppedForwarding } from './scan'
 import { registerMetaHandlers } from './meta'
 import { registerCoverHandlers } from './covers'
 import { registerMiscHandlers } from './misc'
@@ -22,6 +22,8 @@ export function registerModelIpcHandlers() {
   setupStoreErrorForwarding()
   // 预热进度广播注册（预热任务可能在任意 handler 前后台启动）
   setupWarmupProgressForwarding()
+  // 目录监控停止广播注册（OPT-16 状态可见化：连续异常超限后通知渲染层）
+  setupWatcherStoppedForwarding()
   registerStoreHandlers()
   registerScanHandlers()
   registerMetaHandlers()

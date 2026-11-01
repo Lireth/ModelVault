@@ -24,6 +24,7 @@ export function useMainProcessEvents() {
   let unsubscribeFsChanged = null
   let unsubscribeWarmup = null
   let unsubscribeUpdateAvailable = null
+  let unsubscribeWatcherStopped = null
 
   /** 目录变更自动重扫的二级防抖（主进程 3s 静默期后此处再缓冲 1s，E8） */
   let fsChangedTimer = null
@@ -131,6 +132,14 @@ export function useMainProcessEvents() {
         applyUpdateAvailable(payload)
       },
     )
+    // 订阅目录监控停止事件（OPT-16 状态可见化）：autoRescan 开启时监控
+    // 连续异常超限才会停止——此前静默失效，用户对「自动重扫已停」零感知
+    unsubscribeWatcherStopped = window.api.models.onWatcherStopped?.(() => {
+      toast(
+        'warn',
+        '目录监控已停止（模型库持续不可达或多次异常），恢复后可手动扫描重新启用',
+      )
+    })
   }
 
   function unsubscribeAll() {
@@ -142,6 +151,7 @@ export function useMainProcessEvents() {
     unsubscribeFsChanged?.()
     unsubscribeWarmup?.()
     unsubscribeUpdateAvailable?.()
+    unsubscribeWatcherStopped?.()
   }
   return { subscribe, unsubscribeAll }
 }

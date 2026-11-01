@@ -138,13 +138,15 @@ export function refreshWatcherBaseline(root, dirs, snapshot) {
  *   fullWalkInterval?: number,
  *   nativeWatch?: boolean, baseline?: Map<string, string[]>,
  *   backoff?: number[], isVisible?: () => boolean,
+ *   errorRetryLadder?: number[], maxErrorRetries?: number,
  *   onPollScheduled?: (delay: number) => void}} [timing]
  *   轮询间隔/广播防抖/内容校验间隔（毫秒）与目录遍历并发；fullWalkInterval 为
  *   活跃期全量回扫周期（PERF-4，默认 5）；nativeWatch 开启
  *   原生事件监听；baseline 为全量扫描产出的目录名快照（OPT-02：直接作为
  *   监控基线，跳过扫描后的重复全树遍历）；backoff 空闲退避阶梯；
- *   isVisible/onPollScheduled 为测试注入钩子；生产走默认值，测试注入小值
- *   （contentCheckInterval≤0 关闭内容校验）
+ *   errorRetryLadder/maxErrorRetries 为巡检异常的退避重探阶梯与失败上限
+ *   （OPT-16，测试注入缩小）；isVisible/onPollScheduled 为测试注入钩子；
+ *   生产走默认值，测试注入小值（contentCheckInterval≤0 关闭内容校验）
  */
 export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
   const wantEnabled = enabled === true
@@ -228,6 +230,16 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
       typeof timing.onPollScheduled === 'function'
         ? timing.onPollScheduled
         : null,
+    // OPT-16：巡检异常的退避重探（阶梯/上限可经 timing 注入缩小供测试）
+    errorRetries: 0,
+    errorRetryTimer: null,
+    errorRetryLadder: Array.isArray(timing.errorRetryLadder)
+      ? timing.errorRetryLadder
+      : undefined,
+    maxErrorRetries:
+      Number.isFinite(timing.maxErrorRetries) && timing.maxErrorRetries > 0
+        ? timing.maxErrorRetries
+        : undefined,
   })
   setWatcher(w)
   // OPT-02：本次扫描已产出目录快照时直接复用为监控基线，无需扫描结束后
@@ -270,6 +282,7 @@ export {
   snapshotsEqual,
 } from './watcher-snapshot'
 export { stopWatcher } from './watcher-state'
+export { setWatcherStoppedListener } from './watcher-state'
 
 /**
  * 触发一次「filename 缺失」的原生事件广播（仅供单元测试使用；生产代码

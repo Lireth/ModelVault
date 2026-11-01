@@ -56,6 +56,16 @@ export const STAT_CONCURRENCY = 8
  * 冷区域变更发现延迟上界 = N × 基础间隔，热点区域仍是基础间隔。
  */
 export const DEFAULT_FULL_WALK_INTERVAL = 5
+/**
+ * 巡检异常的退避重探阶梯（ms，OPT-16）：瞬时故障（USB 唤醒瞬间、杀毒
+ * 锁定根目录、网络抖动的单次 EBUSY/EACCES）此前直接停监控——autoRescan
+ * 静默失效直到用户下一次手动扫描。改为退避重探：重试期间不读盘只 stat
+ * 根目录（死亡盘上的 stat 由内核最终返回，不叠加读盘放大），持续传输
+ * 恢复即回到常规巡检；30s 起步、5min 封顶，避免对已消失的根目录高频探测。
+ */
+export const WATCHER_ERROR_RETRY_LADDER = [30000, 60000, 120000, 300000]
+/** 巡检异常连续失败上限：超过后停止监控并通知渲染层（OPT-16） */
+export const WATCHER_MAX_ERROR_RETRIES = 5
 
 /**
  * 监控状态对象（syncWatcher 构造；stop/startNativeWatch/scheduleBroadcast
@@ -93,6 +103,11 @@ export const DEFAULT_FULL_WALK_INTERVAL = 5
  * @property {number} debounceMs 广播防抖时长（ms）
  * @property {() => boolean} isVisible 窗口可见性探测（测试可注入）
  * @property {((delay: number) => void)|null} onPollScheduled 轮询安排通告（测试钩子）
+ * @property {number} errorRetries 巡检连续异常次数（OPT-16 退避重探计数）
+ * @property {ReturnType<typeof setTimeout>|null} errorRetryTimer 异常退避重探定时器
+ *   （重探期间常规巡检链暂停；置位时 runWalk 的 finally 不再排下一轮）
+ * @property {number[]=} errorRetryLadder 异常重探阶梯（测试可注入缩小）
+ * @property {number=} maxErrorRetries 异常连续失败上限（测试可注入缩小）
  */
 
 /** 当前监控状态（root/excludeNames/snapshot/定时器链） */
@@ -115,6 +130,7 @@ export function stop() {
   watcher = null
   if (w.debounceTimer) clearTimeout(w.debounceTimer)
   if (w.timer) clearInterval(w.timer)
+  if (w.errorRetryTimer) clearTimeout(w.errorRetryTimer)
   if (w.nativeWatcher) {
     try {
       w.nativeWatcher.close()
@@ -129,6 +145,32 @@ export function stop() {
 export function stopWatcher() {
   stop()
   logger.info('目录监控已停止')
+}
+
+/* ---------------- 停止通知（OPT-16 状态可见化） ---------------- */
+
+/** 监控停止监听器（IPC 层注册，向渲染进程广播；纯 Node 模块不引 electron） */
+let stoppedListener = null
+
+/**
+ * 注册监控停止监听器（传 null 可清除）。
+ * @param {((info: {root: string, reason: string}) => void) | null} fn
+ */
+export function setWatcherStoppedListener(fn) {
+  stoppedListener = typeof fn === 'function' ? fn : null
+}
+
+/**
+ * 通知监控已停止（连续异常超限等不可自愈场景；监听器异常不影响停止流程）。
+ * @param {{root: string, reason: string}} info
+ */
+export function notifyWatcherStopped(info) {
+  if (!stoppedListener) return
+  try {
+    stoppedListener(info)
+  } catch (err) {
+    logger.warn(`监控停止通知监听器异常: ${err.message}`)
+  }
 }
 
 /** 目录名小写集合（与 scanner 的 excludeDirs 同规则：按目录名小写匹配） */
