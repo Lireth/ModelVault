@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import ModelDetail from '../src/renderer/src/components/ModelDetail.vue'
 import {
   acceptConfirm,
+  openAdjacentDetail,
   openDetail,
   rejectConfirm,
   replaceModels,
@@ -499,6 +500,86 @@ describe('ModelDetail 文件重命名（N1）', () => {
     await flushPromises()
     const btn = wrapper.findAll('button').find((b) => b.text() === '重命名')
     expect(btn.element.disabled).toBe(true)
+    wrapper.unmount()
+  })
+})
+
+describe('详情页序列导航（FEA-01）', () => {
+  /** 预置 3 个模型并打开首个详情 */
+  function setupThree() {
+    const models = [
+      makeDetailModel('m1'),
+      makeDetailModel('m2'),
+      makeDetailModel('m3'),
+    ]
+    replaceModels(models)
+    state.selectedId = 'm1'
+    return models
+  }
+
+  it('openAdjacentDetail(1/-1) 在筛选结果内顺序跳转', async () => {
+    setupThree()
+    await openAdjacentDetail(1)
+    expect(state.selectedId).toBe('m2')
+    await openAdjacentDetail(1)
+    expect(state.selectedId).toBe('m3')
+    // 末端点：no-op（按钮同语义禁用）
+    await openAdjacentDetail(1)
+    expect(state.selectedId).toBe('m3')
+    await openAdjacentDetail(-1)
+    expect(state.selectedId).toBe('m2')
+    await openAdjacentDetail(-1)
+    expect(state.selectedId).toBe('m1')
+    // 首端点：no-op
+    await openAdjacentDetail(-1)
+    expect(state.selectedId).toBe('m1')
+  })
+
+  it('当前模型不在筛选结果内时导航 no-op', async () => {
+    setupThree()
+    state.selectedId = 'not-in-list'
+    await openAdjacentDetail(1)
+    expect(state.selectedId).toBe('not-in-list')
+  })
+
+  it('跳转复用脏表单确认：确认后才切换（C8 复用，不复制确认逻辑）', async () => {
+    setupThree()
+    state.detailDirty = true
+    const p = openAdjacentDetail(1)
+    await Promise.resolve()
+    expect(state.confirm.visible).toBe(true)
+    expect(state.selectedId).toBe('m1') // 确认前不切换
+    acceptConfirm()
+    await p
+    expect(state.selectedId).toBe('m2')
+  })
+
+  it('详情头部渲染 ‹ 位置 › 导航组：端点按钮禁用，点击切换（FEA-01）', async () => {
+    setupThree()
+    const wrapper = mountDetail()
+    await flushPromises()
+    const nav = wrapper.find('.detail-nav')
+    expect(nav.exists()).toBe(true)
+    expect(wrapper.find('.detail-nav-pos').text()).toBe('1 / 3')
+    // 首个：无上一个（禁用），可下一个
+    expect(nav.findAll('button')[0].element.disabled).toBe(true)
+    expect(nav.findAll('button')[1].element.disabled).toBe(false)
+    await nav.findAll('button')[1].trigger('click')
+    await flushPromises()
+    expect(state.selectedId).toBe('m2')
+    expect(wrapper.find('.detail-nav-pos').text()).toBe('2 / 3')
+    // 切换后重新取按钮引用：prev 已可用
+    expect(
+      wrapper.find('.detail-nav').findAll('button')[0].element.disabled,
+    ).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('单模型（total=1）不渲染导航组', async () => {
+    selectModel()
+    const wrapper = mountDetail()
+    await flushPromises()
+    expect(wrapper.find('.detail-nav').exists()).toBe(false)
     wrapper.unmount()
   })
 })

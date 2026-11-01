@@ -7,6 +7,8 @@ import MetaForm from './detail/MetaForm.vue'
 import { useDialogFocus } from '../composables/useDialogFocus'
 import {
   closeDetail,
+  detailPosition,
+  openAdjacentDetail,
   renameModel,
   revealModel,
   selectedModel,
@@ -57,6 +59,20 @@ onBeforeUnmount(() => {
 function onPanelContextMenu() {
   if (selectedModel.value) showContextMenu(selectedModel.value.id)
 }
+
+/* ---------------- 序列导航（FEA-01：筛选结果内上一个/下一个） ---------------- */
+
+/** 当前模型在筛选结果内且结果多于一个时才显示导航（位置无意义时隐藏） */
+const navVisible = computed(
+  () => detailPosition.value.index >= 0 && detailPosition.value.total > 1,
+)
+const canPrev = computed(() => detailPosition.value.index > 0)
+const canNext = computed(
+  () => detailPosition.value.index < detailPosition.value.total - 1,
+)
+const positionText = computed(
+  () => `${detailPosition.value.index + 1} / ${detailPosition.value.total}`,
+)
 
 /* ---------------- 文件重命名（N1） ---------------- */
 
@@ -132,6 +148,47 @@ watch(
           <h2 :title="selectedModel.name">
             {{ selectedModel.alias || selectedModel.name }}
           </h2>
+          <div v-if="navVisible" class="detail-nav">
+            <button
+              class="wc-btn"
+              title="上一个模型（←）"
+              :disabled="!canPrev"
+              @click="openAdjacentDetail(-1)"
+            >
+              <svg
+                viewBox="0 0 16 16"
+                width="12"
+                height="12"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                aria-hidden="true"
+              >
+                <path d="M10 3L5 8l5 5" />
+              </svg>
+            </button>
+            <span class="detail-nav-pos">{{ positionText }}</span>
+            <button
+              class="wc-btn"
+              title="下一个模型（→）"
+              :disabled="!canNext"
+              @click="openAdjacentDetail(1)"
+            >
+              <svg
+                viewBox="0 0 16 16"
+                width="12"
+                height="12"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                aria-hidden="true"
+              >
+                <path d="M6 3l5 5-5 5" />
+              </svg>
+            </button>
+          </div>
           <div class="detail-header-actions">
             <button
               class="btn"
@@ -264,6 +321,22 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 序列导航（FEA-01）：标题与操作按钮之间的 ‹ 位置 › 组 */
+.detail-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.detail-nav-pos {
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+  min-width: 56px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .detail-header-actions {

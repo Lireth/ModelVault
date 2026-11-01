@@ -151,7 +151,13 @@ export {
 export { modelById } from './selectors'
 
 // 局部增量扫描详情
-export { selectedModel, openDetail, closeDetail } from './detail'
+export {
+  selectedModel,
+  openDetail,
+  closeDetail,
+  detailPosition,
+  openAdjacentDetail,
+} from './detail'
 
 // 局部增量扫描
 export { partialScanModels } from './partial-scan'

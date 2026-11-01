@@ -4,6 +4,7 @@ import {
   batchDeleteModels,
   batchFavorite,
   exitMultiSelect,
+  openAdjacentDetail,
   requestBatchCancel,
   state,
   toast,
@@ -88,8 +89,20 @@ export function useGlobalShortcuts(searchFieldEl, clearSearch) {
       return
     }
 
-    // 详情打开时仅保留 Ctrl+D 收藏当前模型，其余让位详情
+    // 详情打开时：←/→ 序列导航（FEA-01，逐个审阅标注的核心工作流）；
+    // Ctrl+D 收藏当前模型；其余让位详情
     if (detailOpen) {
+      if (
+        (e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.shiftKey
+      ) {
+        e.preventDefault()
+        openAdjacentDetail(e.key === 'ArrowRight' ? 1 : -1)
+        return
+      }
       if (ctrl && key === 'd') {
         e.preventDefault()
         toggleFavorite(state.selectedId)

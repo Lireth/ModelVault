@@ -81,6 +81,7 @@ const EXPECTED_EXPORTS = [
   'saveCurrentAsView',
   'applySavedView',
   'deleteSavedView',
+  'detailPosition',
   // 跨库存储总览（FN-01）
   'libraryOverview',
   'loadLibraryOverview',
@@ -116,6 +117,7 @@ const EXPECTED_EXPORTS = [
   'modelById',
   // 详情
   'selectedModel',
+  'openAdjacentDetail',
   'openDetail',
   'closeDetail',
   // 局部扫描

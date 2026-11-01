@@ -319,6 +319,33 @@ describe('App 全局快捷键（B-03）', () => {
     )
   })
 
+  it('详情打开时 ←/→ 在筛选结果内序列导航（FEA-01）', async () => {
+    const wrapper = await mountApp()
+    await setupGrid(wrapper)
+    state.selectedId = 'D:\\models\\a.safetensors'
+
+    press('ArrowRight')
+    await flushPromises()
+    expect(state.selectedId).toBe('D:\\models\\b.safetensors')
+    // 末端点：no-op
+    press('ArrowRight')
+    await flushPromises()
+    expect(state.selectedId).toBe('D:\\models\\b.safetensors')
+    press('ArrowLeft')
+    await flushPromises()
+    expect(state.selectedId).toBe('D:\\models\\a.safetensors')
+
+    // 输入框内方向键保持原生文本编辑（不导航）
+    state.selectedId = 'D:\\models\\a.safetensors'
+    const searchInput = wrapper.find('input[type="search"]')
+    if (searchInput.exists()) {
+      press('ArrowRight', { target: searchInput.element })
+      await flushPromises()
+      expect(state.selectedId).toBe('D:\\models\\a.safetensors')
+    }
+    wrapper.unmount()
+  })
+
   it('输入框内按 Delete 不触发删除确认', async () => {
     const wrapper = await mountApp()
     const searchInput = await setupGrid(wrapper)
