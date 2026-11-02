@@ -86,9 +86,11 @@ import {
   whenWarmupIdle,
 } from '../src/main/services/hash-warmup'
 import {
+  flushStoreSaveBounded,
   getCurrentRoot,
   getSwitchFlushTimeoutMs,
   loadSettings,
+  setFlushAwaitTimeoutForTests,
   setModelMeta,
   setSwitchFlushTimeoutForTests,
 } from '../src/main/services/store'
@@ -624,6 +626,7 @@ describe('切库链路超时保护与同根判定（OPT-19 切库防线）', () 
     }
     await new Promise((resolve) => setImmediate(resolve))
     setSwitchFlushTimeoutForTests()
+    setFlushAwaitTimeoutForTests()
     if (metaState.offlineRetryTimer) {
       clearTimeout(metaState.offlineRetryTimer)
       metaState.offlineRetryTimer = null
@@ -695,5 +698,38 @@ describe('切库链路超时保护与同根判定（OPT-19 切库防线）', () 
     await expect(
       fsp.readFile(path.join(rootB, '.modelvault', 'store.json'), 'utf-8'),
     ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('flushStoreSaveBounded：写盘挂起时超时返回 false 而非永久悬挂（B3）', async () => {
+    const { rootA } = await setupHangOnOldRoot()
+    setFlushAwaitTimeoutForTests(50)
+
+    const started = Date.now()
+    const settled = await flushStoreSaveBounded()
+    expect(settled).toBe(false)
+    // 挂起磁盘场景下按注入上限返回，不再永久阻塞持锁调用方
+    expect(Date.now() - started).toBeLessThan(2000)
+    // 超时只是放弃等待：挂起的写入仍在途（未被取消/截断）
+    expect(awHook.pending.length).toBeGreaterThan(0)
+
+    // 磁盘恢复：放行后续写入，reject 挂起的残尾（失败路径不清脏标记）
+    awHook.hangPrefix = null
+    for (const p of awHook.pending.splice(0)) p.reject(new Error('磁盘恢复'))
+    expect(await waitForIdle()).toBe(true)
+    // 后续 flush 真实落盘：脏数据完整写入（无覆盖/截断）
+    expect(await flushStoreSaveBounded()).toBe(true)
+    const store = JSON.parse(
+      await fsp.readFile(path.join(rootA, '.modelvault', 'store.json'), 'utf-8'),
+    )
+    expect(store.models['a.safetensors'].alias).toBe('旧根未落盘')
+  })
+
+  it('flushStoreSaveBounded：无待落盘内容时立即返回 true（快进路径）', async () => {
+    const rootA = await fsp.mkdtemp(path.join(os.tmpdir(), 'modelvault-fl-a-'))
+    tmpRoots.push(rootA)
+    await ensureRootStore(rootA)
+    await flushStoreSaveBounded()
+    setFlushAwaitTimeoutForTests(50)
+    await expect(flushStoreSaveBounded()).resolves.toBe(true)
   })
 })

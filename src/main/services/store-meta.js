@@ -487,4 +487,6 @@ export {
   saveStoreDeltaNow,
   saveStoreNow,
   flushStoreSave,
+  flushStoreSaveBounded,
+  setFlushAwaitTimeoutForTests,
 } from './store-meta-persist'

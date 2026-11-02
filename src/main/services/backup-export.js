@@ -6,8 +6,8 @@ import {
   COVERS_DIR,
   DATA_DIR,
   DATA_FILE,
-  flushSettingsSave,
-  flushStoreSave,
+  flushSettingsSaveBounded,
+  flushStoreSaveBounded,
   getCurrentRoot,
   getLibrarySettings,
   toRelKey,
@@ -68,7 +68,19 @@ async function mapLimit(items, limit, task) {
 export async function buildBackupParts(options = {}) {
   // B-02：先静止两路写盘链再读磁盘——标注为 500ms 防抖落盘，
   // 刚修改的备注/标签若不 flush 不会进入备份（用户以为已备份）。
-  await Promise.all([flushStoreSave(), flushSettingsSave()])
+  // B3：flush 有等待上限——挂起磁盘（死亡网络盘/半挂载 USB）上无限等待会
+  // 把导出（以及持锁的自动备份）永久卡死；超时即取消导出并如实告知，
+  // 绝不产出可能缺少最近标注却声称成功的备份
+  const [storeFlushed, settingsFlushed] = await Promise.all([
+    flushStoreSaveBounded(),
+    flushSettingsSaveBounded(),
+  ])
+  if (!storeFlushed || !settingsFlushed) {
+    return {
+      error:
+        '磁盘无响应：等待数据落盘超时，已取消导出（此时导出的备份可能缺少最近的标注或设置修改）。请检查模型库磁盘连接后重试',
+    }
+  }
   // 库设置随模型库走：备份当前库的设置（不含引导字段）——恢复到任意
   // 模型文件夹时配置随包生效，且不会劫持本机的激活库/库列表
   const librarySettings = getLibrarySettings()

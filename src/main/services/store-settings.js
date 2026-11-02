@@ -13,7 +13,11 @@ import {
 } from '../../shared/app-enums'
 import { DEFAULT_SETTINGS } from '../../shared/defaults'
 import { atomicWriteFile } from './atomic-write'
-import { preserveCorruptedFile, samePathIgnoreCase } from '../utils'
+import {
+  isSettledWithin,
+  preserveCorruptedFile,
+  samePathIgnoreCase,
+} from '../utils'
 import { notifyStoreSaveError } from './store-events'
 import {
   LEGACY_STORE_FILE,
@@ -631,6 +635,35 @@ export async function flushSettingsSave() {
     )
       return
   }
+}
+
+/**
+ * 设置写盘链的 flush 等待上限（ms，B3）：与元数据 flush 同一底线
+ * （store-meta-persist.FLUSH_AWAIT_TIMEOUT_MS）——挂起磁盘上的写链
+ * 可能永不 settle，持锁路径直接 await 会永久卡死全局维护锁。
+ */
+let settingsFlushAwaitTimeoutMs = 5000
+
+/** 注入设置 flush 等待上限（仅供单元测试使用） */
+export function setSettingsFlushAwaitTimeoutForTests(ms) {
+  settingsFlushAwaitTimeoutMs = Number.isFinite(ms) && ms >= 0 ? ms : 5000
+}
+
+/**
+ * 有等待上限的设置写盘链静止（B3）：超时返回 false——写链不取消也不
+ * 截断，在途写入仍在后台续跑（链式追加语义，后续写入排在其后，不存在
+ * 覆盖窗口）；调用方按 false 中止敏感操作或如实告知。
+ * @param {number} [timeoutMs] 等待上限
+ * @returns {Promise<boolean>} true=写盘链已在时限内静止；false=超时
+ */
+export async function flushSettingsSaveBounded(
+  timeoutMs = settingsFlushAwaitTimeoutMs,
+) {
+  const settled = await isSettledWithin(flushSettingsSave(), timeoutMs)
+  if (!settled) {
+    logger.warn('设置写盘链等待超时（磁盘无响应），按未静止处理（写盘仍在后台续跑）')
+  }
+  return settled
 }
 
 /**

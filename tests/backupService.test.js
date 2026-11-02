@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterAll } from 'vitest'
+import { describe, it, expect, vi, afterEach, afterAll } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -21,8 +21,12 @@ import {
   getModelMeta,
   loadData,
   setDataRoot,
+  setFlushAwaitTimeoutForTests,
   setModelMeta,
+  setSettingsFlushAwaitTimeoutForTests,
+  setStoreSaveErrorListener,
 } from '../src/main/services/store'
+import { metaState } from '../src/main/services/store-meta-state'
 import {
   releaseMaintenance,
   tryAcquireMaintenance,
@@ -58,6 +62,27 @@ vi.mock('electron', () => ({
   },
   dialog: dialogMock,
 }))
+
+// B3：atomicWriteFile 可按目录前缀挂起（模拟死亡网络盘/半挂载 USB 上
+// fsync/rename 在内核层阻塞、flush 永不 settle），其余调用透传真实实现；
+// 挂起的写入在用例收尾统一 reject 释放，绝不遗留永久 pending 阻塞写盘链
+const { awHook } = vi.hoisted(() => ({
+  awHook: { hangPrefix: null, pending: [] },
+}))
+vi.mock('../src/main/services/atomic-write', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    atomicWriteFile: (file, content, opts) => {
+      if (awHook.hangPrefix && String(file).startsWith(awHook.hangPrefix)) {
+        return new Promise((resolve, reject) => {
+          awHook.pending.push({ resolve, reject })
+        })
+      }
+      return actual.atomicWriteFile(file, content, opts)
+    },
+  }
+})
 
 /** 本文件产生的临时目录（测试结束后统一清理） */
 const tmpDirs = [userData]
@@ -1228,6 +1253,123 @@ describe('importBackup', () => {
 
     expect(res.error).toBeUndefined()
     expect(res.settingsRestored).toBe(false)
+  })
+})
+
+describe('flush 超时防线（B3：挂起磁盘不永久卡死）', () => {
+  /** 挂起当前根 .modelvault 下的全部原子写（flush 的写入目标） */
+  function hangWritesUnder(root) {
+    awHook.hangPrefix = path.join(root, '.modelvault') + path.sep
+  }
+
+  afterEach(async () => {
+    // 先恢复透传再释放挂起写入（reject 走错误路径，通知降级为日志），
+    // 等一个事件循环周转让重试定时器排程落定后清理
+    awHook.hangPrefix = null
+    for (const p of awHook.pending.splice(0)) {
+      p.reject(new Error('用例收尾：释放挂起写入'))
+    }
+    await new Promise((resolve) => setImmediate(resolve))
+    setFlushAwaitTimeoutForTests()
+    setSettingsFlushAwaitTimeoutForTests()
+    setStoreSaveErrorListener(null)
+    if (metaState.offlineRetryTimer) {
+      clearTimeout(metaState.offlineRetryTimer)
+      metaState.offlineRetryTimer = null
+    }
+    metaState.saveRetryFailures = 0
+    setDataRoot(null)
+    await loadData()
+  })
+
+  it('导出：落盘挂起超时后取消导出并如实报错，不弹保存对话框', async () => {
+    const root = makeLibrary()
+    setDataRoot(root)
+    await loadData()
+    setModelMeta(path.join(root, 'a.safetensors'), { note: '未落盘修改' })
+    hangWritesUnder(root)
+    setFlushAwaitTimeoutForTests(50)
+    setSettingsFlushAwaitTimeoutForTests(50)
+    dialogMock.showSaveDialog.mockReset()
+
+    const started = Date.now()
+    const res = await exportBackup(null)
+
+    // 按注入上限返回，不再永久悬挂；明确报错而非产出可能缺标注的"成功"备份
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(res.error).toContain('磁盘无响应')
+    expect(dialogMock.showSaveDialog).not.toHaveBeenCalled()
+  })
+
+  it('全量恢复：flush 挂起超时后取消恢复、释放维护锁、目标目录不动', async () => {
+    const libRoot = makeLibrary()
+    setDataRoot(libRoot)
+    await loadData()
+    setModelMeta(path.join(libRoot, 'a.safetensors'), { note: '未落盘修改' })
+    hangWritesUnder(libRoot)
+    setFlushAwaitTimeoutForTests(50)
+    setSettingsFlushAwaitTimeoutForTests(50)
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+    )
+    const target = mkTmp('modelvault-target-')
+    dialogMock.showOpenDialog.mockReset()
+    dialogMock.showOpenDialog
+      .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
+      .mockResolvedValueOnce({ canceled: false, filePaths: [target] })
+
+    const started = Date.now()
+    const res = await importBackup(null)
+
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(res.error).toContain('磁盘无响应')
+    // 目标目录未被触碰（无目录交换、无临时目录残留）
+    expect(fs.readdirSync(target).some((n) => n.startsWith('.modelvault'))).toBe(
+      false,
+    )
+    // 维护锁已释放：后续维护操作可立即获取（锁不被永久占住）
+    const token = tryAcquireMaintenance('restore', target)
+    expect(token).not.toBeNull()
+    releaseMaintenance(token)
+  })
+
+  it('合并恢复：合并后落盘超时保留内存结果并向用户发出可见通知', async () => {
+    const root = makeLibrary()
+    setDataRoot(root)
+    await loadData()
+    // 前置 flush 无待落盘内容（立即静止通过）；挂起只命中合并后的落盘
+    hangWritesUnder(root)
+    setFlushAwaitTimeoutForTests(50)
+    setSettingsFlushAwaitTimeoutForTests(50)
+    const saveErrorListener = vi.fn()
+    setStoreSaveErrorListener(saveErrorListener)
+    const zipPath = makePartialZip(
+      path.join(mkTmp('modelvault-out-'), 'selected.zip'),
+      {
+        mode: 'selected',
+        models: { 'a.safetensors': { note: '合并的新备注' } },
+      },
+    )
+    dialogMock.showOpenDialog.mockReset()
+    dialogMock.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [zipPath],
+    })
+    dialogMock.showMessageBox.mockResolvedValue({ response: 1 })
+
+    const res = await importBackup(null)
+
+    // 合并在内存中生效并正常返回；落盘超时不静默——经通知通道告知用户
+    expect(res.error).toBeUndefined()
+    expect(getModelMeta(path.join(root, 'a.safetensors'))?.note).toBe(
+      '合并的新备注',
+    )
+    expect(saveErrorListener).toHaveBeenCalled()
+    expect(saveErrorListener.mock.calls[0][0].message).toContain('暂未落盘')
+    // 维护锁已释放
+    const token = tryAcquireMaintenance('restore', root)
+    expect(token).not.toBeNull()
+    releaseMaintenance(token)
   })
 })
 

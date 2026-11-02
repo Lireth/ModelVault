@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
-import { samePathIgnoreCase } from '../utils'
+import { isSettledWithin, samePathIgnoreCase } from '../utils'
 import { atomicWriteFile } from './atomic-write'
 import { notifyStoreSaveError } from './store-events'
 import { isUnsafeModelKey } from './store-meta-normalize'
@@ -435,4 +435,37 @@ export async function flushStoreSave() {
   while (metaState.saving || metaState.pendingSave) {
     await new Promise((resolve) => setImmediate(resolve))
   }
+}
+
+/**
+ * flush 等待上限（ms，B3）：与切库 SWITCH_FLUSH_TIMEOUT_MS、退出
+ * FLUSH_TIMEOUT_MS 同一底线——挂起磁盘（死亡网络盘/半挂载 USB）上的
+ * stat/fsync 可在内核层阻塞数十秒，持锁路径（恢复）直接 await
+ * flushStoreSave 会把全局维护锁与全部互斥操作永久卡死。
+ */
+export const FLUSH_AWAIT_TIMEOUT_MS = 5000
+
+/** flush 等待上限（测试可注入；生产代码严禁调用注入器） */
+let flushAwaitTimeoutMs = FLUSH_AWAIT_TIMEOUT_MS
+
+/** 注入 flush 等待上限（仅供单元测试使用） */
+export function setFlushAwaitTimeoutForTests(ms) {
+  flushAwaitTimeoutMs =
+    Number.isFinite(ms) && ms >= 0 ? ms : FLUSH_AWAIT_TIMEOUT_MS
+}
+
+/**
+ * 有等待上限的元数据写盘链静止（B3）：与超时赛跑，超时不取消也不截断
+ * 在途写入——写盘链仍在后台续跑，磁盘恢复后正常落盘（迟到写入的跨库
+ * 污染由 writeSnapshot/writeDeltaJournal 的同根守卫拦截），挂起期间的新
+ * 修改继续经防抖/重试排队，不存在被覆盖或截断的窗口。
+ * @param {number} [timeoutMs] 等待上限（默认 FLUSH_AWAIT_TIMEOUT_MS）
+ * @returns {Promise<boolean>} true=写盘链已在时限内静止；false=超时（数据可能尚未落盘）
+ */
+export async function flushStoreSaveBounded(timeoutMs = flushAwaitTimeoutMs) {
+  const settled = await isSettledWithin(flushStoreSave(), timeoutMs)
+  if (!settled) {
+    logger.warn('元数据写盘链等待超时（磁盘无响应），按未静止处理（写盘仍在后台续跑）')
+  }
+  return settled
 }

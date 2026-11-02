@@ -8,8 +8,8 @@ import {
   DATA_DIR,
   DATA_FILE,
   LIB_SETTINGS_FILE,
-  flushSettingsSave,
-  flushStoreSave,
+  flushSettingsSaveBounded,
+  flushStoreSaveBounded,
   getCurrentRoot,
   getModelMeta,
   normalizeLibrarySettings,
@@ -17,6 +17,7 @@ import {
   saveLibrarySettings,
   setModelMeta,
 } from './store'
+import { notifyStoreSaveError } from './store-events'
 import { LIB_PREFIX, parseBackupManifest } from './backup-format'
 import {
   readBackupManifest,
@@ -123,8 +124,18 @@ async function restoreLibraryLocked(
   // 静止两路写盘链（B1/B-02 修复配套）：在途的防抖/原子写完成于目录交换之后时，
   // 其 rename 会把恢复前的旧数据覆盖到刚恢复的 store.json / settings.json 上。
   // 恢复目标为当前激活根时风险最大；对其他根 flush 只是把当前根待落盘数据
-  // 写进其自身文件，无副作用
-  await Promise.all([flushStoreSave(), flushSettingsSave()])
+  // 写进其自身文件，无副作用。
+  // B3：flush 有等待上限——挂起磁盘上无限等待会把恢复持有的全局维护锁永久
+  // 卡死；超时必须取消恢复：继续交换目录会让迟到的旧写入落进恢复结果之上
+  const [storeFlushed, settingsFlushed] = await Promise.all([
+    flushStoreSaveBounded(),
+    flushSettingsSaveBounded(),
+  ])
+  if (!storeFlushed || !settingsFlushed) {
+    throw new Error(
+      '磁盘无响应：等待在途数据落盘超时，已取消恢复（继续可能让迟到的旧写入覆盖恢复结果）。请检查模型库磁盘连接后重试',
+    )
+  }
 
   const dataDir = path.join(root, DATA_DIR)
   const stamp = Date.now()
@@ -249,7 +260,16 @@ async function snapshotSelectiveStore(root, stamp) {
  */
 async function restorePartialLibrary(root, filePath, manifest) {
   return runMaintenance('restore', root, async () => {
-    await Promise.all([flushStoreSave(), flushSettingsSave()])
+    // B3：与全量恢复同一底线——持锁期间不得以无上限 flush 永久卡死
+    const [storeFlushed, settingsFlushed] = await Promise.all([
+      flushStoreSaveBounded(),
+      flushSettingsSaveBounded(),
+    ])
+    if (!storeFlushed || !settingsFlushed) {
+      throw new Error(
+        '磁盘无响应：等待在途数据落盘超时，已取消恢复（继续可能让迟到的旧写入覆盖合并结果）。请检查模型库磁盘连接后重试',
+      )
+    }
     const dataDir = path.join(root, DATA_DIR)
     const coversDir = path.join(dataDir, COVERS_DIR)
     await fs.mkdir(coversDir, { recursive: true })
@@ -303,7 +323,16 @@ async function restorePartialLibrary(root, filePath, manifest) {
         if (existed) updated += 1
         else added += 1
       }
-      await flushStoreSave()
+      // B3：合并后落盘有等待上限——超时不阻断返回（合并结果在内存中已生效，
+      // 写盘链恢复后由防抖/重试机制补写），但必须如实告知用户「尚未落盘」
+      const mergedFlushed = await flushStoreSaveBounded()
+      if (!mergedFlushed) {
+        notifyStoreSaveError(
+          new Error(
+            '恢复合并的标注暂未落盘（磁盘无响应），修改保留在内存，磁盘恢复后将自动补写',
+          ),
+        )
+      }
       logger.info(
         `选择性备份已合并: ${filePath} → ${root}（新增 ${added} / 更新 ${updated} / 跳过 ${skipped}）`,
       )

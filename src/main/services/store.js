@@ -61,6 +61,8 @@ export {
   saveLibrarySettings,
   normalizeLibrarySettings,
   flushSettingsSave,
+  flushSettingsSaveBounded,
+  setSettingsFlushAwaitTimeoutForTests,
   isRegisteredLibrary,
 } from './store-settings'
 
@@ -81,6 +83,8 @@ export {
   saveStoreNow,
   saveStoreDeltaNow,
   flushStoreSave,
+  flushStoreSaveBounded,
+  setFlushAwaitTimeoutForTests,
   switchDataRoot,
   SWITCH_FLUSH_TIMEOUT_MS,
   getSwitchFlushTimeoutMs,
