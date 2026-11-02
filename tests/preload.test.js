@@ -34,6 +34,7 @@ vi.mock('electron', () => ({
 import {
   IPC_EVENT_CHANNELS,
   IPC_PAYLOAD_SCHEMAS,
+  validateIpcPayload,
 } from '../src/shared/ipc-schema'
 
 /** 与 preload 同代的 electron mock 实例（beforeAll 内捕获） */
@@ -145,6 +146,35 @@ describe('调用语义', () => {
     const file = { name: 'model.safetensors' }
     expect(api.getPathForFile(file)).toBe('/resolved/model.safetensors')
     expect(electron.webUtils.getPathForFile).toHaveBeenCalledWith(file)
+  })
+
+  it('organizeByTags：{moves, opId} 整体透传（不再双重包装），剥离 opId 后过 schema 门禁', async () => {
+    // 回归：preload 曾把 {moves, opId} 再包一层成 {moves:{moves,opId}}，
+    // schema 拒绝 → 功能 100% 失败；opId 埋在内层 → wrapHandler 登记不到
+    // 取消令牌 → Esc 失效。本用例锁定渲染层→preload→schema 三方契约。
+    const payload = {
+      moves: [{ id: 'D:\\m\\a.safetensors', subCategory: 'role' }],
+      opId: 'op-test-1234',
+    }
+    await api.models.organizeByTags(payload)
+    expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith(
+      'models:organizeByTags',
+      payload,
+    )
+    // wrapHandler 的 extractOpSignal 语义：顶层剥离 opId 后的载荷必须过门禁
+    //（validateIpcPayload 通过时返回空串）
+    const { opId, ...stripped } = payload
+    expect(opId).toBe('op-test-1234')
+    expect(validateIpcPayload('models:organizeByTags', stripped)).toBe('')
+  })
+
+  it('cancelOp：令牌以 targetOpId 字段发送（绕开 opId 剥离约定）', async () => {
+    // 与 organizeByTags 的 opId 配对：Esc 取消链路的目标字段名锁定
+    await api.models.cancelOp('op-test-1234')
+    expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith(
+      'models:cancelOp',
+      { targetOpId: 'op-test-1234' },
+    )
   })
 })
 

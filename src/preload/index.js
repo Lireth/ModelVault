@@ -235,12 +235,15 @@ const api = {
     /** 库内移动模型（F11，目标目录经原生对话框选择），返回 { path } / { canceled } / { error } */
     moveModelTo: (id) => invokeValidated('models:moveModelTo', { id }),
     /**
-     * 一键移动文件（自动标签整理）：moves 为 [{ id, subCategory }]，主进程在
-     * 模型库根目录创建 7 个分类文件夹并移动已分配标签的模型（元数据键同步
-     * 迁移），返回 { moved, failed: [{id, error}], skipped: [{id, reason}] } 或 { error }
+     * 一键移动文件（自动标签整理）：payload 为 { moves: [{ id, subCategory }],
+     * opId? }——opId 为 OPT-18 取消令牌（Esc 经 models:cancelOp 中止），整体
+     * 透传（与 transferToLibrary 同一约定，由 wrapHandler 在顶层剥离 opId）。
+     * 主进程在模型库根目录创建 7 个分类文件夹并移动已分配标签的模型（元数据
+     * 键同步迁移），返回 { moved, failed: [{id, error}], skipped: [{id, reason}] }
+     * 或 { canceled } / { error }
      */
-    organizeByTags: (moves) =>
-      invokeValidated('models:organizeByTags', { moves }),
+    organizeByTags: (payload) =>
+      invokeValidated('models:organizeByTags', payload),
     /**
      * Civitai 在线识别（按文件 SHA256 反查），返回
      * { found: true, url, info, meta } / { found: false } / { error }。

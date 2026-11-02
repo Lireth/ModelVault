@@ -288,6 +288,12 @@ describe('models:organizeByTags handler', () => {
     expect(res.canceled).toBe(true)
     // 已完成部分保留：中止落在规划/移动前段，移动数必然小于总数
     expect(res.moved).toBeLessThan(50)
+    // handler settle 即移除注册（wrapHandler finally）：同一令牌不再命中
+    const lateCancel = await getRegisteredHandler('models:cancelOp')(
+      makeEvent(),
+      { targetOpId: 'op-cancel-me' },
+    )
+    expect(lateCancel).toEqual({ ok: false })
   })
 })
 
