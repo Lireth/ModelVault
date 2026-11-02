@@ -1,6 +1,7 @@
 import { state } from '../state'
 import { toast } from '../toast'
 import { applyMetaFlagUpdates, mapWithConcurrency } from '../meta-apply'
+import { reportBatchFailures, clearBatchFailures } from './batch-failures'
 
 /**
  * 批量快捷标记（E6，O-4 自 multiselect.js 按域拆出）：
@@ -22,6 +23,7 @@ async function batchApplyFlags(patch, label) {
   const ids = [...state.multiSelect.ids]
   if (ids.length === 0 || state.multiSelect.busy) return
   state.multiSelect.busy = true
+  clearBatchFailures()
   try {
     const results = await mapWithConcurrency(
       ids,
@@ -29,15 +31,25 @@ async function batchApplyFlags(patch, label) {
       16,
     )
     const metaMap = new Map()
-    let fail = 0
+    // B20/F3：逐项失败保留真实原因（IPC 异常 message 或主进程 error 文案）
+    const failures = []
     results.forEach((r, i) => {
-      if (r.status === 'fulfilled' && r.value?.meta)
+      if (r.status === 'fulfilled' && r.value?.meta) {
         metaMap.set(ids[i], r.value.meta)
-      else fail += 1
+      } else {
+        failures.push({
+          id: ids[i],
+          error:
+            r.status === 'rejected'
+              ? r.reason?.message
+              : r.value?.error || '未返回结果',
+        })
+      }
     })
     const ok = applyMetaFlagUpdates(metaMap)
+    const fail = reportBatchFailures(`批量${label}`, failures)
     if (fail === 0) toast('success', `已为 ${ok} 个模型${label}`)
-    else toast('warn', `${label}完成：成功 ${ok} 个，失败 ${fail} 个`)
+    else toast('warn', `${label}完成：成功 ${ok} 个，失败 ${fail} 个（可展开下方失败明细重试）`)
   } finally {
     state.multiSelect.busy = false
     // 并发型批量不响应取消，但 Esc 置位的标志必须在此复位：

@@ -20,7 +20,7 @@ const MAX_TAGS = 20
  * @param {string} id 模型 id
  * @param {string[]} tags 全量标签列表
  * @param {{silent?: boolean}} [opts] silent=true 时失败不 toast（批量场景由汇总提示统一反馈）
- * @returns {Promise<object|null>} 主进程返回的 meta；失败为 null
+ * @returns {Promise<{meta?: object, error?: string}>} 成功 {meta}；失败 {error: 真实原因}
  */
 async function writeModelTags(id, tags, opts = {}) {
   let res
@@ -28,11 +28,11 @@ async function writeModelTags(id, tags, opts = {}) {
     res = await window.api.models.setModelTags(id, tags)
   } catch (err) {
     if (!opts.silent) toast('error', `标签保存失败: ${err.message}`)
-    return null
+    return { error: err.message }
   }
   if (res?.error) {
     if (!opts.silent) toast('error', res.error)
-    return null
+    return { error: res.error }
   }
   const next = res?.meta?.tags || []
   // O2：走 state 的 id→下标索引（O(1)），不再全表 findIndex
@@ -40,7 +40,7 @@ async function writeModelTags(id, tags, opts = {}) {
   if (idx !== undefined) {
     state.models[idx] = { ...state.models[idx], tags: next }
   }
-  return res?.meta || null
+  return { meta: res?.meta || null }
 }
 
 /** 读取模型当前生效标签（执行时取最新值，供意图式增删基于最新状态计算） */
@@ -59,7 +59,10 @@ function currentTagsOf(id) {
  * @returns {Promise<boolean>} 是否保存成功（失败已 toast）
  */
 export function setModelTags(id, tags) {
-  return enqueueModelOp(id, async () => (await writeModelTags(id, tags)) !== null)
+  return enqueueModelOp(
+    id,
+    async () => (await writeModelTags(id, tags)).meta != null,
+  )
 }
 
 /**
@@ -81,7 +84,7 @@ export function addModelTag(id, tag) {
       toast('warn', `标签最多 ${MAX_TAGS} 个`)
       return false
     }
-    return (await writeModelTags(id, [...current, tag])) !== null
+    return (await writeModelTags(id, [...current, tag])).meta != null
   })
 }
 
@@ -96,7 +99,7 @@ export function removeModelTag(id, tag) {
   return enqueueModelOp(id, async () => {
     const current = currentTagsOf(id)
     if (!current.includes(tag)) return true
-    return (await writeModelTags(id, current.filter((x) => x !== tag))) !== null
+    return (await writeModelTags(id, current.filter((x) => x !== tag))).meta != null
   })
 }
 
@@ -107,15 +110,15 @@ export function removeModelTag(id, tag) {
  * @param {string} id 模型 id
  * @param {(current: string[]) => {tags?: string[], unchanged?: boolean, overflow?: boolean}} computeNext
  *   基于执行时最新标签计算目标列表（batch-tags 的 nextTagsFor 语义）
- * @returns {Promise<{meta?: object, unchanged?: boolean, overflow?: boolean, error?: boolean}>}
+ * @returns {Promise<{meta?: object, unchanged?: boolean, overflow?: boolean, error?: string}>}
  */
 export function enqueueBatchTagsWrite(id, computeNext) {
   return enqueueModelOp(id, async () => {
     const r = computeNext(currentTagsOf(id))
     if (r.unchanged) return { unchanged: true }
     if (r.overflow) return { overflow: true }
-    const meta = await writeModelTags(id, r.tags, { silent: true })
-    return meta ? { meta } : { error: true }
+    const w = await writeModelTags(id, r.tags, { silent: true })
+    return w.meta ? { meta: w.meta } : { error: w.error || '标签保存失败' }
   })
 }
 

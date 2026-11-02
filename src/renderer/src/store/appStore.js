@@ -195,6 +195,8 @@ export {
   batchCivitaiIdentify,
   batchCivitaiImages,
   requestBatchCancel,
+  clearBatchFailures,
+  reselectFailedItems,
 } from './multiselect'
 
 // 详情数据保存与封面操作

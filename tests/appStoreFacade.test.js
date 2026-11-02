@@ -154,6 +154,8 @@ const EXPECTED_EXPORTS = [
   'batchCivitaiIdentify',
   'batchCivitaiImages',
   'requestBatchCancel',
+  'clearBatchFailures',
+  'reselectFailedItems',
   // 封面/详情保存
   'saveModelData',
   'uploadCover',

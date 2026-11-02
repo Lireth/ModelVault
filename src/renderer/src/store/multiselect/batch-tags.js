@@ -3,6 +3,7 @@ import { toast } from '../toast'
 import { applyMetaUpdates, mapWithConcurrency } from '../meta-apply'
 import { modelById } from '../selectors'
 import { enqueueBatchTagsWrite } from '../model-actions'
+import { reportBatchFailures, clearBatchFailures } from './batch-failures'
 
 /**
  * 批量自由标签编辑（FEAT-01）：
@@ -134,6 +135,7 @@ export async function batchEditTags(options = {}) {
 
   state.multiSelect.busy = true
   state.multiSelect.progress = ''
+  clearBatchFailures()
   try {
     let processed = 0
     const results = await mapWithConcurrency(
@@ -146,18 +148,19 @@ export async function batchEditTags(options = {}) {
         const r = await enqueueBatchTagsWrite(item.id, (current) =>
           nextTagsFor(current, input, mode),
         )
-        if (r.error) throw new Error('标签保存失败')
+        if (r.error) throw new Error(r.error)
         return r
       },
       TAG_IPC_CONCURRENCY,
     )
 
     const metas = new Map()
-    let failed = 0
+    // B20/F3：逐项失败保留真实原因，供失败明细面板定位与重建选区重试
+    const failedItems = []
     let canceled = 0
     results.forEach((result, i) => {
       if (result.status !== 'fulfilled') {
-        failed += 1
+        failedItems.push({ id: updates[i].id, error: result.reason?.message })
         return
       }
       const value = result.value
@@ -175,8 +178,9 @@ export async function batchEditTags(options = {}) {
         return
       }
       if (value?.meta) metas.set(updates[i].id, value.meta)
-      else failed += 1
+      else failedItems.push({ id: updates[i].id, error: '未返回结果' })
     })
+    const failed = reportBatchFailures(`批量标签${modeLabel}`, failedItems)
 
     const ok = applyMetaUpdates(metas, (meta) => ({
       tags: Array.isArray(meta.tags) ? meta.tags : [],

@@ -222,6 +222,9 @@ export const state = shallowReactive({
     busy: false,
     progress: '',
     cancelRequested: false,
+    // 最近一次批量操作的逐项失败明细（B20/F3）：{ op, at, items: [{id, name, error}] }，
+    // 无失败为 null；整体替换语义（下一次批量结果覆盖，不叠加旧错误）
+    failures: null,
   }),
   // 设置（深响应：主题/卡片尺寸实时预览等就地改深层字段）
   settings: reactive(defaultSettings()),

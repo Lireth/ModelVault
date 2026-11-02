@@ -96,13 +96,14 @@ export function resetStoreTestState(api) {
   state.selectedId = null
   state.detailDirty = false
   state.settingsOpen = false
-  // O3：multiSelect 为内嵌深响应集合，就地表合并复位（含批量取消标志）
+  // O3：multiSelect 为内嵌深响应集合，就地表合并复位（含批量取消标志与失败明细）
   Object.assign(state.multiSelect, {
     active: false,
     ids: [],
     busy: false,
     progress: '',
     cancelRequested: false,
+    failures: null,
   })
   state.toasts.splice(0, state.toasts.length)
   if (state.confirm.resolve) state.confirm.resolve(false)

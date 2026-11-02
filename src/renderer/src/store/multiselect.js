@@ -44,3 +44,9 @@ export {
   batchToggleDisabled,
   batchDeleteModels,
 } from './multiselect/batch-files'
+
+export {
+  reportBatchFailures,
+  clearBatchFailures,
+  reselectFailedItems,
+} from './multiselect/batch-failures'

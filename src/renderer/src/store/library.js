@@ -9,6 +9,7 @@ import {
   clearHashOverrides,
 } from './state'
 import { applyCoverOverrides, clearCoverOverrides } from './cover-overrides'
+import { clearBatchFailures } from './multiselect/batch-failures'
 import { toast } from './toast'
 import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
 
@@ -275,6 +276,7 @@ export async function switchRoot(folder) {
         state.folder = folder
         clearCoverOverrides()
         clearHashOverrides()
+        clearBatchFailures()
         replaceModels([])
         state.lastScan = null
         state.folderMissing = true
@@ -292,6 +294,8 @@ export async function switchRoot(folder) {
       clearCoverOverrides()
       // O7：旧库的哈希覆盖一并清空，避免跨库 id/hash 残留
       clearHashOverrides()
+      // B20/F3：失败明细属于旧库（id 语境已失效），切库即清，不留幻影
+      clearBatchFailures()
       replaceModels(res.models)
       state.folder = res.root || folder
       // F1-offline：目标库可打开（主进程已通过存在性校验），清除离线残留

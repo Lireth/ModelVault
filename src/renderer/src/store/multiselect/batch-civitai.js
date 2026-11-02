@@ -3,6 +3,7 @@ import { toast, confirmDialog } from '../toast'
 import { applyMetaUpdates } from '../meta-apply'
 import { setModelCoverUrl } from '../cover-overrides'
 import { modelById } from '../selectors'
+import { reportBatchFailures, clearBatchFailures } from './batch-failures'
 
 /**
  * 批量 Civitai 操作（O-4 自 multiselect.js 按域拆出）：
@@ -43,12 +44,14 @@ export async function batchAssignCivitaiTags() {
     return
   }
   state.multiSelect.busy = true
+  clearBatchFailures()
   try {
     const metas = new Map()
     let skippedNoUrl = 0
     let unmapped = 0
     let notFound = 0
-    let failed = 0
+    // B20/F3：逐项失败保留真实原因（IPC 异常 message 或主进程 error 文案）
+    const failures = []
     let firstError = ''
     for (let i = 0; i < loraIds.length; i++) {
       if (state.multiSelect.cancelRequested) break
@@ -58,12 +61,12 @@ export async function batchAssignCivitaiTags() {
       let res
       try {
         res = await window.api.models.civitaiCategory(id)
-      } catch {
-        failed += 1
+      } catch (err) {
+        failures.push({ id, error: err?.message || 'IPC 异常' })
         continue
       }
       if (res.error) {
-        failed += 1
+        failures.push({ id, error: res.error })
         if (!firstError) firstError = res.error
         continue
       }
@@ -85,6 +88,7 @@ export async function batchAssignCivitaiTags() {
     const ok = applyMetaUpdates(metas, (meta) => ({
       subCategory: meta.subCategory || '',
     }))
+    const failed = reportBatchFailures('Civitai 分配标签', failures)
     const done = ok + skippedNoUrl + unmapped + notFound + failed
     const parts = []
     if (notLora > 0) parts.push(`非 LoRA ${notLora} 个`)
@@ -130,15 +134,16 @@ const BATCH_CIVITAI_IMAGES_PER_MODEL = 4
  * found=false（哈希未被 Civitai 收录，如自训模型）不算失败，计入 notFound。
  * @param {string[]} ids 模型 id 列表
  * @param {string} label 进度文案前缀（如「识别中」）
- * @returns {Promise<{metas: Map<string, object>, notFound: number, failed: number, firstError: string, cancelled: boolean}>}
- *   metas 为识别成功模型 id → 最新元数据（含 civitaiUrl）；firstError 为首条
- *   失败原因（供汇总提示定位，如网络抖动）；cancelled 为用户请求取消后提前收尾
+ * @returns {Promise<{metas: Map<string, object>, notFound: number, failures: Array<{id: string, error: string}>, firstError: string, cancelled: boolean}>}
+ *   metas 为识别成功模型 id → 最新元数据（含 civitaiUrl）；failures 为逐项失败
+ *   （B20/F3：保留真实原因供失败明细面板）；firstError 为首条失败原因（供汇总
+ *   提示定位，如网络抖动）；cancelled 为用户请求取消后提前收尾
  */
 async function identifySequentially(ids, label) {
   const byId = modelById.value
   const metas = new Map()
   let notFound = 0
-  let failed = 0
+  const failures = []
   let firstError = ''
   for (let i = 0; i < ids.length; i++) {
     if (state.multiSelect.cancelRequested) break
@@ -148,12 +153,12 @@ async function identifySequentially(ids, label) {
     let res
     try {
       res = await window.api.models.civitaiIdentify(id)
-    } catch {
-      failed += 1
+    } catch (err) {
+      failures.push({ id, error: err?.message || 'IPC 异常' })
       continue
     }
     if (res.error) {
-      failed += 1
+      failures.push({ id, error: res.error })
       if (!firstError) firstError = res.error
       continue
     }
@@ -167,9 +172,9 @@ async function identifySequentially(ids, label) {
   return {
     metas,
     notFound,
-    failed,
+    failures,
     firstError,
-    cancelled: metas.size + notFound + failed < ids.length,
+    cancelled: metas.size + notFound + failures.length < ids.length,
   }
 }
 
@@ -181,9 +186,11 @@ export async function batchCivitaiIdentify() {
   const ids = [...state.multiSelect.ids]
   if (ids.length === 0 || state.multiSelect.busy) return
   state.multiSelect.busy = true
+  clearBatchFailures()
   try {
-    const { metas, notFound, failed, firstError, cancelled } =
+    const { metas, notFound, failures, firstError, cancelled } =
       await identifySequentially(ids, '识别中')
+    const failed = reportBatchFailures('批量 Civitai 识别', failures)
     const ok = applyMetaUpdates(metas, (meta, cur) => ({
       civitaiUrl: meta.civitaiUrl || '',
       // 基底模型识别回填（F-2）：与单模型识别同一合并语义（本地已有值优先）
@@ -238,12 +245,14 @@ export async function batchCivitaiImages() {
     return
   }
   state.multiSelect.busy = true
+  clearBatchFailures()
   try {
     const metas = new Map()
     let okModels = 0
     let addedTotal = 0
     let notFound = 0
-    let failed = 0
+    // B20/F3：逐项失败保留真实原因
+    const failures = []
     let firstError = ''
     for (let i = 0; i < targets.length; i++) {
       if (state.multiSelect.cancelRequested) break
@@ -254,12 +263,12 @@ export async function batchCivitaiImages() {
       let res = null
       try {
         res = await window.api.models.civitaiIdentify(id)
-      } catch {
-        failed += 1
+      } catch (err) {
+        failures.push({ id, error: err?.message || 'IPC 异常' })
         continue
       }
       if (res.error) {
-        failed += 1
+        failures.push({ id, error: res.error })
         if (!firstError) firstError = res.error
         continue
       }
@@ -281,12 +290,12 @@ export async function batchCivitaiImages() {
       let imp = null
       try {
         imp = await window.api.models.civitaiImportImages(id, picked)
-      } catch {
-        failed += 1
+      } catch (err) {
+        failures.push({ id, error: err?.message || 'IPC 异常' })
         continue
       }
       if (!imp || imp.error) {
-        failed += 1
+        failures.push({ id, error: imp?.error || '未返回结果' })
         continue
       }
       okModels += 1
@@ -312,6 +321,7 @@ export async function batchCivitaiImages() {
     const parts = []
     if (skippedHasCover > 0) parts.push(`已有示例图跳过 ${skippedHasCover} 个`)
     if (notFound > 0) parts.push(`未收录或无示例图 ${notFound} 个`)
+    const failed = reportBatchFailures('批量获取示例图', failures)
     if (failed > 0)
       parts.push(`失败 ${failed} 个${firstError ? `（${firstError}）` : ''}`)
     const done = okModels + notFound + failed

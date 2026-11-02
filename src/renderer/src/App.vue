@@ -9,6 +9,7 @@ import {
 import TopBar from './components/TopBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import BatchBar from './components/BatchBar.vue'
+import BatchFailuresBar from './components/BatchFailuresBar.vue'
 import ConfirmOverlay from './components/ConfirmOverlay.vue'
 import LibraryPickerOverlay from './components/LibraryPickerOverlay.vue'
 import LibraryStates from './components/LibraryStates.vue'
@@ -162,6 +163,10 @@ onUnmounted(() => {
             <!-- 多选批量操作栏（E4/E6，O9 拆分为 BatchBar）：
                  位于多选开关所在的结果行与模型清单之间，靠近操作对象 -->
             <BatchBar />
+
+            <!-- 批量失败明细条（B20/F3）：仅在最近一次批量操作有逐项失败时出现，
+                 全成功不打扰；可展开定位、可重选失败项后用批量栏重试 -->
+            <BatchFailuresBar />
 
             <!-- 空结果（有筛选条件时保留结果栏，便于切换分类/取消收藏筛选/清空搜索） -->
             <div v-if="filteredModels.length === 0" class="empty-state">

@@ -134,6 +134,7 @@ function resetStoreState() {
     busy: false,
     progress: '',
     cancelRequested: false,
+    failures: null,
   })
   // active/ids 经 exitMultiSelect 复位：顺带清掉 store 模块级的 Shift
   // 范围选择锚点（非响应式记忆，整体赋值复位无法触达）

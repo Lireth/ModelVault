@@ -4,6 +4,7 @@ import { applyMetaUpdates, mapWithConcurrency } from '../meta-apply'
 import { modelById } from '../selectors'
 import { clearSelectedModel } from '../detail'
 import { LORA_DIR, LORA_TAG_KEYS } from '../../../../shared/model-categories'
+import { reportBatchFailures, clearBatchFailures } from './batch-failures'
 
 /**
  * 批量文件级操作（O-4 自 multiselect.js 按域拆出）：
@@ -56,6 +57,8 @@ export async function batchOrganizeByTags() {
     return
   }
   state.multiSelect.busy = true
+  // B20/F3：新批次开始即清空上一批次的失败明细（结果整体替换，不叠加）
+  clearBatchFailures()
   // OPT-18：附带取消令牌，Esc 批量取消路径经 models:cancelOp 中止主进程循环
   organizeOpId =
     typeof crypto !== 'undefined' && crypto.randomUUID
@@ -88,7 +91,12 @@ export async function batchOrganizeByTags() {
       ])
     }
     const parts = []
-    if (res.failed?.length > 0) parts.push(`失败 ${res.failed.length} 个`)
+    // B20/F3：主进程返回的逐项失败（{id, error}）直接保留进明细面板
+    const failCount = reportBatchFailures(
+      '一键移动文件',
+      Array.isArray(res.failed) ? res.failed : [],
+    )
+    if (failCount > 0) parts.push(`失败 ${failCount} 个`)
     if (res.skipped?.length > 0) parts.push(`跳过 ${res.skipped.length} 个`)
     if (res.moved > 0)
       toast(
@@ -129,6 +137,7 @@ export async function batchApplyTriggers() {
     return
   }
   state.multiSelect.busy = true
+  clearBatchFailures()
   try {
     const results = await mapWithConcurrency(
       targets,
@@ -137,12 +146,21 @@ export async function batchApplyTriggers() {
       16,
     )
     const metaMap = new Map()
-    let fail = 0
+    // B20/F3：逐项失败保留真实原因
+    const failures = []
     results.forEach((r, i) => {
       if (r.status === 'fulfilled' && r.value?.meta)
         metaMap.set(targets[i].id, r.value.meta)
-      else fail += 1
+      else
+        failures.push({
+          id: targets[i].id,
+          error:
+            r.status === 'rejected'
+              ? r.reason?.message
+              : r.value?.error || '未返回结果',
+        })
     })
+    const fail = reportBatchFailures('批量填入触发词', failures)
     const ok = applyMetaUpdates(metaMap, (meta) => ({
       triggerWords: meta.triggerWords || '',
       triggerWordsSource: meta.triggerWordsSource || '',
@@ -169,16 +187,18 @@ export async function batchToggleDisabled(disabled) {
   const ids = [...state.multiSelect.ids]
   if (ids.length === 0 || state.multiSelect.busy) return
   state.multiSelect.busy = true
+  clearBatchFailures()
   let ok = 0
-  let fail = 0
+  // B20/F3：逐项失败保留真实原因（串行循环逐个收集）
+  const failures = []
   try {
     for (const id of ids) {
       if (state.multiSelect.cancelRequested) break
       const res = await window.api.models
         .toggleDisabled(id, disabled)
-        .catch(() => null)
+        .catch((err) => ({ error: err.message }))
       if (res && !res.error) ok += 1
-      else fail += 1
+      else failures.push({ id, error: res?.error || '未返回结果' })
     }
     if (ok > 0) {
       // id 已全部变化：收集所涉子树去重后一次局部扫描收敛（OPT-03）；
@@ -188,6 +208,7 @@ export async function batchToggleDisabled(disabled) {
       if (!state.scanning) await partialScanModels(modelRelDirs(ids))
     }
     const label = disabled ? '禁用' : '启用'
+    const fail = reportBatchFailures(`批量${label}`, failures)
     const done = ok + fail
     if (done < ids.length) {
       toast(
@@ -213,6 +234,7 @@ export async function batchDeleteModels() {
   const ids = [...state.multiSelect.ids]
   if (ids.length === 0 || state.multiSelect.busy) return
   state.multiSelect.busy = true
+  clearBatchFailures()
   try {
     if (
       !(await confirmDialog(
@@ -228,8 +250,18 @@ export async function batchDeleteModels() {
       8,
     )
     const deletedIds = new Set()
+    // B20/F3：逐项失败保留真实原因，失败项可经明细面板重建选区重试
+    const failures = []
     results.forEach((r, i) => {
       if (r.status === 'fulfilled' && !r.value?.error) deletedIds.add(ids[i])
+      else
+        failures.push({
+          id: ids[i],
+          error:
+            r.status === 'rejected'
+              ? r.reason?.message
+              : r.value?.error || '未返回结果',
+        })
     })
     if (deletedIds.size > 0) {
       // 单趟移除：整体替换数组（须经 replaceModels 保持数组代理），selectedId 与多选选区同步按 Set 清理
@@ -240,7 +272,7 @@ export async function batchDeleteModels() {
       )
     }
     const ok = deletedIds.size
-    const fail = ids.length - ok
+    const fail = reportBatchFailures('批量删除', failures)
     if (fail === 0)
       toast('success', `已将 ${ok} 个模型移入回收站，可在系统回收站恢复`)
     else toast('warn', `删除完成：成功 ${ok} 个，失败 ${fail} 个`)
