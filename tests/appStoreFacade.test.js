@@ -92,10 +92,11 @@ const EXPECTED_EXPORTS = [
   'libraryOverview',
   'loadLibraryOverview',
   'resetLibraryOverview',
-  // 封面/缩略图展示覆盖（OP-02）
+  // 封面/缩略图展示覆盖（OP-02；coverImageUrl 为 OPT-PAYLOAD 派生入口）
   'applyCoverOverrides',
   'modelCoverUrl',
   'coverThumbUrl',
+  'coverImageUrl',
   'clearCoverOverrides',
   // 模型清单导出（FN-04）
   'EXPORT_FORMATS',

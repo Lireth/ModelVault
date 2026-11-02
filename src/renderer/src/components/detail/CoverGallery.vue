@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { state } from '../../store/appStore'
+import { coverImageUrl, state } from '../../store/appStore'
 
 /**
  * 全屏画廊模式：详情页预览图的全屏浏览层（Teleport 到 body）。
@@ -14,7 +14,7 @@ import { state } from '../../store/appStore'
  */
 
 const props = defineProps({
-  covers: { type: Array, required: true }, // [{ rel, path, url }]
+  covers: { type: Array, required: true }, // [{ rel, path, url? }]（url 可缺省，经 coverImageUrl 派生）
   defaultPath: { type: String, default: '' },
   initialIndex: { type: Number, default: 0 },
   busy: { type: Boolean, default: false },
@@ -70,13 +70,14 @@ watch(
   },
 )
 
-/** 预加载相邻图片（本地文件加载快，但多 MB 原图解码仍需时间） */
+/** 预加载相邻图片（本地文件加载快，但多 MB 原图解码仍需时间）。
+ * OPT-PAYLOAD：瘦身条目无 url 字段，经 coverImageUrl 由 path 派生 */
 function preloadAround() {
   const n = props.covers.length
   if (n < 2) return
   for (const step of [-1, 1]) {
     const c = props.covers[(index.value + step + n) % n]
-    if (c) new Image().src = c.url
+    if (c) new Image().src = coverImageUrl(c)
   }
 }
 
@@ -253,7 +254,7 @@ onBeforeUnmount(() => {
         <img
           v-if="current && !failedPaths.has(current.path)"
           :key="current.path"
-          :src="current.url"
+          :src="coverImageUrl(current)"
           :alt="`预览图 ${index + 1}`"
           class="gallery-img"
           :class="{ grabbing: dragging }"

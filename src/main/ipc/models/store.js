@@ -28,8 +28,18 @@ import {
   releaseMaintenance,
   tryAcquireMaintenance,
 } from '../../services/maintenance-lock'
-import { awaitThumbDrain } from './model-state'
-import { wrapHandler, checkExistingDirectory } from '../handler'
+import { awaitThumbDrain, decorateCache } from './model-state'
+import { resolveCoverSafe } from './decorate'
+import { toImageUrl } from '../../protocol'
+import {
+  slimModelsForList,
+  logPayloadSize,
+} from './list-payload'
+import {
+  wrapHandler,
+  checkExistingDirectory,
+  checkModelIdInRoot,
+} from '../handler'
 import { readLibraryIndex } from '../../services/library-index'
 import { collectLibraryOverview } from '../../services/library-overview'
 import { metaDisplayFields } from './meta-display'
@@ -106,6 +116,97 @@ function overlayCurrentMeta(models) {
       ...metaDisplayFields(m, meta, { baseModel: m.baseModel || '' }),
     }
   })
+}
+
+/* ---------------- 详情按需拉取（OPT-PAYLOAD，models:getDetail） ----------------
+ * 列表通道瘦身（slimModelsForList）剥离的详情消费面字段（autoInfo 详情字段、
+ * 封面 URL 派生前的完整形状）由此通道在打开详情时单模型补全，语义不变。 */
+
+/**
+ * 详情兜底的索引全文缓存（惰性）：装饰缓存未命中时读一次 index.json 并
+ * 保留全文映射——autoScan 关闭 + 冷启动（无扫描发生）场景下，此后每次
+ * 详情拉取不再重复解析整份索引；全量扫描完成后 decorateCache 覆盖全库，
+ * 本缓存自然不再被查询（陈旧无害）。切库（rootLower 变化）时重建。
+ * 仅在兜底路径真正触发时占用主进程内存（数十 MB 级，单库一份）。
+ */
+let detailIndexFallback = { rootLower: '', map: null }
+
+/**
+ * 从本地索引兜底读取完整装饰模型（装饰缓存未命中时）。
+ * @param {string} id 模型绝对路径
+ * @returns {Promise<Record<string, any>|null>} 索引缺失/无该模型时返回 null
+ */
+async function readFullModelFromIndex(id) {
+  const root = getCurrentRoot()
+  if (!root) return null
+  const rootLower = root.toLowerCase()
+  if (detailIndexFallback.rootLower !== rootLower || !detailIndexFallback.map) {
+    const index = await readLibraryIndex(root)
+    if (!index || !Array.isArray(index.models)) return null
+    const map = new Map()
+    for (const m of /** @type {any[]} */ (index.models)) {
+      if (m && typeof m.id === 'string') map.set(m.id, m)
+    }
+    detailIndexFallback = { rootLower, map }
+  }
+  return detailIndexFallback.map.get(id) || null
+}
+
+/**
+ * 组装详情模型：完整装饰对象（缓存/索引）+ 当前 store-meta 覆盖 + 按当前
+ * meta 重建的封面列表。封面操作只写 store-meta，装饰缓存/索引快照的封面
+ * 字段要等到下一次（局部）扫描才更新——快照条目在 rel 集合一致时沿用
+ * （保留已缓存的 thumbPath），出现差异（增删封面）按 rel 重建，未知 rel
+ * 以路径解析构造（不做存在性 stat：碎图由渲染层 error 占位兜底）。
+ * @param {Record<string, any>} base 完整装饰对象（decorateCache 或索引）
+ * @returns {Record<string, any>} 面向详情页的完整模型（新对象，不改入参）
+ */
+function buildDetailModel(base) {
+  if (!base || typeof base !== 'object') return base
+  const meta = getModelMeta(base.id)
+  const merged = /** @type {Record<string, any>} */ ({ ...base })
+  if (meta) {
+    Object.assign(
+      merged,
+      metaDisplayFields(base, meta, { baseModel: base.baseModel || '' }),
+    )
+  }
+  if (meta && Array.isArray(meta.covers)) {
+    const baseRels = Array.isArray(merged.covers)
+      ? merged.covers.map((c) => c?.rel).join('\u0000')
+      : ''
+    if (meta.covers.join('\u0000') !== baseRels) {
+      const byRel = new Map(
+        (Array.isArray(merged.covers) ? merged.covers : [])
+          .filter((c) => c && typeof c === 'object')
+          .map((c) => [c.rel, c]),
+      )
+      merged.covers = meta.covers.map((rel) => {
+        const known = byRel.get(rel)
+        const abs = (known && known.path) || resolveCoverSafe(rel)
+        return {
+          rel,
+          path: abs,
+          url: abs ? toImageUrl(abs) : '',
+          thumbPath: known?.thumbPath || '',
+          thumbUrl: known?.thumbPath ? toImageUrl(known.thumbPath) : '',
+        }
+      })
+      merged.hasManualCover = merged.covers.length > 0
+    }
+    // 默认封面统一按当前 meta 选取（setDefaultCover 只改 meta.cover 不改
+    // covers 列表，rel 集合比对捕捉不到此类变化）；与装饰路径同一选择规则
+    //（显式值 > 第一张），无封面时沿用快照值——sidecar 预览图回退已在
+    // 装饰时烘焙进快照，此处重算需额外 stat
+    const coversList = Array.isArray(merged.covers) ? merged.covers : []
+    const def =
+      coversList.find((c) => c?.rel === meta.cover) || coversList[0] || null
+    if (def && def.path) {
+      merged.cover = def.path
+      merged.coverUrl = toImageUrl(def.path)
+    }
+  }
+  return merged
 }
 
 /**
@@ -229,9 +330,13 @@ export function registerStoreHandlers() {
               readLibraryIndex(settings.modelsFolder),
             ]).then(([, index]) => index)
             if (index) {
+              // OPT-PAYLOAD：列表通道下发瘦身模型（先合成元数据展示字段，
+              // 再剥离详情消费面重字段，顺序不可颠倒——合成依赖 folderSubCategory）
+              const slimmed = slimModelsForList(overlayCurrentMeta(index.models))
+              logPayloadSize('models:loadStore', slimmed.approxBytes)
               cachedIndex = {
                 ...index,
-                models: overlayCurrentMeta(index.models),
+                models: slimmed.models,
               }
             }
             // 启动后后台预热缺失的模型哈希（Civitai 识别加速）：仅入队，
@@ -348,11 +453,17 @@ export function registerStoreHandlers() {
           `模型库已打开（本地索引 ${cachedIndex.models.length} 个模型）: ${root}`,
         )
         perf(`本地索引 ${cachedIndex.models.length} 个模型`)
+        // OPT-PAYLOAD：秒开列表下发瘦身模型（先合成元数据展示字段再剥离，
+        // 顺序不可颠倒——合成依赖 folderSubCategory）
+        const slimmed = slimModelsForList(
+          overlayCurrentMeta(/** @type {any[]} */ (cachedIndex.models)),
+        )
+        logPayloadSize('models:openLibrary', slimmed.approxBytes)
         return {
           root,
           settings,
           cached: true,
-          models: overlayCurrentMeta(cachedIndex.models),
+          models: slimmed.models,
           savedAt: cachedIndex.savedAt,
           durationMs: cachedIndex.durationMs,
         }
@@ -361,6 +472,26 @@ export function registerStoreHandlers() {
       }
     },
     { errorPrefix: '打开模型库失败', perfWarnMs: 200 },
+  )
+
+  // OPT-PAYLOAD：单模型详情按需拉取（列表通道瘦身后的补全通道）。
+  // 数据源优先装饰缓存（扫描后全库热），未命中回退本地索引全文；返回前以
+  // 当前 store-meta 覆盖标注字段并按 meta 重建封面列表，保证与「封面/标注
+  // 操作即时生效」的既有语义一致（装饰缓存快照要等下一次扫描才刷新）。
+  wrapHandler(
+    'models:getDetail',
+    async (event, { id } = {}) => {
+      const invalid = checkModelIdInRoot(id)
+      if (invalid) return { error: invalid }
+      const entry = decorateCache.get(id)
+      const base =
+        (entry && entry.decorated) || (await readFullModelFromIndex(id))
+      if (!base) {
+        return { error: '模型不在当前库索引中，请重新扫描后重试' }
+      }
+      return { model: buildDetailModel(base) }
+    },
+    { errorPrefix: '加载模型详情失败' },
   )
 
   // 选择模型根目录

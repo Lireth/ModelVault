@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { toImageUrl } from '../../../shared/image-url'
 
 /**
  * 封面/缩略图展示覆盖（OP-02）：
@@ -70,10 +71,30 @@ export function modelCoverUrl(model) {
   return byModel.get(model.id) || model.coverUrl || ''
 }
 
-/** 封面条目的缩略图 URL（覆盖优先，回退装饰结果） */
+/**
+ * 封面条目的原图展示 URL（OPT-PAYLOAD 派生）：列表瘦身后的封面条目不再
+ * 携带 url 字段（绝对路径的再编码副本），由 path 经 shared 的同一构造器
+ * 派生——封面操作响应（uploadCover 等）返回的完整条目仍带 url，显式值
+ * 优先以兼容两种形状。
+ * @param {{path?: string, url?: string}|null} cover 封面条目
+ * @returns {string} mvimg URL
+ */
+export function coverImageUrl(cover) {
+  if (!cover) return ''
+  return cover.url || toImageUrl(cover.path)
+}
+
+/**
+ * 封面条目的缩略图 URL（覆盖优先，回退装饰结果；列表瘦身条目无 thumbUrl
+ * 时由 thumbPath 派生）。
+ */
 export function coverThumbUrl(cover) {
   if (!cover) return ''
-  return byPath.get(cover.path) || cover.thumbUrl || ''
+  return (
+    byPath.get(cover.path) ||
+    cover.thumbUrl ||
+    (cover.thumbPath ? toImageUrl(cover.thumbPath) : '')
+  )
 }
 
 /** 清空全部覆盖（全量扫描/切库完成时调用） */

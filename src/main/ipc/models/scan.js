@@ -45,6 +45,7 @@ import {
   queueLibraryIndexUpdate,
   writeLibraryIndex,
 } from '../../services/library-index'
+import { slimModelsForList, logPayloadSize } from './list-payload'
 
 /**
  * 扫描链路：全量扫描模型目录（进度推送、可取消）、局部增量扫描与取消入口。
@@ -262,9 +263,13 @@ export function registerScanHandlers() {
         )
 
         completed = true
+        // OPT-PAYLOAD：列表通道下发瘦身模型（索引/预热/装饰缓存仍持有
+        // 完整装饰对象——瘦身只发生在 IPC 边界，decorated 数组不改动）
+        const slimmed = slimModelsForList(decorated)
+        logPayloadSize('models:scan', slimmed.approxBytes)
         return {
           root,
-          models: decorated,
+          models: slimmed.models,
           byType,
           errors,
           durationMs: Date.now() - startedAt,
@@ -437,8 +442,11 @@ export function registerScanHandlers() {
           `局部扫描完成：${subDirs.length} 个子树 → ${decorated.length} 个模型 / 重关联 ${relinkResult.relinked} 个`,
         )
 
+        // OPT-PAYLOAD：局部结果同全量扫描口径瘦身后再下发
+        const slimmed = slimModelsForList(decorated)
+        logPayloadSize('models:partialScan', slimmed.approxBytes)
         return {
-          models: decorated,
+          models: slimmed.models,
           dirs: subDirs,
           relinked: relinkResult.relinked,
           durationMs: Date.now() - startedAt,

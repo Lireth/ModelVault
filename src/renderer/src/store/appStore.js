@@ -118,6 +118,7 @@ export {
   applyCoverOverrides,
   modelCoverUrl,
   coverThumbUrl,
+  coverImageUrl,
   clearCoverOverrides,
 } from './cover-overrides'
 

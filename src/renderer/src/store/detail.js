@@ -1,5 +1,5 @@
-import { computed } from 'vue'
-import { state } from './state'
+import { computed, watch } from 'vue'
+import { state, modelIndexOf } from './state'
 import { modelById } from './selectors'
 import { filteredModels } from './filter'
 import { confirmDialog } from './toast'
@@ -12,6 +12,58 @@ import { confirmDialog } from './toast'
 export const selectedModel = computed(
   () => modelById.value.get(state.selectedId) || null,
 )
+
+/* ---------------- 详情字段按需补全（OPT-PAYLOAD） ----------------
+ * 列表通道（scan/loadStore/openLibrary/partialScan）下发的瘦身模型不含
+ * 详情消费面字段（autoInfo 的 networkModule/tensorStats 等、封面完整 URL
+ * 形状）。选中模型变化时若元素尚未补全（无 detailFull 标记），经
+ * models:getDetail 拉取完整对象并按浅响应约定整体替换该元素——详情页所有
+ * 面板（MetaForm/CoverPanel/AutoInfoPanel/CivitaiPanel）继续读取
+ * selectedModel，零组件改动。openDetail 与 openAdjacentDetail 的相邻切换
+ * 都经由 selectedModel 变化进入同一条补全链路。
+ *
+ * detailFull 标记的语义：渲染层已持有该模型的完整详情对象。封面/标注操作
+ * 的本地回写走「展开旧对象 + 覆盖字段」（covers-store/meta-apply），标记
+ * 随之保留——主进程装饰缓存/索引快照的封面与 autoInfo 要等下一次（局部）
+ * 扫描才刷新，补全若在这些操作后重跑会用陈旧快照覆盖较新的本地状态。
+ * 局部/全量扫描会以重新装饰的瘦身对象替换元素（标记丢失），此时按
+ * 主进程最新装饰结果重新补全，正是期望行为。 */
+
+/** 在途补全防重入（id 集合）：watcher 连续触发时不重复发起 IPC */
+const enrichingIds = new Set()
+
+/**
+ * 拉取单模型详情并整体替换列表元素（浅响应约定：元素级替换才触发更新）。
+ * 失败静默降级——详情页继续展示瘦身字段（标注/封面操作照常可用），仅
+ * autoInfo 详情面板不展示（其 v-if 依赖字段存在）。
+ * @param {string} id 模型绝对路径
+ */
+async function enrichSelectedModel(id) {
+  if (!id || enrichingIds.has(id)) return
+  const idx = modelIndexOf(id)
+  if (idx === undefined) return
+  if (state.models[idx]?.detailFull) return
+  enrichingIds.add(id)
+  try {
+    const res = await window.api.models.getDetail(id)
+    if (!res || res.error || !res.model) return
+    const cur = modelIndexOf(id)
+    if (cur === undefined) return
+    // 切库/重扫期间元素可能已被替换或移除：以当前列表为准
+    if (state.models[cur]?.detailFull) return
+    state.models[cur] = { ...res.model, detailFull: true }
+  } catch {
+    /* 详情补全失败不阻断详情页：瘦身字段足够展示基础信息 */
+  } finally {
+    enrichingIds.delete(id)
+  }
+}
+
+// 选中模型引用变化即检查补全：打开详情（openDetail/openAdjacentDetail）、
+// 局部扫描替换选中元素、切库后恢复选中等场景统一进入
+watch(selectedModel, (m) => {
+  if (m && !m.detailFull) void enrichSelectedModel(m.id)
+})
 
 /**
  * 当前详情在筛选结果中的位置（FEA-01 序列导航）：

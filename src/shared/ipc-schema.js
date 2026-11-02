@@ -346,6 +346,8 @@ export const IPC_PAYLOAD_SCHEMAS = {
   'models:openLibrary': vObj({
     fields: { folder: vStr({ required: true, max: 1000 }) },
   }),
+  // OPT-PAYLOAD：单模型详情按需拉取（列表通道瘦身后的补全通道）
+  'models:getDetail': vObj({ fields: { id: ID } }),
   'models:chooseFolder': vVoid(),
   // FN-01：跨库存储总览（只读聚合，无渲染层入参）
   'models:crossLibraryOverview': vVoid(),

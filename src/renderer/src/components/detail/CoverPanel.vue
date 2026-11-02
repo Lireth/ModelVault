@@ -4,6 +4,7 @@ import CoverGallery from './CoverGallery.vue'
 import {
   clearCovers,
   confirmDialog,
+  coverImageUrl,
   deleteCover,
   importCoversFromDrop,
   pasteCover,
@@ -114,7 +115,8 @@ const coverSrc = computed(() => {
   const m = selectedModel.value
   if (!m) return ''
   const def = (m.covers || []).find((c) => c.path === m.cover)
-  return def?.url || m.coverUrl || ''
+  // OPT-PAYLOAD：瘦身条目无 url 字段，经 coverImageUrl 由 path 派生
+  return (def && coverImageUrl(def)) || m.coverUrl || ''
 })
 
 /** 大图加载失败标记（封面文件被移动/删除时回退占位符，避免碎图） */
@@ -301,7 +303,7 @@ onBeforeUnmount(() => {
         >
           <img
             v-if="!failedThumbs.has(c.path)"
-            :src="c.url"
+            :src="coverImageUrl(c)"
             alt="预览图"
             loading="lazy"
             draggable="false"

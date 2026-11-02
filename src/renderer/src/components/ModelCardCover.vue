@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
+  coverImageUrl,
   coverThumbUrl,
   duplicateIdSet,
   effectiveNsfw,
@@ -58,10 +59,11 @@ const cycleBrokenUrls = new Set()
  * 封面的展示 URL（OPT-1）：优先主进程缩略图（thumbUrl，640px JPEG），
  * 缩略图缺失或本轮会话内预加载失败时回退原图——多 MB 原图的预加载解码
  * 是悬停卡顿的根源；缩略图文件被清理/源图变更导致 404 时不产生碎图帧。
+ * OPT-PAYLOAD：瘦身条目无 url 字段，回退原图经 coverImageUrl 由 path 派生。
  */
 function displayUrlOf(c) {
   const thumb = coverThumbUrl(c)
-  return thumb && !cycleBrokenUrls.has(thumb) ? thumb : c.url
+  return thumb && !cycleBrokenUrls.has(thumb) ? thumb : coverImageUrl(c)
 }
 
 /** 当前轮播图 URL（空串表示未轮播） */
@@ -101,14 +103,15 @@ async function advanceCycle(session) {
       const c = list[next]
       if (cycleFailed.has(c.path)) continue
       const display = displayUrlOf(c)
+      const original = coverImageUrl(c)
       try {
         await preloadImage(display)
       } catch {
         // 缩略图预加载失败：本轮会话内标记并回退原图；原图也失败才跳过该封面
-        if (display !== c.url) {
+        if (display !== original) {
           cycleBrokenUrls.add(display)
           try {
-            await preloadImage(c.url)
+            await preloadImage(original)
           } catch {
             cycleFailed.add(c.path)
             continue

@@ -99,6 +99,14 @@ const api = {
      *   models?:object[], savedAt?:number, durationMs?:number} | {error:string}>}
      */
     openLibrary: (folder) => invokeValidated('models:openLibrary', { folder }),
+    /**
+     * 单模型详情按需拉取（OPT-PAYLOAD）：列表通道下发的瘦身模型不含详情
+     * 消费面字段（autoInfo 详情字段、封面完整 URL 形状），打开详情时经本
+     * 通道补全。
+     * @param {string} id 模型绝对路径
+     * @returns {Promise<{model: object} | {error: string}>}
+     */
+    getDetail: (id) => invokeValidated('models:getDetail', { id }),
     /** 弹出目录选择框，返回所选目录或 null */
     chooseFolder: () => invokeValidated('models:chooseFolder'),
     /**

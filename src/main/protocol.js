@@ -19,6 +19,7 @@ import {
   removeCivImageCache,
   saveCivImageCache,
 } from './services/civ-cache'
+import { IMAGE_URL_SCHEME as SCHEME } from '../shared/image-url'
 
 /**
  * 自定义图片协议 mvimg://
@@ -35,7 +36,6 @@ import {
  * civimg://remote/<encodeURIComponent(图片 https URL)>
  */
 
-const SCHEME = 'mvimg'
 const CIV_SCHEME = 'civimg'
 
 /** 必须在 app ready 之前调用 */
@@ -692,8 +692,9 @@ async function proxyCivitaiVideo(target, request, acquireSlot) {
   }
 }
 
-/** 由本地图片绝对路径构造渲染进程可用的 mvimg URL */
-export function toImageUrl(filePath) {
-  if (!filePath) return ''
-  return `${SCHEME}://local/${encodeURIComponent(filePath)}`
-}
+/**
+ * 由本地图片绝对路径构造渲染进程可用的 mvimg URL。
+ * 实现收敛于 shared/image-url.js（主/渲染两侧单一来源，列表瘦身依赖渲染侧
+ * 派生）；此处 re-export 保持既有导入面（decorate/covers/thumbs 等）不变。
+ */
+export { toImageUrl } from '../shared/image-url'
