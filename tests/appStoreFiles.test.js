@@ -1,12 +1,15 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   makeApiMock,
   resetStoreTestState,
   makeModel,
 } from './helpers/storeTest'
 import {
+  addModelTag,
+  batchEditTags,
   deleteModel,
   moveModelTo,
+  removeModelTag,
   renameModel,
   revealModel,
   replaceModels,
@@ -25,6 +28,157 @@ let api
 beforeEach(() => {
   api = makeApiMock()
   resetStoreTestState(api)
+})
+
+describe('自由标签 per-id 串行队列（B2 回归）', () => {
+  /** 可控 IPC 桩：每次调用返回一个手动 settle 的 Promise */
+  function makeDeferredApi() {
+    const calls = []
+    api.models.setModelTags.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          calls.push({ resolve })
+        }),
+    )
+    return calls
+  }
+
+  beforeEach(() => {
+    state.folder = 'D:\\models'
+  })
+
+  it('连续快速添加两个标签：串行执行且后一次基于前一次结果，不丢标签', async () => {
+    replaceModels([makeModel('m1', { tags: ['旧'] })])
+    const calls = makeDeferredApi()
+
+    const p1 = addModelTag('m1', 'A')
+    const p2 = addModelTag('m1', 'B') // 第一次 IPC 在途时发起（B2 原始触发路径）
+
+    // 串行：第一次未落定时第二次不得发起 IPC
+    expect(api.models.setModelTags).toHaveBeenCalledTimes(1)
+    expect(api.models.setModelTags).toHaveBeenNthCalledWith(1, 'm1', [
+      '旧',
+      'A',
+    ])
+    calls[0].resolve({ meta: { tags: ['旧', 'A'] } })
+    expect(await p1).toBe(true)
+
+    // 第二次在第一次落定后执行，基于最新标签计算
+    expect(api.models.setModelTags).toHaveBeenCalledTimes(2)
+    expect(api.models.setModelTags).toHaveBeenNthCalledWith(2, 'm1', [
+      '旧',
+      'A',
+      'B',
+    ])
+    calls[1].resolve({ meta: { tags: ['旧', 'A', 'B'] } })
+    expect(await p2).toBe(true)
+    expect(state.models[0].tags).toEqual(['旧', 'A', 'B'])
+  })
+
+  it('添加在途时删除另一标签：以含新标签的最新列表为基计算', async () => {
+    replaceModels([makeModel('m1', { tags: ['x', 'y'] })])
+    const calls = makeDeferredApi()
+
+    const p1 = addModelTag('m1', 'A')
+    const p2 = removeModelTag('m1', 'y')
+
+    calls[0].resolve({ meta: { tags: ['x', 'y', 'A'] } })
+    await p1
+    // 删除基于含 A 的最新列表，不会把 A 抹掉
+    expect(api.models.setModelTags).toHaveBeenNthCalledWith(2, 'm1', [
+      'x',
+      'A',
+    ])
+    calls[1].resolve({ meta: { tags: ['x', 'A'] } })
+    expect(await p2).toBe(true)
+    expect(state.models[0].tags).toEqual(['x', 'A'])
+  })
+
+  it('写盘失败：状态保持原值并给出可见反馈，且队列不被失败阻塞', async () => {
+    replaceModels([makeModel('m1', { tags: ['旧'] })])
+    const calls = makeDeferredApi()
+
+    const p1 = addModelTag('m1', 'A')
+    const p2 = addModelTag('m1', 'B')
+
+    // 第一次失败：不落盘（返回 error），本地状态不变，toast 可见
+    calls[0].resolve({ error: '磁盘写入失败' })
+    expect(await p1).toBe(false)
+    expect(state.models[0].tags).toEqual(['旧'])
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'error' && t.text.includes('磁盘写入失败'),
+      ),
+    ).toBe(true)
+
+    // 第二次不受前一次失败影响，基于原值继续
+    expect(api.models.setModelTags).toHaveBeenNthCalledWith(2, 'm1', [
+      '旧',
+      'B',
+    ])
+    calls[1].resolve({ meta: { tags: ['旧', 'B'] } })
+    expect(await p2).toBe(true)
+    expect(state.models[0].tags).toEqual(['旧', 'B'])
+  })
+
+  it('IPC 抛异常：toast 可见且状态不变', async () => {
+    replaceModels([makeModel('m1', { tags: ['旧'] })])
+    api.models.setModelTags.mockRejectedValue(new Error('IPC 通道断开'))
+    expect(await addModelTag('m1', 'A')).toBe(false)
+    expect(state.models[0].tags).toEqual(['旧'])
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'error' && t.text.includes('IPC 通道断开'),
+      ),
+    ).toBe(true)
+  })
+
+  it('重复添加（含在途未落定）在执行时拦截并提示，不发冗余 IPC', async () => {
+    replaceModels([makeModel('m1', { tags: [] })])
+    const calls = makeDeferredApi()
+
+    const p1 = addModelTag('m1', 'A')
+    const p2 = addModelTag('m1', 'a') // 大小写变体：本地尚无 A，点击期校验拦不住
+    calls[0].resolve({ meta: { tags: ['A'] } })
+    await p1
+    expect(await p2).toBe(false)
+    expect(api.models.setModelTags).toHaveBeenCalledTimes(1)
+    expect(state.toasts.some((t) => t.text.includes('标签已存在'))).toBe(true)
+  })
+
+  it('与批量标签编辑交错：批量执行时基于最新标签重算，互不覆盖', async () => {
+    replaceModels([makeModel('m1', { tags: ['旧'] })])
+    state.multiSelect.active = true
+    state.multiSelect.ids = ['m1']
+    const calls = makeDeferredApi()
+
+    // 批量「添加 批」发起后在途，详情页再即时添加「详」
+    const pBatch = batchEditTags({ mode: 'add', tags: ['批'] })
+    const pDetail = addModelTag('m1', '详')
+
+    // 同一 per-id 队列：批量写入先执行
+    expect(api.models.setModelTags).toHaveBeenCalledTimes(1)
+    expect(api.models.setModelTags).toHaveBeenNthCalledWith(1, 'm1', [
+      '旧',
+      '批',
+    ])
+    calls[0].resolve({ meta: { tags: ['旧', '批'] } })
+
+    // 详情添加排在批量之后：等其任务执行（发起第二次 IPC）
+    await vi.waitFor(() =>
+      expect(api.models.setModelTags).toHaveBeenCalledTimes(2),
+    )
+    // 详情添加以批量落定后的最新列表为基——两个标签都保留
+    expect(api.models.setModelTags).toHaveBeenNthCalledWith(2, 'm1', [
+      '旧',
+      '批',
+      '详',
+    ])
+    calls[1].resolve({ meta: { tags: ['旧', '批', '详'] } })
+    await pBatch
+    await pDetail
+    expect(state.models[0].tags).toEqual(['旧', '批', '详'])
+  })
 })
 
 describe('文件操作编排（F10/F11）', () => {

@@ -1,11 +1,11 @@
 <script setup>
 import { computed, ref } from 'vue'
 import {
+  addModelTag,
+  removeModelTag,
   selectedModel,
-  setModelTags,
   subCategoryInfo,
   tagsForType,
-  toast,
 } from '../../store/appStore'
 
 /**
@@ -27,39 +27,29 @@ const currentSubInfo = computed(() =>
 
 /* ---------------- 自由标签（F-5，即时保存） ---------------- */
 
-/** 标签上限（与主进程 MAX_TAGS 一致，前置提示用） */
-const MAX_TAGS = 20
-
-/** 当前标签列表：以本地模型元素为单一事实源（setModelTags 成功后同步） */
+/** 当前标签列表：以本地模型元素为单一事实源（写入成功后同步） */
 const tags = computed(() => selectedModel.value?.tags || [])
 
 const newTag = ref('')
 
-/** 添加标签：trim + 长度/数量/重复校验后整体覆写提交 */
+/**
+ * 添加标签（B2：意图式提交）：trim/截断后把「添加该标签」的意图交给
+ * store 的 per-id 串行队列——目标全量列表在执行时基于最新标签计算，
+ * 连续快速增删不会用旧快照互相覆盖；重复/超上限由队列任务校验并提示。
+ */
 async function addTag() {
   const model = selectedModel.value
   const t = newTag.value.trim().slice(0, 32)
   newTag.value = ''
   if (!model || !t) return
-  if (tags.value.some((x) => x.toLowerCase() === t.toLowerCase())) {
-    toast('info', '标签已存在')
-    return
-  }
-  if (tags.value.length >= MAX_TAGS) {
-    toast('warn', `标签最多 ${MAX_TAGS} 个`)
-    return
-  }
-  await setModelTags(model.id, [...tags.value, t])
+  await addModelTag(model.id, t)
 }
 
-/** 删除标签 */
+/** 删除标签（意图式：执行时基于最新标签过滤） */
 async function removeTag(tag) {
   const model = selectedModel.value
   if (!model) return
-  await setModelTags(
-    model.id,
-    tags.value.filter((x) => x !== tag),
-  )
+  await removeModelTag(model.id, tag)
 }
 </script>
 

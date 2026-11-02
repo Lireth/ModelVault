@@ -174,6 +174,8 @@ const EXPECTED_EXPORTS = [
   'setNsfw',
   'setRating',
   'setModelTags',
+  'addModelTag',
+  'removeModelTag',
   'showContextMenu',
   'handleMenuAction',
   // 文件操作（批次 4）

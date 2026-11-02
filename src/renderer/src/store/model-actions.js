@@ -9,25 +9,30 @@ import { openTransferToLibrary } from './transfer'
  * （A-04 自 appStore.js 拆出）。
  */
 
+/** 单模型自由标签上限（与 IPC schema / store-meta 规范化保持一致） */
+const MAX_TAGS = 20
+
 /**
- * 整体覆写模型自由标签（F-5，即时落盘）：
- * 详情页标签编辑器每次增删提交全量列表；成功后同步本地列表元素
+ * 标签覆写核心路径：IPC → 成功后以主进程返回的权威标签同步本地列表元素
  * （浅响应约定：元素级整体替换，触发卡片角标与筛选池更新）。
+ * 失败（IPC 异常或业务错误）不触碰本地状态——UI 本就渲染本地状态，
+ * 非乐观更新下失败即天然回滚，只需可见反馈。
  * @param {string} id 模型 id
  * @param {string[]} tags 全量标签列表
- * @returns {Promise<boolean>} 是否保存成功（失败已 toast）
+ * @param {{silent?: boolean}} [opts] silent=true 时失败不 toast（批量场景由汇总提示统一反馈）
+ * @returns {Promise<object|null>} 主进程返回的 meta；失败为 null
  */
-export async function setModelTags(id, tags) {
+async function writeModelTags(id, tags, opts = {}) {
   let res
   try {
     res = await window.api.models.setModelTags(id, tags)
   } catch (err) {
-    toast('error', `标签保存失败: ${err.message}`)
-    return false
+    if (!opts.silent) toast('error', `标签保存失败: ${err.message}`)
+    return null
   }
   if (res?.error) {
-    toast('error', res.error)
-    return false
+    if (!opts.silent) toast('error', res.error)
+    return null
   }
   const next = res?.meta?.tags || []
   // O2：走 state 的 id→下标索引（O(1)），不再全表 findIndex
@@ -35,7 +40,83 @@ export async function setModelTags(id, tags) {
   if (idx !== undefined) {
     state.models[idx] = { ...state.models[idx], tags: next }
   }
-  return true
+  return res?.meta || null
+}
+
+/** 读取模型当前生效标签（执行时取最新值，供意图式增删基于最新状态计算） */
+function currentTagsOf(id) {
+  const idx = modelIndexOf(id)
+  if (idx === undefined) return []
+  const tags = state.models[idx].tags
+  return Array.isArray(tags) ? tags : []
+}
+
+/**
+ * 整体覆写模型自由标签（F-5，即时落盘，per-id 串行队列）：
+ * 全量覆写入口（批量替换等场景）；成功后同步本地列表元素。
+ * @param {string} id 模型 id
+ * @param {string[]} tags 全量标签列表
+ * @returns {Promise<boolean>} 是否保存成功（失败已 toast）
+ */
+export function setModelTags(id, tags) {
+  return enqueueModelOp(id, async () => (await writeModelTags(id, tags)) !== null)
+}
+
+/**
+ * 添加单个自由标签（意图式，B2 修复）：目标列表在执行时基于最新状态计算
+ * ——连续快速增删经 per-id 队列串行，后一次必读到前一次落定后的标签，
+ * 杜绝旧快照互相覆盖。重复/超上限在执行时校验并给出可见反馈。
+ * @param {string} id 模型 id
+ * @param {string} tag 标签（调用方已 trim/截断）
+ * @returns {Promise<boolean>} 是否实际写入（重复/超上限/失败为 false，均已提示）
+ */
+export function addModelTag(id, tag) {
+  return enqueueModelOp(id, async () => {
+    const current = currentTagsOf(id)
+    if (current.some((x) => x.toLowerCase() === tag.toLowerCase())) {
+      toast('info', '标签已存在')
+      return false
+    }
+    if (current.length >= MAX_TAGS) {
+      toast('warn', `标签最多 ${MAX_TAGS} 个`)
+      return false
+    }
+    return (await writeModelTags(id, [...current, tag])) !== null
+  })
+}
+
+/**
+ * 移除单个自由标签（意图式，B2 修复）：执行时基于最新状态计算剩余列表；
+ * 标签已不存在时幂等跳过（视为成功，不产生多余写盘）。
+ * @param {string} id 模型 id
+ * @param {string} tag 待移除标签
+ * @returns {Promise<boolean>} 是否保存成功（失败已 toast）
+ */
+export function removeModelTag(id, tag) {
+  return enqueueModelOp(id, async () => {
+    const current = currentTagsOf(id)
+    if (!current.includes(tag)) return true
+    return (await writeModelTags(id, current.filter((x) => x !== tag))) !== null
+  })
+}
+
+/**
+ * 批量标签编辑的队列化写入原语（FEAT-01 与详情页即时编辑共用同一 per-id
+ * 串行队列）：computeNext 在执行时读取最新标签计算目标列表，与详情页即时
+ * 增删交错时不互相用旧快照覆盖；失败静默返回 {error}（批量汇总统一提示）。
+ * @param {string} id 模型 id
+ * @param {(current: string[]) => {tags?: string[], unchanged?: boolean, overflow?: boolean}} computeNext
+ *   基于执行时最新标签计算目标列表（batch-tags 的 nextTagsFor 语义）
+ * @returns {Promise<{meta?: object, unchanged?: boolean, overflow?: boolean, error?: boolean}>}
+ */
+export function enqueueBatchTagsWrite(id, computeNext) {
+  return enqueueModelOp(id, async () => {
+    const r = computeNext(currentTagsOf(id))
+    if (r.unchanged) return { unchanged: true }
+    if (r.overflow) return { overflow: true }
+    const meta = await writeModelTags(id, r.tags, { silent: true })
+    return meta ? { meta } : { error: true }
+  })
 }
 
 /**
@@ -81,16 +162,18 @@ export async function deleteModel(id, opts = {}) {
 }
 
 /**
- * 即时标注操作（收藏/NSFW/评分）按模型串行队列（A5）：
+ * 单模型元数据操作（收藏/NSFW/评分/自由标签）按模型串行队列（A5）：
  * toggleFavorite 需先读当前值再发 IPC，IPC 在途窗口内再次点击会读到
- * 同一旧值、发出相同目标值，表现为「第二次点击失效」。同一模型的标注
- * 操作经此队列依次执行——后一次必读到前一次经标注覆盖层落定的
- * 状态；不同模型的键不同，互不阻塞。前一次失败不阻塞后续操作。
+ * 同一旧值、发出相同目标值，表现为「第二次点击失效」；标签增删同样
+ * 是「读当前列表→整体覆写」语义，在途窗口内连续增删会用旧快照互相
+ * 覆盖丢标签（B2）。同一模型的元数据操作经此队列依次执行——后一次
+ * 必在前一次落定后执行；不同模型的键不同，互不阻塞。前一次失败不
+ * 阻塞后续操作。
  */
-const metaFlagChains = new Map()
+const modelOpChains = new Map()
 
-function enqueueMetaFlag(id, task) {
-  const prev = metaFlagChains.get(id)
+function enqueueModelOp(id, task) {
+  const prev = modelOpChains.get(id)
   // 空闲时任务同步执行（保持单击原有的同步 IPC 时序）；
   // 有在途任务时才入队等它落定后执行（此时推迟一个微任务是必需的）
   const next = prev ? prev.then(task, task) : task()
@@ -98,9 +181,9 @@ function enqueueMetaFlag(id, task) {
   next
     .catch(() => {})
     .finally(() => {
-      if (metaFlagChains.get(id) === next) metaFlagChains.delete(id)
+      if (modelOpChains.get(id) === next) modelOpChains.delete(id)
     })
-  metaFlagChains.set(id, next)
+  modelOpChains.set(id, next)
   return next
 }
 
@@ -110,7 +193,7 @@ function enqueueMetaFlag(id, task) {
  * @param {string} id 模型 id
  */
 export function toggleFavorite(id) {
-  return enqueueMetaFlag(id, async () => {
+  return enqueueModelOp(id, async () => {
     // P1-1：当前值经有效读取器取覆盖层（元素对象不再被标注写路径更新）
     const idx = modelIndexOf(id)
     const next = !(idx !== undefined && effectiveFavorite(state.models[idx]))
@@ -136,7 +219,7 @@ export function toggleFavorite(id) {
  * @param {boolean} nsfw 是否 NSFW
  */
 export function setNsfw(id, nsfw) {
-  return enqueueMetaFlag(id, async () => {
+  return enqueueModelOp(id, async () => {
     const res = await window.api.models.setMetaFlags({ id, nsfw })
     if (res?.error) {
       toast('error', res.error)
@@ -153,7 +236,7 @@ export function setNsfw(id, nsfw) {
  * @param {number} rating 评分
  */
 export function setRating(id, rating) {
-  return enqueueMetaFlag(id, async () => {
+  return enqueueModelOp(id, async () => {
     const res = await window.api.models.setMetaFlags({ id, rating })
     if (res?.error) {
       toast('error', res.error)

@@ -224,6 +224,8 @@ export {
   setNsfw,
   setRating,
   setModelTags,
+  addModelTag,
+  removeModelTag,
   showContextMenu,
   handleMenuAction,
   toggleDisabledModel,

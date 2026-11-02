@@ -2,12 +2,16 @@ import { state } from '../state'
 import { toast } from '../toast'
 import { applyMetaUpdates, mapWithConcurrency } from '../meta-apply'
 import { modelById } from '../selectors'
+import { enqueueBatchTagsWrite } from '../model-actions'
 
 /**
  * 批量自由标签编辑（FEAT-01）：
  * 对当前多选模型执行「添加 / 移除 / 替换」三种标签变更，复用单模型
  * setModelTags IPC（整体覆写语义）与批量并发池；结果经 applyMetaUpdates
  * 单趟同步本地列表，避免逐个元素替换导致全量派生反复失效。
+ * B2：写入经 enqueueBatchTagsWrite 进入与详情页即时编辑相同的 per-id
+ * 串行队列，且目标列表在执行时基于最新标签重算——预计算仅用于预判
+ * 参与集与空操作提示，不做最终载荷，杜绝与即时编辑交错时旧快照覆盖。
  */
 
 /** 单模型标签上限（与 IPC schema / store-meta 规范化保持一致） */
@@ -98,6 +102,8 @@ export async function batchEditTags(options = {}) {
   const updates = []
   let unchanged = 0
   let overflow = 0
+  // 预计算仅用于预判参与集与「全部无变化」提示；最终载荷在执行时按
+  // 最新标签重算（B2：与详情页即时编辑交错时不用旧快照覆盖）
   for (const id of ids) {
     const model = byId.get(id)
     if (!model) continue
@@ -111,7 +117,7 @@ export async function batchEditTags(options = {}) {
       overflow += 1
       continue
     }
-    updates.push({ id, tags: result.tags })
+    updates.push({ id })
   }
 
   const modeLabel = MODE_LABELS[mode]
@@ -136,9 +142,12 @@ export async function batchEditTags(options = {}) {
         if (state.multiSelect.cancelRequested) return { canceled: true }
         processed += 1
         state.multiSelect.progress = `标签${modeLabel} ${processed}/${updates.length}`
-        const res = await window.api.models.setModelTags(item.id, item.tags)
-        if (res?.error) throw new Error(res.error)
-        return res
+        // 经 per-id 串行队列写入，执行时重读最新标签重算目标列表（B2）
+        const r = await enqueueBatchTagsWrite(item.id, (current) =>
+          nextTagsFor(current, input, mode),
+        )
+        if (r.error) throw new Error('标签保存失败')
+        return r
       },
       TAG_IPC_CONCURRENCY,
     )
@@ -151,12 +160,21 @@ export async function batchEditTags(options = {}) {
         failed += 1
         return
       }
-      if (result.value?.canceled) {
+      const value = result.value
+      if (value?.canceled) {
         canceled += 1
         return
       }
-      const meta = result.value?.meta
-      if (meta) metas.set(updates[i].id, meta)
+      // 执行时模型已被并发编辑收敛为无变化/超上限：并入对应计数
+      if (value?.unchanged) {
+        unchanged += 1
+        return
+      }
+      if (value?.overflow) {
+        overflow += 1
+        return
+      }
+      if (value?.meta) metas.set(updates[i].id, value.meta)
       else failed += 1
     })
 
