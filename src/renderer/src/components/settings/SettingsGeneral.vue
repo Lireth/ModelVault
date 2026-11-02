@@ -138,5 +138,16 @@ async function onImportModels(mode) {
         </button>
       </div>
     </div>
+    <!-- 隐藏 NSFW 模型开关：开启后清单页完全不显示被标记 NSFW 的模型 -->
+    <label class="setting-row switch-row">
+      <div class="setting-info">
+        <span class="setting-title">隐藏 NSFW 模型</span>
+        <span class="setting-desc"
+          >开启后清单页不显示被标记 NSFW
+          的模型（含手动标注），搜索与侧栏筛选均不会命中；关闭后恢复显示</span
+        >
+      </div>
+      <input v-model="form.hideNsfwModels" type="checkbox" class="switch" />
+    </label>
   </div>
 </template>

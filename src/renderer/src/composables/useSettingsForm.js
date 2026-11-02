@@ -42,6 +42,7 @@ export function useSettingsForm() {
     showParams: true,
     civitaiEnabled: true,
     nsfwBlur: 'blur',
+    hideNsfwModels: false,
     hashWarmup: 'candidates',
     hashWarmupConcurrency: 1,
     autoBackup: true,
@@ -71,6 +72,7 @@ export function useSettingsForm() {
     // NSFW 模糊样式（off/blur/heavy）：旧版布尔值迁移（true=blur/false=off），
     // 与主进程 normalizeNsfwBlur 同语义，防御内存态尚未规范化的情况
     form.nsfwBlur = normalizeNsfwBlur(state.settings.nsfwBlur)
+    form.hideNsfwModels = state.settings.hideNsfwModels === true
     form.hashWarmup = state.settings.hashWarmup || 'candidates'
     form.hashWarmupConcurrency =
       Number.isFinite(state.settings.hashWarmupConcurrency) &&
@@ -108,6 +110,7 @@ export function useSettingsForm() {
       showParams: form.showParams,
       civitaiEnabled: form.civitaiEnabled,
       nsfwBlur: form.nsfwBlur,
+      hideNsfwModels: form.hideNsfwModels,
       hashWarmup: form.hashWarmup,
       hashWarmupConcurrency: form.hashWarmupConcurrency,
     }
@@ -130,6 +133,7 @@ export function useSettingsForm() {
       form.showParams !== s.showParams ||
       form.civitaiEnabled !== s.civitaiEnabled ||
       form.nsfwBlur !== s.nsfwBlur ||
+      form.hideNsfwModels !== s.hideNsfwModels ||
       form.hashWarmup !== s.hashWarmup ||
       form.hashWarmupConcurrency !== s.hashWarmupConcurrency ||
       form.scanExtensions.length !== s.scanExtensions.length ||

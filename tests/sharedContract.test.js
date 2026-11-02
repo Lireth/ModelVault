@@ -204,6 +204,7 @@ describe('shared/defaults', () => {
       'showParams',
       'civitaiEnabled',
       'nsfwBlur',
+      'hideNsfwModels',
       'autoRescan',
       'autoCheckUpdate',
       'hashWarmup',

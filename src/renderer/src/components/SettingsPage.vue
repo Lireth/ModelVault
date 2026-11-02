@@ -85,6 +85,7 @@ async function onSave() {
       showParams: form.showParams,
       civitaiEnabled: form.civitaiEnabled,
       nsfwBlur: form.nsfwBlur,
+      hideNsfwModels: form.hideNsfwModels,
       autoBackup: form.autoBackup,
     })
     if (!ok) return

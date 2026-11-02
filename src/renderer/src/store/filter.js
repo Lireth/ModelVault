@@ -161,7 +161,11 @@ const filteredUnsorted = computed(() => {
   // 重复筛选仅在开启时读取命中集合（关闭路径零额外开销）
   const dupes = showDuplicatesOnly ? duplicateIdSet.value : null
   const list = []
+  // 隐藏 NSFW 模型（设置开关）：开启后被标记 NSFW 的模型整行过滤（标注
+  // 覆盖层与模型自带标记均经 effectiveNsfw 计入）；关闭路径零额外开销
+  const hideNsfw = state.settings?.hideNsfwModels === true
   for (const m of state.models) {
+    if (hideNsfw && effectiveNsfw(m)) continue
     if (typeFilter !== 'all' && m.type !== typeFilter) continue
     if (checkSub && m.subCategory !== subFilter) continue
     if (

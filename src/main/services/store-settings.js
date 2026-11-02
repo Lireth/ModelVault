@@ -97,6 +97,7 @@ function defaultLibrarySettings() {
     showParams: base.showParams,
     civitaiEnabled: base.civitaiEnabled,
     nsfwBlur: base.nsfwBlur,
+    hideNsfwModels: base.hideNsfwModels,
     autoRescan: base.autoRescan,
     autoCheckUpdate: base.autoCheckUpdate,
     hashWarmup: base.hashWarmup,
@@ -257,6 +258,8 @@ export function normalizeLibrarySettings(raw) {
     // NSFW 模糊样式（off/blur/heavy）：旧版为布尔值（true=模糊/false=关闭），
     // 读到布尔时迁移为对应样式；非法值回退默认「模糊」
     nsfwBlur: normalizeNsfwBlur(raw.nsfwBlur, base.nsfwBlur),
+    // 隐藏 NSFW 模型开关：缺省视为关闭
+    hideNsfwModels: raw.hideNsfwModels === true,
     autoRescan: raw.autoRescan === true,
     // 启动自动检查更新（O-3）：缺省视为开启（与 civitaiEnabled 同款默认真语义）
     autoCheckUpdate: raw.autoCheckUpdate !== false,

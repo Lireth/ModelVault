@@ -32,6 +32,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // 示例图按所选样式模糊展示（红色 NSFW 标记不受影响）；详情页图片始终不模糊。
   // off 关闭 / blur 标准模糊 / heavy 重度模糊（高码，内容不可辨）
   nsfwBlur: 'blur',
+  // 隐藏 NSFW 模型：开启后清单页（网格/列表）完全不显示被标记 NSFW 的模型
+  // （标注覆盖层与模型自带标记均计入），详情页/搜索入口不可达
+  hideNsfwModels: false,
   autoRescan: false,
   // 启动自动检查更新（O-3）：应用启动完成后延迟静默查询 GitHub Releases，
   // 仅在有新版本时经 app:updateAvailable 事件提示（无更新/失败均不打扰）

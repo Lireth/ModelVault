@@ -376,6 +376,8 @@ export const IPC_PAYLOAD_SCHEMAS = {
       civitaiEnabled: vBool(),
       // NSFW 模糊样式：off/blur/heavy（枚举收口在 normalizeSettings）
       nsfwBlur: vStr({ max: 16 }),
+      // 隐藏 NSFW 模型开关
+      hideNsfwModels: vBool(),
       autoRescan: vBool(),
       autoCheckUpdate: vBool(),
       hashWarmup: vStr({ max: 16 }),
