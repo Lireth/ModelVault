@@ -1,7 +1,7 @@
 import { state, replaceModels, clearHashOverrides } from './state'
 import { clearModelCoverOverrides } from './cover-overrides'
 import { toast } from './toast'
-import { scanModels } from './library'
+import { isOfflineResult, scanModels } from './library'
 import { modelById } from './selectors'
 import { clearSelectedModel } from './detail'
 import {
@@ -236,7 +236,7 @@ export async function partialScanModels(dirs) {
       // F1-offline：库路径失效不降级全量扫描（注定连环失败并弹误导 toast）——
       // 直接置位离线态，由离线页/横幅承担提示与恢复入口；排队子树同样注定
       // 失败，一并丢弃
-      if (res.folderMissing === true) {
+      if (isOfflineResult(res)) {
         clearQueue()
         state.folderMissing = true
         return

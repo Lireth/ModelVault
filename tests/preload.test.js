@@ -36,6 +36,7 @@ import {
   IPC_PAYLOAD_SCHEMAS,
   validateIpcPayload,
 } from '../src/shared/ipc-schema'
+import { IPC_ERROR } from '../src/shared/error-codes'
 
 /** 与 preload 同代的 electron mock 实例（beforeAll 内捕获） */
 let electron = null
@@ -125,6 +126,57 @@ describe('调用语义', () => {
       'settings:update',
       { theme: 'light' },
     )
+  })
+
+  it('错误/canceled 结果在 preload 边界补齐稳定 code（C3）', async () => {
+    const invoke = vi.mocked(electron.ipcRenderer.invoke)
+
+    invoke.mockResolvedValueOnce({ error: '模型不在当前根目录内' })
+    await expect(
+      api.models.setMetaFlags({ id: 'x', favorite: true }),
+    ).resolves.toEqual({
+      error: '模型不在当前根目录内',
+      code: IPC_ERROR.NOT_IN_ROOT,
+    })
+
+    invoke.mockResolvedValueOnce({ error: 'favorite 须为布尔值' })
+    await expect(
+      api.models.setMetaFlags({ id: 'x', favorite: true }),
+    ).resolves.toEqual({
+      error: 'favorite 须为布尔值',
+      code: IPC_ERROR.VALIDATION,
+    })
+
+    invoke.mockResolvedValueOnce({ canceled: true })
+    await expect(
+      api.models.partialScan({ folder: 'D:\\m', dirs: [] }),
+    ).resolves.toEqual({
+      canceled: true,
+      code: IPC_ERROR.CANCELED,
+    })
+
+    invoke.mockResolvedValueOnce({ error: '自定义业务拒绝' })
+    await expect(
+      api.models.setMetaFlags({ id: 'x', favorite: true }),
+    ).resolves.toEqual({
+      error: '自定义业务拒绝',
+      code: IPC_ERROR.BUSINESS,
+    })
+
+    // 离线数据响应（无 error）补 E_OFFLINE
+    invoke.mockResolvedValueOnce({ folderMissing: true, settings: {} })
+    await expect(api.models.loadStore()).resolves.toEqual({
+      folderMissing: true,
+      settings: {},
+      code: IPC_ERROR.OFFLINE,
+    })
+
+    // 成功响应不附加 code
+    invoke.mockResolvedValueOnce({ models: [], durationMs: 1 })
+    await expect(api.models.loadStore()).resolves.toEqual({
+      models: [],
+      durationMs: 1,
+    })
   })
 
   it('事件订阅：载荷解包（剥掉 event）、返回的取消函数摘除同一 handler', () => {

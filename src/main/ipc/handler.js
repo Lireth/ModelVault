@@ -4,6 +4,7 @@ import logger from '../logger'
 import { startPerf } from '../services/perf'
 import { getCurrentRoot, isInRoot } from '../services/store'
 import { validateIpcPayload } from '../../shared/ipc-schema'
+import { IPC_ERROR, classifyException } from '../../shared/error-codes'
 import { isPathRealWithin, resolveRealPath } from '../utils'
 import { isThumbRendererContents } from '../services/thumb-renderer'
 
@@ -30,7 +31,10 @@ import { isThumbRendererContents } from '../services/thumb-renderer'
  *   业务处理」全程计时，quiet 模式低于阈值零日志（高频通道无噪音）、超阈值
  *   以 [perf] warn 显形（长耗时通道按 perfWarnMs 下调阈值采集基线，为
  *   IPC payload 瘦身等优化提供实测依据）；失败路径不静默——异常日志始终
- *   携带耗时（按通道名检索可离线聚合失败率/慢调用分布）。
+ *   携带耗时（按通道名检索可离线聚合失败率/慢调用分布）；
+ * - C3 错误码：schema/取消/异常日志携带稳定 code（shared/error-codes），
+ *   响应 code 由 preload 边界统一补齐——handler 返回形状保持不变，既有
+ *   消费方与测试零破坏。
  */
 
 /** IPC 通道慢调用阈值（ms）：quiet 模式仅超阈值写 [perf] 日志 */
@@ -121,7 +125,9 @@ export function wrapHandler(channel, handler, opts = {}) {
     // preload 被图片解码漏洞利用，也不能借 invoke 触达业务 IPC。
     if (isThumbRendererContents(event?.sender)) {
       done('来源拒绝')
-      logger.warn(`拒绝来自缩略图渲染窗口的 IPC 调用: ${channel}`)
+      logger.warn(
+        `拒绝来自缩略图渲染窗口的 IPC 调用 [${IPC_ERROR.SECURITY}]: ${channel}`,
+      )
       return { error: '不允许的 IPC 来源' }
     }
     // OPT-18：剥离并登记取消令牌（校验针对剥离后的载荷，schema 无感知）
@@ -131,7 +137,9 @@ export function wrapHandler(channel, handler, opts = {}) {
       const schemaError = validateIpcPayload(channel, payload)
       if (schemaError) {
         done('入参校验失败')
-        logger.warn(`IPC ${channel} 入参校验失败: ${schemaError}`)
+        logger.warn(
+          `IPC ${channel} 入参校验失败 [${IPC_ERROR.VALIDATION}]: ${schemaError}`,
+        )
         return { error: schemaError }
       }
       const result = await handler(event, payload, { signal })
@@ -140,13 +148,14 @@ export function wrapHandler(channel, handler, opts = {}) {
     } catch (err) {
       if (err?.name === 'AbortError') {
         done('用户取消')
-        logger.info(`IPC ${channel}: 用户已取消`)
+        logger.info(`IPC ${channel}: 用户已取消 [${IPC_ERROR.CANCELED}]`)
         return { canceled: true }
       }
       // 失败路径不受 quiet 静默：done 恒返回耗时，随异常日志带出
+      const errorCode = classifyException(err)
       const ms = done(err?.message || '异常')
       logger.error(
-        `IPC ${channel} 处理异常（耗时 ${ms}ms）: ${err.stack || err.message}`,
+        `IPC ${channel} 处理异常 [${errorCode}]（耗时 ${ms}ms）: ${err.stack || err.message}`,
       )
       return { error: `${prefix}: ${err.message}` }
     } finally {

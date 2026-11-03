@@ -12,11 +12,23 @@ import { applyCoverOverrides, clearCoverOverrides } from './cover-overrides'
 import { clearBatchFailures } from './multiselect/batch-failures'
 import { toast } from './toast'
 import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
+import { IPC_ERROR } from '../../../shared/error-codes'
 
 /**
  * 模型库生命周期与扫描（A-04 自 appStore.js 拆出）：
  * 初始化/主题/设置/目录切换/全量扫描/取消/缩略图回填。
  */
+
+/**
+ * 响应是否表示「当前库离线」（C3）：优先使用稳定错误码，兼容既有
+ * folderMissing 字段与旧版主进程响应。离线态用于跳过注定失败的自动扫描、
+ * 展示离线页/横幅并抑制错误 toast。
+ * @param {any} res IPC 响应
+ * @returns {boolean}
+ */
+export function isOfflineResult(res) {
+  return res?.folderMissing === true || res?.code === IPC_ERROR.OFFLINE
+}
 
 /**
  * 系统亮暗媒体查询（主题跟随系统）：惰性求值——
@@ -95,7 +107,7 @@ export async function initApp() {
     if (state.settings.viewMode) state.viewMode = state.settings.viewMode
 
     const cached = data.cachedIndex
-    if (data.folderMissing === true) {
+    if (isOfflineResult(data)) {
       // 库路径失效（被移动/重命名/盘符未挂载）：离线页/横幅承担提示与
       // 恢复入口，不再触发注定失败的自动扫描与错误 toast
       state.folderMissing = true
@@ -272,7 +284,7 @@ export async function switchRoot(folder) {
       // F1-offline：目标库路径失效——提交目标库身份并进入离线态
       // （离线页提供重新定位/重试入口；主进程根目录未切换，旧库数据完好，
       // 切回时经本地索引秒开恢复）
-      if (res.folderMissing === true) {
+      if (isOfflineResult(res)) {
         state.folder = folder
         clearCoverOverrides()
         clearHashOverrides()
@@ -434,7 +446,7 @@ export async function scanModels(folder = state.folder, options = {}) {
     if (res.error) {
       // F1-offline：库路径失效——置位离线态并跳过错误 toast
       // （离线页/横幅承担提示与恢复入口）；后台校验路径同样静默置位
-      if (res.folderMissing === true) {
+      if (isOfflineResult(res)) {
         state.folderMissing = true
         return false
       }

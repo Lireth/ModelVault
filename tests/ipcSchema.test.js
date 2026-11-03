@@ -667,7 +667,7 @@ describe('wrapHandler 统一包装与通道观测（O1/O2 运行时契约 + OPT-
     expect(res).toEqual({ error: '测试失败: 业务失败' })
     expect(logger.error).toHaveBeenCalledTimes(1)
     expect(logger.error.mock.calls[0][0]).toContain(
-      'IPC models:loadStore 处理异常（耗时',
+      'IPC models:loadStore 处理异常 [E_INTERNAL]（耗时',
     )
   })
 

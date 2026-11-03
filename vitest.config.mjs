@@ -150,6 +150,14 @@ export default defineConfig({
           functions: 95,
           lines: 90,
         },
+        // C3 错误码契约（枚举/文案归类/响应补齐/异常分类）：稳定码是渲染层
+        // 离线/重试分支的依赖，单独设地板防回退（分支统计对正则归类失真，
+        // 不设分支地板）。
+        '**/src/shared/error-codes.js': {
+          statements: 88,
+          functions: 95,
+          lines: 95,
+        },
       },
     },
   },

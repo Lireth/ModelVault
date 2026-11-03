@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC_PAYLOAD_SCHEMAS, IPC_EVENT_CHANNELS } from '../shared/ipc-schema'
+import { attachIpcErrorCode } from '../shared/error-codes'
 
 /**
  * IPC 通道白名单：渲染进程只能通过以下通道通信，防止任意通道调用。
@@ -16,12 +17,23 @@ const VALID_INVOKE_CHANNELS = new Set(Object.keys(IPC_PAYLOAD_SCHEMAS))
  */
 const VALID_RECEIVE_CHANNELS = new Set(IPC_EVENT_CHANNELS)
 
-/** 带白名单校验的 invoke（所有便捷方法的统一入口） */
+/**
+ * 带白名单校验的 invoke（所有便捷方法的统一入口）。
+ * C3：返回结果在 preload 边界补齐稳定错误码（{ error } / { canceled }
+ * 均带 code），error 文案与既有响应形状保持不变；渲染层可按 code 做
+ * 离线/繁忙/冲突等分支，不再依赖文案匹配。
+ * @param {string} channel IPC 通道
+ * @param {any} [payload] 载荷
+ * @returns {Promise<any>} 主进程结果（错误响应已附加 code）
+ */
 function invokeValidated(channel, payload) {
+  // 白名单外通道保持同步抛错（fail-closed 的调用点语义不变）
   if (!VALID_INVOKE_CHANNELS.has(channel)) {
     throw new Error(`不允许的 IPC 通道: ${channel}`)
   }
-  return ipcRenderer.invoke(channel, payload)
+  return ipcRenderer
+    .invoke(channel, payload)
+    .then((result) => attachIpcErrorCode(result))
 }
 
 /** 带白名单校验的事件订阅，返回取消监听函数 */

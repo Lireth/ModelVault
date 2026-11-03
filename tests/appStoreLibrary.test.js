@@ -4,6 +4,7 @@ import {
   resetStoreTestState,
   makeModel,
 } from './helpers/storeTest'
+import { IPC_ERROR } from '../src/shared/error-codes'
 import {
   initApp,
   partialScanModels,
@@ -249,11 +250,42 @@ describe('库路径失效闭环（F1-offline）', () => {
     expect(api.models.scan).toHaveBeenCalled()
   })
 
+  it('initApp：仅稳定错误码 E_OFFLINE（无 folderMissing）同样进入离线态并跳过自动扫描（C3）', async () => {
+    state.booting = true
+    api.models.loadStore.mockResolvedValue({
+      settings: { modelsFolder: 'D:\\gone', autoScan: true },
+      code: IPC_ERROR.OFFLINE,
+    })
+
+    await initApp()
+
+    expect(state.folderMissing).toBe(true)
+    expect(api.models.scan).not.toHaveBeenCalled()
+    expect(state.toasts.some((t) => t.type === 'error')).toBe(false)
+    expect(state.booting).toBe(false)
+  })
+
   it('scanModels：folderMissing 响应置位离线态，不弹错误 toast 也不置 scanError', async () => {
     state.folder = 'D:\\gone'
     api.models.scan.mockResolvedValue({
       error: '模型文件夹不存在或不是目录',
       folderMissing: true,
+    })
+
+    const ok = await scanModels()
+
+    expect(ok).toBe(false)
+    expect(state.folderMissing).toBe(true)
+    expect(state.scanError).toBe('')
+    expect(state.toasts.some((t) => t.type === 'error')).toBe(false)
+    expect(state.scanning).toBe(false)
+  })
+
+  it('scanModels：仅错误码 E_OFFLINE（旧响应无 folderMissing）同样置位离线态（C3）', async () => {
+    state.folder = 'D:\\gone'
+    api.models.scan.mockResolvedValue({
+      error: '模型文件夹不存在或不是目录',
+      code: IPC_ERROR.OFFLINE,
     })
 
     const ok = await scanModels()
