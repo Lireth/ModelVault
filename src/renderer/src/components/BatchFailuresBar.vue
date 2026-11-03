@@ -67,7 +67,12 @@ function showMore() {
       </button>
     </div>
     <div v-if="expanded" class="bf-list">
-      <div v-for="it in visibleItems" :key="it.id" class="bf-item" :title="it.id">
+      <div
+        v-for="it in visibleItems"
+        :key="it.id"
+        class="bf-item"
+        :title="it.id"
+      >
         <span class="bf-name">{{ it.name }}</span>
         <span class="bf-error">{{ it.error }}</span>
       </div>

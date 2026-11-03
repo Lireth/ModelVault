@@ -34,7 +34,12 @@ import logger from '../../logger'
  */
 
 /** 列表通道保留的 autoInfo 字段（搜索域消费面，见文件头注释） */
-const AUTO_INFO_LIST_KEYS = ['title', 'author', 'baseModel', 'triggerCandidates']
+const AUTO_INFO_LIST_KEYS = [
+  'title',
+  'author',
+  'baseModel',
+  'triggerCandidates',
+]
 
 /**
  * 瘦身单个装饰模型（纯函数，不修改入参）。

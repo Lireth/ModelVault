@@ -719,7 +719,10 @@ describe('切库链路超时保护与同根判定（OPT-19 切库防线）', () 
     // 后续 flush 真实落盘：脏数据完整写入（无覆盖/截断）
     expect(await flushStoreSaveBounded()).toBe(true)
     const store = JSON.parse(
-      await fsp.readFile(path.join(rootA, '.modelvault', 'store.json'), 'utf-8'),
+      await fsp.readFile(
+        path.join(rootA, '.modelvault', 'store.json'),
+        'utf-8',
+      ),
     )
     expect(store.models['a.safetensors'].alias).toBe('旧根未落盘')
   })

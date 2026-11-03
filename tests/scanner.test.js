@@ -473,13 +473,9 @@ describe('scanModels', () => {
     })
 
     it('不存在的子目录静默跳过（已删除目录的情况），其余子树正常', async () => {
-      const { models, errors, failedDirs } = await scanModels(
-        root,
-        undefined,
-        {
-          subDirs: ['lora', 'gone-dir'],
-        },
-      )
+      const { models, errors, failedDirs } = await scanModels(root, undefined, {
+        subDirs: ['lora', 'gone-dir'],
+      })
       expect(errors).toHaveLength(0)
       // ENOENT 属正常删除/移动：不登记 failedDirs（B5 三态区分）
       expect(failedDirs).toEqual([])
@@ -513,9 +509,9 @@ describe('scanModels', () => {
           false,
         )
         // 同批的根直属子树（''）不受影响
-        expect(models.some((m) => m.id === path.join(root, 'a.safetensors'))).toBe(
-          true,
-        )
+        expect(
+          models.some((m) => m.id === path.join(root, 'a.safetensors')),
+        ).toBe(true)
       } finally {
         spy.mockRestore()
       }

@@ -31,10 +31,7 @@ import {
 import { awaitThumbDrain, decorateCache } from './model-state'
 import { resolveCoverSafe } from './decorate'
 import { toImageUrl } from '../../protocol'
-import {
-  slimModelsForList,
-  logPayloadSize,
-} from './list-payload'
+import { slimModelsForList, logPayloadSize } from './list-payload'
 import {
   wrapHandler,
   checkExistingDirectory,
@@ -332,7 +329,9 @@ export function registerStoreHandlers() {
             if (index) {
               // OPT-PAYLOAD：列表通道下发瘦身模型（先合成元数据展示字段，
               // 再剥离详情消费面重字段，顺序不可颠倒——合成依赖 folderSubCategory）
-              const slimmed = slimModelsForList(overlayCurrentMeta(index.models))
+              const slimmed = slimModelsForList(
+                overlayCurrentMeta(index.models),
+              )
               logPayloadSize('models:loadStore', slimmed.approxBytes)
               cachedIndex = {
                 ...index,

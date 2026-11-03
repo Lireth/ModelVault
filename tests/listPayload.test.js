@@ -228,10 +228,7 @@ describe('models:getDetail（详情按需补全通道）', () => {
 
     // store-meta：新增第二张封面 + 切换默认封面 + 收藏（快照 rel 集合因此分歧）
     setModelMeta(full.id, {
-      covers: [
-        '.modelvault/covers/1.png',
-        '.modelvault/covers/2.png',
-      ],
+      covers: ['.modelvault/covers/1.png', '.modelvault/covers/2.png'],
       cover: '.modelvault/covers/2.png',
       favorite: true,
       rating: 4,

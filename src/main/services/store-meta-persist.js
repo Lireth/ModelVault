@@ -465,7 +465,9 @@ export function setFlushAwaitTimeoutForTests(ms) {
 export async function flushStoreSaveBounded(timeoutMs = flushAwaitTimeoutMs) {
   const settled = await isSettledWithin(flushStoreSave(), timeoutMs)
   if (!settled) {
-    logger.warn('元数据写盘链等待超时（磁盘无响应），按未静止处理（写盘仍在后台续跑）')
+    logger.warn(
+      '元数据写盘链等待超时（磁盘无响应），按未静止处理（写盘仍在后台续跑）',
+    )
   }
   return settled
 }

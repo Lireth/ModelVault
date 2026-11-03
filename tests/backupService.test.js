@@ -1324,9 +1324,9 @@ describe('flush 超时防线（B3：挂起磁盘不永久卡死）', () => {
     expect(Date.now() - started).toBeLessThan(2000)
     expect(res.error).toContain('磁盘无响应')
     // 目标目录未被触碰（无目录交换、无临时目录残留）
-    expect(fs.readdirSync(target).some((n) => n.startsWith('.modelvault'))).toBe(
-      false,
-    )
+    expect(
+      fs.readdirSync(target).some((n) => n.startsWith('.modelvault')),
+    ).toBe(false)
     // 维护锁已释放：后续维护操作可立即获取（锁不被永久占住）
     const token = tryAcquireMaintenance('restore', target)
     expect(token).not.toBeNull()

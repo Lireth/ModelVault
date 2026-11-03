@@ -448,7 +448,12 @@ export function registerScanHandlers() {
         // 范围外基线保持原样，未覆盖的新变更仍会在停扫后补发。
         // B5：失败子树不回填基线也不清待广播——停扫后自动重试直至恢复
         if (scanResult.dirSnapshot instanceof Map) {
-          refreshWatcherBaseline(root, subDirs, scanResult.dirSnapshot, failedDirs)
+          refreshWatcherBaseline(
+            root,
+            subDirs,
+            scanResult.dirSnapshot,
+            failedDirs,
+          )
         }
 
         logger.info(
