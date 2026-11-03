@@ -48,6 +48,16 @@ export function getThumbDrainPromise() {
  */
 export const decorateCache = new Map()
 
+/**
+ * 索引头部解析快照（IDX-REUSE）：冷启动/切库时由本地索引播种，
+ * 键=模型绝对路径，值为「文件 mtime + size + autoInfo + suspect」。
+ * safetensors 头部解析结果只依赖文件内容；mtime/size 未变时可直接复用，
+ * 避免每次启动/切库对全库模型重复读 2–8MB 头部并 JSON.parse。
+ * 仅在会话内有效，随根目录切换与装饰缓存一并清空。
+ * @type {Map<string, {mtimeMs: number, size: number, autoInfo: any, suspect: boolean}>}
+ */
+export const headerInfoCache = new Map()
+
 /** 缓存对应的模型根目录（切换根目录时清空缓存） */
 let decorateCacheRoot = null
 
@@ -85,6 +95,7 @@ export function setDecorateCacheLimit(limit) {
  */
 export function resetDecorateCache(root) {
   decorateCache.clear()
+  headerInfoCache.clear()
   decorateCacheRoot = root
   decorateCacheLimit = DECORATE_CACHE_DEFAULT_LIMIT
 }

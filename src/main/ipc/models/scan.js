@@ -30,6 +30,7 @@ import {
 import {
   clearDeferredOwners,
   decorateModels,
+  primeHeaderInfoCache,
   startThumbDrain,
 } from './decorate'
 import { ensureRootStore } from './store'
@@ -43,6 +44,7 @@ import { samePathIgnoreCase } from '../../utils'
 import { normalizePartialScanDirs } from '../../../shared/scan-dirs'
 import {
   queueLibraryIndexUpdate,
+  readLibraryIndex,
   writeLibraryIndex,
 } from '../../services/library-index'
 import { slimModelsForList, logPayloadSize } from './list-payload'
@@ -163,10 +165,20 @@ export function registerScanHandlers() {
         // 切换根目录后装饰缓存全部失效；延迟缩略图队列同步清空——
         // 残留的旧根条目会被下一轮 drain 以「新根」的 thumbs 目录生成（跨根写文件），
         // 并把无效的封面更新推送回渲染进程（C5，与 B10 同类竞态）
-        if (getDecorateCacheRoot() !== root) {
+        const cacheRootChanged = !samePathIgnoreCase(
+          getDecorateCacheRoot(),
+          root,
+        )
+        if (cacheRootChanged) {
           resetDecorateCache(root)
           clearDeferredOwners()
           clearDeferredJobs()
+        }
+        // IDX-REUSE：通过「选择文件夹/重新定位」首次进入某库时，若目标库
+        // 已有本地索引，先播种上次扫描的头部解析结果，避免首扫对全库重复读盘
+        if (cacheRootChanged) {
+          const index = await readLibraryIndex(root)
+          if (index) primeHeaderInfoCache(index.models)
         }
 
         let lastSent = 0

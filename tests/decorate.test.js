@@ -38,6 +38,7 @@ import {
   computeDecorateCacheLimit,
   decorateModels,
   metaSignature,
+  primeHeaderInfoCache,
   resolveCoverSafe,
   setDecorateCachePolicyForTests,
   startThumbDrain,
@@ -260,6 +261,83 @@ describe('decorateModels 元数据装饰', () => {
     const [third] = await decorateModels([{ ...model }])
     expect(third).not.toBe(first)
     expect(third.alias).toBe('修改后')
+  })
+
+  it('IDX-REUSE：索引头部快照在 mtime/size 一致时复用，不读取文件头', async () => {
+    // 文件刻意不存在：若仍走 readSafetensorsInfo/健康检查，autoInfo 必为 null
+    // 且 suspect=true；命中快照则直接返回索引中的解析结果
+    const abs = path.join(root, 'indexed-missing.safetensors')
+    primeHeaderInfoCache([
+      {
+        id: abs,
+        ext: '.safetensors',
+        size: 123,
+        mtimeMs: 1000,
+        autoInfo: { title: '索引头信息', expectedMinBytes: 100 },
+        suspect: false,
+      },
+    ])
+    const [decorated] = await decorateModels([
+      makeModel(abs, { size: 123, mtimeMs: 1000 }),
+    ])
+    expect(decorated.autoInfo.title).toBe('索引头信息')
+    expect(decorated.suspect).toBe(false)
+  })
+
+  it('IDX-REUSE：mtime 变化时快照失效并回退完整解析', async () => {
+    const abs = path.join(root, 'indexed-stale.safetensors')
+    primeHeaderInfoCache([
+      {
+        id: abs,
+        ext: '.safetensors',
+        size: 123,
+        mtimeMs: 1000,
+        autoInfo: { title: '旧头信息' },
+        suspect: false,
+      },
+    ])
+    const [decorated] = await decorateModels([
+      makeModel(abs, { size: 123, mtimeMs: 2000 }),
+    ])
+    // 文件不存在且快照已失效：完整解析失败，按损坏处理
+    expect(decorated.autoInfo).toBeNull()
+    expect(decorated.suspect).toBe(true)
+  })
+
+  it('IDX-REUSE：切库清空快照；快照仍按 expectedMinBytes 复核截断', async () => {
+    const stalePath = path.join(root, 'indexed-reset.safetensors')
+    primeHeaderInfoCache([
+      {
+        id: stalePath,
+        ext: '.safetensors',
+        size: 123,
+        mtimeMs: 1000,
+        autoInfo: { title: '待清空' },
+        suspect: false,
+      },
+    ])
+    resetDecorateCache(root)
+    const [afterReset] = await decorateModels([
+      makeModel(stalePath, { size: 123, mtimeMs: 1000 }),
+    ])
+    expect(afterReset.autoInfo).toBeNull()
+
+    // 快照声明的数据区超过当前文件体积：即使索引标记健康也必须重新判为损坏
+    const truncated = path.join(root, 'indexed-truncated.safetensors')
+    primeHeaderInfoCache([
+      {
+        id: truncated,
+        ext: '.safetensors',
+        size: 123,
+        mtimeMs: 1000,
+        autoInfo: { title: '截断', expectedMinBytes: 200 },
+        suspect: false,
+      },
+    ])
+    const [decorated] = await decorateModels([
+      makeModel(truncated, { size: 123, mtimeMs: 1000 }),
+    ])
+    expect(decorated.suspect).toBe(true)
   })
 
   it('缓存命中的缩略图引用失效时丢弃缓存重建；引用有效时照常复用（A6）', async () => {

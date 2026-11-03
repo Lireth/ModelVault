@@ -28,6 +28,7 @@ import {
   decorateCache,
   getDecorateCacheLimit,
   getThumbDrainPromise,
+  headerInfoCache,
   setDecorateCacheLimit,
   setThumbDrainPromise,
 } from './model-state'
@@ -82,6 +83,83 @@ export function setDecorateCachePolicyForTests(policy = {}) {
     Number.isFinite(policy.max) && policy.max >= cachePolicyMin
       ? Math.floor(policy.max)
       : DECORATE_CACHE_HARD_MAX
+}
+
+/** 索引头部快照缓存容量上限（与装饰缓存硬上限同量级，防病态库无限驻留） */
+const HEADER_INFO_CACHE_MAX = 50000
+
+/**
+ * 从索引播种 safetensors 头部解析快照（IDX-REUSE）：
+ * 本地索引保存的是上一次扫描的完整装饰结果，其中 autoInfo/suspect 只依赖
+ * 文件内容。冷启动/切库后的后台校验或全量扫描在 mtime+size 未变时直接复用，
+ * 跳过 2–8MB 头部读取与 JSON.parse。
+ *
+ * 仅接受字段完整的索引记录（ext/size/mtime/autoInfo/suspect 齐备）；
+ * 旧版索引缺失 suspect 或 autoInfo 时跳过，由装饰链路重新解析，避免
+ * 把「未知」误当「健康」。快照与索引模型共享引用，不复制大对象。
+ * @param {Array<Record<string, any>>} models 本地索引中的装饰模型列表
+ */
+export function primeHeaderInfoCache(models) {
+  if (!Array.isArray(models)) return
+  for (const m of models) {
+    if (!m || typeof m.id !== 'string' || m.ext !== '.safetensors') continue
+    if (!Number.isFinite(m.mtimeMs) || !Number.isFinite(m.size)) continue
+    if (typeof m.suspect !== 'boolean' || !Object.hasOwn(m, 'autoInfo')) {
+      continue
+    }
+    boundedMapSet(
+      headerInfoCache,
+      m.id,
+      {
+        mtimeMs: m.mtimeMs,
+        size: m.size,
+        autoInfo: m.autoInfo || null,
+        suspect: m.suspect,
+      },
+      HEADER_INFO_CACHE_MAX,
+    )
+  }
+}
+
+/**
+ * 查询可复用的头部快照：mtime 与文件体积均一致才命中；
+ * 不一致即视为陈旧并删除（文件已被覆盖/替换，必须重新解析）。
+ * 命中时刷新 Map 插入顺序，维持简易 LRU。
+ * @param {Record<string, any>} model 扫描模型
+ * @returns {{mtimeMs: number, size: number, autoInfo: any, suspect: boolean}|null}
+ */
+function takeHeaderInfoSnapshot(model) {
+  const entry = headerInfoCache.get(model.id)
+  if (!entry) return null
+  if (entry.mtimeMs !== model.mtimeMs || entry.size !== model.size) {
+    headerInfoCache.delete(model.id)
+    return null
+  }
+  headerInfoCache.delete(model.id)
+  headerInfoCache.set(model.id, entry)
+  return entry
+}
+
+/**
+ * 记录本次解析结果，供同会话后续装饰（清空装饰缓存/同根重扫）直接复用。
+ * @param {Record<string, any>} model 扫描模型
+ * @param {any} autoInfo 头部解析结果（可为 null）
+ * @param {boolean} suspect 结构是否疑似损坏
+ */
+function rememberHeaderInfo(model, autoInfo, suspect) {
+  if (model.ext !== '.safetensors') return
+  if (!Number.isFinite(model.mtimeMs) || !Number.isFinite(model.size)) return
+  boundedMapSet(
+    headerInfoCache,
+    model.id,
+    {
+      mtimeMs: model.mtimeMs,
+      size: model.size,
+      autoInfo,
+      suspect: suspect === true,
+    },
+    HEADER_INFO_CACHE_MAX,
+  )
 }
 
 /**
@@ -528,14 +606,28 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
   if (model.size <= 0) {
     suspect = true
   } else if (model.ext === '.safetensors') {
-    autoInfo = await readSafetensorsInfo(model.id)
-    if (!autoInfo) {
-      suspect = !(await checkSafetensorsHealthy(model.id))
-    } else if (
-      Number.isFinite(autoInfo.expectedMinBytes) &&
-      autoInfo.expectedMinBytes > model.size
-    ) {
-      suspect = true
+    // IDX-REUSE：索引播种的快照在冷启动/切库后直接复用头部解析结果；
+    // mtime+size 变化即视为文件已被替换，走完整解析并覆盖快照
+    const snapshot = takeHeaderInfoSnapshot(model)
+    if (snapshot) {
+      autoInfo = snapshot.autoInfo
+      suspect =
+        snapshot.suspect ||
+        Boolean(
+          Number.isFinite(autoInfo?.expectedMinBytes) &&
+          autoInfo.expectedMinBytes > model.size,
+        )
+    } else {
+      autoInfo = await readSafetensorsInfo(model.id)
+      if (!autoInfo) {
+        suspect = !(await checkSafetensorsHealthy(model.id))
+      } else if (
+        Number.isFinite(autoInfo.expectedMinBytes) &&
+        autoInfo.expectedMinBytes > model.size
+      ) {
+        suspect = true
+      }
+      rememberHeaderInfo(model, autoInfo, suspect)
     }
   }
   // meta → 展示字段统一合成（OPT-06 单一来源，与 loadStore 索引覆盖路径
@@ -581,6 +673,10 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
 function pruneDecorateCache(validIds) {
   for (const id of [...decorateCache.keys()]) {
     if (!validIds.has(id)) decorateCache.delete(id)
+  }
+  // 头部快照同属可再生产物：库内已删除/移出的模型不应继续占用内存
+  for (const id of [...headerInfoCache.keys()]) {
+    if (!validIds.has(id)) headerInfoCache.delete(id)
   }
   const limit = getDecorateCacheLimit()
   while (decorateCache.size > limit) {

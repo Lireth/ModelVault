@@ -75,6 +75,8 @@ import {
   paramSummaryFromMeta,
   sidecarFilesFor,
 } from '../src/main/ipc/models/misc'
+import { decorateModels } from '../src/main/ipc/models/decorate'
+import { resetDecorateCache } from '../src/main/ipc/models/model-state'
 import { registerStoreHandlers } from '../src/main/ipc/models/store'
 import { syncWatcher } from '../src/main/services/watcher'
 import { computeFileHash } from '../src/main/services/civitai'
@@ -258,6 +260,52 @@ describe('models:loadStore 目录监控启动路径（OPT-19）', () => {
       statSpy.mockRestore()
     }
   })
+
+  it('loadStore 用索引播种头部快照：冷启动装饰复用解析结果（IDX-REUSE）', async () => {
+    const root = writeSettings({ autoScan: false })
+    const id = path.join(root, 'indexed-ghost.safetensors')
+    fs.mkdirSync(path.join(root, '.modelvault'), { recursive: true })
+    fs.writeFileSync(
+      path.join(root, '.modelvault', 'index.json'),
+      JSON.stringify({
+        version: 1,
+        root,
+        savedAt: 1,
+        durationMs: 42,
+        models: [
+          {
+            id,
+            name: 'indexed-ghost',
+            type: 'lora',
+            ext: '.safetensors',
+            size: 123,
+            mtimeMs: 1000,
+            relDir: '',
+            autoInfo: { title: '索引中的头部信息', expectedMinBytes: 100 },
+            suspect: false,
+          },
+        ],
+      }),
+    )
+    await loadSettings()
+    resetDecorateCache(null)
+
+    await getRegisteredHandler('models:loadStore')(makeEvent())
+    const [decorated] = await decorateModels([
+      {
+        id,
+        name: 'indexed-ghost',
+        type: 'lora',
+        ext: '.safetensors',
+        size: 123,
+        mtimeMs: 1000,
+        relDir: '',
+      },
+    ])
+    expect(decorated.autoInfo.title).toBe('索引中的头部信息')
+    expect(decorated.suspect).toBe(false)
+    resetDecorateCache(null)
+  })
 })
 
 describe('models:openLibrary 秒切库（F1）', () => {
@@ -405,6 +453,46 @@ describe('models:openLibrary 秒切库（F1）', () => {
     expect(syncWatcher).toHaveBeenCalledWith(root, false, [], {
       nativeWatch: true,
     })
+  })
+
+  it('openLibrary 用索引播种头部快照：随后的装饰复用解析结果（IDX-REUSE）', async () => {
+    const root = writeSettings({})
+    await loadSettings()
+    const id = path.join(root, 'indexed-ghost.safetensors')
+    const indexed = {
+      id,
+      name: 'indexed-ghost',
+      type: 'lora',
+      ext: '.safetensors',
+      size: 123,
+      mtimeMs: 1000,
+      relDir: '',
+      // 上次扫描的完整装饰结果（文件本身刻意不存在，命中快照才可能得到该值）
+      autoInfo: { title: '索引中的头部信息', expectedMinBytes: 100 },
+      suspect: false,
+    }
+    writeIndex(root, [indexed])
+    resetDecorateCache(null)
+
+    const res = await getRegisteredHandler('models:openLibrary')(makeEvent(), {
+      folder: root,
+    })
+    expect(res.cached).toBe(true)
+
+    const [decorated] = await decorateModels([
+      {
+        id,
+        name: 'indexed-ghost',
+        type: 'lora',
+        ext: '.safetensors',
+        size: 123,
+        mtimeMs: 1000,
+        relDir: '',
+      },
+    ])
+    expect(decorated.autoInfo.title).toBe('索引中的头部信息')
+    expect(decorated.suspect).toBe(false)
+    resetDecorateCache(null)
   })
 
   it('索引覆盖含 civitaiUrl/baseModel：识别回填即时生效，快照头部值不被抹掉（OPT-06）', async () => {

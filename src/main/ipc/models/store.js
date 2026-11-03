@@ -28,8 +28,18 @@ import {
   releaseMaintenance,
   tryAcquireMaintenance,
 } from '../../services/maintenance-lock'
-import { awaitThumbDrain, decorateCache } from './model-state'
-import { resolveCoverSafe } from './decorate'
+import {
+  awaitThumbDrain,
+  decorateCache,
+  getDecorateCacheRoot,
+  resetDecorateCache,
+} from './model-state'
+import {
+  clearDeferredOwners,
+  primeHeaderInfoCache,
+  resolveCoverSafe,
+} from './decorate'
+import { clearDeferredJobs } from '../../services/thumbs'
 import { toImageUrl } from '../../protocol'
 import { slimModelsForList, logPayloadSize } from './list-payload'
 import {
@@ -327,6 +337,20 @@ export function registerStoreHandlers() {
               readLibraryIndex(settings.modelsFolder),
             ]).then(([, index]) => index)
             if (index) {
+              // IDX-REUSE：先确保装饰/头部缓存归属当前根（冷启动首次进入或
+              // 库切换时清空旧根状态），再播种索引中的头部解析结果；随后的
+              // 启动后台校验在 mtime/size 未变时不再重复读文件头
+              if (
+                !samePathIgnoreCase(
+                  getDecorateCacheRoot(),
+                  settings.modelsFolder,
+                )
+              ) {
+                resetDecorateCache(settings.modelsFolder)
+                clearDeferredOwners()
+                clearDeferredJobs()
+              }
+              primeHeaderInfoCache(index.models)
               // OPT-PAYLOAD：列表通道下发瘦身模型（先合成元数据展示字段，
               // 再剥离详情消费面重字段，顺序不可颠倒——合成依赖 folderSubCategory）
               const slimmed = slimModelsForList(
@@ -424,6 +448,15 @@ export function registerStoreHandlers() {
       if (!token) return { error: maintenanceBusyMessage() }
       try {
         await ensureRootStore(root, { maintenanceToken: token })
+        // IDX-REUSE：切库后的后台校验复用目标库索引中的头部解析结果。
+        // 先清空旧根的装饰/头部缓存与延迟缩略图归属，再按目标索引播种，
+        // 使随后的后台校验扫描无需再次读取索引即可命中头部快照
+        if (!samePathIgnoreCase(getDecorateCacheRoot(), root)) {
+          resetDecorateCache(root)
+          clearDeferredOwners()
+          clearDeferredJobs()
+        }
+        primeHeaderInfoCache(cachedIndex.models)
         // 切库成功后才提交激活库（与扫描链路同一 V-02 状态机）
         await updateSettings({ modelsFolder: root })
         const settings = getSettings()
