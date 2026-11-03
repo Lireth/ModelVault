@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -473,13 +473,75 @@ describe('scanModels', () => {
     })
 
     it('不存在的子目录静默跳过（已删除目录的情况），其余子树正常', async () => {
-      const { models, errors } = await scanModels(root, undefined, {
-        subDirs: ['lora', 'gone-dir'],
-      })
+      const { models, errors, failedDirs } = await scanModels(
+        root,
+        undefined,
+        {
+          subDirs: ['lora', 'gone-dir'],
+        },
+      )
       expect(errors).toHaveLength(0)
+      // ENOENT 属正常删除/移动：不登记 failedDirs（B5 三态区分）
+      expect(failedDirs).toEqual([])
       expect(models.map((m) => m.id)).toContain(
         path.join(root, 'lora', 'b.ckpt'),
       )
+    })
+
+    it('子树读取失败（EACCES）：记入 errors 并登记 failedDirs，不按空目录处理（B5）', async () => {
+      const locked = path.join(root, 'lora')
+      const original = fs.readdir
+      // 模拟杀软锁定/同步工具占用：目标子树 readdir 抛 EACCES，其余透传
+      const spy = vi.spyOn(fs, 'readdir').mockImplementation((p, opts) => {
+        if (String(p) === locked) {
+          const err = new Error('EACCES: permission denied')
+          err.code = 'EACCES'
+          return Promise.reject(err)
+        }
+        return original.call(fs, p, opts)
+      })
+      try {
+        const { models, errors, failedDirs } = await scanModels(
+          root,
+          undefined,
+          { subDirs: ['lora', ''] },
+        )
+        // 失败子树不计为空：无模型产出（未读取），但错误与 failedDirs 均已登记
+        expect(failedDirs).toEqual(['lora'])
+        expect(errors.some((e) => e.dir === locked)).toBe(true)
+        expect(models.some((m) => m.id === path.join(locked, 'b.ckpt'))).toBe(
+          false,
+        )
+        // 同批的根直属子树（''）不受影响
+        expect(models.some((m) => m.id === path.join(root, 'a.safetensors'))).toBe(
+          true,
+        )
+      } finally {
+        spy.mockRestore()
+      }
+    })
+
+    it('父级子树内后代读取失败：failedDirs 登记后代，父级自身条目正常（B5）', async () => {
+      const sub = path.join(root, 'lora', 'sub')
+      await fs.mkdir(sub, { recursive: true })
+      await fs.writeFile(path.join(sub, 'c.safetensors'), 'x')
+      const original = fs.readdir
+      const spy = vi.spyOn(fs, 'readdir').mockImplementation((p, opts) => {
+        if (String(p) === sub) {
+          const err = new Error('EBUSY: resource busy')
+          err.code = 'EBUSY'
+          return Promise.reject(err)
+        }
+        return original.call(fs, p, opts)
+      })
+      try {
+        const { failedDirs } = await scanModels(root, undefined, {
+          subDirs: ['lora'],
+        })
+        expect(failedDirs).toEqual(['lora/sub'])
+      } finally {
+        spy.mockRestore()
+      }
     })
 
     it('子树扫描仍受 MAX_DEPTH 约束（深于上限不遍历）', async () => {

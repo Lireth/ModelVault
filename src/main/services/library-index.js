@@ -275,7 +275,7 @@ async function writeIndexBody(root, models, durationMs) {
  * 语义与 updateLibraryIndex 一致（最后一次 upsert 覆盖同 id，remove 优先）。
  * @param {string} root 模型库根目录
  * @param {{upsertModels?: object[], removeIds?: string[],
- *   affectedDirs?: string[]|null}} payload 局部变更
+ *   affectedDirs?: string[]|null, excludeDirs?: string[]}} payload 局部变更
  * @returns {boolean} 是否成功入队
  */
 export function queueLibraryIndexUpdate(root, payload = {}) {
@@ -288,6 +288,7 @@ export function queueLibraryIndexUpdate(root, payload = {}) {
       upserts: new Map(),
       removeIds: new Set(),
       affectedDirs: null,
+      excludeDirs: null,
       timer: null,
       firstQueuedAt: Date.now(),
     }
@@ -316,6 +317,13 @@ export function queueLibraryIndexUpdate(root, payload = {}) {
       if (typeof dir === 'string') entry.affectedDirs.add(dir)
     }
   }
+  // B5：合并窗内多批次的失败子树一并累积（语义：这些子树一律不移除）
+  if (Array.isArray(payload.excludeDirs)) {
+    entry.excludeDirs = entry.excludeDirs || new Set()
+    for (const dir of payload.excludeDirs) {
+      if (typeof dir === 'string') entry.excludeDirs.add(dir)
+    }
+  }
   if (entry.timer) clearTimeout(entry.timer)
   const elapsed = Date.now() - entry.firstQueuedAt
   const delay = Math.max(
@@ -337,6 +345,7 @@ function payloadFromEntry(entry) {
     upsertModels: [...entry.upserts.values()],
     removeIds: [...entry.removeIds],
     affectedDirs: entry.affectedDirs ? [...entry.affectedDirs] : null,
+    excludeDirs: entry.excludeDirs ? [...entry.excludeDirs] : null,
   }
 }
 
@@ -370,10 +379,12 @@ export function getQueuedIndexUpdateCountForTests() {
  * （局部数据不足以构成完整库快照，交由下一次全量扫描重建）。
  * @param {string} root 模型库根目录
  * @param {{upsertModels?: object[], removeIds?: string[],
- *   affectedDirs?: string[]|null}} payload
+ *   affectedDirs?: string[]|null, excludeDirs?: string[]|null}} payload
  *   upsertModels 新增/更新的装饰模型；removeIds 需移除的模型绝对路径；
  *   affectedDirs 本次扫描覆盖的相对子树（这些目录内未出现在 upsertModels
- *   的旧记录会被移除，语义与渲染层局部合并一致）
+ *   的旧记录会被移除，语义与渲染层局部合并一致）；
+ *   excludeDirs（B5）受影响集合内应排除的子树——读取失败的目录：其旧记录
+ *   保留不移除（本次未能扫描不等于已删除）
  * @returns {Promise<boolean>} 是否完成写入（索引缺失/失败返回 false）
  */
 export async function updateLibraryIndex(root, payload = {}) {
@@ -397,6 +408,9 @@ export async function updateLibraryIndex(root, payload = {}) {
       const affectedDirs = Array.isArray(payload.affectedDirs)
         ? payload.affectedDirs
         : null
+      const excludeDirs = Array.isArray(payload.excludeDirs)
+        ? payload.excludeDirs
+        : null
       const existingModels = /** @type {any[]} */ (existing.models)
       const kept = existingModels.filter((m) => {
         const idLower = String(m.id).toLowerCase()
@@ -404,6 +418,8 @@ export async function updateLibraryIndex(root, payload = {}) {
         if (!affectedDirs) return true
         const relDir =
           typeof m.relDir === 'string' ? m.relDir : relDirFromId(root, m.id)
+        // B5：读取失败的子树排除在移除范围外——本次未能扫描不等于已删除
+        if (excludeDirs && isRelDirInScope(relDir, excludeDirs)) return true
         return !isRelDirInScope(relDir, affectedDirs)
       })
       const models = kept.concat(upserts)

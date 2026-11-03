@@ -266,6 +266,31 @@ describe('updateLibraryIndex（O8 增量维护）', () => {
     ])
   })
 
+  it('excludeDirs（B5）：失败子树的旧记录保留，兄弟子树照常移除', async () => {
+    await writeLibraryIndex(root, {
+      models: [
+        model('a.safetensors'),
+        model('lora/locked.safetensors', { relDir: 'lora/locked' }),
+        model('lora/free.safetensors', { relDir: 'lora/free' }),
+      ],
+      durationMs: 1,
+    })
+
+    // 扫描子树 lora，其中 lora/locked 读取失败：仅 lora/free 被清理
+    const ok = await updateLibraryIndex(root, {
+      upsertModels: [],
+      affectedDirs: ['lora'],
+      excludeDirs: ['lora/locked'],
+    })
+
+    expect(ok).toBe(true)
+    const cached = await readLibraryIndex(root)
+    const ids = cached.models.map((m) => path.basename(m.id))
+    expect(ids).toContain('locked.safetensors')
+    expect(ids).not.toContain('free.safetensors')
+    expect(ids).toContain('a.safetensors')
+  })
+
   it('并发增量更新经串行链合并，不丢失任一变更', async () => {
     await writeLibraryIndex(root, { models: [model('a.safetensors')] })
 

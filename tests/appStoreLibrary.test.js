@@ -296,6 +296,57 @@ describe('库路径失效闭环（F1-offline）', () => {
     expect(state.toasts.some((t) => t.type === 'error')).toBe(true)
   })
 
+  it('partialScanModels：读取失败子树的既有模型保留，正常子树按结果收敛（B5）', async () => {
+    state.folder = 'D:\\lib'
+    replaceModels([
+      makeModel('D:\\lib\\lora\\keep.safetensors', { relDir: 'lora' }),
+      makeModel('D:\\lib\\free\\gone.safetensors', { relDir: 'free' }),
+    ])
+    api.models.partialScan.mockResolvedValue({
+      models: [], // free 子树扫描结果为空（确实已删除）
+      dirs: ['lora', 'free'],
+      failedDirs: ['lora'], // lora 读取失败（EACCES 等），不按空目录处理
+      relinked: 0,
+      durationMs: 1,
+    })
+
+    await partialScanModels(['lora', 'free'])
+
+    const ids = state.models.map((m) => m.id)
+    // 失败子树模型原样保留；正常子树的空结果按「已删除」收敛
+    expect(ids).toContain('D:\\lib\\lora\\keep.safetensors')
+    expect(ids).not.toContain('D:\\lib\\free\\gone.safetensors')
+    // 可见反馈：告知哪些目录读取失败、列表已保留
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'warn' && t.text.includes('目录读取失败'),
+      ),
+    ).toBe(true)
+  })
+
+  it('partialScanModels：相同失败集合在节流窗口内不重复提示（B5 防刷屏）', async () => {
+    state.folder = 'D:\\lib'
+    // 与上个用例不同的失败目录集合（模块级节流状态跨用例存续）
+    replaceModels([
+      makeModel('D:\\lib\\lockedx\\keep.safetensors', { relDir: 'lockedx' }),
+    ])
+    api.models.partialScan.mockResolvedValue({
+      models: [],
+      dirs: ['lockedx'],
+      failedDirs: ['lockedx'],
+      relinked: 0,
+      durationMs: 1,
+    })
+
+    await partialScanModels(['lockedx'])
+    await partialScanModels(['lockedx'])
+
+    const warns = state.toasts.filter(
+      (t) => t.type === 'warn' && t.text.includes('目录读取失败'),
+    )
+    expect(warns).toHaveLength(1)
+  })
+
   it('partialScanModels：folderMissing 置位离线态，不降级全量扫描也不提示降级', async () => {
     state.folder = 'D:\\gone'
     replaceModels([makeModel('D:\\gone\\a.safetensors')])

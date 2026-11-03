@@ -208,10 +208,12 @@ export function modelAddedMs(stat) {
  *   额外排除的目录名（不区分大小写）、扫描的文件扩展名、取消信号；
  *   subDirs 为 A-03 子树局部扫描的相对根 POSIX 目录列表（'' 表示根直属）
  * @returns {Promise<{models: Array, errors: Array, dirCount: number,
- *   dirSnapshot: Map<string, string[]>}>}
+ *   dirSnapshot: Map<string, string[]>, failedDirs: string[]}>}
  *   dirSnapshot 为本次实际读取目录的「目录绝对路径 → 排序条目名」快照，
  *   供 watcher 直接作为监控基线（OPT-02：扫描与监控共用同一份目录事实，
  *   避免扫描结束后再做一次全树遍历，也避免旧基线重复触发局部扫描）。
+ *   failedDirs（B5）为子树模式下读取失败（非 ENOENT）的相对目录 POSIX
+ *   列表：这些子树数据可能仍存在，调用方须保留其既有模型/索引/基线。
  * @throws {Error} name 为 'AbortError' 表示扫描被取消
  */
 export async function scanModels(root, onProgress, options = {}) {
@@ -239,6 +241,9 @@ export async function scanModels(root, onProgress, options = {}) {
   // 每个初始节点扫描目录内文件；非根节点递归全部后代，根节点（''）不递归——
   // 根层新增/删除的目录必以其自身路径另行出现在子树集合中，'' 只需采集直属文件
   const scoped = Array.isArray(options.subDirs) && options.subDirs.length > 0
+  // B5：子树模式下读取失败（非 ENOENT）的相对目录（POSIX）——这些子树
+  // 数据可能仍存在，调用方必须保留其既有模型/索引/基线而非按空目录覆盖
+  const failedDirs = []
   const rootResolved = path.resolve(root)
   const isInsideRoot = (abs) =>
     relativeWithin(path.resolve(abs), rootResolved) !== null
@@ -304,6 +309,8 @@ export async function scanModels(root, onProgress, options = {}) {
       if (!unit) continue
       if (unit.error) {
         errors.push({ dir: unit.dir, message: unit.error })
+        // B5：子树读取失败（非 ENOENT）的相对目录登记，供调用方保留旧数据
+        if (typeof unit.failedDir === 'string') failedDirs.push(unit.failedDir)
         continue
       }
       // OPT-02：记录本目录的可见条目名（与 watcher 快照同构，排序保证稳定比较）
@@ -365,9 +372,25 @@ export async function scanModels(root, onProgress, options = {}) {
     try {
       entries = await fs.readdir(dir, { withFileTypes: true })
     } catch (err) {
-      // 子树模式下目标目录已被删除是正常增量场景，静默跳过；
-      // 全量模式（根节点不可读）仍计入错误由调用方决定停止监控。
-      // 两类均以占位/错误单元进提交链：序号连续、errors 顺序确定
+      // 三态区分（B5）：
+      // - ENOENT/ENOTDIR：目录确实不存在（删除/移动），正常增量场景——
+      //   按空目录处理，该子树旧模型随之移除；
+      // - 子树模式的其它错误（EACCES/EBUSY/EMFILE 等，杀软锁定/同步工具
+      //   占用）：目录可能仍存在——记入 errors 并登记 failedDirs，由调用方
+      //   保留该子树的既有模型/索引/监控基线，绝不用空结果覆盖；
+      // - 全量模式（根节点不可读）：仍计入错误由调用方决定停止监控。
+      // 三类均以占位/错误单元进提交链：序号连续、errors 顺序确定
+      const code = err?.code
+      if (scoped && code !== 'ENOENT' && code !== 'ENOTDIR') {
+        pendingUnits.set(seq, {
+          dir,
+          rel,
+          error: err?.message || String(err),
+          failedDir: rel,
+        })
+        commitReadyUnits()
+        return
+      }
       if (scoped) {
         pendingUnits.set(seq, null)
         commitReadyUnits()
@@ -477,7 +500,7 @@ export async function scanModels(root, onProgress, options = {}) {
   await walkDone
   if (signal?.aborted) throw abortError()
 
-  return { models, errors, dirCount, dirSnapshot }
+  return { models, errors, dirCount, dirSnapshot, failedDirs }
 }
 
 /**

@@ -48,14 +48,27 @@ function sanitizeBaseline(root, snapshot, excludeNames) {
   return out
 }
 
-/** 删除某目录及其全部后代的快照条目（目录被删除/子树回填前调用） */
-export function removeSnapshotSubtree(w, absDir) {
+/**
+ * 删除某目录及其全部后代的快照条目（目录被删除/子树回填前调用）。
+ * @param {WatcherState} w
+ * @param {string} absDir 目标目录绝对路径
+ * @param {string[]} [excludeAbs] 排除的子树绝对路径（B5：读取失败的目录
+ *   基线原样保留，不随本次回填删除）
+ */
+export function removeSnapshotSubtree(w, absDir, excludeAbs = []) {
+  const isExcluded = (dir) =>
+    excludeAbs.length > 0 &&
+    excludeAbs.some((ex) => relativeWithin(dir, ex) !== null)
   for (const dir of [...w.snapshot.keys()]) {
-    if (relativeWithin(dir, absDir) !== null) w.snapshot.delete(dir)
+    if (relativeWithin(dir, absDir) !== null && !isExcluded(dir)) {
+      w.snapshot.delete(dir)
+    }
   }
   if (w.statSnapshot) {
     for (const dir of [...w.statSnapshot.keys()]) {
-      if (relativeWithin(dir, absDir) !== null) w.statSnapshot.delete(dir)
+      if (relativeWithin(dir, absDir) !== null && !isExcluded(dir)) {
+        w.statSnapshot.delete(dir)
+      }
     }
   }
 }
@@ -65,15 +78,19 @@ export function removeSnapshotSubtree(w, absDir) {
  * - scopes=null 表示全量扫描，全部覆盖；
  * - 数组按局部扫描语义（'' 仅根直属），只清理真正被覆盖的目录；
  * - 清理后若无剩余项，取消已安排的防抖广播（扫描结果已包含这些变更）。
+ * B5：读取失败的子树（excludes）本次未被扫描覆盖，其待广播项保留——
+ * 停扫后补发将再次触发局部扫描，磁盘恢复后自动收敛（无需手动全量扫描）。
  */
-function clearScannedPendingDirs(w, scopes) {
+function clearScannedPendingDirs(w, scopes, excludes = []) {
+  const isExcluded = (dir) =>
+    excludes.length > 0 && isRelDirInScope(dir, excludes)
   const clearSet = (set) => {
     if (scopes === null) {
       set.clear()
       return
     }
     for (const dir of [...set]) {
-      if (isRelDirInScope(dir, scopes)) set.delete(dir)
+      if (isRelDirInScope(dir, scopes) && !isExcluded(dir)) set.delete(dir)
     }
   }
   clearSet(w.pendingDirs)
@@ -102,12 +119,26 @@ export function applyFullBaseline(w, snapshot) {
   return true
 }
 
-/** 局部扫描基线：按受影响子树替换名称快照，范围外条目保持原样 */
-export function applyPartialBaseline(w, dirs, snapshot) {
+/**
+ * 局部扫描基线：按受影响子树替换名称快照，范围外条目保持原样。
+ * B5：excludeDirs 为读取失败的子树——这些目录本次未产生扫描事实，
+ * 其基线条目原样保留（含「目录已消失」判定跳过），待广播项不清理。
+ */
+export function applyPartialBaseline(w, dirs, snapshot, excludeDirs = []) {
   const scopes = dedupeAndPruneDescendants(Array.isArray(dirs) ? dirs : [])
   if (scopes.length === 0) return false
+  const excludes = dedupeAndPruneDescendants(
+    Array.isArray(excludeDirs) ? excludeDirs : [],
+  )
+  const isExcluded = (relPosix) =>
+    excludes.length > 0 && isRelDirInScope(relPosix, excludes)
+  const excludeAbs = excludes
+    .filter((rel) => rel !== '')
+    .map((rel) => path.join(w.root, ...rel.split('/')))
   const baseline = sanitizeBaseline(w.root, snapshot, w.excludeNames)
   for (const rel of scopes) {
+    // 失败子树整体跳过：不删不替换，基线与待广播项保持原样
+    if (isExcluded(rel)) continue
     const abs = rel === '' ? w.root : path.join(w.root, ...rel.split('/'))
     if (rel === '') {
       // 空串仅代表根目录直属：只替换根目录自身条目，保留已存在的后代快照
@@ -115,25 +146,26 @@ export function applyPartialBaseline(w, dirs, snapshot) {
       if (w.statSnapshot) w.statSnapshot.delete(abs)
       continue
     }
-    removeSnapshotSubtree(w, abs)
+    removeSnapshotSubtree(w, abs, excludeAbs)
   }
   for (const [abs, names] of baseline) {
     const rel = relativeWithin(abs, w.root)
     if (rel === null) continue
     const relPosix = rel === '' ? '' : rel.split(path.sep).join('/')
-    if (!isRelDirInScope(relPosix, scopes)) continue
+    if (!isRelDirInScope(relPosix, scopes) || isExcluded(relPosix)) continue
     w.snapshot.set(abs, names)
   }
   // 非根子树扫描后目录可能已消失：快照中不存在该键即视为删除
+  // （失败子树跳过该判定——没有本次扫描事实，不能断言其已删除）
   for (const rel of scopes) {
-    if (rel === '') continue
+    if (rel === '' || isExcluded(rel)) continue
     const abs = path.join(w.root, ...rel.split('/'))
-    if (!w.snapshot.has(abs)) removeSnapshotSubtree(w, abs)
+    if (!w.snapshot.has(abs)) removeSnapshotSubtree(w, abs, excludeAbs)
   }
   w.statSnapshot = null
   w.snapshotRevision += 1
   // 保留原内容校验节奏：局部扫描不推迟范围外目录的同名覆盖检测
   w.idleRounds = 0
-  clearScannedPendingDirs(w, scopes)
+  clearScannedPendingDirs(w, scopes, excludes)
   return true
 }

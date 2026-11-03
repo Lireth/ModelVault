@@ -117,14 +117,15 @@ export function setWatcherScanning(scanning) {
  * @param {string} root 扫描的模型根目录
  * @param {string[]} dirs 本次局部扫描的子树（POSIX 相对路径，'' 为根直属）
  * @param {Map<string, string[]>} snapshot scanner 返回的目录名快照
+ * @param {string[]} [excludeDirs] 读取失败的子树（B5：基线保留，不删不换）
  * @returns {boolean} 是否成功应用到当前监控状态
  */
-export function refreshWatcherBaseline(root, dirs, snapshot) {
+export function refreshWatcherBaseline(root, dirs, snapshot, excludeDirs = []) {
   const w = getWatcher()
   if (!w || !w.enabled || !samePathIgnoreCase(w.root, root)) return false
   // 空快照合法：本次扫描的子树已被删除，需要移除对应旧基线条目
   if (!(snapshot instanceof Map)) return false
-  return applyPartialBaseline(w, dirs, snapshot)
+  return applyPartialBaseline(w, dirs, snapshot, excludeDirs)
 }
 
 /**

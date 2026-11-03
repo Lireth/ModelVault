@@ -61,6 +61,7 @@ import {
   stopWatcher,
   syncWatcher,
 } from '../src/main/services/watcher'
+import { applyPartialBaseline } from '../src/main/services/watcher-baseline'
 import logger from '../src/main/logger'
 
 /** 测试用小间隔时序（ms）：轮询快、防抖短，用例百毫秒级完成 */
@@ -908,6 +909,80 @@ describe('OPT-02 扫描/监控基线协同', () => {
     expect(refreshWatcherBaseline(root, [''], snapshot)).toBe(true)
     await sleep(300)
     expect(sentEvents).toHaveLength(0)
+  })
+
+  it('applyPartialBaseline：失败子树的基线与待广播项原样保留（B5）', () => {
+    const w = {
+      root,
+      snapshot: new Map([
+        [path.join(root, 'lora'), ['a.safetensors']],
+        [path.join(root, 'other'), ['b.safetensors']],
+      ]),
+      statSnapshot: null,
+      excludeNames: new Set(),
+      pendingDirs: new Set(['lora']),
+      pendingConfirmedDirs: new Set(),
+      debounceTimer: null,
+      snapshotRevision: 0,
+      idleRounds: 0,
+    }
+    // 空快照 + 排除语义：失败子树不能按「目录已消失」删除基线
+    const ok = applyPartialBaseline(w, ['lora'], new Map(), ['lora'])
+    expect(ok).toBe(true)
+    expect(w.snapshot.get(path.join(root, 'lora'))).toEqual(['a.safetensors'])
+    // 待广播保留：停扫后补发将自动重试该子树（磁盘恢复后自动收敛）
+    expect(w.pendingDirs.has('lora')).toBe(true)
+    // 范围外条目不受影响
+    expect(w.snapshot.get(path.join(root, 'other'))).toEqual(['b.safetensors'])
+  })
+
+  it('applyPartialBaseline：正常子树（无排除）空快照按目录已删除移除基线', () => {
+    const w = {
+      root,
+      snapshot: new Map([[path.join(root, 'lora'), ['a.safetensors']]]),
+      statSnapshot: null,
+      excludeNames: new Set(),
+      pendingDirs: new Set(['lora']),
+      pendingConfirmedDirs: new Set(),
+      debounceTimer: null,
+      snapshotRevision: 0,
+      idleRounds: 0,
+    }
+    applyPartialBaseline(w, ['lora'], new Map(), [])
+    expect(w.snapshot.has(path.join(root, 'lora'))).toBe(false)
+    expect(w.pendingDirs.size).toBe(0)
+  })
+
+  it('applyPartialBaseline：父级子树含失败后代——兄弟正常替换，失败后代保留（B5）', () => {
+    const abs = (rel) => path.join(root, ...rel.split('/'))
+    const w = {
+      root,
+      snapshot: new Map([
+        [abs('a'), ['x']],
+        [abs('a/b'), ['locked.safetensors']],
+        [abs('a/c'), ['old.safetensors']],
+      ]),
+      statSnapshot: null,
+      excludeNames: new Set(),
+      pendingDirs: new Set(['a', 'a/b']),
+      pendingConfirmedDirs: new Set(),
+      debounceTimer: null,
+      snapshotRevision: 0,
+      idleRounds: 0,
+    }
+    // 扫描子树 'a'，快照含 a 与 a/c（a/b 读取失败未产生快照），排除 a/b
+    const snapshot = new Map([
+      [abs('a'), ['x']],
+      [abs('a/c'), ['new.safetensors']],
+    ])
+    applyPartialBaseline(w, ['a'], snapshot, ['a/b'])
+    expect(w.snapshot.get(abs('a'))).toEqual(['x'])
+    expect(w.snapshot.get(abs('a/c'))).toEqual(['new.safetensors'])
+    // 失败后代基线原样保留（不被父级回填删除）
+    expect(w.snapshot.get(abs('a/b'))).toEqual(['locked.safetensors'])
+    // 已覆盖的 'a' 清理；失败子树 'a/b' 的待广播保留（停扫后自动重试）
+    expect(w.pendingDirs.has('a')).toBe(false)
+    expect(w.pendingDirs.has('a/b')).toBe(true)
   })
 
   it('原生事件子树回填：噪声不广播，真实变更/删除按子树广播（含内容基线）', async () => {

@@ -392,9 +392,20 @@ export function registerScanHandlers() {
           signal,
         })
         const models = scanResult.models
-        // 重关联限定受影响子树：范围外元数据保持原样
+        // B5：读取失败（非 ENOENT）的子树——其旧模型/索引/基线一律保留，
+        // 不参与重关联孤儿判定与移除语义（扫描不到 ≠ 已删除）
+        const failedDirs = Array.isArray(scanResult.failedDirs)
+          ? scanResult.failedDirs
+          : []
+        if (failedDirs.length > 0) {
+          logger.warn(
+            `局部扫描有 ${failedDirs.length} 个目录读取失败，已保留其既有数据: ${failedDirs.slice(0, 10).join(', ')}`,
+          )
+        }
+        // 重关联限定受影响子树：范围外与失败子树内的元数据保持原样
         const relinkResult = relinkScannedMeta(models, {
           affectedDirs: subDirs,
+          excludeDirs: failedDirs,
         })
         // pruneThumbs=false（OPT-1 修复）：局部装饰仅覆盖变更子树，若按局部
         // usedThumbs 清理会把子树外模型的全部缩略图误删（缓存命中路径不会重新
@@ -417,6 +428,7 @@ export function registerScanHandlers() {
         queueLibraryIndexUpdate(root, {
           upsertModels: decorated,
           affectedDirs: subDirs,
+          excludeDirs: failedDirs,
         })
 
         const win = BrowserWindow.fromWebContents(event.sender)
@@ -434,8 +446,9 @@ export function registerScanHandlers() {
 
         // OPT-02：只回填受影响子树的监控基线，并清理这些子树对应的待广播项；
         // 范围外基线保持原样，未覆盖的新变更仍会在停扫后补发。
+        // B5：失败子树不回填基线也不清待广播——停扫后自动重试直至恢复
         if (scanResult.dirSnapshot instanceof Map) {
-          refreshWatcherBaseline(root, subDirs, scanResult.dirSnapshot)
+          refreshWatcherBaseline(root, subDirs, scanResult.dirSnapshot, failedDirs)
         }
 
         logger.info(
@@ -448,6 +461,7 @@ export function registerScanHandlers() {
         return {
           models: slimmed.models,
           dirs: subDirs,
+          failedDirs,
           relinked: relinkResult.relinked,
           durationMs: Date.now() - startedAt,
         }

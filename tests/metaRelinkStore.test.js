@@ -58,6 +58,25 @@ function scanned(rel, { size = 1024, mtimeMs = 1000 } = {}) {
 }
 
 describe('relinkScannedMeta 库内移动/重命名重关联', () => {
+  it('excludeDirs（B5）：读取失败子树内的旧标注不作孤儿判定（不重关联不清理）', async () => {
+    // 失败子树内的既有标注：本次扫描「看不见」，但不是删除——必须原样保留
+    const lockedAbs = path.join(root, 'locked', 'a.safetensors')
+    setModelMeta(lockedAbs, { note: '失败子树的标注' })
+    const freeAbs = path.join(root, 'free', 'b.safetensors')
+    setModelMeta(freeAbs, { note: '正常子树的孤儿标注' })
+
+    const result = relinkScannedMeta([], {
+      affectedDirs: ['locked', 'free'],
+      excludeDirs: ['locked'],
+    })
+
+    expect(result.relinked).toBe(0)
+    // 失败子树的标注原样保留
+    expect(getModelMeta(lockedAbs)?.note).toBe('失败子树的标注')
+    // 正常子树按 affectedDirs 语义处理（空孤儿清理或保守保留，取决于内容）
+    expect(getModelMeta(freeAbs)?.note).toBe('正常子树的孤儿标注')
+  })
+
   it('模型移入子目录（同名）：标注迁移到新键，旧键删除，封面引用保持有效', async () => {
     const oldAbs = path.join(root, 'a.safetensors')
     setModelMeta(oldAbs, {

@@ -403,6 +403,8 @@ export async function switchDataRoot(root) {
  *   A-03 局部重扫）。仅这些目录（含后代）内消失的键才作为孤儿候选；
  *   未扫描目录内的键一律保持原样——局部扫描"看不见"不等于模型被删除。
  *   缺省为全量语义（全部键参与判定）
+ * @param {string[]} [options.excludeDirs] 受影响集合内应排除的子树（B5：
+ *   读取失败的目录——这些子树本次未能扫描，其中的旧键不作孤儿判定）
  * @returns {{relinked:number, prunedEmpty:number, retainedOrphans:number}}
  *   relinked 迁移条目数；prunedEmpty 清理的空孤儿数；retainedOrphans 保留的数据孤儿数
  */
@@ -414,8 +416,14 @@ export function relinkScannedMeta(scanned, options = {}) {
   const affectedDirs = Array.isArray(options.affectedDirs)
     ? options.affectedDirs
     : null
-  /** 键的相对目录是否落在受影响集合内（OP-09 共享实现；null = 全量语义） */
-  const keyInScope = (key) => isRelKeyInScope(key, affectedDirs)
+  const excludeDirs = Array.isArray(options.excludeDirs)
+    ? options.excludeDirs
+    : null
+  /** 键的相对目录是否落在受影响集合内（OP-09 共享实现；null = 全量语义）；
+      B5：读取失败的子树排除在外——扫描不到不等于已删除 */
+  const keyInScope = (key) =>
+    isRelKeyInScope(key, affectedDirs) &&
+    !(excludeDirs && isRelKeyInScope(key, excludeDirs))
 
   const currentKeys = new Set()
   const newcomers = []

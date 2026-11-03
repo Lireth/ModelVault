@@ -96,6 +96,39 @@ function enqueue(root, dirs) {
 /** 判断模型的相对目录是否落在变更子树集合内（OP-09 共享实现） */
 const isRelDirAffected = isRelDirInScope
 
+/* ---------------- 子树读取失败提示（B5：去重 + 节流，不刷屏） ---------------- */
+
+/** 相同失败目录集合的提示间隔（ms）：watcher 自动重试期间不重复打扰 */
+const FAILED_DIRS_TOAST_INTERVAL_MS = 60_000
+let lastFailedToastKey = ''
+let lastFailedToastAt = 0
+
+/**
+ * 子树读取失败的可见反馈（B5）：按目录集合去重 + 60s 节流——
+ * 失败子树的待广播项被保留，watcher 会自动重试直至恢复，期间相同
+ * 失败不重复弹提示；目录集合变化或超过间隔则再次提示。
+ */
+function notifyFailedDirs(failedDirs) {
+  const key = [...failedDirs].sort().join('|')
+  const now = Date.now()
+  if (
+    key === lastFailedToastKey &&
+    now - lastFailedToastAt < FAILED_DIRS_TOAST_INTERVAL_MS
+  ) {
+    return
+  }
+  lastFailedToastKey = key
+  lastFailedToastAt = now
+  const shown = failedDirs
+    .slice(0, 3)
+    .map((d) => d || '（根目录）')
+    .join('、')
+  toast(
+    'warn',
+    `${failedDirs.length} 个目录读取失败（可能被占用或权限不足），已保留原有模型列表，恢复后将自动重试：${shown}${failedDirs.length > 3 ? ' 等' : ''}`,
+  )
+}
+
 /**
  * 局部增量扫描：只重扫 watcher 检出的变更子树，主进程返回这些子树的模型现状，
  * 渲染层就地合并——子树外的模型列表完全不动（零 IPC 载荷、零重排），
@@ -231,10 +264,15 @@ export async function partialScanModels(dirs) {
     // 避免合并范围与扫描范围不一致留下陈旧条目
     const appliedDirs =
       Array.isArray(res.dirs) && res.dirs.length > 0 ? res.dirs : scanDirs
+    // B5：读取失败的子树不参与移除语义——本次未能扫描不等于模型已删除，
+    // 这些目录内的既有模型原样保留（索引/基线在主进程同样被保留）
+    const failedDirs = Array.isArray(res.failedDirs) ? res.failedDirs : []
+    if (failedDirs.length > 0) notifyFailedDirs(failedDirs)
 
-    // 未受影响子树的旧模型原样保留；受影响的模型以局部扫描结果为准
+    // 未受影响子树与读取失败子树的旧模型原样保留；受影响的模型以局部扫描结果为准
     const untouched = state.models.filter((m) => {
       if (!isRelDirAffected(m.relDir || '', appliedDirs)) return true
+      if (isRelDirAffected(m.relDir || '', failedDirs)) return true
       if (incomingIds.has(m.id)) return false
       removedIds.push(m.id)
       return false

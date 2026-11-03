@@ -895,9 +895,37 @@ describe('OPT-02 扫描/监控基线协同', () => {
       root,
       ['lora'],
       baseline,
+      [],
     )
     expect(setWatcherScanning).toHaveBeenNthCalledWith(1, true)
     expect(setWatcherScanning).toHaveBeenLastCalledWith(false)
+  })
+
+  it('局部扫描子树读取失败：failedDirs 透传响应，基线回填与索引更新带排除（B5）', async () => {
+    await registerLibrary(root)
+    vi.mocked(refreshWatcherBaseline).mockClear()
+    const baseline = new Map()
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [{ dir: path.join(root, 'locked'), message: 'EACCES' }],
+      dirCount: 0,
+      dirSnapshot: baseline,
+      failedDirs: ['locked'],
+    })
+
+    const partial = getRegisteredHandler('models:partialScan')
+    const res = await partial(makeEvent(), { folder: root, dirs: ['locked'] })
+
+    expect(res.error).toBeUndefined()
+    // 失败子树透传给渲染层（其既有模型原样保留，不按空目录移除）
+    expect(res.failedDirs).toEqual(['locked'])
+    // 基线回填携带排除集：失败子树的旧基线与待广播项不清理（自动重试）
+    expect(refreshWatcherBaseline).toHaveBeenCalledWith(
+      root,
+      ['locked'],
+      baseline,
+      ['locked'],
+    )
   })
 })
 
