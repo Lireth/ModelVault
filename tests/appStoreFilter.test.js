@@ -421,3 +421,21 @@ describe('重复模型检测与筛选（FEAT-1）', () => {
     expect(filteredModels.value).toHaveLength(5)
   })
 })
+
+describe('疑似损坏筛选（FEAT-01）', () => {
+  it('仅保留 suspect=true 的模型；关闭后恢复全量；可与搜索语法叠加', () => {
+    replaceModels([
+      makeModel('ok', { suspect: false, name: '正常' }),
+      makeModel('bad', { suspect: true, name: '损坏A' }),
+      makeModel('truncated', { suspect: true, name: '损坏B' }),
+    ])
+    state.showSuspectOnly = true
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['bad', 'truncated'])
+    // 与 broken:yes 搜索语法同语义：叠加后结果不变
+    state.search = 'broken:yes'
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['bad', 'truncated'])
+    state.search = ''
+    state.showSuspectOnly = false
+    expect(filteredModels.value).toHaveLength(3)
+  })
+})

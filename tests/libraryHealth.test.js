@@ -117,14 +117,92 @@ describe('checkLibraryHealth（只读体检）', () => {
     ).resolves.toBeUndefined()
   })
 
+  it('模型文件完整性：0 字节/头部非法/数据区截断，并复用索引快照（FEAT-01）', async () => {
+    // 0 字节（非 safetensors 也会命中）
+    const empty = await touchModel('empty.ckpt', '')
+    setModelMeta(empty, { note: '空文件' })
+
+    // 头部垃圾（不可解析）
+    const bad = await touchModel('bad.safetensors', 'garbage — not safetensors')
+    setModelMeta(bad, { note: '坏头' })
+
+    // 头部声明数据区到 16 字节，实际只有 4 字节（下载中断典型形态）
+    const header = JSON.stringify({
+      __metadata__: { 'modelspec.title': '截断模型' },
+      'model.weight': { dtype: 'F32', shape: [2, 2], data_offsets: [0, 16] },
+    })
+    const lenBuf = Buffer.alloc(8)
+    lenBuf.writeUInt32LE(Buffer.byteLength(header), 0)
+    const truncatedRel = 'truncated.safetensors'
+    const truncated = await touchModel(
+      truncatedRel,
+      Buffer.concat([lenBuf, Buffer.from(header), Buffer.alloc(4)]),
+    )
+    setModelMeta(truncated, { note: '截断' })
+
+    // 索引快照：文件实际是垃圾字节，但索引声明 suspect + 数据区越界。
+    // 若走实时解析会得到 invalid-header；命中索引快照应得到 truncated
+    const snapRel = 'snap.safetensors'
+    const snapAbs = await touchModel(snapRel, 'garbage snapshot')
+    const snapStat = await fs.stat(snapAbs)
+    await fs.mkdir(path.join(root, '.modelvault'), { recursive: true })
+    await fs.writeFile(
+      path.join(root, '.modelvault', 'index.json'),
+      JSON.stringify({
+        version: 1,
+        root,
+        savedAt: 1,
+        durationMs: 42,
+        models: [
+          {
+            id: snapAbs,
+            name: 'snap',
+            type: 'lora',
+            ext: '.safetensors',
+            size: snapStat.size,
+            mtimeMs: snapStat.mtimeMs,
+            relDir: '',
+            autoInfo: { expectedMinBytes: snapStat.size + 10 },
+            suspect: true,
+          },
+        ],
+      }),
+    )
+
+    const res = await checkLibraryHealth()
+
+    expect(res.report.modelSource).toBe('index')
+    expect(res.report.indexSavedAt).toBe(1)
+    expect(res.report.checkedModels).toBe(4)
+    expect(res.report.brokenModels).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ rel: 'empty.ckpt', reason: 'zero-size' }),
+        expect.objectContaining({
+          rel: 'bad.safetensors',
+          reason: 'invalid-header',
+        }),
+        expect.objectContaining({
+          rel: truncatedRel,
+          reason: 'truncated',
+        }),
+        expect.objectContaining({ rel: snapRel, reason: 'truncated' }),
+      ]),
+    )
+    expect(res.report.summary.brokenModels).toBe(4)
+    // 模型文件损坏不进入自动修复范围（不能替用户删除/改写模型文件）
+    expect(res.report.summary.repairable).toBe(0)
+  })
+
   it('无问题时报告为空且 repairable=0', async () => {
-    const a = await touchModel('ok.safetensors')
+    // .ckpt 不做头部结构判定：非空即视为健康（避免把无结构校验能力的格式误报）
+    const a = await touchModel('ok.ckpt')
     setModelMeta(a, { note: 'ok' })
 
     const res = await checkLibraryHealth()
 
     expect(res.report.summary).toMatchObject({
       missingFiles: 0,
+      brokenModels: 0,
       brokenCovers: 0,
       orphanCovers: 0,
       duplicateHashes: 0,

@@ -188,7 +188,9 @@ async function onClearAllCovers() {
         <span class="setting-title">模型库体检</span>
         <span class="setting-desc">
           检查元数据与磁盘是否一致：模型文件已缺失的幽灵标注、失效封面引用、
-          无人引用的孤儿封面，以及重复模型哈希。检查为只读操作，不会修改任何文件。
+          无人引用的孤儿封面、重复模型哈希，以及模型文件完整性（0 字节/
+          头部不可解析/数据区截断）。检查为只读操作，不会修改任何文件；
+          疑似损坏模型仅提示，需重新下载或替换。
         </span>
       </div>
       <div class="setting-actions">
@@ -206,12 +208,13 @@ async function onClearAllCovers() {
       <div class="health-report-head">
         <span>体检结果</span>
         <span class="health-counts">
-          模型 {{ healthReport.totalModels }} · 封面引用
+          模型 {{ healthReport.totalModels }} · 已校验文件
+          {{ healthReport.checkedModels }} · 封面引用
           {{ healthReport.totalCoverRefs }}
         </span>
       </div>
       <div v-if="healthExamples.length === 0" class="health-ok">
-        未发现缺失文件、失效封面、孤儿封面或重复哈希。
+        未发现缺失文件、疑似损坏模型、失效封面、孤儿封面或重复哈希。
       </div>
       <ul v-else class="health-issues">
         <li v-for="line in healthExamples" :key="line">{{ line }}</li>

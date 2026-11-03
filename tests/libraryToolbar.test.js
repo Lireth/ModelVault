@@ -28,7 +28,7 @@ describe('搜索语法帮助面板（FEAT-1）', () => {
     expect(wrapper.find('.search-help-panel').exists()).toBe(false)
     await wrapper.find('.search-help').trigger('click')
     expect(wrapper.find('.search-help-panel').exists()).toBe(true)
-    expect(wrapper.findAll('.help-row')).toHaveLength(11)
+    expect(wrapper.findAll('.help-row')).toHaveLength(12)
     await wrapper.find('.search-help').trigger('click')
     expect(wrapper.find('.search-help-panel').exists()).toBe(false)
     wrapper.unmount()

@@ -39,6 +39,7 @@ function model(name, tags) {
 }
 
 beforeEach(() => {
+  state.showSuspectOnly = false
   replaceModels([
     model('a', ['赛博朋克', '服装']),
     model('b', ['赛博朋克']),
@@ -85,6 +86,38 @@ describe('ResultBar 多标签筛选', () => {
     await clear.trigger('click')
     expect(state.tagFilters).toEqual([])
     expect(wrapper.find('.tag-clear').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+describe('ResultBar 疑似损坏筛选（FEAT-01）', () => {
+  it('仅存在损坏模型时显示入口，点击切换筛选并更新结果', async () => {
+    replaceModels([
+      { ...model('ok', []), suspect: false },
+      { ...model('bad', []), suspect: true },
+    ])
+    const wrapper = mount(ResultBar)
+    const btn = wrapper
+      .findAll('.fav-filter')
+      .find((w) => w.text().includes('疑似损坏'))
+    expect(btn).toBeTruthy()
+    expect(btn.text()).toContain('1')
+
+    await btn.trigger('click')
+    expect(state.showSuspectOnly).toBe(true)
+    expect(filteredModels.value.map((m) => m.name)).toEqual(['bad'])
+
+    await btn.trigger('click')
+    expect(state.showSuspectOnly).toBe(false)
+    expect(filteredModels.value).toHaveLength(2)
+    wrapper.unmount()
+  })
+
+  it('无损坏模型时不显示入口', () => {
+    const wrapper = mount(ResultBar)
+    expect(
+      wrapper.findAll('.fav-filter').some((w) => w.text().includes('疑似损坏')),
+    ).toBe(false)
     wrapper.unmount()
   })
 })

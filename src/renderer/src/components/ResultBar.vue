@@ -15,12 +15,17 @@ import {
 
 /**
  * 结果栏筛选 chips（O-5 自 App.vue 拆出，FEAT-1/F-2/F-5）：
- * 主分类 chip、重复模型筛选与冗余清理入口、LoRA 二级分类 / 基底模型家族 /
- * 自由标签三个子筛选。全部状态与动作内聚于 store（与工具行解耦）。
+ * 主分类 chip、重复模型筛选与冗余清理入口、疑似损坏筛选、LoRA 二级分类 /
+ * 基底模型家族 / 自由标签三个子筛选。全部状态与动作内聚于 store（与工具行解耦）。
  */
 
 /** 重复模型数（重复组内全部成员；0 表示当前无可见的重复项，隐藏筛选入口） */
 const duplicateCount = computed(() => duplicateIdSet.value.size)
+
+/** 疑似损坏模型数（FEAT-01）：装饰阶段标记 0 字节/头部非法/数据区截断 */
+const suspectCount = computed(() =>
+  state.models.reduce((n, m) => n + (m.suspect === true ? 1 : 0), 0),
+)
 
 /** 重复清理：每组保留最优一份，冗余副本加入多选，交由用户复核后批量删除 */
 function onSelectRedundant() {
@@ -101,6 +106,36 @@ function clearTagFilters() {
         <path d="M16 4H6a2 2 0 0 0-2 2v10" />
       </svg>
       重复 {{ duplicateCount }}
+    </button>
+    <!-- 疑似损坏筛选（FEAT-01）：只显示装饰阶段标记 suspect 的模型；
+         与搜索语法 broken:yes 同语义，便于集中重新下载/替换坏文件 -->
+    <button
+      v-if="suspectCount > 0"
+      class="fav-filter"
+      :class="{ active: state.showSuspectOnly }"
+      :title="
+        state.showSuspectOnly
+          ? '显示全部模型'
+          : `仅显示疑似损坏模型（${suspectCount} 个：0 字节/头部不可解析/数据区截断）`
+      "
+      @click="state.showSuspectOnly = !state.showSuspectOnly"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        width="11"
+        height="11"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M12 3 2 21h20L12 3Z" />
+        <path d="M12 9v5" />
+        <path d="M12 17h.01" />
+      </svg>
+      疑似损坏 {{ suspectCount }}
     </button>
     <!-- 重复清理（FEAT-1）：重复筛选开启时提供「保留最优、选中冗余」的一键辅助，
          交由既有批量删除（回收站）完成清理 -->

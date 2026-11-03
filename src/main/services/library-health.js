@@ -2,7 +2,9 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
 import { runWithConcurrency } from '../utils'
+import { readLibraryIndex } from './library-index'
 import { runMaintenance } from './maintenance-lock'
+import { checkSafetensorsHealthy, readSafetensorsInfo } from './safetensors'
 import {
   COVERS_DIR,
   DATA_DIR,
@@ -30,6 +32,8 @@ import {
  * - 元数据指向的模型文件已缺失 → 移除幽灵标注；
  * - 封面引用失效（文件缺失/路径非法）→ 清掉死引用并回退默认封面；
  * - 封面目录中无人引用的孤儿文件 → 移入 .modelvault/trash/（不直接删除）；
+ * - 模型文件完整性（0 字节/头部不可解析/数据区截断）→ 仅报告，
+ *   引导用户重新下载/替换，绝不删除或改写模型文件；
  * - 重复哈希 → 仅报告，不自动处理（避免误删用户文件）。
  * 修复前把 store.json 复制到 .modelvault/backups/，最多保留 10 份。
  * 所有操作在全局维护锁内执行，与扫描/切库/备份恢复互斥。
@@ -86,21 +90,69 @@ function groupDuplicates(existingHashes) {
 }
 
 /**
+ * 模型文件完整性判定（F6/体检）：
+ * - zero-size：空文件（任何格式）；
+ * - truncated：safetensors 头部声明的数据区超出文件实际大小（下载中断典型形态）；
+ * - invalid-header：容器头不可读/不可解析（非 safetensors 结构）；
+ * - suspect：上次扫描已标记疑似损坏，但索引信息不足以细分原因。
+ * 只有 .safetensors 可做结构判定；其他格式只检查 0 字节。
+ * @param {string} abs 模型绝对路径
+ * @param {import('node:fs').Stats} stat 当前文件 stat
+ * @param {Record<string, any>|null} record 本地索引中的上次装饰记录
+ * @returns {Promise<string>} 原因码；健康返回空串
+ */
+async function inspectModelIntegrity(abs, stat, record) {
+  if (stat.size <= 0) return 'zero-size'
+  const ext = String(record?.ext || path.extname(abs)).toLowerCase()
+  if (ext !== '.safetensors') return ''
+  // 索引快照与当前文件 mtime/size 一致：复用上次装饰的 suspect/autoInfo，
+  // 避免体检仅为复核未变文件而重读全库 2–8MB 头部
+  if (
+    record &&
+    Number.isFinite(record.mtimeMs) &&
+    record.mtimeMs === stat.mtimeMs &&
+    Number.isFinite(record.size) &&
+    record.size === stat.size &&
+    typeof record.suspect === 'boolean'
+  ) {
+    if (!record.suspect) return ''
+    const expected = record.autoInfo?.expectedMinBytes
+    if (Number.isFinite(expected) && expected > stat.size) return 'truncated'
+    return record.autoInfo ? 'suspect' : 'invalid-header'
+  }
+  // 索引缺失/过期（文件被替换或外部新增）：实时解析头部
+  const info = await readSafetensorsInfo(abs)
+  if (!info) {
+    return (await checkSafetensorsHealthy(abs)) ? '' : 'invalid-header'
+  }
+  const expectedMinBytes = /** @type {any} */ (info).expectedMinBytes
+  if (Number.isFinite(expectedMinBytes) && expectedMinBytes > stat.size) {
+    return 'truncated'
+  }
+  return ''
+}
+
+/**
  * 库体检报告（collectHealth 的只读快照结构）
  * @typedef {object} HealthReport
  * @property {string} root 体检的模型根目录
  * @property {number} checkedAt 体检时刻（Date.now()）
- * @property {number} totalModels 元数据条目总数
+ * @property {number} totalModels 待体检模型条目总数（元数据 ∪ 本地索引）
+ * @property {number} checkedModels 实际存在并完成完整性判定的模型文件数
+ * @property {'index'|'metadata'} modelSource 模型清单来源（索引/元数据）
+ * @property {number} indexSavedAt 本地索引保存时间（无索引为 0）
  * @property {number} totalCoverRefs 封面引用总数
  * @property {{rel: string}[]} missingFiles 元数据存在但文件缺失的条目
+ * @property {{rel: string, reason: string, sizeBytes: number}[]} brokenModels 疑似损坏的模型文件
  * @property {{model: string, cover: string, reason: string}[]} brokenCovers 失效封面引用
  * @property {{rel: string, code: string}[]} inaccessibleFiles 无法确认状态的模型文件
  * @property {{model: string, cover: string, code: string}[]} inaccessibleCovers 无法确认状态的封面
  * @property {{name: string, sizeBytes: number}[]} orphanCovers 无引用孤儿封面
  * @property {{hash: string, models: string[]}[]} duplicateHashes 内容重复分组
  * @property {boolean} dataReset 元数据是否曾被损坏重置
- * @property {{missingFiles: number, brokenCovers: number, orphanCovers: number,
- *   duplicateHashes: number, inaccessible: number, repairable: number}} summary 数量摘要
+ * @property {{missingFiles: number, brokenModels: number, brokenCovers: number,
+ *   orphanCovers: number, duplicateHashes: number, inaccessible: number,
+ *   repairable: number}} summary 数量摘要
  */
 
 /**
@@ -110,72 +162,115 @@ function groupDuplicates(existingHashes) {
  */
 async function collectHealth(root) {
   const entries = Object.entries(getMetaMapByAbsPath())
+  const index = await readLibraryIndex(root)
   const missingFiles = []
+  const brokenModels = []
   const brokenCovers = []
   const inaccessibleFiles = []
   const inaccessibleCovers = []
   const existingHashes = []
   let totalCoverRefs = 0
+  let checkedModels = 0
+
+  const indexById = new Map()
+  if (index) {
+    for (const m of /** @type {any[]} */ (index.models)) {
+      if (!m || typeof m.id !== 'string') continue
+      indexById.set(path.resolve(m.id).toLowerCase(), m)
+    }
+  }
+  /**
+   * 待体检模型清单（元数据 ∪ 本地索引）：索引补齐无标注模型的完整性检查；
+   * 元数据条目提供封面/哈希等标注信息。键为小写绝对路径，避免大小写重复。
+   * @type {Map<string, {abs: string, rel: string, meta: Record<string, any>|null,
+   *   record: Record<string, any>|null}>}
+   */
+  const candidates = new Map()
+  for (const [abs, meta] of entries) {
+    const key = path.resolve(abs).toLowerCase()
+    candidates.set(key, {
+      abs,
+      rel: relOf(abs),
+      meta,
+      record: indexById.get(key) || null,
+    })
+  }
+  if (index) {
+    for (const m of /** @type {any[]} */ (index.models)) {
+      if (!m || typeof m.id !== 'string') continue
+      const rel = toRelKey(m.id)
+      if (!rel) continue
+      const key = path.resolve(m.id).toLowerCase()
+      if (candidates.has(key)) continue
+      candidates.set(key, { abs: m.id, rel, meta: null, record: m })
+    }
+  }
 
   await runWithConcurrency(
-    entries,
-    async ([abs, meta]) => {
-      const rel = relOf(abs)
+    [...candidates.values()],
+    async ({ abs, rel, meta, record }) => {
       const { stat, code } = await statOutcome(abs)
       if (!stat || !stat.isFile()) {
         if (!stat && !isMissingCode(code)) {
           // 权限/占用/磁盘离线：无法确认文件是否真的消失，绝不进入自动修复
           inaccessibleFiles.push({ rel, code })
-        } else {
+        } else if (meta) {
           missingFiles.push({ rel })
         }
         return
       }
-      existingHashes.push({
-        rel,
-        // 文件 mtime 与缓存不一致时哈希可能已过期，不参与重复判定
-        hash:
-          meta.hash &&
-          (!meta.hashMtime || Math.abs(stat.mtimeMs - meta.hashMtime) < 2000)
-            ? meta.hash
-            : '',
-      })
+      checkedModels += 1
+      if (meta) {
+        existingHashes.push({
+          rel,
+          // 文件 mtime 与缓存不一致时哈希可能已过期，不参与重复判定
+          hash:
+            meta.hash &&
+            (!meta.hashMtime || Math.abs(stat.mtimeMs - meta.hashMtime) < 2000)
+              ? meta.hash
+              : '',
+        })
 
-      const refs = [
-        ...new Set([...(meta.covers || []), meta.cover].filter(Boolean)),
-      ]
-      for (const coverRel of refs) {
-        totalCoverRefs += 1
-        if (!isManagedCoverRel(coverRel)) {
-          brokenCovers.push({
-            model: rel,
-            cover: coverRel,
-            reason: 'invalid-path',
-          })
-          continue
-        }
-        const absCover = resolveCover(coverRel)
-        const outcome = await statOutcome(absCover)
-        if (outcome.stat) continue
-        if (isMissingCode(outcome.code)) {
-          brokenCovers.push({
-            model: rel,
-            cover: coverRel,
-            reason: 'missing-file',
-          })
-        } else {
-          inaccessibleCovers.push({
-            model: rel,
-            cover: coverRel,
-            code: outcome.code,
-          })
+        const refs = [
+          ...new Set([...(meta.covers || []), meta.cover].filter(Boolean)),
+        ]
+        for (const coverRel of refs) {
+          totalCoverRefs += 1
+          if (!isManagedCoverRel(coverRel)) {
+            brokenCovers.push({
+              model: rel,
+              cover: coverRel,
+              reason: 'invalid-path',
+            })
+            continue
+          }
+          const absCover = resolveCover(coverRel)
+          const outcome = await statOutcome(absCover)
+          if (outcome.stat) continue
+          if (isMissingCode(outcome.code)) {
+            brokenCovers.push({
+              model: rel,
+              cover: coverRel,
+              reason: 'missing-file',
+            })
+          } else {
+            inaccessibleCovers.push({
+              model: rel,
+              cover: coverRel,
+              code: outcome.code,
+            })
+          }
         }
       }
+
+      const reason = await inspectModelIntegrity(abs, stat, record)
+      if (reason) brokenModels.push({ rel, reason, sizeBytes: stat.size })
     },
     HEALTH_IO_CONCURRENCY,
   )
 
   missingFiles.sort((a, b) => a.rel.localeCompare(b.rel))
+  brokenModels.sort((a, b) => a.rel.localeCompare(b.rel))
   inaccessibleFiles.sort((a, b) => a.rel.localeCompare(b.rel))
   brokenCovers.sort(
     (a, b) => a.model.localeCompare(b.model) || a.cover.localeCompare(b.cover),
@@ -216,9 +311,13 @@ async function collectHealth(root) {
   return {
     root,
     checkedAt: Date.now(),
-    totalModels: entries.length,
+    totalModels: candidates.size,
+    checkedModels,
+    modelSource: index ? 'index' : 'metadata',
+    indexSavedAt: index?.savedAt || 0,
     totalCoverRefs,
     missingFiles,
+    brokenModels,
     brokenCovers,
     inaccessibleFiles,
     inaccessibleCovers,
@@ -227,6 +326,7 @@ async function collectHealth(root) {
     dataReset,
     summary: {
       missingFiles: missingFiles.length,
+      brokenModels: brokenModels.length,
       brokenCovers: brokenCovers.length,
       orphanCovers: orphanCovers.length,
       duplicateHashes: duplicateHashes.length,

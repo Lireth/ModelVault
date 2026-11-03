@@ -160,6 +160,7 @@ function resetStoreState() {
   state.subFilter = ''
   state.tagFilters = []
   state.showFavoritesOnly = false
+  state.showSuspectOnly = false
   state.search = ''
   state.sortBy = 'name'
   state.sortAsc = true

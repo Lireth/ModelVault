@@ -150,6 +150,7 @@ const filteredUnsorted = computed(() => {
     tagFilters,
     showFavoritesOnly,
     showDuplicatesOnly,
+    showSuspectOnly,
   } = state
   // LoRA 分类筛选：仅选中 LoRA 分类且指定了子分类时生效
   const checkSub = typeFilter === 'lora' && subFilter
@@ -166,6 +167,8 @@ const filteredUnsorted = computed(() => {
   const hideNsfw = state.settings?.hideNsfwModels === true
   for (const m of state.models) {
     if (hideNsfw && effectiveNsfw(m)) continue
+    // 疑似损坏筛选（FEAT-01）：只保留装饰阶段标记 suspect 的模型
+    if (showSuspectOnly && m.suspect !== true) continue
     if (typeFilter !== 'all' && m.type !== typeFilter) continue
     if (checkSub && m.subCategory !== subFilter) continue
     if (

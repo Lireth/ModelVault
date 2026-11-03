@@ -405,6 +405,7 @@ export const IPC_PAYLOAD_SCHEMAS = {
             tagFilter: vStr({ max: 32 }),
             showFavoritesOnly: vBool(),
             showDuplicatesOnly: vBool(),
+            showSuspectOnly: vBool(),
             sortBy: vStr({ max: 16 }),
             sortAsc: vBool(),
           },

@@ -193,6 +193,9 @@ export const state = shallowReactive({
   // 仅显示重复模型（FEAT-1）：文件 SHA256 完全一致（与其他模型互为副本）。
   // 哈希由后台预热渐进就绪，开启前以「重复」筛选入口上的计数为准
   showDuplicatesOnly: false,
+  // 仅显示疑似损坏模型（FEAT-01）：装饰阶段判定 0 字节/头部不可解析/
+  // 数据区截断的模型；与搜索语法 broken:yes 同语义
+  showSuspectOnly: false,
   search: '',
   sortBy: 'name', // name | type | size | mtime | favorite | rating
   sortAsc: true, // 排序方向：true 升序 / false 降序（收藏优先/按评分为固定语义排序，忽略方向，O1）

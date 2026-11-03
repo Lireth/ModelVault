@@ -270,8 +270,14 @@ describe('SettingsPage 模型库体检（V-07）', () => {
       root: 'D:\\models',
       checkedAt: Date.now(),
       totalModels: 12,
+      checkedModels: 12,
+      modelSource: 'index',
+      indexSavedAt: 1,
       totalCoverRefs: 3,
       missingFiles: [{ rel: 'gone.safetensors' }],
+      brokenModels: [
+        { rel: 'truncated.safetensors', reason: 'truncated', sizeBytes: 10 },
+      ],
       brokenCovers: [
         {
           model: 'a.safetensors',
@@ -286,6 +292,7 @@ describe('SettingsPage 模型库体检（V-07）', () => {
       dataReset: false,
       summary: {
         missingFiles: 1,
+        brokenModels: 1,
         brokenCovers: 1,
         orphanCovers: 1,
         duplicateHashes: 1,
@@ -307,6 +314,10 @@ describe('SettingsPage 模型库体检（V-07）', () => {
     expect(box.text()).toContain('失效封面引用 1 条')
     expect(box.text()).toContain('孤儿封面 1 个')
     expect(box.text()).toContain('重复哈希 1 组')
+    expect(box.text()).toContain('疑似损坏模型 1 个')
+    expect(box.text()).toContain('truncated.safetensors（数据区截断）')
+    expect(box.text()).toContain('已校验文件')
+    expect(box.text()).toContain('12')
 
     window.api.models.repairHealth.mockResolvedValue({
       report,

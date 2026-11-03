@@ -54,6 +54,12 @@ export const SEARCH_SYNTAX = [
     desc: 'yes/no（true/false/1/0 等价写法）',
   },
   {
+    prefix: 'broken',
+    label: '疑似损坏',
+    example: 'broken:yes',
+    desc: 'yes/no：0 字节、头部不可解析或数据区截断的模型（suspect 为等价别名）',
+  },
+  {
     prefix: 'mtime',
     label: '文件年龄',
     example: 'mtime:<7d',
@@ -101,6 +107,7 @@ const VALUE_ITEMS = {
   })),
   fav: boolItems('fav'),
   nsfw: boolItems('nsfw'),
+  broken: boolItems('broken'),
 }
 
 function boolItems(prefix) {

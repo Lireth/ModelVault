@@ -61,6 +61,7 @@ function snapshotFilters() {
     tagFilters: [...state.tagFilters],
     showFavoritesOnly: state.showFavoritesOnly,
     showDuplicatesOnly: state.showDuplicatesOnly,
+    showSuspectOnly: state.showSuspectOnly,
     sortBy: state.sortBy,
     sortAsc: state.sortAsc,
   }
@@ -78,6 +79,7 @@ function viewMatchesCurrent(v) {
     v.showFavoritesOnly === state.showFavoritesOnly &&
     // 旧视图缺省该字段时按 false 参与（=== true 与 undefined 比较）
     (v.showDuplicatesOnly === true) === state.showDuplicatesOnly &&
+    (v.showSuspectOnly === true) === state.showSuspectOnly &&
     v.sortBy === state.sortBy &&
     v.sortAsc === state.sortAsc
   )
@@ -104,6 +106,7 @@ export function viewSummary(v) {
   if (tags.length > 0) parts.push(`标签：${tags.join('、')}`)
   if (v.showFavoritesOnly) parts.push('仅收藏')
   if (v.showDuplicatesOnly) parts.push('仅重复')
+  if (v.showSuspectOnly) parts.push('仅疑似损坏')
   if (v.search) parts.push(`搜索“${v.search}”`)
   if (parts.length === 0) parts.push('全部模型')
   const sort = SORT_OPTIONS.find((s) => s.key === v.sortBy)
@@ -164,6 +167,7 @@ export async function applySavedView(id) {
   state.showFavoritesOnly = v.showFavoritesOnly
   // 旧视图缺省该字段时回退 false（=== true 规避 undefined）
   state.showDuplicatesOnly = v.showDuplicatesOnly === true
+  state.showSuspectOnly = v.showSuspectOnly === true
   state.sortBy = v.sortBy
   state.sortAsc = v.sortAsc
   // typeFilter 变更会触发 filter.js 的 watcher 清空 subFilter/baseFilter

@@ -4,9 +4,17 @@ import { confirmDialog, scanModels, state, toast } from '../store/appStore'
 /**
  * 模型库体检（V-07，OPT-04 自 SettingsBackup.vue 抽出）：
  * 只读检查当前库元数据与磁盘的一致性（幽灵标注/失效封面引用/孤儿封面/
- * 重复哈希），并支持一键安全修复（修复前主进程自动备份 store.json）。
+ * 重复哈希/模型文件完整性），并支持一键安全修复（修复前主进程自动备份 store.json）。
  * 状态与动作自包含，组件仅做模板绑定——可独立于设置页复用与测试。
  */
+/** 模型完整性原因码 → 展示文案（与 library-health.inspectModelIntegrity 对应） */
+const BROKEN_REASON_LABELS = {
+  'zero-size': '0 字节',
+  truncated: '数据区截断',
+  'invalid-header': '头部不可解析',
+  suspect: '结构异常',
+}
+
 export function useLibraryHealth() {
   const healthBusy = ref(false)
   const healthRepairing = ref(false)
@@ -49,6 +57,16 @@ export function useLibraryHealth() {
           .join('、')}${report.orphanCovers.length > 3 ? '…' : ''}`,
       )
     }
+    if (report.brokenModels?.length) {
+      lines.push(
+        `疑似损坏模型 ${report.brokenModels.length} 个：${report.brokenModels
+          .slice(0, 3)
+          .map(
+            (x) => `${x.rel}（${BROKEN_REASON_LABELS[x.reason] || x.reason}）`,
+          )
+          .join('、')}${report.brokenModels.length > 3 ? '…' : ''}`,
+      )
+    }
     if (report.duplicateHashes.length) {
       lines.push(
         `重复哈希 ${report.duplicateHashes.length} 组（仅提示，不自动删除任何模型文件）`,
@@ -75,6 +93,7 @@ export function useLibraryHealth() {
       const summary = res.report?.summary
       const issueCount =
         (summary?.repairable || 0) +
+        (summary?.brokenModels || 0) +
         (summary?.duplicateHashes || 0) +
         (summary?.inaccessible || 0)
       if (issueCount === 0) {
@@ -98,7 +117,7 @@ export function useLibraryHealth() {
         `· 移除 ${summary.missingFiles} 条“模型文件已缺失”的标注\n` +
         `· 清理 ${summary.brokenCovers} 条失效封面引用\n` +
         `· 将 ${summary.orphanCovers} 个无人引用的封面移入 .modelvault/trash（可手动恢复）\n` +
-        `修复前会自动备份 .modelvault/store.json。重复哈希仅保留提示，不会删除模型文件。是否继续？`,
+        `修复前会自动备份 .modelvault/store.json。重复哈希与疑似损坏模型仅保留提示，不会删除模型文件；损坏文件需重新下载/替换。是否继续？`,
     )
     if (!ok) return
     healthRepairing.value = true

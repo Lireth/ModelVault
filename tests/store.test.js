@@ -1101,6 +1101,7 @@ describe('应用设置规范化', () => {
           tagFilters: ['角色', '风格', '角色'],
           showFavoritesOnly: true,
           showDuplicatesOnly: true,
+          showSuspectOnly: true,
           sortBy: 'mtime',
           sortAsc: false,
         },
@@ -1130,6 +1131,7 @@ describe('应用设置规范化', () => {
       tagFilters: ['角色', '风格'],
       showFavoritesOnly: true,
       showDuplicatesOnly: true,
+      showSuspectOnly: true,
       sortBy: 'mtime',
       sortAsc: false,
     })
@@ -1143,6 +1145,7 @@ describe('应用设置规范化', () => {
       tagFilters: [],
       showFavoritesOnly: false,
       showDuplicatesOnly: false,
+      showSuspectOnly: false,
       sortBy: 'name',
       sortAsc: true,
     })

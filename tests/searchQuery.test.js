@@ -106,6 +106,17 @@ describe('parseSearchQuery 解析器', () => {
     expect(parseSearchQuery('hash:xyz').filters).toEqual([])
   })
 
+  it('broken 布尔语法：主前缀与 suspect 别名（FEAT-01）', () => {
+    expect(parseSearchQuery('broken:yes').filters).toEqual([
+      { kind: 'broken', value: true },
+    ])
+    expect(parseSearchQuery('SUSPECT:no').filters).toEqual([
+      { kind: 'broken', value: false },
+    ])
+    // 非法值回退自由文本
+    expect(parseSearchQuery('broken:maybe').filters).toEqual([])
+  })
+
   it('空输入返回空', () => {
     expect(parseSearchQuery('')).toEqual({ text: '', filters: [] })
     expect(parseSearchQuery('   ')).toEqual({ text: '', filters: [] })
@@ -177,6 +188,25 @@ describe('matchSearchFilters 匹配器', () => {
       matchSearchFilters(
         model({ nsfw: true }),
         parseSearchQuery('nsfw:1').filters,
+      ),
+    ).toBe(true)
+    // 疑似损坏（FEAT-01）：suspect 字段与 broken 语法同语义
+    expect(
+      matchSearchFilters(
+        model({ suspect: true }),
+        parseSearchQuery('broken:yes').filters,
+      ),
+    ).toBe(true)
+    expect(
+      matchSearchFilters(
+        model({ suspect: false }),
+        parseSearchQuery('broken:yes').filters,
+      ),
+    ).toBe(false)
+    expect(
+      matchSearchFilters(
+        model({ suspect: false }),
+        parseSearchQuery('broken:no').filters,
       ),
     ).toBe(true)
   })

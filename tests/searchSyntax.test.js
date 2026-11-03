@@ -34,6 +34,7 @@ describe('SEARCH_SYNTAX 目录与 search-query 对账', () => {
       'score',
       'fav',
       'nsfw',
+      'broken',
       'mtime',
       'author',
       'trigger',
@@ -93,6 +94,11 @@ describe('suggestSearchSyntax 值建议', () => {
 
   it('fav: 给出 yes/no', () => {
     const s = suggestSearchSyntax('fav:', 4)
+    expect(s.items.map((i) => i.insert.trim())).toEqual(['yes', 'no'])
+  })
+
+  it('broken: 给出 yes/no（FEAT-01）', () => {
+    const s = suggestSearchSyntax('broken:', 7)
     expect(s.items.map((i) => i.insert.trim())).toEqual(['yes', 'no'])
   })
 

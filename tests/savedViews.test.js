@@ -40,6 +40,7 @@ function resetState() {
   state.subFilter = ''
   state.tagFilters = []
   state.showFavoritesOnly = false
+  state.showSuspectOnly = false
   state.search = ''
   state.sortBy = 'name'
   state.sortAsc = true
@@ -76,6 +77,7 @@ describe('智能视图：保存当前筛选', () => {
     await nextTick() // 等 typeFilter watcher 落定后再设 subFilter（与应用路径同序）
     state.subFilter = 'role'
     state.showFavoritesOnly = true
+    state.showSuspectOnly = true
     state.sortBy = 'mtime'
     state.sortAsc = false
 
@@ -90,6 +92,7 @@ describe('智能视图：保存当前筛选', () => {
       typeFilter: 'lora',
       subFilter: 'role',
       showFavoritesOnly: true,
+      showSuspectOnly: true,
       sortBy: 'mtime',
       sortAsc: false,
     })
@@ -137,6 +140,7 @@ describe('智能视图：应用', () => {
       search: '机甲',
       typeFilter: 'checkpoint',
       showFavoritesOnly: false,
+      showSuspectOnly: true,
       sortBy: 'size',
       sortAsc: false,
     })
@@ -146,6 +150,7 @@ describe('智能视图：应用', () => {
     expect(state.search).toBe('机甲')
     expect(state.typeFilter).toBe('checkpoint')
     expect(state.showFavoritesOnly).toBe(false)
+    expect(state.showSuspectOnly).toBe(true)
     expect(state.sortBy).toBe('size')
     expect(state.sortAsc).toBe(false)
     // 排序持久化（与手动改排序的既有行为一致）
@@ -246,6 +251,7 @@ describe('智能视图：摘要', () => {
       typeFilter: 'lora',
       subFilter: 'role',
       showFavoritesOnly: true,
+      showSuspectOnly: true,
       sortBy: 'favorite',
       sortAsc: false,
     }
@@ -253,6 +259,7 @@ describe('智能视图：摘要', () => {
     expect(summary).toContain('LoRA')
     expect(summary).toContain('角色')
     expect(summary).toContain('仅收藏')
+    expect(summary).toContain('仅疑似损坏')
     expect(summary).toContain('动漫')
     expect(summary).toContain('收藏优先')
     expect(summary).not.toContain('↓') // 固定语义排序不响应方向

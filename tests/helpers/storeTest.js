@@ -96,6 +96,7 @@ export function resetStoreTestState(api) {
   state.tagFilters = []
   state.showFavoritesOnly = false
   state.showDuplicatesOnly = false
+  state.showSuspectOnly = false
   state.search = ''
   state.sortBy = 'name'
   state.sortAsc = true

@@ -16,6 +16,8 @@ import { normalizeBaseModel } from '../../../shared/model-categories'
  * - score:>[=|<|<=]<0-5 整数>  评分（裸值为精确匹配）
  * - fav:yes|no                收藏状态（true/false/1/0 等价写法）
  * - nsfw:yes|no               NSFW 标记
+ * - broken:yes|no             疑似损坏（装饰阶段标记 0 字节/头部不可解析/
+ *                             数据区截断；`suspect:` 为等价别名）
  * - mtime:<|<=|>|>=<数值><单位> 文件年龄（距今时长，单位 m/h/d/w/y，缺省 d）：
  *                             `mtime:<7d` 近 7 天更新；`mtime:>30d` 超过 30 天未更新
  * - author:<文本>             safetensors 头部解析/Civitai 回填的作者包含命中
@@ -111,6 +113,12 @@ function parseFilter(prefix, value) {
       if (!BOOL_VALUES.has(value.toLowerCase())) return null
       return { kind: 'nsfw', value: /^(yes|true|1)$/i.test(value) }
     }
+    // 疑似损坏（FEAT-01）：broken 为主语法，suspect 为字段同名别名
+    case 'broken':
+    case 'suspect': {
+      if (!BOOL_VALUES.has(value.toLowerCase())) return null
+      return { kind: 'broken', value: /^(yes|true|1)$/i.test(value) }
+    }
     case 'mtime': {
       const m = /^(>=|<=|>|<)?\s*([\d.]+)\s*(m|h|d|w|y)?$/i.exec(value)
       if (!m || !Number.isFinite(parseFloat(m[2]))) return null
@@ -166,6 +174,8 @@ function matchFilter(m, f, resolveHash, resolveFlags) {
       )
     case 'nsfw':
       return (resolveFlags ? resolveFlags.nsfw(m) : m.nsfw === true) === f.value
+    case 'broken':
+      return (m.suspect === true) === f.value
     case 'mtime': {
       // mtime 为文件修改时间；年龄 = 当前时间 - mtime（缺失值不命中）
       const t = Number(m.mtimeMs)

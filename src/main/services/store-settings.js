@@ -193,6 +193,8 @@ function normalizeSavedViews(raw) {
       showFavoritesOnly: v.showFavoritesOnly === true,
       // 重复模型筛选（FEAT-1）：旧视图缺省该字段时为 false
       showDuplicatesOnly: v.showDuplicatesOnly === true,
+      // 疑似损坏筛选（FEAT-01）：旧视图缺省该字段时为 false
+      showSuspectOnly: v.showSuspectOnly === true,
       sortBy: SORT_BY_KEYS.has(v.sortBy) ? v.sortBy : 'name',
       sortAsc: typeof v.sortAsc === 'boolean' ? v.sortAsc : true,
     })
