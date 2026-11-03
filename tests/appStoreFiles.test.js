@@ -85,10 +85,7 @@ describe('自由标签 per-id 串行队列（B2 回归）', () => {
     calls[0].resolve({ meta: { tags: ['x', 'y', 'A'] } })
     await p1
     // 删除基于含 A 的最新列表，不会把 A 抹掉
-    expect(api.models.setModelTags).toHaveBeenNthCalledWith(2, 'm1', [
-      'x',
-      'A',
-    ])
+    expect(api.models.setModelTags).toHaveBeenNthCalledWith(2, 'm1', ['x', 'A'])
     calls[1].resolve({ meta: { tags: ['x', 'A'] } })
     expect(await p2).toBe(true)
     expect(state.models[0].tags).toEqual(['x', 'A'])
@@ -146,36 +143,48 @@ describe('自由标签 per-id 串行队列（B2 回归）', () => {
     expect(state.toasts.some((t) => t.text.includes('标签已存在'))).toBe(true)
   })
 
-  it('与批量标签编辑交错：批量执行时基于最新标签重算，互不覆盖', async () => {
+  it('与批量标签编辑交错：批量锁串行化，双方均基于最新标签（C1/B2）', async () => {
     replaceModels([makeModel('m1', { tags: ['旧'] })])
     state.multiSelect.active = true
     state.multiSelect.ids = ['m1']
+    // 详情即时编辑的 per-id 队列桩
     const calls = makeDeferredApi()
+    // 批量标签单次 IPC 桩
+    const bulkCalls = []
+    api.models.setModelTagsBulk.mockImplementation(
+      (items) =>
+        new Promise((resolve) => {
+          bulkCalls.push({ items, resolve })
+        }),
+    )
 
     // 批量「添加 批」发起后在途，详情页再即时添加「详」
     const pBatch = batchEditTags({ mode: 'add', tags: ['批'] })
     const pDetail = addModelTag('m1', '详')
 
-    // 同一 per-id 队列：批量写入先执行
-    expect(api.models.setModelTags).toHaveBeenCalledTimes(1)
-    expect(api.models.setModelTags).toHaveBeenNthCalledWith(1, 'm1', [
-      '旧',
-      '批',
-    ])
-    calls[0].resolve({ meta: { tags: ['旧', '批'] } })
-
-    // 详情添加排在批量之后：等其任务执行（发起第二次 IPC）
     await vi.waitFor(() =>
-      expect(api.models.setModelTags).toHaveBeenCalledTimes(2),
+      expect(api.models.setModelTagsBulk).toHaveBeenCalledTimes(1),
     )
-    // 详情添加以批量落定后的最新列表为基——两个标签都保留
-    expect(api.models.setModelTags).toHaveBeenNthCalledWith(2, 'm1', [
+    // 批量以当前最新标签计算；详情编辑被批量锁挡住，尚未发 IPC
+    expect(bulkCalls[0].items).toEqual([{ id: 'm1', tags: ['旧', '批'] }])
+    expect(api.models.setModelTags).not.toHaveBeenCalled()
+
+    bulkCalls[0].resolve({
+      updated: [{ id: 'm1', tags: ['旧', '批'] }],
+      failed: [],
+    })
+    await pBatch
+
+    // 批量落定并回写本地状态后，详情编辑才开始：以含「批」的最新列表为基
+    await vi.waitFor(() =>
+      expect(api.models.setModelTags).toHaveBeenCalledTimes(1),
+    )
+    expect(api.models.setModelTags).toHaveBeenNthCalledWith(1, 'm1', [
       '旧',
       '批',
       '详',
     ])
-    calls[1].resolve({ meta: { tags: ['旧', '批', '详'] } })
-    await pBatch
+    calls[0].resolve({ meta: { tags: ['旧', '批', '详'] } })
     await pDetail
     expect(state.models[0].tags).toEqual(['旧', '批', '详'])
   })

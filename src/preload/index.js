@@ -177,9 +177,22 @@ const api = {
     deleteModel: (id) => invokeValidated('models:deleteModel', { id }),
     /** 更新快捷标记（收藏/NSFW/评分，仅传需更新的字段），返回 { meta } 或 { error } */
     setMetaFlags: (payload) => invokeValidated('models:setMetaFlags', payload),
+    /**
+     * 批量更新快捷标记（C1，单次 IPC）：payload 为 { ids, favorite?, nsfw?,
+     * rating? }。返回 { updated: [{ id, favorite, nsfw, rating }],
+     * failed: [{ id, error }] }，渲染层据此单趟写标注覆盖层并汇总失败项。
+     */
+    setMetaFlagsBulk: (payload) =>
+      invokeValidated('models:setMetaFlagsBulk', payload),
     /** 整体覆写模型自由标签（F-5，tags 为全量字符串数组），返回 { meta } 或 { error } */
     setModelTags: (id, tags) =>
       invokeValidated('models:setModelTags', { id, tags }),
+    /**
+     * 批量整体覆写自由标签（C1，单次 IPC）：items 为 [{ id, tags }]。
+     * 返回 { updated: [{ id, tags }], failed: [{ id, error }] }。
+     */
+    setModelTagsBulk: (items) =>
+      invokeValidated('models:setModelTagsBulk', { items }),
     /** 全库重命名自由标签（F4，to 已存在时合并），返回 { changed } 或 { error } */
     renameTag: (from, to) => invokeValidated('models:renameTag', { from, to }),
     /** 全库移除自由标签（F4），返回 { changed } 或 { error } */

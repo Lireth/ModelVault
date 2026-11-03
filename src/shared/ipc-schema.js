@@ -36,6 +36,7 @@
  */
 
 import { MAX_PARTIAL_SCAN_DIRS_INPUT } from './scan-dirs'
+import { MAX_BATCH_META_IDS } from './app-enums'
 
 /**
  * 未显式声明 max 时的全局默认规模/深度上限（fail-closed 收口）：
@@ -456,6 +457,22 @@ export const IPC_PAYLOAD_SCHEMAS = {
       rating: vInt(),
     },
   }),
+  // C1：批量快捷标记（收藏/NSFW/评分）单次 IPC。ids 上限与渲染层分块共用
+  // shared/app-enums.MAX_BATCH_META_IDS；字段语义与单模型通道一致，空更新
+  // 由 handler 产出专属文案。
+  'models:setMetaFlagsBulk': vObj({
+    max: 8,
+    fields: {
+      ids: vArr({
+        required: true,
+        max: MAX_BATCH_META_IDS,
+        items: vStr({ max: 2000 }),
+      }),
+      favorite: vBool(),
+      nsfw: vBool(),
+      rating: vInt(),
+    },
+  }),
   'models:popupMenu': vObj({ fields: { id: ID } }),
   // F-3 跨库传输：ids 为当前库内模型路径；targetRoot 必须是已保存的其他
   // 模型库（handler 校验 ∈ settings.modelsFolders 且 ≠ 当前根）；mode 枚举
@@ -477,6 +494,28 @@ export const IPC_PAYLOAD_SCHEMAS = {
     fields: {
       id: ID,
       tags: vArr({ required: true, max: 20, items: vStr({ max: 32 }) }),
+    },
+  }),
+  // C1：批量自由标签整体覆写。items 由渲染层在执行时基于最新标签计算，
+  // 主进程逐项做归属校验与规范化后单次落盘；上限与批量标记共用。
+  'models:setModelTagsBulk': vObj({
+    max: 4,
+    fields: {
+      items: vArr({
+        required: true,
+        max: MAX_BATCH_META_IDS,
+        items: vObj({
+          max: 4,
+          fields: {
+            id: ID,
+            tags: vArr({
+              required: true,
+              max: 20,
+              items: vStr({ max: 32 }),
+            }),
+          },
+        }),
+      }),
     },
   }),
   // 全库标签管理（F4）：重命名/合并与移除；长度上限与 normalizeTags 截断一致

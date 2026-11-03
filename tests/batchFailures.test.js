@@ -4,6 +4,7 @@ import { mount } from '@vue/test-utils'
 import BatchFailuresBar from '../src/renderer/src/components/BatchFailuresBar.vue'
 import {
   batchFavorite,
+  effectiveFavorite,
   reselectFailedItems,
   replaceModels,
   state,
@@ -49,10 +50,13 @@ describe('批量失败明细 store（B20/F3）', () => {
     state.folder = 'D:\\models'
     state.multiSelect.active = true
     state.multiSelect.ids = [idOf('a'), idOf('b'), idOf('c')]
-    window.api.models.setMetaFlags.mockImplementation(({ id }) =>
-      id === idOf('b')
-        ? Promise.resolve({ error: '元数据写入失败: EPERM' })
-        : Promise.resolve({ meta: { favorite: true, nsfw: false, rating: 0 } }),
+    window.api.models.setMetaFlagsBulk.mockImplementation(({ ids }) =>
+      Promise.resolve({
+        updated: ids
+          .filter((id) => id !== idOf('b'))
+          .map((id) => ({ id, favorite: true, nsfw: false, rating: 0 })),
+        failed: [{ id: idOf('b'), error: '元数据写入失败: EPERM' }],
+      }),
     )
 
     await batchFavorite(true)
@@ -64,16 +68,46 @@ describe('批量失败明细 store（B20/F3）', () => {
     expect(f.items[0].name).toBe('b')
     expect(f.items[0].error).toContain('EPERM')
     expect(
-      state.toasts.some((t) => t.type === 'warn' && t.text.includes('失败 1 个')),
+      state.toasts.some(
+        (t) => t.type === 'warn' && t.text.includes('失败 1 个'),
+      ),
     ).toBe(true)
+  })
+
+  it('主进程漏回条目时按「未返回结果」显形（契约防御）', async () => {
+    seedModels()
+    state.multiSelect.active = true
+    state.multiSelect.ids = [idOf('a'), idOf('b')]
+    window.api.models.setMetaFlagsBulk.mockResolvedValue({
+      // 只回 a，b 既不在 updated 也不在 failed
+      updated: [{ id: idOf('a'), favorite: true, nsfw: false, rating: 0 }],
+      failed: [],
+    })
+
+    await batchFavorite(true)
+
+    expect(
+      effectiveFavorite(state.models.find((m) => m.id === idOf('a'))),
+    ).toBe(true)
+    expect(state.multiSelect.failures.items).toHaveLength(1)
+    expect(state.multiSelect.failures.items[0]).toMatchObject({
+      id: idOf('b'),
+      error: '未返回结果',
+    })
   })
 
   it('全成功：不记录失败明细（面板不出现）', async () => {
     seedModels()
     state.multiSelect.active = true
     state.multiSelect.ids = [idOf('a'), idOf('b')]
-    window.api.models.setMetaFlags.mockResolvedValue({
-      meta: { favorite: true, nsfw: false, rating: 0 },
+    window.api.models.setMetaFlagsBulk.mockResolvedValue({
+      updated: [idOf('a'), idOf('b')].map((id) => ({
+        id,
+        favorite: true,
+        nsfw: false,
+        rating: 0,
+      })),
+      failed: [],
     })
 
     await batchFavorite(true)
@@ -85,9 +119,7 @@ describe('批量失败明细 store（B20/F3）', () => {
     seedModels()
     state.multiSelect.active = true
     state.multiSelect.ids = [idOf('a'), idOf('b')]
-    window.api.models.setMetaFlags.mockImplementation(() =>
-      Promise.reject(new Error('模拟失败')),
-    )
+    window.api.models.setMetaFlagsBulk.mockRejectedValue(new Error('模拟失败'))
     await batchFavorite(true)
     expect(state.multiSelect.failures.items).toHaveLength(2)
     state.multiSelect.active = false
@@ -105,29 +137,32 @@ describe('批量失败明细 store（B20/F3）', () => {
     seedModels()
     state.multiSelect.active = true
     state.multiSelect.ids = [idOf('a')]
-    window.api.models.setMetaFlags.mockResolvedValue({ error: '失败' })
+    window.api.models.setMetaFlagsBulk.mockResolvedValue({ error: '失败' })
     await batchFavorite(true)
     replaceModels([]) // 失败项已不在库中
     expect(reselectFailedItems()).toBe(false)
     // 拒绝重建时选区保持原样（不清空、不篡改）
     expect(state.multiSelect.ids).toEqual([idOf('a')])
-    expect(
-      state.toasts.some((t) => t.text.includes('已不在当前模型库')),
-    ).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('已不在当前模型库'))).toBe(
+      true,
+    )
   })
 
   it('重试成功后面板清空（结果整体替换，不叠加旧错误）', async () => {
     seedModels()
     state.multiSelect.active = true
     state.multiSelect.ids = [idOf('a')]
-    window.api.models.setMetaFlags.mockResolvedValueOnce({ error: '首次失败' })
+    window.api.models.setMetaFlagsBulk.mockResolvedValueOnce({
+      error: '首次失败',
+    })
     await batchFavorite(true)
     expect(state.multiSelect.failures.items).toHaveLength(1)
 
     // 重选失败项后重试同一动作（既有执行路径），这次成功
     reselectFailedItems()
-    window.api.models.setMetaFlags.mockResolvedValue({
-      meta: { favorite: true, nsfw: false, rating: 0 },
+    window.api.models.setMetaFlagsBulk.mockResolvedValue({
+      updated: [{ id: idOf('a'), favorite: true, nsfw: false, rating: 0 }],
+      failed: [],
     })
     await batchFavorite(true)
     expect(state.multiSelect.failures).toBeNull()

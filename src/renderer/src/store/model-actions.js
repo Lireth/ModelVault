@@ -99,27 +99,55 @@ export function removeModelTag(id, tag) {
   return enqueueModelOp(id, async () => {
     const current = currentTagsOf(id)
     if (!current.includes(tag)) return true
-    return (await writeModelTags(id, current.filter((x) => x !== tag))).meta != null
+    return (
+      (
+        await writeModelTags(
+          id,
+          current.filter((x) => x !== tag),
+        )
+      ).meta != null
+    )
   })
 }
 
 /**
- * 批量标签编辑的队列化写入原语（FEAT-01 与详情页即时编辑共用同一 per-id
- * 串行队列）：computeNext 在执行时读取最新标签计算目标列表，与详情页即时
- * 增删交错时不互相用旧快照覆盖；失败静默返回 {error}（批量汇总统一提示）。
- * @param {string} id 模型 id
- * @param {(current: string[]) => {tags?: string[], unchanged?: boolean, overflow?: boolean}} computeNext
- *   基于执行时最新标签计算目标列表（batch-tags 的 nextTagsFor 语义）
- * @returns {Promise<{meta?: object, unchanged?: boolean, overflow?: boolean, error?: string}>}
+ * 等待指定模型已排队的元数据操作落定（内部原语）。
+ * @param {string[]} ids 模型 id 列表
+ * @returns {Promise<void>} 全部在途操作落定（失败也视为落定）
  */
-export function enqueueBatchTagsWrite(id, computeNext) {
-  return enqueueModelOp(id, async () => {
-    const r = computeNext(currentTagsOf(id))
-    if (r.unchanged) return { unchanged: true }
-    if (r.overflow) return { overflow: true }
-    const w = await writeModelTags(id, r.tags, { silent: true })
-    return w.meta ? { meta: w.meta } : { error: w.error || '标签保存失败' }
+async function flushModelOps(ids) {
+  const pending = []
+  for (const id of Array.isArray(ids) ? ids : []) {
+    const task = modelOpChains.get(id)
+    if (task) pending.push(task.catch(() => {}))
+  }
+  await Promise.all(pending)
+}
+
+/**
+ * 批量标签写入锁（C1 批量 IPC 与单模型即时编辑的互斥）：
+ * 批量标签不再逐项进入 per-id 队列，但必须与详情页即时增删保持顺序——
+ * 1. 获取锁时先等待全部选中模型在途操作落定（批量读取最新标签）；
+ * 2. 锁生效期间新发起的单模型操作在 enqueueModelOp 入队时捕获锁，
+ *    等批量完成并回写本地状态后才执行（不会用批量前的旧快照反向覆盖）。
+ *
+ * 注意：入队时捕获锁而非执行时读取，避免「批量开始前已排队、尚未执行」
+ * 的单模型任务等待批量造成互相等待（批量也在等该任务落定）。
+ * @param {string[]} ids 批量涉及的模型 id
+ * @returns {Promise<() => void>} 释放函数（调用方必须在 finally 中执行）
+ */
+export async function beginBatchTagsWrite(ids) {
+  let release = () => {}
+  /** @type {Promise<void>} */
+  const own = new Promise((resolve) => {
+    release = () => resolve()
   })
+  bulkTagWritePromise = own
+  await flushModelOps(ids)
+  return () => {
+    release()
+    if (bulkTagWritePromise === own) bulkTagWritePromise = null
+  }
 }
 
 /**
@@ -175,11 +203,18 @@ export async function deleteModel(id, opts = {}) {
  */
 const modelOpChains = new Map()
 
+/** 批量标签写入锁（C1）：非 null 时新入队的单模型操作需等其落定 */
+let bulkTagWritePromise = null
+
 function enqueueModelOp(id, task) {
   const prev = modelOpChains.get(id)
+  // C1：锁在入队时捕获（而非执行时读取）——批量开始前已排队的任务不等待
+  // 批量（否则批量等它、它等批量互相卡死），批量开始后新发起的任务才等待
+  const bulk = bulkTagWritePromise
+  const run = () => (bulk ? bulk.catch(() => {}).then(task) : task())
   // 空闲时任务同步执行（保持单击原有的同步 IPC 时序）；
   // 有在途任务时才入队等它落定后执行（此时推迟一个微任务是必需的）
-  const next = prev ? prev.then(task, task) : task()
+  const next = prev ? prev.then(run, run) : run()
   // 队列静止后清理条目，避免 Map 随模型数量无限增长
   next
     .catch(() => {})

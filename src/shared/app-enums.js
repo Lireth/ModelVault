@@ -56,6 +56,14 @@ export const HASH_WARMUP_DEFS = [
 export const HASH_WARMUP_KEYS = new Set(HASH_WARMUP_DEFS.map((d) => d.key))
 
 /**
+ * 单次批量标注/标签 IPC 的条目上限（C1 单一来源）：
+ * main 的 payload schema 与渲染层的分块大小共用此值。5000 条 × 典型绝对
+ * 路径（约 200B）≈ 1MB 载荷，兼顾万级批量与主进程结构化克隆开销；超过
+ * 上限由渲染层按此值分块，不截断、不丢项。
+ */
+export const MAX_BATCH_META_IDS = 5000
+
+/**
  * NSFW 示例图模糊样式（A-12 单一来源：主进程校验与设置页分段选择共用）：
  * - off：不模糊，仅显示红色 NSFW 标记；
  * - blur：标准模糊（默认，与旧版开启时一致）；

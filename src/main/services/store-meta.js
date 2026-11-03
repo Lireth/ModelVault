@@ -255,20 +255,78 @@ export function getModelIdsByAbsPath() {
   )
 }
 
-/** 写入单条模型元数据（合并保存，键为模型绝对路径） */
-export function setModelMeta(modelId, meta) {
-  if (!metaState.data || typeof modelId !== 'string' || !modelId) return null
+/**
+ * 写入单条已规范化前的元数据（内部原语）：
+ * - 归属校验（相对键）与规范化在此统一完成；
+ * - 只标记脏键，不调度落盘——单条/批量入口各自决定调度时机。
+ * @param {string} modelId 模型绝对路径
+ * @param {object} meta 待写入的完整元数据
+ * @returns {Record<string, any>|null} 规范化后的元数据；越界/非法返回 null
+ */
+function writeMetaEntry(modelId, meta) {
+  if (!metaState.data) return null
   const relKey = toRelKey(modelId)
-  if (!relKey || isUnsafeModelKey(relKey)) {
-    logger.warn(`模型不在当前根目录内，忽略保存: ${modelId}`)
-    return null
-  }
+  if (!relKey || isUnsafeModelKey(relKey)) return null
   const normalized = normalizeModelMeta(meta)
   if (!normalized) return null
   metaState.data.models[relKey] = normalized
   markDirty(relKey)
+  return normalized
+}
+
+/**
+ * 写入单条模型元数据（合并保存，键为模型绝对路径）。
+ * @param {string} modelId 模型绝对路径
+ * @param {object} meta 完整元数据
+ * @returns {Record<string, any>|null} 规范化后的元数据；越界/非法返回 null
+ */
+export function setModelMeta(modelId, meta) {
+  if (!metaState.data || typeof modelId !== 'string' || !modelId) return null
+  const normalized = writeMetaEntry(modelId, meta)
+  if (!normalized) {
+    logger.warn(`模型不在当前根目录内，忽略保存: ${modelId}`)
+    return null
+  }
   scheduleSave()
   return normalized
+}
+
+/**
+ * 批量写入模型元数据（C1 单次落盘调度）：
+ * 逐条完成归属校验与规范化，但只在全部条目处理完后调用一次 scheduleSave，
+ * 避免批量操作触发 N 次防抖调度与重复脏键登记。调用方负责合并已有字段
+ * （本函数按整条元数据覆写语义写入）。
+ * @param {Array<{id: string, meta: object}>} entries 待写入条目
+ * @returns {{updated: Array<{id: string, meta: Record<string, any>}>, failed: Array<{id: string, error: string}>}}
+ *   updated 为成功写入的 id 与规范化后的元数据；failed 为逐项失败原因
+ */
+export function setModelMetaMany(entries) {
+  const updated = []
+  const failed = []
+  if (!metaState.data || !Array.isArray(entries)) return { updated, failed }
+  for (const entry of entries) {
+    const id = entry?.id
+    if (typeof id !== 'string' || !id) {
+      failed.push({
+        id: typeof id === 'string' ? id : '',
+        error: '无效的模型标识',
+      })
+      continue
+    }
+    const normalized = writeMetaEntry(id, entry.meta)
+    if (!normalized) {
+      failed.push({ id, error: '模型不在当前模型根目录内或元数据无效' })
+      continue
+    }
+    updated.push({ id, meta: normalized })
+  }
+  if (updated.length > 0) scheduleSave()
+  if (failed.length > 0) {
+    logger.warn(
+      `批量元数据保存跳过 ${failed.length} 条（模型不在当前根目录内或元数据无效）`,
+    )
+  }
+  return { updated, failed }
 }
 
 /** 删除单条模型元数据（模型文件被移入回收站时调用） */

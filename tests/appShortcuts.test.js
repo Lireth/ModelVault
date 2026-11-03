@@ -288,18 +288,28 @@ describe('App 全局快捷键（B-03）', () => {
   it('Ctrl+D 多选时对全部选中项批量收藏', async () => {
     const wrapper = await mountApp()
     await setupGrid(wrapper)
-    window.api.models.setMetaFlags.mockResolvedValue({
-      meta: { favorite: true },
-    })
+    window.api.models.setMetaFlagsBulk.mockImplementation(({ ids }) =>
+      Promise.resolve({
+        updated: ids.map((id) => ({
+          id,
+          favorite: true,
+          nsfw: false,
+          rating: 0,
+        })),
+        failed: [],
+      }),
+    )
     press('a', { ctrlKey: true })
 
     press('d', { ctrlKey: true })
     await flushPromises()
 
-    expect(window.api.models.setMetaFlags).toHaveBeenCalledTimes(2)
-    for (const call of window.api.models.setMetaFlags.mock.calls) {
-      expect(call[0]).toMatchObject({ favorite: true })
-    }
+    // C1：多选收藏合并为一次批量 IPC
+    expect(window.api.models.setMetaFlagsBulk).toHaveBeenCalledTimes(1)
+    const [payload] = window.api.models.setMetaFlagsBulk.mock.calls[0]
+    expect(payload).toMatchObject({ favorite: true })
+    expect(payload.ids).toHaveLength(2)
+    expect(window.api.models.setMetaFlags).not.toHaveBeenCalled()
   })
 
   it('Ctrl+D 非多选但详情打开时收藏当前模型', async () => {

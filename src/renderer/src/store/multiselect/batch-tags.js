@@ -1,26 +1,27 @@
 import { state } from '../state'
 import { toast } from '../toast'
-import { applyMetaUpdates, mapWithConcurrency } from '../meta-apply'
+import { applyMetaUpdates } from '../meta-apply'
 import { modelById } from '../selectors'
-import { enqueueBatchTagsWrite } from '../model-actions'
+import { beginBatchTagsWrite } from '../model-actions'
 import { reportBatchFailures, clearBatchFailures } from './batch-failures'
+import { MAX_BATCH_META_IDS } from '../../../../shared/app-enums'
 
 /**
- * 批量自由标签编辑（FEAT-01）：
- * 对当前多选模型执行「添加 / 移除 / 替换」三种标签变更，复用单模型
- * setModelTags IPC（整体覆写语义）与批量并发池；结果经 applyMetaUpdates
- * 单趟同步本地列表，避免逐个元素替换导致全量派生反复失效。
- * B2：写入经 enqueueBatchTagsWrite 进入与详情页即时编辑相同的 per-id
- * 串行队列，且目标列表在执行时基于最新标签重算——预计算仅用于预判
- * 参与集与空操作提示，不做最终载荷，杜绝与即时编辑交错时旧快照覆盖。
+ * 批量自由标签编辑（FEAT-01，C1 批量 IPC 改造）：
+ * 对当前多选模型执行「添加 / 移除 / 替换」三种标签变更。目标列表在
+ * 等待既有 per-id 队列落定后基于最新标签重算（B2），再按
+ * MAX_BATCH_META_IDS 分块、单次 IPC 提交整块；主进程逐项校验/规范化后
+ * 单次落盘调度，返回成功项的规范化标签与逐项失败原因。
+ *
+ * 相比旧实现（逐模型 setModelTags + 并发 16）：万级选中时 IPC 往返从
+ * N 次降到 ceil(N/5000) 次，回包从「每模型完整 meta」降为「标签数组 +
+ * 失败明细」，并保留「无变化/超上限跳过」的逐项语义。
  */
 
 /** 单模型标签上限（与 IPC schema / store-meta 规范化保持一致） */
 const MAX_TAGS = 20
 /** 单个标签长度上限（与 IPC schema 保持一致） */
 const MAX_TAG_LEN = 32
-/** 批量标签 IPC 并发上限（与收藏/评分批量一致） */
-const TAG_IPC_CONCURRENCY = 16
 
 const MODE_LABELS = {
   add: '添加',
@@ -78,6 +79,11 @@ function nextTagsFor(current, input, mode) {
   return replacesAll ? { unchanged: true } : { tags: [...input] }
 }
 
+/** 读取当前模型的最新标签（执行时取值，供意图式增删基于最新状态计算） */
+function currentTagsOf(model) {
+  return Array.isArray(model?.tags) ? model.tags : []
+}
+
 /**
  * 批量编辑选中模型的自由标签。
  * @param {{mode?: 'add'|'remove'|'replace', tags?: string[]|string}} [options]
@@ -100,16 +106,15 @@ export async function batchEditTags(options = {}) {
   if (state.multiSelect.cancelRequested) return false
 
   const byId = modelById.value
-  const updates = []
+  const modeLabel = MODE_LABELS[mode]
+  // 预判参与集：无变化/超上限的模型不进 IPC；最终载荷在执行时按最新标签重算
+  const candidates = []
   let unchanged = 0
   let overflow = 0
-  // 预计算仅用于预判参与集与「全部无变化」提示；最终载荷在执行时按
-  // 最新标签重算（B2：与详情页即时编辑交错时不用旧快照覆盖）
   for (const id of ids) {
     const model = byId.get(id)
     if (!model) continue
-    const current = Array.isArray(model.tags) ? model.tags : []
-    const result = nextTagsFor(current, input, mode)
+    const result = nextTagsFor(currentTagsOf(model), input, mode)
     if (result.unchanged) {
       unchanged += 1
       continue
@@ -118,11 +123,10 @@ export async function batchEditTags(options = {}) {
       overflow += 1
       continue
     }
-    updates.push({ id })
+    candidates.push(id)
   }
 
-  const modeLabel = MODE_LABELS[mode]
-  if (updates.length === 0) {
+  if (candidates.length === 0) {
     const notes = []
     if (unchanged > 0) notes.push(`标签无变化 ${unchanged} 个`)
     if (overflow > 0) notes.push(`超过 ${MAX_TAGS} 个标签上限 ${overflow} 个`)
@@ -136,52 +140,91 @@ export async function batchEditTags(options = {}) {
   state.multiSelect.busy = true
   state.multiSelect.progress = ''
   clearBatchFailures()
+  let releaseBulkTags = null
   try {
-    let processed = 0
-    const results = await mapWithConcurrency(
-      updates,
-      async (item) => {
-        if (state.multiSelect.cancelRequested) return { canceled: true }
-        processed += 1
-        state.multiSelect.progress = `标签${modeLabel} ${processed}/${updates.length}`
-        // 经 per-id 串行队列写入，执行时重读最新标签重算目标列表（B2）
-        const r = await enqueueBatchTagsWrite(item.id, (current) =>
-          nextTagsFor(current, input, mode),
-        )
-        if (r.error) throw new Error(r.error)
-        return r
-      },
-      TAG_IPC_CONCURRENCY,
-    )
+    // B2/C1：等待全部选中模型的在途操作落定并持有批量锁；锁生效期间新发起
+    // 的单模型编辑会排在本批之后，避免批量 IPC 在途时用旧快照反向覆盖
+    releaseBulkTags = await beginBatchTagsWrite(ids)
+    unchanged = 0
+    overflow = 0
+    const items = []
+    for (const id of ids) {
+      const model = modelById.value.get(id)
+      if (!model) continue
+      const result = nextTagsFor(currentTagsOf(model), input, mode)
+      if (result.unchanged) {
+        unchanged += 1
+        continue
+      }
+      if (result.overflow) {
+        overflow += 1
+        continue
+      }
+      items.push({ id, tags: result.tags })
+    }
+
+    if (items.length === 0) {
+      const notes = []
+      if (unchanged > 0) notes.push(`标签无变化 ${unchanged} 个`)
+      if (overflow > 0) notes.push(`超过 ${MAX_TAGS} 个标签上限 ${overflow} 个`)
+      toast(
+        'info',
+        `没有需要更新标签的模型${notes.length ? `（${notes.join('，')}）` : ''}`,
+      )
+      return false
+    }
 
     const metas = new Map()
     // B20/F3：逐项失败保留真实原因，供失败明细面板定位与重建选区重试
     const failedItems = []
     let canceled = 0
-    results.forEach((result, i) => {
-      if (result.status !== 'fulfilled') {
-        failedItems.push({ id: updates[i].id, error: result.reason?.message })
-        return
-      }
-      const value = result.value
-      if (value?.canceled) {
-        canceled += 1
-        return
-      }
-      // 执行时模型已被并发编辑收敛为无变化/超上限：并入对应计数
-      if (value?.unchanged) {
-        unchanged += 1
-        return
-      }
-      if (value?.overflow) {
-        overflow += 1
-        return
-      }
-      if (value?.meta) metas.set(updates[i].id, value.meta)
-      else failedItems.push({ id: updates[i].id, error: '未返回结果' })
-    })
-    const failed = reportBatchFailures(`批量标签${modeLabel}`, failedItems)
+    let processed = 0
 
+    for (let offset = 0; offset < items.length; offset += MAX_BATCH_META_IDS) {
+      if (state.multiSelect.cancelRequested) {
+        canceled = items.length - processed
+        break
+      }
+      const chunk = items.slice(offset, offset + MAX_BATCH_META_IDS)
+      processed += chunk.length
+      state.multiSelect.progress = `标签${modeLabel} ${Math.min(processed, items.length)}/${items.length}`
+
+      let res
+      try {
+        res = await window.api.models.setModelTagsBulk(chunk)
+      } catch (err) {
+        for (const item of chunk)
+          failuresPush(failedItems, item.id, err.message)
+        continue
+      }
+      if (res?.error) {
+        for (const item of chunk) failuresPush(failedItems, item.id, res.error)
+        continue
+      }
+
+      const updated = Array.isArray(res?.updated) ? res.updated : []
+      const updatedIds = new Set()
+      for (const item of updated) {
+        if (!item || typeof item.id !== 'string') continue
+        updatedIds.add(item.id)
+        metas.set(item.id, item)
+      }
+      const failed = Array.isArray(res?.failed) ? res.failed : []
+      const failedIds = new Set()
+      for (const item of failed) {
+        if (!item || typeof item.id !== 'string') continue
+        failedIds.add(item.id)
+        failuresPush(failedItems, item.id, item.error || '未返回失败原因')
+      }
+      // 契约防御：既未成功也未显式失败的条目必须显形，不得静默丢失
+      for (const item of chunk) {
+        if (!updatedIds.has(item.id) && !failedIds.has(item.id)) {
+          failuresPush(failedItems, item.id, '未返回结果')
+        }
+      }
+    }
+
+    const failed = reportBatchFailures(`批量标签${modeLabel}`, failedItems)
     const ok = applyMetaUpdates(metas, (meta) => ({
       tags: Array.isArray(meta.tags) ? meta.tags : [],
     }))
@@ -193,7 +236,7 @@ export async function batchEditTags(options = {}) {
     if (canceled > 0) {
       toast(
         'warn',
-        `标签${modeLabel}已取消：完成 ${ok}/${updates.length}，已完成部分已保存${suffix}`,
+        `标签${modeLabel}已取消：完成 ${ok}/${items.length}，已完成部分已保存${suffix}`,
       )
     } else if (failed > 0) {
       toast('warn', `标签${modeLabel}完成：成功 ${ok} 个${suffix}`)
@@ -202,8 +245,14 @@ export async function batchEditTags(options = {}) {
     }
     return ok > 0
   } finally {
+    releaseBulkTags?.()
     state.multiSelect.busy = false
     state.multiSelect.progress = ''
     state.multiSelect.cancelRequested = false
   }
+}
+
+/** 记录一条失败明细（契约防御与 IPC 异常共用） */
+function failuresPush(list, id, error) {
+  list.push({ id, error: error || '未返回结果' })
 }

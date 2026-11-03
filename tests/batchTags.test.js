@@ -39,13 +39,19 @@ function seedModels(models) {
   )
 }
 
-/** window.api 桩：setModelTags 原样回显标签 */
+/** window.api 桩：setModelTagsBulk 原样回显成功项的标签 */
 function makeApi() {
   return {
     api: {
       models: {
-        setModelTags: vi.fn((modelId, tags) =>
-          Promise.resolve({ meta: { tags } }),
+        setModelTagsBulk: vi.fn((items) =>
+          Promise.resolve({
+            updated: items.map(({ id: modelId, tags }) => ({
+              id: modelId,
+              tags,
+            })),
+            failed: [],
+          }),
         ),
       },
     },
@@ -102,7 +108,12 @@ describe('batchEditTags', () => {
     await expect(
       batchEditTags({ mode: 'add', tags: ['已有', '新标签'] }),
     ).resolves.toBe(true)
-    expect(window.api.models.setModelTags).toHaveBeenCalledTimes(2)
+    // C1：两个模型合并为一次批量 IPC
+    expect(window.api.models.setModelTagsBulk).toHaveBeenCalledTimes(1)
+    expect(window.api.models.setModelTagsBulk).toHaveBeenCalledWith([
+      { id: id('a'), tags: ['已有', '新标签'] },
+      { id: id('b'), tags: ['已有', '新标签'] },
+    ])
     expect(state.models.find((m) => m.id === id('a')).tags).toEqual([
       '已有',
       '新标签',
@@ -140,7 +151,7 @@ describe('batchEditTags', () => {
     await expect(batchEditTags({ mode: 'add', tags: ['已有'] })).resolves.toBe(
       false,
     )
-    expect(window.api.models.setModelTags).not.toHaveBeenCalled()
+    expect(window.api.models.setModelTagsBulk).not.toHaveBeenCalled()
     expect(
       state.toasts.some((t) => t.text.includes('没有需要更新标签的模型')),
     ).toBe(true)
@@ -155,9 +166,9 @@ describe('batchEditTags', () => {
     await expect(batchEditTags({ mode: 'add', tags: ['new'] })).resolves.toBe(
       true,
     )
-    expect(window.api.models.setModelTags).toHaveBeenCalledTimes(1)
-    expect(window.api.models.setModelTags).toHaveBeenCalledWith(id('room'), [
-      'new',
+    expect(window.api.models.setModelTagsBulk).toHaveBeenCalledTimes(1)
+    expect(window.api.models.setModelTagsBulk).toHaveBeenCalledWith([
+      { id: id('room'), tags: ['new'] },
     ])
     expect(state.toasts.some((t) => t.text.includes('超上限跳过 1 个'))).toBe(
       true,
@@ -174,16 +185,20 @@ describe('batchEditTags', () => {
     state.multiSelect.busy = false
     state.multiSelect.cancelRequested = true
     expect(await batchEditTags({ mode: 'add', tags: ['x'] })).toBe(false)
-    expect(window.api.models.setModelTags).not.toHaveBeenCalled()
+    expect(window.api.models.setModelTagsBulk).not.toHaveBeenCalled()
   })
 
   it('部分 IPC 失败仍保留成功项并汇总提示', async () => {
     state.multiSelect.ids = [id('a'), id('b')]
-    window.api.models.setModelTags.mockImplementation((modelId, tags) =>
-      modelId === id('b')
-        ? Promise.resolve({ error: '写入失败' })
-        : Promise.resolve({ meta: { tags } }),
-    )
+    window.api.models.setModelTagsBulk.mockImplementation((items) => {
+      const failedItem = items.find((item) => item.id === id('b'))
+      return Promise.resolve({
+        updated: items
+          .filter((item) => item.id !== id('b'))
+          .map(({ id: modelId, tags }) => ({ id: modelId, tags })),
+        failed: failedItem ? [{ id: failedItem.id, error: '写入失败' }] : [],
+      })
+    })
     await expect(batchEditTags({ mode: 'add', tags: ['x'] })).resolves.toBe(
       true,
     )

@@ -26,7 +26,13 @@ export function makeApiMock() {
       cancelScan: vi.fn(() => Promise.resolve({ ok: false })),
       chooseFolder: vi.fn(),
       setMetaFlags: vi.fn(),
+      setMetaFlagsBulk: vi.fn(() =>
+        Promise.resolve({ updated: [], failed: [] }),
+      ),
       setModelTags: vi.fn(),
+      setModelTagsBulk: vi.fn(() =>
+        Promise.resolve({ updated: [], failed: [] }),
+      ),
       toggleDisabled: vi.fn(),
       renameModel: vi.fn(),
       moveModelTo: vi.fn(),

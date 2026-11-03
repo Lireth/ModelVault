@@ -77,6 +77,7 @@ export {
   getMetaMapByAbsPath,
   getModelIdsByAbsPath,
   setModelMeta,
+  setModelMetaMany,
   removeModelMeta,
   renameModelMeta,
   relinkScannedMeta,

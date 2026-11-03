@@ -4,6 +4,7 @@ import {
   resetStoreTestState,
   makeModel,
 } from './helpers/storeTest'
+import { MAX_BATCH_META_IDS } from '../src/shared/app-enums'
 import {
   acceptConfirm,
   batchApplyTriggers,
@@ -114,8 +115,14 @@ describe('批量操作单次状态合并（O2）', () => {
   it('批量收藏：全部成功时单趟同步全部标记并提示成功', async () => {
     state.models = [makeModel('a'), makeModel('b'), makeModel('c')]
     state.multiSelect.ids = ['a', 'b', 'c']
-    api.models.setMetaFlags.mockResolvedValue({
-      meta: { favorite: true, nsfw: false, rating: 0 },
+    api.models.setMetaFlagsBulk.mockResolvedValue({
+      updated: ['a', 'b', 'c'].map((id) => ({
+        id,
+        favorite: true,
+        nsfw: false,
+        rating: 0,
+      })),
+      failed: [],
     })
     await batchFavorite(true)
     // P1-1：批量标记同样写覆盖层——对象保持引用稳定，有效读取器反映新值
@@ -131,34 +138,71 @@ describe('批量操作单次状态合并（O2）', () => {
     ).toBe(true)
   })
 
-  it('批量收藏按统一限流执行：同时在途 IPC 不超过上限', async () => {
+  it('批量收藏合并为单次批量 IPC（不再逐模型 invoke）', async () => {
     const ids = Array.from({ length: 40 }, (_, i) => `m${i}`)
     state.models = ids.map((id) => makeModel(id))
     state.multiSelect.ids = ids
-    let inFlight = 0
-    let maxInFlight = 0
-    api.models.setMetaFlags.mockImplementation(async () => {
-      inFlight += 1
-      maxInFlight = Math.max(maxInFlight, inFlight)
-      await new Promise((resolve) => setTimeout(resolve, 5))
-      inFlight -= 1
-      return { meta: { favorite: true, nsfw: false, rating: 0 } }
-    })
+    api.models.setMetaFlagsBulk.mockImplementation(({ ids: payloadIds }) =>
+      Promise.resolve({
+        updated: payloadIds.map((id) => ({
+          id,
+          favorite: true,
+          nsfw: false,
+          rating: 0,
+        })),
+        failed: [],
+      }),
+    )
 
     await batchFavorite(true)
 
-    expect(api.models.setMetaFlags).toHaveBeenCalledTimes(40)
-    expect(maxInFlight).toBeGreaterThan(0)
-    expect(maxInFlight).toBeLessThanOrEqual(16)
+    expect(api.models.setMetaFlagsBulk).toHaveBeenCalledTimes(1)
+    expect(api.models.setMetaFlagsBulk).toHaveBeenCalledWith({
+      ids,
+      favorite: true,
+    })
+    expect(api.models.setMetaFlags).not.toHaveBeenCalled()
+  })
+
+  it('选中数超过单批上限时按块提交，逐项结果全部合并（C1）', async () => {
+    const ids = Array.from(
+      { length: MAX_BATCH_META_IDS + 1 },
+      (_, i) => `m${i}`,
+    )
+    state.models = ids.map((id) => makeModel(id))
+    state.multiSelect.ids = ids
+    api.models.setMetaFlagsBulk.mockImplementation(({ ids: chunk }) =>
+      Promise.resolve({
+        updated: chunk.map((id) => ({
+          id,
+          favorite: true,
+          nsfw: false,
+          rating: 0,
+        })),
+        failed: [],
+      }),
+    )
+
+    await batchFavorite(true)
+
+    expect(api.models.setMetaFlagsBulk).toHaveBeenCalledTimes(2)
+    expect(api.models.setMetaFlagsBulk.mock.calls[0][0].ids).toHaveLength(
+      MAX_BATCH_META_IDS,
+    )
+    expect(api.models.setMetaFlagsBulk.mock.calls[1][0].ids).toHaveLength(1)
+    expect(state.models.every((m) => effectiveFavorite(m))).toBe(true)
   })
 
   it('批量收藏：部分失败时成功者已同步、汇总提示统计', async () => {
     state.models = [makeModel('a'), makeModel('b'), makeModel('c')]
     state.multiSelect.ids = ['a', 'b', 'c']
-    api.models.setMetaFlags.mockImplementation(({ id }) =>
-      id === 'b'
-        ? Promise.reject(new Error('IPC 断开'))
-        : Promise.resolve({ meta: { favorite: true, nsfw: false, rating: 0 } }),
+    api.models.setMetaFlagsBulk.mockImplementation(({ ids }) =>
+      Promise.resolve({
+        updated: ids
+          .filter((id) => id !== 'b')
+          .map((id) => ({ id, favorite: true, nsfw: false, rating: 0 })),
+        failed: [{ id: 'b', error: 'IPC 断开' }],
+      }),
     )
     await batchFavorite(true)
     expect(effectiveFavorite(state.models.find((m) => m.id === 'a'))).toBe(true)
@@ -377,12 +421,21 @@ describe('批量操作单次状态合并（O2）', () => {
     state.models = [makeModel('a'), makeModel('b')]
     state.multiSelect.ids = ['a', 'b']
     state.multiSelect.busy = false
-    // 两个模型的 IPC 各自挂起：逐一收集 resolve（单个变量会被后一次调用覆盖）
-    const resolvers = []
-    api.models.setMetaFlags.mockImplementation(
-      () =>
+    // 批量 IPC 挂起：构造在途窗口
+    let releaseBulk = () => {}
+    api.models.setMetaFlagsBulk.mockImplementation(
+      ({ ids }) =>
         new Promise((resolve) => {
-          resolvers.push(resolve)
+          releaseBulk = () =>
+            resolve({
+              updated: ids.map((id) => ({
+                id,
+                favorite: true,
+                nsfw: false,
+                rating: 0,
+              })),
+              failed: [],
+            })
         }),
     )
 
@@ -390,12 +443,11 @@ describe('批量操作单次状态合并（O2）', () => {
     const second = batchFavorite(true) // 在途期间的连点：必须被 busy 拦截
     await second
 
-    // 仅第一批 2 个 IPC（每模型一个）；连点不得把同一批再提交一遍
-    expect(api.models.setMetaFlags).toHaveBeenCalledTimes(2)
+    // 仅一次批量 IPC；连点不得把同一批再提交一遍
+    expect(api.models.setMetaFlagsBulk).toHaveBeenCalledTimes(1)
     expect(state.multiSelect.busy).toBe(true) // 首批在途，按钮应保持禁用
 
-    for (const resolve of resolvers)
-      resolve({ meta: { favorite: true, nsfw: false, rating: 0 } })
+    releaseBulk()
     await first
     expect(state.multiSelect.busy).toBe(false) // 完成后恢复可用
     expect(state.models.map((m) => effectiveFavorite(m))).toEqual([true, true])
@@ -726,14 +778,22 @@ describe('批量取消（Esc 请求取消，串行批量提前收尾）', () => 
     state.models = [makeModel('a'), makeModel('b')]
     state.multiSelect.ids = ['a', 'b']
     state.multiSelect.busy = false
-    api.models.setMetaFlags.mockImplementation(async () => {
+    api.models.setMetaFlagsBulk.mockImplementation(async ({ ids }) => {
       requestBatchCancel() // 并发型批量进行中按 Esc：置位但不响应
-      return { meta: { favorite: true, nsfw: false, rating: 0 } }
+      return {
+        updated: ids.map((id) => ({
+          id,
+          favorite: true,
+          nsfw: false,
+          rating: 0,
+        })),
+        failed: [],
+      }
     })
 
     await batchFavorite(true)
 
-    expect(api.models.setMetaFlags).toHaveBeenCalledTimes(2)
+    expect(api.models.setMetaFlagsBulk).toHaveBeenCalledTimes(1)
     // finally 统一复位：取消意图不得跨批量泄漏（A3 毒化根因）
     expect(state.multiSelect.cancelRequested).toBe(false)
   })
@@ -741,9 +801,17 @@ describe('批量取消（Esc 请求取消，串行批量提前收尾）', () => 
   it('并发批量期间 Esc 不毒化后续串行批量（A3 回归）', async () => {
     state.models = [makeModel('a'), makeModel('b')]
     state.multiSelect.ids = ['a', 'b']
-    api.models.setMetaFlags.mockImplementation(async () => {
+    api.models.setMetaFlagsBulk.mockImplementation(async ({ ids }) => {
       requestBatchCancel()
-      return { meta: { favorite: true, nsfw: false, rating: 0 } }
+      return {
+        updated: ids.map((id) => ({
+          id,
+          favorite: true,
+          nsfw: false,
+          rating: 0,
+        })),
+        failed: [],
+      }
     })
     await batchFavorite(true)
 

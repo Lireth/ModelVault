@@ -357,6 +357,113 @@ describe('models:saveModelData / models:setMetaFlags 集成（D1）', () => {
     })
     expect(res.meta.tags).toEqual(['Pony', 'Style'])
   })
+
+  /** 创建两个模型并预置不同元数据（批量通道共用） */
+  async function setupBulkModels() {
+    const a = path.join(root, 'a.safetensors')
+    const b = path.join(root, 'b.safetensors')
+    await fs.writeFile(a, 'x')
+    await fs.writeFile(b, 'x')
+    setModelMeta(a, {
+      alias: '别名 A',
+      params: { steps: 20 },
+      covers: ['covers/a.png'],
+      cover: 'covers/a.png',
+    })
+    setModelMeta(b, { note: '备注 B' })
+    return { a, b }
+  }
+
+  it('setMetaFlagsBulk 单次更新多条并保留未传字段（C1）', async () => {
+    const { a, b } = await setupBulkModels()
+    const handler = getRegisteredHandler('models:setMetaFlagsBulk')
+    const res = await handler(makeEvent(), {
+      ids: [a, b],
+      favorite: true,
+      rating: 4,
+    })
+
+    expect(res.failed).toEqual([])
+    expect(res.updated).toEqual([
+      { id: a, favorite: true, nsfw: false, rating: 4 },
+      { id: b, favorite: true, nsfw: false, rating: 4 },
+    ])
+    // 未传字段（别名/参数/封面/备注）原样保留
+    expect(getModelMeta(a).alias).toBe('别名 A')
+    expect(getModelMeta(a).params.steps).toBe(20)
+    expect(getModelMeta(b).note).toBe('备注 B')
+  })
+
+  it('setMetaFlagsBulk 逐项失败原因与空更新/去重语义（C1）', async () => {
+    const { a } = await setupBulkModels()
+    const outside = path.join(root, '..', 'outside.safetensors')
+    const handler = getRegisteredHandler('models:setMetaFlagsBulk')
+
+    const mixed = await handler(makeEvent(), {
+      ids: [a, outside],
+      favorite: true,
+    })
+    expect(mixed.updated).toHaveLength(1)
+    expect(mixed.failed).toHaveLength(1)
+    expect(mixed.failed[0].id).toBe(outside)
+    expect(mixed.failed[0].error).toContain('模型不在当前模型根目录内')
+
+    // 重复 id 去重后只返回一次
+    const dup = await handler(makeEvent(), { ids: [a, a], favorite: true })
+    expect(dup.updated).toEqual([
+      { id: a, favorite: true, nsfw: false, rating: 0 },
+    ])
+
+    expect(await handler(makeEvent(), { ids: [] })).toEqual({
+      error: '缺少待更新的模型',
+    })
+    expect(await handler(makeEvent(), { ids: [a] })).toEqual({
+      error: '无有效的更新字段',
+    })
+  })
+
+  it('setModelTagsBulk 单次覆写并规范化，失败项单独返回（C1）', async () => {
+    const { a, b } = await setupBulkModels()
+    const outside = path.join(root, '..', 'outside.safetensors')
+    const handler = getRegisteredHandler('models:setModelTagsBulk')
+
+    const res = await handler(makeEvent(), {
+      items: [
+        { id: a, tags: ['Pony', 'pony', '  ', 'Style', '  Style  '] },
+        { id: b, tags: ['x'] },
+      ],
+    })
+    expect(res.failed).toEqual([])
+    expect(res.updated).toEqual([
+      { id: a, tags: ['Pony', 'Style'] },
+      { id: b, tags: ['x'] },
+    ])
+    expect(getModelMeta(a).alias).toBe('别名 A')
+
+    // 超上限/非数组 tags 由 schema 整单拒绝（见 ipcSchema 用例）；handler 的
+    // 逐项上限是绕过 schema 的纵深防御。这里覆盖可经 schema 放行的越界项。
+    const bad = await handler(makeEvent(), {
+      items: [
+        { id: outside, tags: [] },
+        { id: b, tags: ['ok'] },
+      ],
+    })
+    expect(bad.updated).toEqual([{ id: b, tags: ['ok'] }])
+    expect(bad.failed).toEqual([{ id: outside, error: '模型不在当前根目录内' }])
+
+    // 同 id 多次提交以最后一次为准（意图式整体覆写）
+    const dup = await handler(makeEvent(), {
+      items: [
+        { id: a, tags: ['one'] },
+        { id: a, tags: ['two'] },
+      ],
+    })
+    expect(dup.updated).toEqual([{ id: a, tags: ['two'] }])
+
+    expect(await handler(makeEvent(), { items: [] })).toEqual({
+      error: '缺少待更新的模型',
+    })
+  })
 })
 describe('models:renameTag / models:removeTag 全库标签管理（F4）', () => {
   let root

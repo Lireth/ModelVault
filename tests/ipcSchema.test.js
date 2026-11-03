@@ -15,6 +15,7 @@ import {
   DEFAULT_MAX_OBJECT_KEYS,
   DEFAULT_MAX_ARRAY_ITEMS,
 } from '../src/shared/ipc-schema'
+import { MAX_BATCH_META_IDS } from '../src/shared/app-enums'
 
 /**
  * IPC 通道单一来源对账 + payload 入口结构校验（O-2 / O1 fail-closed / O2）：
@@ -351,6 +352,48 @@ describe('IPC payload 通道校验（validateIpcPayload）', () => {
     expect(validateIpcPayload('models:setMetaFlags', { id: 42 })).toBe(
       'id 须为字符串',
     )
+  })
+
+  it('models:setMetaFlagsBulk / setModelTagsBulk：批量结构与上限门禁（C1）', () => {
+    expect(
+      validateIpcPayload('models:setMetaFlagsBulk', {
+        ids: ['a', 'b'],
+        favorite: true,
+      }),
+    ).toBe('')
+    expect(
+      validateIpcPayload('models:setMetaFlagsBulk', { favorite: true }),
+    ).toBe('ids 缺失')
+    expect(validateIpcPayload('models:setMetaFlagsBulk', { ids: 'x' })).toBe(
+      'ids 须为数组',
+    )
+    expect(validateIpcPayload('models:setMetaFlagsBulk', { ids: [1] })).toBe(
+      'ids[0] 须为字符串',
+    )
+    expect(
+      validateIpcPayload('models:setMetaFlagsBulk', {
+        ids: Array(MAX_BATCH_META_IDS + 1).fill('x'),
+      }),
+    ).toBe(`ids 数量超限（≤${MAX_BATCH_META_IDS}）`)
+
+    expect(
+      validateIpcPayload('models:setModelTagsBulk', {
+        items: [{ id: 'a', tags: ['x'] }],
+      }),
+    ).toBe('')
+    expect(
+      validateIpcPayload('models:setModelTagsBulk', { items: [{ id: 'a' }] }),
+    ).toBe('items[0].tags 缺失')
+    expect(
+      validateIpcPayload('models:setModelTagsBulk', {
+        items: [{ id: 'a', tags: 'x' }],
+      }),
+    ).toBe('items[0].tags 须为数组')
+    expect(
+      validateIpcPayload('models:setModelTagsBulk', {
+        items: [{ id: 'a', tags: Array(21).fill('x') }],
+      }),
+    ).toBe('items[0].tags 数量超限（≤20）')
   })
 
   it('settings:update：字段白名单与未知字段拒绝（O9）', () => {

@@ -36,7 +36,13 @@ function makeComponentApiMock() {
       cancelScan: vi.fn(() => Promise.resolve({ ok: false })),
       chooseFolder: vi.fn(),
       setMetaFlags: vi.fn(),
+      setMetaFlagsBulk: vi.fn(() =>
+        Promise.resolve({ updated: [], failed: [] }),
+      ),
       setModelTags: vi.fn(() => Promise.resolve({ meta: { tags: [] } })),
+      setModelTagsBulk: vi.fn(() =>
+        Promise.resolve({ updated: [], failed: [] }),
+      ),
       renameModel: vi.fn(() =>
         Promise.resolve({ path: '', sidecarWarnings: [] }),
       ),
