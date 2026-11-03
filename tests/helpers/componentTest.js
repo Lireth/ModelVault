@@ -27,8 +27,11 @@ function makeComponentApiMock() {
       file && typeof file.path === 'string' ? file.path : '',
     ),
     models: {
-      loadStore: vi.fn(),
+      // 默认返回已落定的空结果：调用方普遍直接 .catch 链式使用
+      loadStore: vi.fn(() => Promise.resolve(null)),
       openLibrary: vi.fn(),
+      // 详情按需补全（OPT-PAYLOAD）：默认返回空模型，避免覆盖用例种子数据
+      getDetail: vi.fn(() => Promise.resolve({ model: null })),
       scan: vi.fn(),
       cancelScan: vi.fn(() => Promise.resolve({ ok: false })),
       chooseFolder: vi.fn(),
@@ -80,6 +83,32 @@ function makeComponentApiMock() {
           warnings: [],
         }),
       ),
+      // 备份/恢复（SettingsBackup + useBackupTransfer）
+      exportBackup: vi.fn(() =>
+        Promise.resolve({
+          path: 'D:\\backup.zip',
+          mode: 'full',
+          models: 0,
+          covers: 0,
+        }),
+      ),
+      importBackup: vi.fn(() => Promise.resolve({ canceled: true })),
+      // 封面批量清理（SettingsBackup 数据管理区）
+      clearAllCovers: vi.fn(() => Promise.resolve({ cleared: 0, images: 0 })),
+      // Civitai 在线识别（CivitaiPanel）
+      civitaiIdentify: vi.fn(() => Promise.resolve({ found: false })),
+      civitaiComplete: vi.fn(() => Promise.resolve({ found: false })),
+      civitaiImportImages: vi.fn(() =>
+        Promise.resolve({
+          added: 0,
+          failed: [],
+          cover: '',
+          coverUrl: '',
+          covers: [],
+        }),
+      ),
+      // 可取消操作令牌（跨库传输/批量整理）
+      cancelOp: vi.fn(() => Promise.resolve({ ok: true })),
       onScanProgress: vi.fn(() => () => {}),
       onWarmupProgress: vi.fn(() => () => {}),
       onMenuAction: vi.fn(() => () => {}),
@@ -140,6 +169,16 @@ function resetStoreState() {
   // 范围选择锚点（非响应式记忆，整体赋值复位无法触达）
   exitMultiSelect()
   state.settingsOpen = false
+  // 后台哈希预热进度（CivitaiPanel 进度条消费）：整体复位，避免跨用例残留
+  Object.assign(state.warmup, {
+    active: false,
+    id: '',
+    percent: 0,
+    hashedBytes: 0,
+    totalBytes: 0,
+    done: 0,
+    remaining: 0,
+  })
   Object.assign(state.settings, defaultSettings())
   state.toasts.splice(0, state.toasts.length)
   Object.assign(state.confirm, { visible: false, text: '', resolve: null })

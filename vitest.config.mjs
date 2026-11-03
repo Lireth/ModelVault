@@ -114,6 +114,42 @@ export default defineConfig({
           functions: 96,
           lines: 92.5,
         },
+        // ---------- C4 数据关键 UI 地板（备份恢复/详情自动信息/跨库选择/
+        // Civitai/确认层）：这些模块低频但后果高——备份恢复直接覆盖用户数据，
+        // 确认层是删除等破坏性操作的最终关口——全局均值容易被大文件稀释，
+        // 单独设地板防回退。分支覆盖不设地板：.vue 模板编译产物的 v-if/v-for
+        // 分支在 v8 统计下天然偏低（单侧分支同次渲染不可达），仅以语句/行/
+        // 函数衡量，避免为凑分支数字编写无意义用例。
+        '**/src/renderer/src/composables/useBackupTransfer.js': {
+          statements: 95,
+          functions: 95,
+          lines: 90,
+        },
+        '**/src/renderer/src/components/detail/AutoInfoPanel.vue': {
+          statements: 90,
+          functions: 95,
+          lines: 90,
+        },
+        '**/src/renderer/src/components/LibraryPickerOverlay.vue': {
+          statements: 95,
+          functions: 95,
+          lines: 90,
+        },
+        '**/src/renderer/src/components/detail/CivitaiPanel.vue': {
+          statements: 92,
+          functions: 95,
+          lines: 90,
+        },
+        '**/src/renderer/src/components/settings/SettingsBackup.vue': {
+          statements: 88,
+          functions: 90,
+          lines: 90,
+        },
+        '**/src/renderer/src/components/ConfirmOverlay.vue': {
+          statements: 95,
+          functions: 95,
+          lines: 90,
+        },
       },
     },
   },

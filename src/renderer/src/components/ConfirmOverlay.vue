@@ -25,7 +25,20 @@ function onConfirmKeydown(e) {
   } else if (e.key === 'Tab') {
     e.preventDefault()
     e.stopPropagation()
-    ;(e.shiftKey ? confirmOkBtn.value : confirmCancelBtn.value)?.focus()
+    // 两按钮循环焦点陷阱（C4 测试暴露的回归）：此前 Tab 恒聚焦「取消」、
+    // Shift+Tab 恒聚焦「确定」，方向键语义反转且无法在两按钮间循环。
+    // 焦点不在按钮上（初次进入/点击遮罩）时，Tab 落到「取消」（安全默认），
+    // Shift+Tab 落到「确定」（反向进入末项）。
+    const buttons = [confirmCancelBtn.value, confirmOkBtn.value].filter(Boolean)
+    const active = document.activeElement
+    const index = buttons.indexOf(active)
+    const next =
+      index === -1
+        ? buttons[e.shiftKey ? buttons.length - 1 : 0]
+        : buttons[
+            (index + (e.shiftKey ? -1 : 1) + buttons.length) % buttons.length
+          ]
+    next?.focus()
   } else if (e.key === 'Enter' && e.target?.tagName !== 'BUTTON') {
     e.preventDefault()
     e.stopPropagation()
