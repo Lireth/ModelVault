@@ -712,6 +712,10 @@ describe('切库链路超时保护与同根判定（OPT-19 切库防线）', () 
     // 超时只是放弃等待：挂起的写入仍在途（未被取消/截断）
     expect(awHook.pending.length).toBeGreaterThan(0)
 
+    // 超时路径验证完毕：恢复生产默认等待上限。50ms 注入只用于上面的
+    // 超时断言，若继续沿用到下方「真实落盘」的等待，CI 慢盘上会误报未静止
+    setFlushAwaitTimeoutForTests()
+
     // 磁盘恢复：放行后续写入，reject 挂起的残尾（失败路径不清脏标记）
     awHook.hangPrefix = null
     for (const p of awHook.pending.splice(0)) p.reject(new Error('磁盘恢复'))
