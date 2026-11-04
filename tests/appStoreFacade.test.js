@@ -71,12 +71,18 @@ const EXPECTED_EXPORTS = [
   'applyHashUpdate',
   // 派生
   'filteredModels',
+  'visibleModels',
+  'isModelVisible',
   'typeCounts',
   'duplicateGroups',
+  'allDuplicateGroups',
   'allTags',
   'tagCounts',
+  'visibleTags',
+  'visibleTagCounts',
   'duplicateIdSet',
   'duplicateWastedBytes',
+  'allDuplicateWastedBytes',
   // 标签管理（F4）
   'renameTagGlobally',
   'removeTagGlobally',

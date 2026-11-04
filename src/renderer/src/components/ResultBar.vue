@@ -1,7 +1,6 @@
 <script setup>
 import { computed } from 'vue'
 import {
-  allTags,
   BASE_MODEL_FAMILIES,
   duplicateIdSet,
   duplicateWastedBytes,
@@ -11,6 +10,8 @@ import {
   state,
   toast,
   typeInfo,
+  visibleModels,
+  visibleTags,
 } from '../store/appStore'
 
 /**
@@ -24,7 +25,7 @@ const duplicateCount = computed(() => duplicateIdSet.value.size)
 
 /** 疑似损坏模型数（FEAT-01）：装饰阶段标记 0 字节/头部非法/数据区截断 */
 const suspectCount = computed(() =>
-  state.models.reduce((n, m) => n + (m.suspect === true ? 1 : 0), 0),
+  visibleModels.value.reduce((n, m) => n + (m.suspect === true ? 1 : 0), 0),
 )
 
 /** 重复清理：每组保留最优一份，冗余副本加入多选，交由用户复核后批量删除 */
@@ -39,11 +40,11 @@ function onSelectRedundant() {
 const MAX_TAG_FILTERS = 20
 
 /**
- * 标签下拉选项：库内标签池 + 已选但不在池中的标签（保证活动筛选始终可见，
- * 例如智能视图应用了已跌出前 50 的标签时仍可取消）。
+ * 标签下拉选项：当前可见标签池 + 已选但不在池中的标签（保证活动筛选始终
+ * 可见，例如智能视图应用了已跌出前 50 的标签时仍可取消）。
  */
 const tagOptions = computed(() => {
-  const pool = allTags.value
+  const pool = visibleTags.value
   const missing = state.tagFilters.filter((t) => !pool.includes(t))
   return missing.length > 0 ? [...missing, ...pool] : pool
 })

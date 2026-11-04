@@ -87,12 +87,31 @@ function searchHaystack(m) {
 }
 
 /**
- * 重复模型分组（FEAT-1，F9 闭环）：按文件 SHA256 分组，仅保留成员数 > 1 的组。
- * 哈希来源两路：扫描装饰携带（缓存命中，decorate.js 已随模型下发）+ 后台预热
- * 完成事件回填（library.applyHashUpdate，渐进可用无需重扫）。同哈希文件大小
- * 必然一致，组内可释放空间 = (成员数 - 1) × 单文件大小。
+ * 模型是否在当前视图中可见（OPT-03 统一谓词）：
+ * 隐藏 NSFW 开关开启时，经标注覆盖层的 effectiveNsfw 判定；关闭时恒可见。
+ * 所有「浏览/筛选/计数」派生统一走本谓词或 visibleModels，避免侧栏数字、
+ * 标签池、重复分组与列表命中范围不一致。
+ * @param {Record<string, any>} m 模型对象
+ * @returns {boolean}
  */
-export const duplicateGroups = computed(() => {
+export function isModelVisible(m) {
+  return !(state.settings?.hideNsfwModels === true && effectiveNsfw(m))
+}
+
+/** 当前可见模型列表（隐藏 NSFW 时过滤；关闭时直接复用原数组，零额外分配） */
+export const visibleModels = computed(() => {
+  if (state.settings?.hideNsfwModels !== true) return state.models
+  return state.models.filter((m) => !effectiveNsfw(m))
+})
+
+/**
+ * 全库重复模型分组（供统计页使用，包含隐藏的 NSFW 模型）：
+ * 按文件 SHA256 分组，仅保留成员数 > 1 的组。哈希来源两路：扫描装饰携带
+ * （缓存命中，decorate.js 已随模型下发）+ 后台预热完成事件回填
+ * （library.applyHashUpdate，渐进可用无需重扫）。同哈希文件大小必然一致，
+ * 组内可释放空间 = (成员数 - 1) × 单文件大小。
+ */
+export const allDuplicateGroups = computed(() => {
   const byHash = new Map()
   for (const m of state.models) {
     // O7：后台预热回填走独立覆盖映射，模型对象保持引用稳定
@@ -115,6 +134,28 @@ export const duplicateGroups = computed(() => {
   return groups
 })
 
+/**
+ * 当前可见重复分组：从全库分组按可见成员重新收敛。
+ * 组内仅剩 1 个可见成员时不再构成「可见重复」，因此不能只过滤整组，
+ * 必须按成员过滤后重新判定 > 1；wastedBytes 也按可见副本重算。
+ */
+export const duplicateGroups = computed(() => {
+  if (state.settings?.hideNsfwModels !== true) return allDuplicateGroups.value
+  const visibleIds = new Set(visibleModels.value.map((m) => m.id))
+  const groups = []
+  for (const group of allDuplicateGroups.value) {
+    const models = group.models.filter((m) => visibleIds.has(m.id))
+    if (models.length > 1) {
+      groups.push({
+        hash: group.hash,
+        models,
+        wastedBytes: models[0].size * (models.length - 1),
+      })
+    }
+  }
+  return groups
+})
+
 /** 重复组内全部模型 id 集合（O4：筛选与卡片角标 O(1) 命中） */
 export const duplicateIdSet = computed(() => {
   const set = new Set()
@@ -124,9 +165,14 @@ export const duplicateIdSet = computed(() => {
   return set
 })
 
-/** 冗余副本可释放空间合计（各组 wastedBytes 之和） */
+/** 当前可见冗余副本可释放空间合计（各组 wastedBytes 之和） */
 export const duplicateWastedBytes = computed(() =>
   duplicateGroups.value.reduce((sum, g) => sum + g.wastedBytes, 0),
+)
+
+/** 全库冗余副本可释放空间合计（统计页口径，包含隐藏的 NSFW 模型） */
+export const allDuplicateWastedBytes = computed(() =>
+  allDuplicateGroups.value.reduce((sum, g) => sum + g.wastedBytes, 0),
 )
 
 /**
@@ -162,11 +208,9 @@ const filteredUnsorted = computed(() => {
   // 重复筛选仅在开启时读取命中集合（关闭路径零额外开销）
   const dupes = showDuplicatesOnly ? duplicateIdSet.value : null
   const list = []
-  // 隐藏 NSFW 模型（设置开关）：开启后被标记 NSFW 的模型整行过滤（标注
-  // 覆盖层与模型自带标记均经 effectiveNsfw 计入）；关闭路径零额外开销
-  const hideNsfw = state.settings?.hideNsfwModels === true
-  for (const m of state.models) {
-    if (hideNsfw && effectiveNsfw(m)) continue
+  // 隐藏 NSFW 模型（设置开关）：统一从 visibleModels 取数（标注覆盖层与
+  // 模型自带标记均经 effectiveNsfw 计入）；关闭路径直接复用 state.models
+  for (const m of visibleModels.value) {
     // 疑似损坏筛选（FEAT-01）：只保留装饰阶段标记 suspect 的模型
     if (showSuspectOnly && m.suspect !== true) continue
     if (typeFilter !== 'all' && m.type !== typeFilter) continue
@@ -282,12 +326,37 @@ export const allTags = computed(() =>
 )
 
 /**
- * 各分类的数量（含全部）：直接从模型列表派生，删除/新增后自动同步。
- * 收藏/搜索条件不参与（切分类时计数保持稳定，避免侧栏数字闪烁）。
+ * 当前可见模型的自由标签计数/标签池（OPT-03）：隐藏 NSFW 后筛选下拉不得
+ * 出现「只属于隐藏模型、选中必为空」的标签。标签管理面板仍使用全库
+ * tagCounts/allTags（需要能管理隐藏模型的标签）。
+ */
+export const visibleTagCounts = computed(() => {
+  // 关闭隐藏开关时与全库计数完全一致，直接复用，避免多一遍 O(n)
+  if (state.settings?.hideNsfwModels !== true) return tagCounts.value
+  const counts = new Map()
+  for (const m of visibleModels.value) {
+    for (const t of m.tags || []) {
+      counts.set(t, (counts.get(t) || 0) + 1)
+    }
+  }
+  return counts
+})
+
+/** 当前可见标签池（排序/上限与 allTags 一致） */
+export const visibleTags = computed(() =>
+  [...visibleTagCounts.value.entries()]
+    .sort((a, b) => b[1] - a[1] || zhCollator.compare(a[0], b[0]))
+    .slice(0, 50)
+    .map(([tag]) => tag),
+)
+
+/**
+ * 各分类的数量（可见模型口径，OPT-03）：隐藏 NSFW 后侧栏计数与列表命中
+ * 范围一致。收藏/搜索条件不参与（切分类时计数保持稳定，避免数字闪烁）。
  */
 export const typeCounts = computed(() => {
   const counts = { all: 0 }
-  for (const m of state.models) {
+  for (const m of visibleModels.value) {
     counts.all += 1
     counts[m.type] = (counts[m.type] || 0) + 1
   }

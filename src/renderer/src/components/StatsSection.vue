@@ -9,9 +9,9 @@ import StatsRatingBreakdown from './stats/StatsRatingBreakdown.vue'
 import StatsTopSize from './stats/StatsTopSize.vue'
 import StatsTypeBreakdown from './stats/StatsTypeBreakdown.vue'
 import {
+  allDuplicateGroups,
+  allDuplicateWastedBytes,
   BASE_MODEL_FAMILIES,
-  duplicateGroups,
-  duplicateWastedBytes,
   effectiveFavorite,
   effectiveNsfw,
   effectiveRating,
@@ -276,9 +276,10 @@ const baseRows = computed(() => {
   }
 })
 
-/** 重复占用统计（FEAT-1）：组数 / 冗余副本数 / 可释放空间占比 */
+/** 重复占用统计（FEAT-1）：组数 / 冗余副本数 / 可释放空间占比。
+ * OPT-03：统计页保持全库口径（含隐藏的 NSFW 模型），与总览/NSFW 统计一致 */
 const dupStats = computed(() => {
-  const groups = duplicateGroups.value
+  const groups = allDuplicateGroups.value
   if (groups.length === 0) return null
   let redundant = 0
   for (const g of groups) redundant += g.models.length - 1
@@ -287,7 +288,7 @@ const dupStats = computed(() => {
     groups: groups.length,
     redundant,
     wastedPct:
-      total > 0 ? Math.round((duplicateWastedBytes.value / total) * 100) : 0,
+      total > 0 ? Math.round((allDuplicateWastedBytes.value / total) * 100) : 0,
   }
 })
 </script>
@@ -319,7 +320,7 @@ const dupStats = computed(() => {
     <StatsDuplicates
       v-if="dupStats"
       :dup="dupStats"
-      :wasted-bytes="duplicateWastedBytes"
+      :wasted-bytes="allDuplicateWastedBytes"
     />
 
     <!-- 最占空间 TOP 5：占比条直观看占用，点击行打开模型详情 -->

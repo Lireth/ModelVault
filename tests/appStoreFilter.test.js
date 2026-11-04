@@ -11,7 +11,12 @@ import {
   duplicateGroups,
   duplicateIdSet,
   duplicateWastedBytes,
+  allDuplicateGroups,
+  allDuplicateWastedBytes,
   allTags,
+  visibleModels,
+  visibleTags,
+  isModelVisible,
   filteredModels,
   formatSize,
   multiSelectIdSet,
@@ -419,6 +424,63 @@ describe('重复模型检测与筛选（FEAT-1）', () => {
     expect(filteredModels.value).toHaveLength(4)
     state.showDuplicatesOnly = false
     expect(filteredModels.value).toHaveLength(5)
+  })
+})
+
+describe('可见模型谓词（OPT-03）', () => {
+  it('隐藏 NSFW 后：列表、分类计数、标签池、重复分组统一收敛；全库口径保持独立', () => {
+    replaceModels([
+      makeModel('a', {
+        type: 'checkpoint',
+        nsfw: false,
+        tags: ['公开', '双份'],
+        hash: 'h1',
+        size: 100,
+      }),
+      makeModel('b', {
+        type: 'lora',
+        nsfw: true,
+        tags: ['隐藏', '双份'],
+        hash: 'h1',
+        size: 100,
+      }),
+      makeModel('c', {
+        type: 'vae',
+        nsfw: false,
+        tags: ['双份'],
+        hash: 'h2',
+        size: 50,
+      }),
+      makeModel('d', {
+        type: 'vae',
+        nsfw: false,
+        tags: ['公开', '双份'],
+        hash: 'h2',
+        size: 50,
+      }),
+    ])
+    const prevHide = state.settings.hideNsfwModels
+    state.settings.hideNsfwModels = true
+    try {
+      expect(visibleModels.value.map((m) => m.id)).toEqual(['a', 'c', 'd'])
+      expect(isModelVisible(state.models[1])).toBe(false)
+      expect(filteredModels.value.map((m) => m.id)).toEqual(['a', 'c', 'd'])
+      // 侧栏分类计数不再包含隐藏的 LoRA
+      expect(typeCounts.value).toEqual({ all: 3, checkpoint: 1, vae: 2 })
+      // 筛选标签池剔除「只属于隐藏模型」的标签；标签管理仍保留全库池
+      expect(visibleTags.value).toEqual(['双份', '公开'])
+      expect(allTags.value).toEqual(['双份', '公开', '隐藏'])
+      // h1 仅剩 1 个可见成员 → 不再构成可见重复；h2 仍为 2 个可见副本
+      expect(duplicateGroups.value).toHaveLength(1)
+      expect(duplicateGroups.value[0].hash).toBe('h2')
+      expect(duplicateGroups.value[0].wastedBytes).toBe(50)
+      expect(duplicateWastedBytes.value).toBe(50)
+      // 统计页全库口径不受隐藏开关影响
+      expect(allDuplicateGroups.value).toHaveLength(2)
+      expect(allDuplicateWastedBytes.value).toBe(150)
+    } finally {
+      state.settings.hideNsfwModels = prevHide
+    }
   })
 })
 

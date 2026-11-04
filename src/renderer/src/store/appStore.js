@@ -82,15 +82,21 @@ export {
   applyHashUpdate,
 } from './library'
 
-// 筛选派生（含重复模型分组，FEAT-1；自由标签池 F-5）
+// 筛选派生（含重复模型分组，FEAT-1；自由标签池 F-5；OPT-03 可见模型口径）
 export {
   filteredModels,
+  visibleModels,
+  isModelVisible,
   typeCounts,
   duplicateGroups,
   duplicateIdSet,
   duplicateWastedBytes,
+  allDuplicateGroups,
+  allDuplicateWastedBytes,
   allTags,
   tagCounts,
+  visibleTags,
+  visibleTagCounts,
 } from './filter'
 
 // 全库标签管理（F4：设置页标签管理面板）
