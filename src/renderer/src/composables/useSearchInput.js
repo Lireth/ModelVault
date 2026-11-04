@@ -1,5 +1,6 @@
 import { onUnmounted, ref, watch } from 'vue'
 import { state } from '../store/appStore'
+import { ensurePinyinEngine } from '../store/pinyin'
 
 /**
  * 搜索输入防抖（O-5 自 App.vue 拆出）：
@@ -19,7 +20,20 @@ export function useSearchInput() {
   const searchFieldEl = ref(null)
   let searchTimer = null
 
+  /**
+   * FEAT-07：拉丁字母查询可能走拼音域，按需启动拼音引擎。
+   * 动态分块在搜索防抖窗口内加载；就绪后过滤 computed 自动重算。
+   */
+  function maybeEnsurePinyin(value) {
+    if (typeof value === 'string' && /[a-z]/i.test(value)) {
+      void ensurePinyinEngine()
+    }
+  }
+  // 智能视图恢复的搜索词可能已是拼音：挂载时补一次
+  maybeEnsurePinyin(state.search)
+
   watch(searchInput, (value) => {
+    maybeEnsurePinyin(value)
     clearTimeout(searchTimer)
     searchTimer = setTimeout(() => {
       state.search = value
@@ -29,6 +43,7 @@ export function useSearchInput() {
   watch(
     () => state.search,
     (value) => {
+      maybeEnsurePinyin(value)
       if (value !== searchInput.value) {
         clearTimeout(searchTimer)
         searchInput.value = value

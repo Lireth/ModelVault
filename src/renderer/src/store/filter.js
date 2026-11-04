@@ -10,6 +10,7 @@ import {
   effectiveRating,
 } from './state'
 import { normalizeBaseModel } from '../../../shared/model-categories'
+import { getPinyinSearchText, pinyinReady } from './pinyin'
 import { matchSearchFilters, parseSearchQuery } from './search-query'
 
 /**
@@ -53,11 +54,15 @@ function addedMsOf(m) {
  * 纳入搜索域——数据在扫描装饰阶段已随模型对象携带，此前解析了却搜不到。
  */
 const searchHaystackCache = new WeakMap()
+/** 拼音搜索域缓存（FEAT-07）：按模型对象引用记忆化，与普通搜索域同一失效约定 */
+const pinyinHaystackCache = new WeakMap()
 
-/** 构建并缓存模型的合并小写搜索域 */
-function searchHaystack(m) {
-  let hay = searchHaystackCache.get(m)
-  if (hay !== undefined) return hay
+/**
+ * 模型的可搜索文本片段（普通搜索域与拼音域共用同一来源，顺序/字段一致）。
+ * @param {Record<string, any>} m 模型对象
+ * @returns {any[]} 字段片段（可能含空值，由调用方过滤）
+ */
+function searchParts(m) {
   // 基底模型取装饰层合成字段，兼容手工构造/旧数据仅带 autoInfo 的对象
   const parts = [
     m.name,
@@ -81,9 +86,98 @@ function searchHaystack(m) {
       parts.push(...m.autoInfo.triggerCandidates)
     }
   }
-  hay = parts.filter(Boolean).join('\n').toLowerCase()
+  return parts
+}
+
+/** 构建并缓存模型的合并小写搜索域 */
+function searchHaystack(m) {
+  let hay = searchHaystackCache.get(m)
+  if (hay !== undefined) return hay
+  hay = searchParts(m).filter(Boolean).join('\n').toLowerCase()
   searchHaystackCache.set(m, hay)
   return hay
+}
+
+/**
+ * 构建并缓存模型的拼音搜索域（FEAT-07）：仅在拼音引擎就绪且模型含中文时
+ * 生成；引擎未就绪不写缓存，加载完成后的下一次过滤会自然重建。
+ * @param {Record<string, any>} m 模型对象
+ * @returns {string} 全拼+首字母搜索域；不可用时为空串
+ */
+function pinyinHaystack(m) {
+  if (!pinyinReady.value) return ''
+  let hay = pinyinHaystackCache.get(m)
+  if (hay !== undefined) return hay
+  hay = getPinyinSearchText(searchParts(m).filter(Boolean).join('\n'))
+  pinyinHaystackCache.set(m, hay)
+  return hay
+}
+
+/** 含拉丁字母的查询才尝试拼音域（纯中文查询走普通子串即可） */
+const LATIN_QUERY_RE = /[a-z]/i
+/** 模糊子序列最短长度：过短会产生大量无关命中 */
+const FUZZY_MIN_LENGTH = 3
+/** 允许模糊匹配的 token 形态（英文/数字/常见连接符）；中文仍精确子串 */
+const FUZZY_TOKEN_RE = /^[a-z0-9._-]+$/i
+
+/**
+ * 模糊子序列匹配：按顺序在搜索域中找齐字符（允许间隔）。
+ * 例：`sdxl` 可命中 `stable diffusion xl`；`yguang` 可命中 `yueguang`。
+ * @param {string} hay 小写搜索域
+ * @param {string} token 小写查询 token
+ * @returns {boolean}
+ */
+function fuzzySubsequence(hay, token) {
+  let cursor = 0
+  for (const ch of token) {
+    const next = hay.indexOf(ch, cursor)
+    if (next < 0) return false
+    cursor = next + 1
+  }
+  return true
+}
+
+/**
+ * 单 token 命中：先精确子串；英文/数字 token 长度达阈值时回退模糊子序列。
+ * 中文 token 不做模糊，避免任意汉字顺序造成误命中。
+ * @param {string} hay 小写搜索域
+ * @param {string} token 小写查询 token
+ * @returns {boolean}
+ */
+function tokenMatches(hay, token) {
+  if (hay.includes(token)) return true
+  if (token.length < FUZZY_MIN_LENGTH) return false
+  if (!FUZZY_TOKEN_RE.test(token)) return false
+  return fuzzySubsequence(hay, token)
+}
+
+/**
+ * 查询命中判定：整串精确子串优先；含空格时按 token AND 匹配；
+ * 单 token 支持英文/拼音模糊子序列（FEAT-07）。
+ * @param {string} hay 小写搜索域
+ * @param {string} keyword 小写查询文本
+ * @returns {boolean}
+ */
+function keywordMatches(hay, keyword) {
+  if (!keyword) return true
+  if (hay.includes(keyword)) return true
+  const tokens = keyword.split(/\s+/).filter(Boolean)
+  if (tokens.length === 0) return true
+  return tokens.every((token) => tokenMatches(hay, token))
+}
+
+/**
+ * 模型自由文本命中（FEAT-07）：普通搜索域优先；仅当查询含拉丁字母且
+ * 普通域未命中时，再尝试拼音全拼/首字母域（引擎未就绪时自动降级）。
+ * @param {Record<string, any>} m 模型对象
+ * @param {string} keyword 小写查询文本
+ * @returns {boolean}
+ */
+function keywordHit(m, keyword) {
+  if (keywordMatches(searchHaystack(m), keyword)) return true
+  if (!LATIN_QUERY_RE.test(keyword)) return false
+  const py = pinyinHaystack(m)
+  return py !== '' && keywordMatches(py, keyword)
 }
 
 /**
@@ -227,7 +321,7 @@ const filteredUnsorted = computed(() => {
     }
     if (showFavoritesOnly && !effectiveFavorite(m)) continue
     if (dupes && !dupes.has(m.id)) continue
-    if (keyword && !searchHaystack(m).includes(keyword)) continue
+    if (keyword && !keywordHit(m, keyword)) continue
     if (
       hasFilters &&
       !matchSearchFilters(m, filters, effectiveModelHash, META_FLAG_RESOLVERS)

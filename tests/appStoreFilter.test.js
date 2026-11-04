@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { effectiveModelHash } from '../src/renderer/src/store/state'
+import { ensurePinyinEngine } from '../src/renderer/src/store/pinyin'
 import {
   makeApiMock,
   resetStoreTestState,
@@ -424,6 +425,36 @@ describe('重复模型检测与筛选（FEAT-1）', () => {
     expect(filteredModels.value).toHaveLength(4)
     state.showDuplicatesOnly = false
     expect(filteredModels.value).toHaveLength(5)
+  })
+})
+
+describe('拼音/模糊搜索（FEAT-07）', () => {
+  it('中文全拼、拼音首字母、英文模糊子序列与多 token AND', async () => {
+    await ensurePinyinEngine()
+    replaceModels([
+      makeModel('moon', { name: '月光宝盒' }),
+      makeModel('sdxl', { name: 'Stable Diffusion XL' }),
+      makeModel('other', { name: '完全无关' }),
+    ])
+
+    state.search = 'yueguang'
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['moon'])
+
+    state.search = 'ygbh'
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['moon'])
+
+    // 拼音域模糊子序列：字符顺序命中即可（允许中间空缺）
+    state.search = 'yguang'
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['moon'])
+
+    // 英文模糊子序列：sdxl 命中 stable diffusion xl
+    state.search = 'sdxl'
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['sdxl'])
+
+    // 多 token AND：两个 token 分别精确命中
+    state.search = 'diff xl'
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['sdxl'])
+    state.search = ''
   })
 })
 
