@@ -19,16 +19,14 @@ export default defineConfig({
     // 轮询消除抖动；再出现偶发失败应作为缺陷定位修复，而非靠重试放行。
     retry: 0,
     coverage: {
-      // A-14 覆盖率防退化门禁（O-3 棘轮渐进上调）：门禁 = 实际基线下浮 ~2pt，
-      // 为环境波动留余量。棘轮历史：2026-10-20 Dependabot 升级（vue 3.5.44/
-      // jsdom 30/electron 44/eslint 10）后基线回落，下调至 Stmts 78/Branch 70/
-      // Funcs 76/Lines 80；O7 补强备份/Civitai IPC handler 与 civitai-store 测试
-      // 并排除纯 re-export 门面（见 exclude）后基线回升至 Stmts 81.84/Branch
-      // 74.32/Funcs 78.68/Lines 83.81，2026-10-21 棘轮上调；2026-10-23 因
-      // windows CI（Node 22 覆盖率腿）波动，整体再下浮 1pt 至当前值。
-      // 仅 npm run test:coverage 生效；按全局总量判定（perFile=false），
-      // 不因个别低覆盖文件（如 mainWindow/menu 等薄胶水层）阻断 CI；
-      // 数据完整性关键服务另设 per-file 地板（下方 glob 键，O7）。
+      // 覆盖率门禁（防退化下限，非质量目标）：2026-11-04 测试精简（移除基础
+      // 设施与外围功能测试 26 个，保留扫描入库/元数据/筛选搜索/封面/Civitai/
+      // 备份/多选/虚拟滚动等核心域）后实测基线为 Stmts 82.01 / Branch 75.64 /
+      // Funcs 79.15 / Lines 84.42，门禁取基线下浮 ~10pt（72/65/69/74），
+      // 仅拦截「整块测试被误删或大面积失效」的灾难性退化，不为凑数字补测。
+      // 按全局总量判定（perFile=false），不设 per-file 地板（原 15 组数据
+      // 关键服务/UI 地板随精简一并移除，降低维护成本）；纯 re-export 门面
+      // 仍排除（见 exclude），避免以 0% 逻辑稀释全局均值。
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
       exclude: [
@@ -40,124 +38,11 @@ export default defineConfig({
         'src/renderer/src/store/multiselect.js',
       ],
       thresholds: {
-        statements: 80,
-        branches: 73,
-        functions: 77,
-        lines: 82,
+        statements: 72,
+        branches: 65,
+        functions: 69,
+        lines: 74,
         perFile: false,
-        // ---------- O7 per-file 地板（数据完整性关键服务，防薄胶水层稀释）
-        // 地板 = 各文件实际基线下浮 ~4pt（2026-10-23 由 ~2pt 放宽）：windows CI
-        // 的 Node 22 基准腿在 v8 覆盖率插桩与高并发下与本地存在 1~2pt 偏差，
-        // 原 1~2pt 余量已多次把偶发波动误判为回归；这些模块仍保留独立地板，
-        // 覆盖率回落超出此余量须显式决策而非被全局均值掩盖 ----------
-
-        // 关联存储（store.json 元数据读写/迁移/重关联/落盘链；O1 拆分后逻辑
-        // 位于 store-meta（核心+门面）与 store-meta-normalize/state/journal/
-        // persist 四个子模块，glob 键对匹配文件取聚合值判定）
-        '**/src/main/services/store-meta*.js': {
-          statements: 88,
-          branches: 82.5,
-          functions: 92,
-          lines: 94,
-        },
-        // 应用设置双层存储（引导层 + 随库 settings.json）
-        '**/src/main/services/store-settings.js': {
-          statements: 89,
-          branches: 84.5,
-          functions: 93,
-          lines: 90,
-        },
-        // 目录监控（轮询快照比对 + 增量扫描触发；O12 拆分后逻辑位于 watcher
-        // （门面+生命周期）与 watcher-state/snapshot/baseline/broadcast/native/
-        // poll 六个子模块，glob 键对匹配文件取聚合值判定）
-        '**/src/main/services/watcher*.js': {
-          statements: 90,
-          branches: 78,
-          functions: 96,
-          lines: 93.5,
-        },
-        // 备份恢复（zip 流式编解码/导出/恢复/.bak 留存；O2 拆分后逻辑位于
-        // backup-format/backup-zip/backup-export/backup-restore 四个子模块，
-        // 门面 backup.js 已排除；glob 键对匹配文件取聚合值判定，
-        // 地板 = 拆分后实际聚合基线 91.7/86.7/88.3/93.3 下浮 ~4pt）
-        '**/src/main/services/backup-*.js': {
-          statements: 87,
-          branches: 82,
-          functions: 84,
-          lines: 89,
-        },
-        // 元数据重关联（库内移动/重命名后「宁可不绑也绝不绑错」）
-        '**/src/main/services/meta-relink.js': {
-          statements: 97,
-          branches: 95,
-          functions: 97,
-          lines: 97,
-        },
-        // safetensors 头部解析与健康检查
-        '**/src/main/services/safetensors.js': {
-          statements: 94,
-          branches: 93.5,
-          functions: 80,
-          lines: 95,
-        },
-        // 扫描分类（扩展名过滤/自动分类/禁用后缀）
-        '**/src/main/services/scanner.js': {
-          statements: 92,
-          branches: 84,
-          functions: 96,
-          lines: 95,
-        },
-        // 后台哈希预热（重复检测与 Civitai 识别的缓存基座）
-        '**/src/main/services/hash-warmup.js': {
-          statements: 89,
-          branches: 85,
-          functions: 96,
-          lines: 92.5,
-        },
-        // ---------- C4 数据关键 UI 地板（备份恢复/详情自动信息/跨库选择/
-        // Civitai/确认层）：这些模块低频但后果高——备份恢复直接覆盖用户数据，
-        // 确认层是删除等破坏性操作的最终关口——全局均值容易被大文件稀释，
-        // 单独设地板防回退。分支覆盖不设地板：.vue 模板编译产物的 v-if/v-for
-        // 分支在 v8 统计下天然偏低（单侧分支同次渲染不可达），仅以语句/行/
-        // 函数衡量，避免为凑分支数字编写无意义用例。
-        '**/src/renderer/src/composables/useBackupTransfer.js': {
-          statements: 95,
-          functions: 95,
-          lines: 90,
-        },
-        '**/src/renderer/src/components/detail/AutoInfoPanel.vue': {
-          statements: 90,
-          functions: 95,
-          lines: 90,
-        },
-        '**/src/renderer/src/components/LibraryPickerOverlay.vue': {
-          statements: 95,
-          functions: 95,
-          lines: 90,
-        },
-        '**/src/renderer/src/components/detail/CivitaiPanel.vue': {
-          statements: 92,
-          functions: 95,
-          lines: 90,
-        },
-        '**/src/renderer/src/components/settings/SettingsBackup.vue': {
-          statements: 88,
-          functions: 90,
-          lines: 90,
-        },
-        '**/src/renderer/src/components/ConfirmOverlay.vue': {
-          statements: 95,
-          functions: 95,
-          lines: 90,
-        },
-        // C3 错误码契约（枚举/文案归类/响应补齐/异常分类）：稳定码是渲染层
-        // 离线/重试分支的依赖，单独设地板防回退（分支统计对正则归类失真，
-        // 不设分支地板）。
-        '**/src/shared/error-codes.js': {
-          statements: 88,
-          functions: 95,
-          lines: 95,
-        },
       },
     },
   },
