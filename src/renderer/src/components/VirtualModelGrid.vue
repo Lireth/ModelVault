@@ -13,7 +13,7 @@ import { useVirtualScroll } from '../composables/useVirtualScroll'
  *   二维键盘导航；
  * - 列数/列宽复刻原 .model-grid 的 repeat(auto-fill, minmax(...)) 行为，
  *   行高（卡片实际高度 + 行间距）在渲染后按真实卡片校准；
- * - 滚动事件挂在最近的滚动祖先（.content）上，页面其余部分滚动行为不变。
+ * - 滚动事件挂在最近的滚动祖先（App 的 .content-scroll）上，页面其余部分滚动行为不变。
  */
 
 const props = defineProps({

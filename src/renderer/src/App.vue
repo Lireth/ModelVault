@@ -53,6 +53,30 @@ const StatsPage = defineAsyncComponent(
  */
 
 const toolbarRef = ref(null)
+// .content-scroll 滚动区引用：驱动返回顶部按钮的显隐与滚动复位
+const scrollEl = ref(null)
+
+/* ---------------- 返回顶部按钮（U-滚动） ---------------- */
+
+/** 滚动超过该距离（px）才显示按钮，避免顶部误触 */
+const BACK_TOP_THRESHOLD = 240
+const showBackTop = ref(false)
+let backTopRafId = 0
+
+/** 滚动事件 rAF 合帧：同一帧多次事件只取最后位置驱动显隐 */
+function onContentScroll() {
+  if (backTopRafId) return
+  backTopRafId = requestAnimationFrame(() => {
+    backTopRafId = 0
+    showBackTop.value = (scrollEl.value?.scrollTop || 0) > BACK_TOP_THRESHOLD
+  })
+}
+
+/** 平滑滚回顶部；虚拟滚动随 scroll 事件逐帧收敛，锚捕获同步更新 */
+function backToTop() {
+  scrollEl.value?.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
 // 搜索框 DOM 引用与清空动作由 LibraryToolbar 持有（搜索防抖状态随其生灭），
 // 经 defineExpose 转供给全局快捷键：Ctrl+F 聚焦 / Esc 逐层退出的清空搜索。
 // 快捷键读取时机为按键时（惰性求值），工具行未挂载（面板打开/无文件夹）时为
@@ -106,6 +130,8 @@ function onWindowDrop(e) {
 onMounted(async () => {
   window.addEventListener('dragover', onWindowDragOver)
   window.addEventListener('drop', onWindowDrop)
+  // 返回顶部按钮：监听内容区滚动（rAF 合帧，仅驱动显隐）
+  scrollEl.value?.addEventListener('scroll', onContentScroll, { passive: true })
   // 订阅主进程事件（扫描进度/菜单动作/缩略图/落盘失败/目录变更/哈希预热）
   mainEvents.subscribe()
   await initApp()
@@ -115,6 +141,9 @@ onUnmounted(() => {
   window.removeEventListener('dragover', onWindowDragOver)
   window.removeEventListener('drop', onWindowDrop)
   mainEvents.unsubscribeAll()
+  // 返回顶部：清理滚动监听与未完成的 rAF 合帧
+  scrollEl.value?.removeEventListener('scroll', onContentScroll)
+  if (backTopRafId) cancelAnimationFrame(backTopRafId)
 })
 </script>
 
@@ -126,12 +155,10 @@ onUnmounted(() => {
       <Sidebar />
 
       <main class="content">
-        <!-- 库统计页 / 设置页面：占用模型预览区位置（互斥） -->
-        <StatsPage v-if="state.statsOpen" />
-        <SettingsPage v-else-if="state.settingsOpen" />
-
-        <!-- 模型预览区 -->
-        <template v-else>
+        <!-- 模型视图固定区（仅模型视图渲染）：状态横幅与工具行常驻不滚动，
+             滚动仅发生在下方 .content-scroll——列表内容不会经过工具行背后，
+             无需玻璃遮罩（替代旧 sticky 吸附方案） -->
+        <template v-if="!state.statsOpen && !state.settingsOpen">
           <!-- 离线横幅（F1-offline 双形态之一）：库路径失效但有缓存模型可展示时
                顶部提示（区别于金色 scan-error-bar 的普通扫描失败）；空库时的
                全屏形态由 LibraryStates 离线分支承担 -->
@@ -173,49 +200,86 @@ onUnmounted(() => {
             ref="toolbarRef"
           />
 
-          <!-- 启动/引导/扫描/失败/空库五态互斥；库中有模型时渲染默认插槽 -->
-          <LibraryStates>
-            <!-- 筛选 chips（重复/LoRA/基底/标签） -->
-            <ResultBar />
-
-            <!-- 多选批量操作栏（E4/E6，O9 拆分为 BatchBar）：
-                 位于多选开关所在的结果行与模型清单之间，靠近操作对象 -->
-            <BatchBar />
-
-            <!-- 批量失败明细条（B20/F3）：仅在最近一次批量操作有逐项失败时出现，
-                 全成功不打扰；可展开定位、可重选失败项后用批量栏重试 -->
-            <BatchFailuresBar />
-
-            <!-- 空结果（有筛选条件时保留结果栏，便于切换分类/取消收藏筛选/清空搜索） -->
-            <div v-if="filteredModels.length === 0" class="empty-state">
-              <div class="empty-icon" aria-hidden="true">
-                <svg
-                  viewBox="0 0 24 24"
-                  width="52"
-                  height="52"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  stroke-linecap="round"
-                >
-                  <circle cx="10.5" cy="10.5" r="6.5" />
-                  <path d="M15.3 15.3 20.5 20.5" />
-                </svg>
-              </div>
-              <h2>没有匹配的模型</h2>
-              <p class="muted">
-                当前筛选或搜索条件下没有模型，试试切换分类、取消「收藏」筛选或清空搜索词。
-              </p>
-            </div>
-
-            <!-- 模型列表区：网格/紧凑列表双视图，虚拟滚动仅渲染视口附近行 -->
-            <VirtualModelGrid
-              v-if="state.viewMode === 'grid'"
-              :models="filteredModels"
-            />
-            <VirtualModelList v-else :models="filteredModels" />
-          </LibraryStates>
+          <!-- 返回顶部（U-滚动）：工具行常驻后深位浏览的快速回顶补充。
+               固定于内容区右下角，滚动超过阈值淡入（onContentScroll），
+               点击平滑回顶；仅模型视图渲染 -->
+          <button
+            class="back-top"
+            :class="{ visible: showBackTop }"
+            title="返回顶部"
+            aria-label="返回顶部"
+            @click="backToTop"
+          >
+            <svg
+              viewBox="0 0 16 16"
+              width="15"
+              height="15"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M8 13V3.5" />
+              <path d="M4.5 7 8 3.5 11.5 7" />
+            </svg>
+          </button>
         </template>
+
+        <!-- 滚动区：统计/设置/模型视图共用的唯一滚动容器
+             （useVirtualScroll 经 overflow-y 向上查找定位到此处） -->
+        <div ref="scrollEl" class="content-scroll">
+          <!-- 库统计页 / 设置页面：占用模型预览区位置（互斥），内部自带滚动 -->
+          <StatsPage v-if="state.statsOpen" />
+          <SettingsPage v-else-if="state.settingsOpen" />
+
+          <!-- 模型预览区 -->
+          <template v-else>
+            <!-- 启动/引导/扫描/失败/空库五态互斥；库中有模型时渲染默认插槽 -->
+            <LibraryStates>
+              <!-- 筛选 chips（重复/LoRA/基底/标签） -->
+              <ResultBar />
+
+              <!-- 多选批量操作栏（E4/E6，O9 拆分为 BatchBar）：
+                   位于多选开关所在的结果行与模型清单之间，靠近操作对象 -->
+              <BatchBar />
+
+              <!-- 批量失败明细条（B20/F3）：仅在最近一次批量操作有逐项失败时出现，
+                   全成功不打扰；可展开定位、可重选失败项后用批量栏重试 -->
+              <BatchFailuresBar />
+
+              <!-- 空结果（有筛选条件时保留结果栏，便于切换分类/取消收藏筛选/清空搜索） -->
+              <div v-if="filteredModels.length === 0" class="empty-state">
+                <div class="empty-icon" aria-hidden="true">
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="52"
+                    height="52"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.3"
+                    stroke-linecap="round"
+                  >
+                    <circle cx="10.5" cy="10.5" r="6.5" />
+                    <path d="M15.3 15.3 20.5 20.5" />
+                  </svg>
+                </div>
+                <h2>没有匹配的模型</h2>
+                <p class="muted">
+                  当前筛选或搜索条件下没有模型，试试切换分类、取消「收藏」筛选或清空搜索词。
+                </p>
+              </div>
+
+              <!-- 模型列表区：网格/紧凑列表双视图，虚拟滚动仅渲染视口附近行 -->
+              <VirtualModelGrid
+                v-if="state.viewMode === 'grid'"
+                :models="filteredModels"
+              />
+              <VirtualModelList v-else :models="filteredModels" />
+            </LibraryStates>
+          </template>
+        </div>
       </main>
     </div>
 
@@ -281,10 +345,23 @@ onUnmounted(() => {
 
 .content {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px 0;
+  min-height: 0;
+  align-content: start;
+}
+
+/* 滚动区：唯一滚动容器（模型列表/统计/设置共用）。工具行位于其上方常驻，
+   列表内容不会滚动到工具行背后；底部内边距随内容滚动，滚到底时留出空隙 */
+.content-scroll {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   /* 预留滚动条空间，避免滚动条出现/消失时模块左右错位 */
   scrollbar-gutter: stable;
-  padding: 20px 24px;
+  padding-bottom: 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -420,5 +497,53 @@ onUnmounted(() => {
   flex-shrink: 0;
   font-size: var(--font-xs);
   padding: 3px 12px;
+}
+
+/* ---------- 返回顶部按钮（U-滚动）：玻璃圆钮与标题栏/浮条质感一致 ---------- */
+.back-top {
+  position: fixed;
+  right: 24px;
+  /* 悬浮于底栏（约 36px 高）上方，与导入浮条（居中）错开 */
+  bottom: 52px;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--glass-border);
+  border-radius: 50%;
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: var(--shadow-lg);
+  /* 低于详情浮层（--z-detail: 100）/通知，高于页面内容 */
+  z-index: calc(var(--z-detail) - 10);
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+/* 滚动超过阈值（onContentScroll）时淡入；隐藏态拦截指针避免误触 */
+.back-top.visible {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.back-top:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.back-top:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 </style>

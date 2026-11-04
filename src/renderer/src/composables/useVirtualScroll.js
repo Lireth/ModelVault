@@ -85,7 +85,7 @@ export function useVirtualScroll(opts) {
   let scroller = null
   let resizeObserver = null
 
-  /** 向上查找最近的滚动容器（.content） */
+  /** 向上查找最近的滚动容器（.content-scroll，App 布局的唯一滚动区） */
   function findScrollParent(el) {
     let node = el?.parentElement
     while (node) {

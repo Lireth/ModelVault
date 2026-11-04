@@ -336,7 +336,7 @@ function onListKeydown(e) {
   min-height: 0;
 }
 
-/* 表头：吸附滚动容器顶部（.content 为滚动祖先），玻璃底压住行内容 */
+/* 表头：吸附滚动容器顶部（App 的 .content-scroll 为滚动祖先），玻璃底压住行内容 */
 .list-header {
   position: sticky;
   top: 0;
