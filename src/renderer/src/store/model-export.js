@@ -84,10 +84,41 @@ export function buildExportRows(models) {
   })
 }
 
-/** CSV 单元格转义（逗号/引号/换行） */
-function csvCell(value) {
+/**
+ * 公式注入危险起始字符（CSV injection）：= + - @ 以及 Tab/CR。
+ * Excel/Sheets 等表格软件会把这类起始内容当公式或 DDE 命令执行，
+ * 因此自由文本命中时必须前置单引号使其按文本呈现。
+ */
+const CSV_FORMULA_PREFIX = /^[=+\-@\t\r]/
+
+/**
+ * 合法数值字面量（含正负号、小数与科学计数法）：-1、+5、.5、1.、1e3、
+ * -1.25E-3 均命中；空串、'-'、'+'、异常串不命中。数值列命中该规则时
+ * 按数值原样输出，避免负数/科学计数法被公式注入中和误伤。
+ */
+const CSV_NUMERIC = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/
+
+/**
+ * 数值列下标（0 基）：5=文件大小(字节)、7=评分。列序是导出契约（表头与
+ * 列顺序不得改动），故以固定下标标注；其余列一律按自由文本中和。
+ */
+const CSV_NUMERIC_COLUMNS = new Set([5, 7])
+
+/**
+ * CSV 单元格转义（逗号/引号/换行 + 公式注入中和）。
+ * 自由文本命中危险前缀时前置单引号，再按原有规则做引号转义——前缀落在
+ * 引号内，不破坏 `""` 转义与 `\r\n` 记录分隔；正常文本逐字节不变。
+ * 数值列仅在值为合法数值时原样输出（负数/科学计数法不被误伤），
+ * 非数值的异常内容仍按自由文本中和。null/undefined 输出空单元格。
+ * @param {any} value 原始值
+ * @param {boolean} [numeric] 是否为数值列
+ * @returns {string} 转义后的单元格
+ */
+function csvCell(value, numeric = false) {
   const text = value === null || value === undefined ? '' : String(value)
-  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+  const keepNumeric = numeric && text !== '' && CSV_NUMERIC.test(text)
+  const safe = !keepNumeric && CSV_FORMULA_PREFIX.test(text) ? `'${text}` : text
+  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe
 }
 
 /** Markdown 单元格转义（竖线/换行） */
@@ -120,7 +151,7 @@ export function buildCsv(rows) {
     '文件路径',
     'Civitai链接',
   ]
-  const lines = [header.map(csvCell).join(',')]
+  const lines = [header.map((cell) => csvCell(cell)).join(',')]
   for (const row of rows) {
     lines.push(
       [
@@ -141,7 +172,7 @@ export function buildCsv(rows) {
         row.path,
         row.civitaiUrl,
       ]
-        .map(csvCell)
+        .map((cell, column) => csvCell(cell, CSV_NUMERIC_COLUMNS.has(column)))
         .join(','),
     )
   }

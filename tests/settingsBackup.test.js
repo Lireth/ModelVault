@@ -9,6 +9,10 @@ import {
   replaceModels,
   state,
 } from '../src/renderer/src/store/appStore'
+import {
+  buildCsv,
+  buildExportRows,
+} from '../src/renderer/src/store/model-export'
 import { setupComponentTest } from './helpers/componentTest'
 
 /**
@@ -358,5 +362,153 @@ describe('SettingsBackup 全库示例图清理', () => {
     await wrapper.find('input.switch').setValue(false)
     expect(form.autoBackup).toBe(false)
     wrapper.unmount()
+  })
+})
+
+/** CSV 表头（导出列序是契约，O-4 不得改动） */
+const CSV_HEADER = [
+  '名称',
+  '别名',
+  '分类',
+  '二级分类',
+  '基底模型',
+  '文件大小(字节)',
+  '修改时间',
+  '评分',
+  '收藏',
+  'NSFW',
+  '标签',
+  '触发词',
+  '推荐参数',
+  '备注',
+  '文件路径',
+  'Civitai链接',
+]
+
+/**
+ * 最小 RFC4180 解析器（仅用于回读断言）：记录分隔为 CRLF，引号内的
+ * 逗号/换行原样保留，`""` 还原为单个 `"`。
+ * @param {string} text CSV 文本（可带 BOM）
+ * @returns {string[][]} 记录数组
+ */
+function parseCsv(text) {
+  const body = text.startsWith('\uFEFF') ? text.slice(1) : text
+  const rows = []
+  let row = []
+  let field = ''
+  let quoted = false
+  for (let i = 0; i < body.length; i += 1) {
+    const ch = body[i]
+    if (quoted) {
+      if (ch === '"') {
+        if (body[i + 1] === '"') {
+          field += '"'
+          i += 1
+        } else {
+          quoted = false
+        }
+      } else {
+        field += ch
+      }
+      continue
+    }
+    if (ch === '"') quoted = true
+    else if (ch === ',') {
+      row.push(field)
+      field = ''
+    } else if (ch === '\r' && body[i + 1] === '\n') {
+      row.push(field)
+      rows.push(row)
+      row = []
+      field = ''
+      i += 1
+    } else {
+      field += ch
+    }
+  }
+  return rows
+}
+
+/** 用 buildExportRows 生成一行，仅覆盖指定模型字段 */
+function csvRow(overrides = {}) {
+  const [row] = buildExportRows([
+    {
+      id: 'm1',
+      name: 'm1',
+      type: 'checkpoint',
+      size: 1000,
+      mtimeMs: 0,
+      alias: '',
+      note: '',
+      triggerWords: '',
+      tags: [],
+      ...overrides,
+    },
+  ])
+  return row
+}
+
+describe('CSV 导出公式注入中和（O-4）', () => {
+  it('自由文本危险前缀被前置单引号中和（= + - @ Tab CR）', () => {
+    const cases = [
+      { field: 'name', text: "=cmd|' /C calc'!A0", column: 0 },
+      { field: 'name', text: '+1+1', column: 0 },
+      { field: 'name', text: '@SUM(A1)', column: 0 },
+      { field: 'alias', text: '-1', column: 1 },
+      { field: 'alias', text: '\tTAB', column: 1 },
+      { field: 'note', text: '\rCR', column: 13 },
+    ]
+    for (const { field, text, column } of cases) {
+      const parsed = parseCsv(buildCsv([csvRow({ [field]: text })]))
+      expect(parsed).toHaveLength(2)
+      expect(parsed[1][column]).toBe(`'${text}`)
+    }
+  })
+
+  it('正常文本逐字节等价输出，BOM/CRLF/表头列序保持不变', () => {
+    const csv = buildCsv([
+      csvRow({ name: '普通模型', alias: 'abc', note: '中文备注' }),
+    ])
+    const parsed = parseCsv(csv)
+    expect(parsed[0]).toEqual(CSV_HEADER)
+    expect(parsed).toHaveLength(2)
+    expect(parsed[1]).toHaveLength(CSV_HEADER.length)
+    expect(parsed[1][0]).toBe('普通模型')
+    expect(parsed[1][1]).toBe('abc')
+    expect(parsed[1][13]).toBe('中文备注')
+    // 未触发中和：输出中没有任何单引号
+    expect(csv).not.toContain("'")
+    expect(csv.startsWith('\uFEFF')).toBe(true)
+    expect(csv.endsWith('\r\n')).toBe(true)
+    expect(csv.split('\r\n')).toHaveLength(3)
+  })
+
+  it('数值列负数/科学计数法保持原样，不被公式前缀误伤', () => {
+    const numericStrings = {
+      ...csvRow({ size: -1000, rating: -1 }),
+      sizeBytes: '-1e3',
+      rating: '+5',
+    }
+    const parsed = parseCsv(
+      buildCsv([csvRow({ size: -1000, rating: -1 }), numericStrings]),
+    )
+    expect(parsed[1][5]).toBe('-1000')
+    expect(parsed[1][7]).toBe('-1')
+    expect(parsed[2][5]).toBe('-1e3')
+    expect(parsed[2][7]).toBe('+5')
+    // 同样的 -1 出现在自由文本列（别名）仍按注入文本中和
+    expect(parseCsv(buildCsv([csvRow({ alias: '-1' })]))[1][1]).toBe("'-1")
+  })
+
+  it('含逗号/引号/换行的自由文本加前缀后仍是合法 CSV（解析回读一致）', () => {
+    const text = '=1,"quoted"\nline,next'
+    const csv = buildCsv([csvRow({ name: text })])
+    const parsed = parseCsv(csv)
+    expect(parsed).toHaveLength(2)
+    expect(parsed[1]).toHaveLength(CSV_HEADER.length)
+    expect(parsed[1][0]).toBe(`'${text}`)
+    // 前缀落在引号内，原双引号按原有规则翻倍；\r\n 记录分隔未被破坏
+    expect(csv).toContain(`"'=1,""quoted""\nline,next"`)
+    expect(csv.split('\r\n')).toHaveLength(3)
   })
 })
