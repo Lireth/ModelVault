@@ -32,7 +32,12 @@ import {
   splitModelFileName,
 } from '../src/main/ipc/models/files'
 import { registerMiscHandlers } from '../src/main/ipc/models/misc'
-import { getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
+import {
+  getRegisteredHandler,
+  makeEvent,
+  makeWindow,
+} from './helpers/modelsIpc'
+import { BrowserWindow } from 'electron'
 import {
   getModelMeta,
   loadData,
@@ -311,6 +316,7 @@ describe('F2 模型导入（复制/移动入台）', () => {
     registerFilesHandlers()
     handler = getRegisteredHandler('models:importModels')
     vi.mocked(dialog.showOpenDialog).mockReset()
+    vi.mocked(BrowserWindow.fromWebContents).mockReset()
   })
 
   async function makeSource(name = 'a.safetensors', content = 'model-data') {
@@ -355,6 +361,82 @@ describe('F2 模型导入（复制/移动入台）', () => {
       fs.readFile(path.join(target, 'a.preview.png'), 'utf-8'),
     ).resolves.toBe('png')
     await expect(fs.access(source)).resolves.toBeUndefined()
+  })
+
+  it('导入进度事件：推送 done/total/字节与最终快照（OPT-02）', async () => {
+    const win = makeWindow()
+    vi.mocked(BrowserWindow.fromWebContents).mockReturnValue(win)
+    const source = await makeSource('progress.safetensors', 'model-data')
+    const target = path.join(root, 'lora')
+    await fs.mkdir(target, { recursive: true })
+    mockDialogs([source], target)
+
+    const res = await handler(makeEvent(win), { mode: 'copy' })
+
+    expect(res.imported).toBe(1)
+    const events = win.webContents.send.mock.calls
+      .filter((call) => call[0] === 'models:importProgress')
+      .map((call) => call[1])
+    expect(events.length).toBeGreaterThan(0)
+    expect(events.at(-1)).toMatchObject({
+      done: 1,
+      total: 1,
+      fileName: '',
+      canceled: false,
+    })
+    expect(events.at(-1).bytes).toBeGreaterThan(0)
+    expect(events.at(-1).totalBytes).toBeGreaterThan(0)
+  })
+
+  it('磁盘预检：目标卷空间不足时拒绝且不写目标文件（OPT-02）', async () => {
+    const source = await makeSource('disk-full.safetensors', 'x'.repeat(64))
+    const target = path.join(root, 'lora')
+    await fs.mkdir(target, { recursive: true })
+    mockDialogs([source], target)
+    const statfsSpy = vi
+      .spyOn(fs, 'statfs')
+      .mockResolvedValue({ bsize: 1, bavail: 1 })
+
+    try {
+      const res = await handler(makeEvent(), { mode: 'copy' })
+      expect(res.error).toContain('目标磁盘空间不足')
+      expect(res.neededBytes).toBe(64)
+      expect(res.freeBytes).toBe(1)
+      await expect(
+        fs.access(path.join(target, 'disk-full.safetensors')),
+      ).rejects.toThrow()
+    } finally {
+      statfsSpy.mockRestore()
+    }
+  })
+
+  it('取消导入：opId 经 cancelOp 中止，返回 canceled 且不写目标文件（OPT-02）', async () => {
+    registerMiscHandlers()
+    const win = makeWindow()
+    vi.mocked(BrowserWindow.fromWebContents).mockReturnValue(win)
+    const source = await makeSource(
+      'cancel-import.safetensors',
+      Buffer.alloc(1024 * 1024),
+    )
+    const target = path.join(root, 'lora')
+    await fs.mkdir(target, { recursive: true })
+    mockDialogs([source], target)
+
+    const pending = handler(makeEvent(win), {
+      mode: 'copy',
+      opId: 'import-cancel-token',
+    })
+    const cancelRes = await getRegisteredHandler('models:cancelOp')(
+      makeEvent(),
+      { targetOpId: 'import-cancel-token' },
+    )
+    expect(cancelRes).toEqual({ ok: true })
+
+    const res = await pending
+    expect(res.canceled).toBe(true)
+    await expect(
+      fs.access(path.join(target, 'cancel-import.safetensors')),
+    ).rejects.toThrow()
   })
 
   it('移动导入：源模型与 sidecar 移走，源位置不存在', async () => {

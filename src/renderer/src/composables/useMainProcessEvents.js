@@ -27,6 +27,7 @@ export function useMainProcessEvents() {
   let unsubscribeUpdateAvailable = null
   let unsubscribeWatcherStopped = null
   let unsubscribeTransferProgress = null
+  let unsubscribeImportProgress = null
 
   /** 目录变更自动重扫的二级防抖（主进程 3s 静默期后此处再缓冲 1s，E8） */
   let fsChangedTimer = null
@@ -149,6 +150,20 @@ export function useMainProcessEvents() {
         if (transferState.busy) transferState.progress = progress
       },
     )
+    // 订阅模型导入进度事件（OPT-02）：全局导入浮条读取快照；
+    // 无进行中导入时忽略迟到事件（importModels finally 会置 null）
+    unsubscribeImportProgress = window.api.models.onImportProgress?.(
+      (progress) => {
+        if (!state.importing) return
+        // 保留本地「取消中」标记：主进程事件到达前取消按钮不得回弹为可点击
+        state.importProgress = {
+          ...progress,
+          canceling:
+            state.importProgress?.canceling === true ||
+            progress.canceled === true,
+        }
+      },
+    )
   }
 
   function unsubscribeAll() {
@@ -162,6 +177,7 @@ export function useMainProcessEvents() {
     unsubscribeUpdateAvailable?.()
     unsubscribeWatcherStopped?.()
     unsubscribeTransferProgress?.()
+    unsubscribeImportProgress?.()
   }
   return { subscribe, unsubscribeAll }
 }

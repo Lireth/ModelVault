@@ -65,7 +65,8 @@ async function onImportModels(mode) {
         <span class="setting-title">导入模型文件</span>
         <span class="setting-desc">
           从本机任意位置选择模型文件，复制或移动入台；同名 sidecar（说明/预览图/
-          civitai.info）一并搬运，重名自动追加编号，不覆盖库内文件
+          civitai.info）一并搬运，重名自动追加编号，不覆盖库内文件。导入前
+          预检目标磁盘空间，导入中显示全局进度并支持取消，未完成文件自动清理
         </span>
       </div>
       <div class="setting-actions">

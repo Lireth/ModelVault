@@ -23,6 +23,7 @@ import VirtualModelList from './components/VirtualModelList.vue'
 import { useGlobalShortcuts } from './composables/useGlobalShortcuts'
 import { useMainProcessEvents } from './composables/useMainProcessEvents'
 import {
+  cancelImport,
   filteredModels,
   initApp,
   relocateFolder,
@@ -57,6 +58,23 @@ const toolbarRef = ref(null)
 // 快捷键读取时机为按键时（惰性求值），工具行未挂载（面板打开/无文件夹）时为
 // null，与 useGlobalShortcuts 的空值守卫语义一致
 const searchFieldEl = computed(() => toolbarRef.value?.searchFieldEl || null)
+
+/** OPT-02：导入进度百分比（优先按字节，未知体积时按条目） */
+const importPercent = computed(() => {
+  const p = state.importProgress
+  if (!p) return 0
+  if (Number.isFinite(p.totalBytes) && p.totalBytes > 0) {
+    return Math.min(100, Math.round(((p.bytes || 0) / p.totalBytes) * 100))
+  }
+  if (Number.isFinite(p.total) && p.total > 0) {
+    return Math.min(100, Math.round(((p.done || 0) / p.total) * 100))
+  }
+  return 0
+})
+/** 取消请求已发出（等待主进程清理当前未完成文件） */
+const importCancelPending = computed(() =>
+  Boolean(state.importProgress?.canceled || state.importProgress?.canceling),
+)
 
 function clearSearch() {
   toolbarRef.value?.clearSearch()
@@ -209,6 +227,43 @@ onUnmounted(() => {
     <ModelCompare />
     <ToastHost />
 
+    <!-- OPT-02：模型导入任务浮条（全局可见）：进度 + 取消；关闭设置页后
+         仍可中止，已完成条目保留，当前未完成目标由主进程清理 -->
+    <div
+      v-if="
+        state.importing &&
+        state.importProgress &&
+        state.importProgress.total > 0
+      "
+      class="import-progress"
+      role="status"
+      aria-live="polite"
+    >
+      <div class="import-progress-main">
+        <span class="import-progress-title">
+          导入模型 {{ state.importProgress.done }}/{{
+            state.importProgress.total
+          }}
+          <template v-if="state.importProgress.fileName">
+            · {{ state.importProgress.fileName }}</template
+          >
+        </span>
+        <div class="import-progress-track">
+          <div
+            class="import-progress-fill"
+            :style="{ width: `${importPercent}%` }"
+          ></div>
+        </div>
+      </div>
+      <button
+        class="btn import-progress-cancel"
+        :disabled="importCancelPending"
+        @click="cancelImport"
+      >
+        {{ importCancelPending ? '取消中…' : '取消导入' }}
+      </button>
+    </div>
+
     <!-- 自定义确认层（U4，O9 拆分为 ConfirmOverlay 组件）：
          替代 window.confirm，覆盖区不包含标题栏（保持窗口控制可达） -->
     <ConfirmOverlay />
@@ -310,5 +365,60 @@ onUnmounted(() => {
 .scan-error-retry:hover {
   background: var(--favorite);
   color: var(--on-accent);
+}
+
+/* ---------- 导入任务浮条（OPT-02）：进度/文件名/取消 ---------- */
+.import-progress {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 48px));
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px 14px;
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-toast);
+}
+
+.import-progress-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.import-progress-title {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-progress-track {
+  height: 4px;
+  background: var(--border);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.import-progress-fill {
+  height: 100%;
+  background: var(--accent-grad);
+  transition: width var(--dur-fast) var(--ease-out);
+}
+
+.import-progress-cancel {
+  flex-shrink: 0;
+  font-size: var(--font-xs);
+  padding: 3px 12px;
 }
 </style>

@@ -137,7 +137,8 @@ const api = {
      *   imported:number,renamed:number,failed:object[],warnings:string[]} |
      *   {canceled:true} | {error:string}>}
      */
-    importModels: (mode) => invokeValidated('models:importModels', { mode }),
+    importModels: (mode, opId) =>
+      invokeValidated('models:importModels', opId ? { mode, opId } : { mode }),
     /**
      * 局部增量扫描（A-03）：只扫描指定变更子树，返回这些子树的模型现状。
      * payload 为 { folder, dirs }（dirs 为 POSIX 相对目录数组，'' 为根直属）
@@ -245,6 +246,10 @@ const api = {
     /** 订阅跨库传输进度事件（OPT-18：{ done, total, bytes, totalBytes, canceled? }） */
     onTransferProgress: (listener) =>
       subscribe('models:transferProgress', listener),
+    /** 订阅模型导入进度事件（OPT-02：{ done, total, bytes, totalBytes,
+     * fileName, canceled? }） */
+    onImportProgress: (listener) =>
+      subscribe('models:importProgress', listener),
     /** 订阅右键菜单动作事件，返回取消监听函数 */
     onMenuAction: (listener) => subscribe('models:menuAction', listener),
     /** 加/去 .disabled 后缀（F10），返回 { path } 或 { error } */

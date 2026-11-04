@@ -456,9 +456,27 @@ export async function moveModelTo(id) {
   return true
 }
 
+/** OPT-02：在途导入取消令牌（models:cancelOp 据此中止分块复制/文件间隙） */
+let activeImportOpId = null
+
+/**
+ * 请求取消在途模型导入：主进程清理当前未完成目标文件，已完成条目保留。
+ * 与跨库传输的取消语义一致，结果由 importModels 的响应兜底。
+ */
+export function cancelImport() {
+  if (!activeImportOpId) return
+  if (state.importProgress) {
+    state.importProgress = { ...state.importProgress, canceling: true }
+  }
+  window.api.models.cancelOp(activeImportOpId).catch(() => {
+    /* 取消通道异常不阻断导入主流程 */
+  })
+}
+
 /**
  * F2：导入外部模型文件（复制/移动入台）。
  * 主进程完成文件搬运后，对目标子树执行局部扫描，让新模型即时入列。
+ * OPT-02：附带 opId 取消令牌；进度经 models:importProgress 事件更新。
  * @param {'copy'|'move'} mode 复制或移动
  * @returns {Promise<boolean>} 是否成功导入至少一个模型
  */
@@ -469,9 +487,36 @@ export async function importModels(mode = 'copy') {
     return false
   }
   state.importing = true
+  const opId =
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`
+  activeImportOpId = opId
+  state.importProgress = {
+    done: 0,
+    total: 0,
+    bytes: 0,
+    totalBytes: 0,
+    fileName: '',
+    canceled: false,
+    canceling: false,
+  }
   try {
-    const res = await window.api.models.importModels(mode)
-    if (res?.canceled) return false
+    const res = await window.api.models.importModels(mode, opId)
+    if (res?.canceled) {
+      const imported = Number.isFinite(res?.imported) ? res.imported : 0
+      if (imported > 0) {
+        toast('warn', `导入已取消（已完成 ${imported} 个，已导入部分保留）`)
+        // 先释放导入标记，再对目标子树做局部扫描（与正常完成路径一致）
+        state.importing = false
+        const { partialScanModels } = await import('./partial-scan')
+        await partialScanModels([res.targetRelDir ?? ''])
+        return true
+      }
+      // 主进程已开始搬运（响应携带 imported 字段）才提示；对话框取消保持静默
+      if (Number.isFinite(res?.imported)) toast('warn', '导入已取消')
+      return false
+    }
     if (res?.error) {
       toast('error', res.error)
       return false
@@ -506,6 +551,8 @@ export async function importModels(mode = 'copy') {
     return false
   } finally {
     state.importing = false
+    state.importProgress = null
+    activeImportOpId = null
   }
 }
 

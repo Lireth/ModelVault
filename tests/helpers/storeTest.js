@@ -55,6 +55,8 @@ export function makeApiMock() {
       warmupHash: vi.fn(() => Promise.resolve({ ok: true })),
       onScanProgress: vi.fn(() => () => {}),
       onWarmupProgress: vi.fn(() => () => {}),
+      onImportProgress: vi.fn(() => () => {}),
+      cancelOp: vi.fn(() => Promise.resolve({ ok: true })),
       onMenuAction: vi.fn(() => () => {}),
       onThumbsReady: vi.fn(() => () => {}),
       onStoreError: vi.fn(() => () => {}),
@@ -86,6 +88,7 @@ export function resetStoreTestState(api) {
   state.backgroundScanning = false
   state.importing = false
   state.partialScanning = false
+  state.importProgress = null
   state.scanError = ''
   // F1-offline：离线态与失效库清单
   state.folderMissing = false

@@ -185,6 +185,7 @@ const EXPECTED_EXPORTS = [
   'renameModel',
   'moveModelTo',
   'importModels',
+  'cancelImport',
 ]
 
 describe('appStore 门面导出契约（A-04）', () => {

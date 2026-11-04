@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { makeApiMock, resetStoreTestState } from './helpers/storeTest'
-import { importModels, state } from '../src/renderer/src/store/appStore'
+import {
+  cancelImport,
+  importModels,
+  state,
+} from '../src/renderer/src/store/appStore'
 
 /**
  * appStoreImport.test.js（ENG-1 自 appStore.test.js 按域拆分，用例内容保持原样）
@@ -32,7 +36,10 @@ describe('F2 模型导入', () => {
     const ok = await importModels('copy')
 
     expect(ok).toBe(true)
-    expect(api.models.importModels).toHaveBeenCalledWith('copy')
+    expect(api.models.importModels).toHaveBeenCalledWith(
+      'copy',
+      expect.any(String),
+    )
     expect(api.models.partialScan).toHaveBeenCalledWith({
       folder: 'D:\\models',
       dirs: ['lora'],
@@ -43,6 +50,52 @@ describe('F2 模型导入', () => {
       ),
     ).toBe(true)
     expect(state.importing).toBe(false)
+  })
+
+  it('取消在途导入：发出 cancelOp，已完成条目保留并局部扫描（OPT-02）', async () => {
+    state.folder = 'D:\\models'
+    let resolveImport
+    api.models.importModels.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveImport = resolve
+        }),
+    )
+    api.models.partialScan.mockResolvedValue({
+      models: [],
+      dirs: ['lora'],
+      relinked: 0,
+    })
+
+    const pending = importModels('copy')
+    // 等 importModels 完成前置检查并真正发出 IPC（拿到 opId）
+    await Promise.resolve()
+    const opId = api.models.importModels.mock.calls[0][1]
+    expect(typeof opId).toBe('string')
+    cancelImport()
+    expect(api.models.cancelOp).toHaveBeenCalledWith(opId)
+    expect(state.importProgress.canceling).toBe(true)
+
+    resolveImport({
+      canceled: true,
+      imported: 1,
+      renamed: 0,
+      failed: [],
+      warnings: [],
+      targetRelDir: 'lora',
+    })
+    expect(await pending).toBe(true)
+    expect(api.models.partialScan).toHaveBeenCalledWith({
+      folder: 'D:\\models',
+      dirs: ['lora'],
+    })
+    expect(state.importing).toBe(false)
+    expect(state.importProgress).toBeNull()
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'warn' && t.text.includes('导入已取消'),
+      ),
+    ).toBe(true)
   })
 
   it('全部失败时不触发局部扫描；扫描中拒绝导入', async () => {

@@ -163,6 +163,9 @@ export const state = shallowReactive({
   backgroundScanning: false,
   // F2：外部模型导入在途（按钮禁用/提示）
   importing: false,
+  // OPT-02：导入任务进度快照（{done,total,bytes,totalBytes,fileName,canceled}），
+  // 由主进程 models:importProgress 事件整体替换；null = 无进行中导入
+  importProgress: null,
   // 局部增量扫描在途（B-01）：与全量 scanning 分离，不显示全屏扫描遮罩，
   // 但同样参与「切库/再次扫描」的互斥判断，避免旧根结果合并进新库。
   partialScanning: false,

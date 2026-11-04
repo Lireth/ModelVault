@@ -81,6 +81,7 @@ export const IPC_EVENT_CHANNELS = Object.freeze([
   'models:warmupProgress',
   'models:watcherStopped',
   'models:transferProgress',
+  'models:importProgress',
 ])
 
 /**
