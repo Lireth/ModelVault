@@ -369,6 +369,108 @@ describe('decorateModels 元数据装饰', () => {
     expect(third).toBe(entry2.decorated)
   })
 
+  // OPT-22 扩展：快照命中时缓存命中路径不再逐封面 fs.access
+  it('thumbs 快照命中时缓存路径零 fs.access（每模型探测 1→0）', async () => {
+    const abs = path.join(root, 'snap-hit.safetensors')
+    await fs.writeFile(abs, 'x')
+    const model = makeModel(abs)
+    await decorateModels([model])
+    const entry = decorateCache.get(abs)
+    expect(entry).toBeTruthy()
+    const thumbsDir = path.join(root, DATA_DIR, 'thumbs')
+    await fs.mkdir(thumbsDir, { recursive: true })
+    const realThumb = path.join(thumbsDir, 'snap.jpg')
+    await fs.writeFile(realThumb, 't')
+    entry.thumbPath = realThumb
+    entry.decorated.coverUrl = 'mvimg://snap'
+
+    const accessSpy = vi.spyOn(fs, 'access')
+    try {
+      const [second] = await decorateModels([{ ...model }])
+      expect(second).toBe(entry.decorated)
+      // 旧实现：每个封面 1 次 access；快照命中后本批次零系统调用
+      expect(accessSpy).not.toHaveBeenCalled()
+    } finally {
+      accessSpy.mockRestore()
+    }
+  })
+
+  // OPT-22 扩展：快照未命中回退原探测路径（缺失仍自愈）
+  it('thumbs 快照未命中时回退 fs.access，缺失引用仍触发重建', async () => {
+    const abs = path.join(root, 'snap-miss.safetensors')
+    await fs.writeFile(abs, 'x')
+    await fs.writeFile(path.join(root, 'snap-miss.preview.png'), 'p')
+    const model = makeModel(abs)
+    const [first] = await decorateModels([model])
+    const entry = decorateCache.get(abs)
+    const ghost = path.join(root, DATA_DIR, 'thumbs', 'ghost.jpg')
+    entry.thumbPath = ghost
+    entry.decorated.coverUrl = 'mvimg://stale'
+
+    const accessSpy = vi.spyOn(fs, 'access')
+    try {
+      const [second] = await decorateModels([{ ...model }])
+      expect(second).not.toBe(first)
+      expect(decorateCache.get(abs).thumbPath).toBe('')
+      expect(accessSpy.mock.calls.some(([p]) => p === ghost)).toBe(true)
+    } finally {
+      accessSpy.mockRestore()
+    }
+  })
+
+  // OPT-22 扩展：目录被清空（readdir ENOENT）时降级并按缺失自愈
+  it('thumbs 目录在扫描前被清空时降级探测并自愈', async () => {
+    const abs = path.join(root, 'snap-wiped.safetensors')
+    await fs.writeFile(abs, 'x')
+    const model = makeModel(abs)
+    await decorateModels([model])
+    const entry = decorateCache.get(abs)
+    const thumbsDir = path.join(root, DATA_DIR, 'thumbs')
+    await fs.mkdir(thumbsDir, { recursive: true })
+    const realThumb = path.join(thumbsDir, 'wiped.jpg')
+    await fs.writeFile(realThumb, 't')
+    entry.thumbPath = realThumb
+    entry.decorated.coverUrl = 'mvimg://wiped'
+    const [reused] = await decorateModels([{ ...model }])
+    expect(reused).toBe(entry.decorated)
+
+    // 模拟外部清空/备份恢复：目录整体消失，快照枚举 ENOENT → 回退 access
+    await fs.rm(thumbsDir, { recursive: true, force: true })
+    const [healed] = await decorateModels([{ ...model }])
+    expect(healed).not.toBe(entry.decorated)
+    expect(decorateCache.get(abs).thumbPath).toBe('')
+  })
+
+  // OPT-22 扩展：枚举抛错（权限等）不得中断扫描，必须降级
+  it('thumbs 快照枚举抛错时降级为逐个探测且不中断装饰', async () => {
+    const abs = path.join(root, 'snap-denied.safetensors')
+    await fs.writeFile(abs, 'x')
+    const model = makeModel(abs)
+    const [first] = await decorateModels([model])
+    const entry = decorateCache.get(abs)
+    entry.thumbPath = path.join(root, DATA_DIR, 'thumbs', 'ghost.jpg')
+    entry.decorated.coverUrl = 'mvimg://stale'
+
+    const readdirSpy = vi
+      .spyOn(fs, 'readdir')
+      .mockRejectedValueOnce(
+        Object.assign(new Error('denied'), { code: 'EACCES' }),
+      )
+    const warnSpy = vi.spyOn(logger, 'warn')
+    try {
+      const [second] = await decorateModels([{ ...model }])
+      expect(second).not.toBe(first)
+      expect(
+        warnSpy.mock.calls.some(([msg]) =>
+          String(msg).includes('缩略图目录枚举失败'),
+        ),
+      ).toBe(true)
+    } finally {
+      readdirSpy.mockRestore()
+      warnSpy.mockRestore()
+    }
+  })
+
   it('取消信号在批间生效：aborted 时抛出 AbortError', async () => {
     const abs = path.join(root, 'e.safetensors')
     await fs.writeFile(abs, 'x')

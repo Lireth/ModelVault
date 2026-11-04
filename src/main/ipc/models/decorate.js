@@ -16,6 +16,7 @@ import {
   getThumbPathDeferred,
   peekThumbHitCache,
   pruneThumbs,
+  readThumbDirSnapshot,
 } from '../../services/thumbs'
 import { createBatchedSender } from './batched-sender'
 import {
@@ -424,10 +425,14 @@ export function resolveCoverSafe(cover) {
  * OPT-22：thumbs 命中缓存（TTL 30s）内「已知存在且路径一致」的缩略图
  * 零探针直接放行——万级库全量重扫的命中路径此前对每封面各付一次
  * fs.access（2 万+ 次系统调用），是重扫耗时中除头部解析外的主要 IO。
+ * 本批次已用 readThumbDirSnapshot 做过一次 thumbs 目录枚举，快照命中的
+ * 文件名同样零探针放行；快照未命中（含并发新增/被清空）仍回退 fs.access，
+ * 因此“坏图自愈”语义与旧实现完全一致。
  * @param {{thumbPath?: string, decorated?: {cover?: string, covers?: Array<{path?: string, thumbPath?: string}>}}} cached 装饰缓存条目
+ * @param {Set<string>|null} thumbNames 本批次 thumbs 目录文件名快照；null 表示枚举不可用
  * @returns {Promise<boolean>} 有缺失引用返回 true
  */
-async function cachedThumbMissing(cached) {
+async function cachedThumbMissing(cached, thumbNames) {
   // [源图路径, 缩略图路径] 对：命中缓存以源图为键，据此查询已知存在性
   const pairs = []
   if (cached.thumbPath) {
@@ -441,6 +446,9 @@ async function cachedThumbMissing(cached) {
     pairs.map(([source, thumbPath]) => {
       const hit = source ? peekThumbHitCache(source) : null
       if (hit && hit.hit && hit.thumbPath === thumbPath) return false
+      // 快照命中：本批次开头枚举到过该文件名，等价于 access 成功；未命中
+      // 一律回退到原探测（新生成/被清空/快照不可用均按旧语义处理）
+      if (thumbNames && thumbNames.has(path.basename(thumbPath))) return false
       return fs.access(thumbPath).then(
         () => false,
         () => true,
@@ -485,8 +493,16 @@ async function statSidecarFacts(id) {
  *   不再一刀切跳过缓存，而是以缓存内记录的 sidecar 家族文件级事实复核——
  *   与文件现状一致则缓存仍然有效（跳过 16MB 级 safetensors 头解析等重装饰），
  *   仅真实变化（或旧缓存无事实记录）的模型走完整重装饰
+ * @param {Set<string>|null} [thumbNames] 本批次 thumbs 目录文件名快照（见
+ *   readThumbDirSnapshot）；用于缓存命中路径的存在性查表，新生成的缩略图
+ *   会就地补进该集合，避免同一批次内重复判定为缺失
  */
-async function decorateOne(model, usedThumbs, forceRefresh = false) {
+async function decorateOne(
+  model,
+  usedThumbs,
+  forceRefresh = false,
+  thumbNames = null,
+) {
   const meta0 = getModelMeta(model.id) || {}
   const cached = decorateCache.get(model.id)
   // 增量扫描缓存命中：mtime 与元数据签名均未变化时复用上次结果
@@ -506,7 +522,7 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
       sidecarVerified = facts === cached.sidecarFacts
     }
     if (sidecarVerified) {
-      if (await cachedThumbMissing(cached)) {
+      if (await cachedThumbMissing(cached, thumbNames)) {
         // A6：引用的缩略图已不存在——丢弃缓存走完整重建（getThumbPathDeferred
         // 会登记缺失缩略图的后台补生成），坏图自愈而不是持续到元数据变化
         decorateCache.delete(model.id)
@@ -563,6 +579,7 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
     covers.map(async (c) => {
       const tp = await getThumbPathDeferred(c.path)
       if (tp) {
+        thumbNames?.add(path.basename(tp))
         usedThumbs.add(path.basename(tp))
         c.thumbPath = tp
         c.thumbUrl = toImageUrl(tp)
@@ -585,6 +602,7 @@ async function decorateOne(model, usedThumbs, forceRefresh = false) {
       ? defaultThumbPath
       : await getThumbPathDeferred(cover)
     if (thumbPath) {
+      thumbNames?.add(path.basename(thumbPath))
       usedThumbs.add(path.basename(thumbPath))
       coverUrl = toImageUrl(thumbPath)
     } else {
@@ -716,6 +734,12 @@ export async function decorateModels(models, signal, opts = {}) {
   // OPT-04：先按当前库规模调整容量，再开始装饰；扩容后整库条目可留在 LRU
   if (adaptCacheSize)
     setDecorateCacheLimit(computeDecorateCacheLimit(models.length))
+  // OPT-22 扩展：批次开始时枚举一次 thumbs 目录，命中缓存路径用文件名查表
+  // 代替逐封面 fs.access。快照只在本次调用内有效：pruneThumbs 在批次末尾
+  // 执行且只删除 usedThumbs 之外的条目，不会清掉本批次已判存在的缩略图；
+  // 枚举失败（ENOENT/权限/离线）得到 null，cachedThumbMissing 自动退回
+  // 原逐个探测，扫描不会因此中断。
+  const thumbNames = await readThumbDirSnapshot()
   // 流式固定并发池（与 scanner/watcher 共用 utils.runWithConcurrency，O-5）：
   // 完成一个补位一个，消除「批内并发、批间串行」的整批等待尾延迟——每批
   // 最慢的模型（多封面逐张 stat + safetensors 头解析）不再拖住同批其余任务。
@@ -725,7 +749,7 @@ export async function decorateModels(models, signal, opts = {}) {
     models,
     async (m, index) => {
       if (signal?.aborted) throw abortError()
-      result[index] = await decorateOne(m, usedThumbs, forceRefresh)
+      result[index] = await decorateOne(m, usedThumbs, forceRefresh, thumbNames)
     },
     DECORATE_BATCH_SIZE,
   )

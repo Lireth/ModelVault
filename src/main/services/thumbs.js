@@ -159,6 +159,31 @@ function thumbFileName(absCover, mtimeMs) {
 }
 
 /**
+ * 取 thumbs 目录的文件名快照（OPT-22 扩展：一次 readdir 替代逐封面 fs.access）。
+ * 文件名由「源图路径哈希 + mtime」唯一决定，因此可用 basename 做存在性判断。
+ * 策略边界：
+ * - 快照只在一次装饰批次内使用，不跨批次复用（跨批次会把「外部删除」的
+ *   陈旧窗口扩大到多次扫描）；
+ * - 快照未命中一律回退到原 fs.access 路径（装饰期内新生成/并发 drain 写入
+ *   的缩略图不会被误判为缺失，只是多一次探测）；
+ * - pruneThumbs 在本批次末尾执行且只删除 usedThumbs 之外的条目，因此本进程
+ *   不会清掉已判定为存在的缩略图；外部进程删除的窗口与旧 access 版一致
+ *   （至多影响当前一轮显示，下一轮快照自然自愈）。
+ * readdir 失败（目录不存在/权限/库根离线）返回 null，调用方降级为逐个探测，
+ * 绝不让枚举错误中断扫描。
+ * @returns {Promise<Set<string>|null>} 文件名集合；不可用时为 null
+ */
+export async function readThumbDirSnapshot() {
+  try {
+    return new Set(await fs.readdir(getThumbsDir()))
+  } catch (err) {
+    if (err?.code !== 'ENOENT')
+      logger.warn(`缩略图目录枚举失败（回退逐个探测）: ${err.message}`)
+    return null
+  }
+}
+
+/**
  * 生成缩略图核心逻辑：读取源图、经隐藏渲染进程缩放编码并写入缓存文件。
  * 解码/缩放/JPEG 编码运行在独立渲染进程（P2 改造）：此前 nativeImage 的
  * createFromBuffer/resize/toJPEG 为同步 API，大封面图会阻塞主进程事件循环
