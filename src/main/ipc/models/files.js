@@ -626,7 +626,11 @@ export function planRenameTarget(id, name) {
   }
   if (base === '.' || base === '..') return { error: '文件名不能为 . 或 ..' }
   const newPath = path.join(path.dirname(id), `${base}${ext}`)
-  if (newPath.toLowerCase() === id.toLowerCase()) return { path: id }
+  // 仅大小写变化（my_lora → My_LoRA）属于真实改名：必须返回新路径，否则处理器
+  // 会把 plan.path === id 当作「名称未变」直接返回成功而不执行 fs.rename。
+  // 大小写不敏感的冲突判定由处理器按 target.toLowerCase() 复核（仅大小写变化
+  // 时目标就是源文件本身，须跳过那一步）。
+  if (newPath === id) return { path: id }
   return { path: newPath }
 }
 

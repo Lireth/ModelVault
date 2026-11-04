@@ -575,6 +575,15 @@ describe('planRenameTarget（N1 重命名目标计算）', () => {
     })
   })
 
+  it('仅大小写变化返回新路径（不得退化为原路径）', () => {
+    expect(planRenameTarget(path.join(dir, 'a.safetensors'), 'A')).toEqual({
+      path: path.join(dir, 'A.safetensors'),
+    })
+    expect(
+      planRenameTarget(path.join(dir, 'my_lora.safetensors'), 'My_LoRA'),
+    ).toEqual({ path: path.join(dir, 'My_LoRA.safetensors') })
+  })
+
   it('空名/非法字符/超长/禁用模型拒绝', () => {
     const id = path.join(dir, 'a.safetensors')
     expect(planRenameTarget(id, '   ').error).toContain('不能为空')
@@ -638,6 +647,65 @@ describe('models:renameModel handler（N1）', () => {
     expect(getModelMeta(newPath)?.note).toBe('标注')
     expect(getModelMeta(id)).toBeNull()
   })
+
+  it('名称完全未变：快速路径直接返回原路径，不触碰文件与标注', async () => {
+    const id = await makeModel()
+
+    const res = await handler(makeEvent(), { id, name: 'a' })
+
+    expect(res).toEqual({ path: id, renamedSidecars: 0, sidecarWarnings: [] })
+    await expect(fs.readFile(id, 'utf8')).resolves.toBe('model-data')
+    expect(getModelMeta(id)?.note).toBe('标注')
+  })
+
+  // 平台假设：Windows/NTFS 大小写不敏感，a → A 是「同源目标」改名；在大小写敏感
+  // 文件系统上该用例退化为普通改名，同一断言仍成立（readdir 返回真实大小写）
+  it('仅大小写变化：真实执行改名并一并迁移 sidecar 与注解键', async () => {
+    const id = await makeModel()
+    await fs.writeFile(path.join(root, 'lora', 'a.txt'), '说明文本')
+    await fs.writeFile(path.join(root, 'lora', 'a.preview.png'), '预览图')
+
+    const res = await handler(makeEvent(), { id, name: 'A' })
+
+    const newPath = path.join(root, 'lora', 'A.safetensors')
+    expect(res).toMatchObject({
+      path: newPath,
+      renamedSidecars: 2,
+      sidecarWarnings: [],
+    })
+    // 用 readdir（返回磁盘真实大小写）断言改名确实发生；大小写不敏感卷上
+    // fs.access(旧路径) 会命中新文件，不能作为「旧名已消失」的依据
+    const names = await fs.readdir(path.join(root, 'lora'))
+    expect(names).toContain('A.safetensors')
+    expect(names).not.toContain('a.safetensors')
+    expect(names).toContain('A.txt')
+    expect(names).toContain('A.preview.png')
+    await expect(fs.readFile(newPath, 'utf8')).resolves.toBe('model-data')
+    await expect(
+      fs.readFile(path.join(root, 'lora', 'A.txt'), 'utf8'),
+    ).resolves.toBe('说明文本')
+    // 标注随相对键（保留原大小写）迁移
+    expect(getModelMeta(newPath)?.note).toBe('标注')
+    expect(getModelMeta(id)).toBeNull()
+  })
+
+  // 仅在大小写不敏感卷上「b.safetensors 已存在」与「B.safetensors 目标」才是
+  // 同一路径；大小写敏感文件系统上二者互不冲突，故跳过
+  it.skipIf(process.platform !== 'win32')(
+    '大小写不敏感卷：改名为已存在文件的大小写变体仍判为冲突',
+    async () => {
+      const id = await makeModel()
+      await fs.writeFile(path.join(root, 'lora', 'b.safetensors'), 'other')
+
+      const res = await handler(makeEvent(), { id, name: 'B' })
+
+      expect(res.error).toBe('目标文件名已存在')
+      await expect(fs.readFile(id, 'utf8')).resolves.toBe('model-data')
+      await expect(
+        fs.readFile(path.join(root, 'lora', 'b.safetensors'), 'utf8'),
+      ).resolves.toBe('other')
+    },
+  )
 
   it('目标文件名已存在时拒绝，源文件保持不变', async () => {
     const id = await makeModel()
