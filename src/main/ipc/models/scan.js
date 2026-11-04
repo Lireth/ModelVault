@@ -210,9 +210,13 @@ export function registerScanHandlers() {
         // 哈希履历在本次结果中即时生效
         const relinkResult = relinkScannedMeta(models)
 
-        // OPT-04：全量扫描按库规模自适应装饰缓存容量并清理陈旧条目
+        // OPT-04：全量扫描按库规模自适应装饰缓存容量并清理陈旧条目；
+        // O-3：把本次扫描已 readdir 的目录清单（dirSnapshot）传给装饰层，
+        // sidecar 候选探测按目录剪枝，避免对每个模型盲 stat 全部 9 个候选，
+        // 也避免装饰层对同一目录再补一次 readdir
         const decorated = await decorateModels(models, signal, {
           adaptCacheSize: true,
+          dirSnapshot,
         })
         // 原始扫描数组的元素壳随装饰完成立即释放（O8）：装饰结果为字段浅拷贝的
         // 新对象，原始元素不再被引用；大库扫描期间原始数组、装饰数组与 IPC
@@ -431,6 +435,8 @@ export function registerScanHandlers() {
         const decorated = await decorateModels(models, signal, {
           pruneThumbs: false,
           forceRefresh: true,
+          // O-3：复用本次局部扫描的目录清单剪枝 sidecar 候选探测
+          dirSnapshot: scanResult.dirSnapshot,
         })
         models.length = 0 // 同全量扫描：装饰后立即释放原始数组（O8）
 

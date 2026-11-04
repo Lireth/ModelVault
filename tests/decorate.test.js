@@ -60,7 +60,7 @@ import {
   DATA_DIR,
   COVERS_DIR,
 } from '../src/main/services/store'
-import { findSidecarText } from '../src/main/services/scanner'
+import { findSidecarText, sidecarFilesFor } from '../src/main/services/scanner'
 import { clearDeferredJobs } from '../src/main/services/thumbs'
 import * as thumbsModule from '../src/main/services/thumbs'
 import { renderThumbFromPath } from '../src/main/services/thumb-renderer'
@@ -1116,5 +1116,140 @@ describe('局部扫描装饰缓存文件级复核（OPT-8）', () => {
       forceRefresh: true,
     })
     expect(second.cover).toBe('')
+  })
+})
+
+describe('O-3 sidecar 候选探测按目录清单剪枝', () => {
+  /** 创建真实模型文件并返回与扫描一致的 model 对象（mtime/size 取自真实 stat） */
+  async function writeModel(rel, content = 'x'.repeat(10)) {
+    const abs = path.join(root, rel)
+    await fs.writeFile(abs, content)
+    const { mtimeMs, size } = await fs.stat(abs)
+    return { ...makeModel(abs, { mtimeMs, size, type: 'lora' }) }
+  }
+
+  /** 装饰层同构的目录清单（目录 → 条目名数组，模拟扫描期 dirSnapshot） */
+  async function snapshotOfDir() {
+    return new Map([[root, await fs.readdir(root)]])
+  }
+
+  it('清单剪枝后装饰结果与旧路径逐字段一致（部分候选存在）', async () => {
+    const model = await writeModel('prune-parity.safetensors')
+    await fs.writeFile(path.join(root, 'prune-parity.txt'), 'first line\nrest')
+    await fs.writeFile(path.join(root, 'prune-parity.png'), PNG_MAGIC)
+    findSidecarText.mockReset()
+    findSidecarText.mockResolvedValue('first line\nrest')
+
+    // 旧路径（无清单，逐个候选 stat）
+    const [legacy] = await decorateModels([model])
+    resetDecorateCache(root)
+    // 剪枝路径（复用扫描期目录清单）
+    const [pruned] = await decorateModels([{ ...model }], null, {
+      dirSnapshot: await snapshotOfDir(),
+    })
+    for (const key of [
+      'cover',
+      'coverUrl',
+      'note',
+      'triggerWords',
+      'hasManualCover',
+      'subCategory',
+      'suspect',
+    ]) {
+      expect(pruned[key]).toEqual(legacy[key])
+    }
+  })
+
+  it('不存在的候选不再产生 stat：每模型候选探测 9 → 2', async () => {
+    const model = await writeModel('prune-count.safetensors')
+    await fs.writeFile(path.join(root, 'prune-count.txt'), 'note')
+    await fs.writeFile(
+      path.join(root, 'prune-count.civitai.info'),
+      '{"trainedWords":["a"]}',
+    )
+    const candidates = new Set(
+      sidecarFilesFor(model.id).map((p) => p.toLowerCase()),
+    )
+    findSidecarText.mockReset()
+    const statSpy = vi.spyOn(fs, 'stat')
+    try {
+      await decorateModels([model], null, {
+        dirSnapshot: await snapshotOfDir(),
+      })
+      // 目录内仅有 txt + civitai.info 两个 sidecar：其余 7 个候选被清单剪掉
+      expect(
+        statSpy.mock.calls.filter(([p]) =>
+          candidates.has(String(p).toLowerCase()),
+        ),
+      ).toHaveLength(2)
+    } finally {
+      statSpy.mockRestore()
+    }
+  })
+
+  it('目录清单 readdir 失败时回退逐个 stat 且不中断装饰', async () => {
+    const model = await writeModel('prune-denied.safetensors')
+    await fs.writeFile(path.join(root, 'prune-denied.txt'), 'words')
+    const originalReaddir = fs.readdir.bind(fs)
+    const readdirSpy = vi
+      .spyOn(fs, 'readdir')
+      .mockImplementation((dir, opts) => {
+        if (String(dir) === root) {
+          return Promise.reject(
+            Object.assign(new Error('denied'), { code: 'EACCES' }),
+          )
+        }
+        return opts ? originalReaddir(dir, opts) : originalReaddir(dir)
+      })
+    const warnSpy = vi.spyOn(logger, 'warn')
+    findSidecarText.mockReset()
+    findSidecarText.mockResolvedValue('words')
+    try {
+      // 未传 dirSnapshot：装饰层按目录懒 readdir，失败 → null → 旧逐个探测
+      const [decorated] = await decorateModels([model])
+      expect(decorated.note).toBe('words')
+      expect(
+        warnSpy.mock.calls.some(([msg]) =>
+          String(msg).includes('sidecar 目录枚举失败'),
+        ),
+      ).toBe(true)
+    } finally {
+      readdirSpy.mockRestore()
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('清单陈旧（扫描后外部新增 sidecar）：本轮漏检且不删除已有注解，下一轮修正', async () => {
+    const model = await writeModel('prune-late.safetensors')
+    setModelMeta(model.id, { note: '用户备注', triggerWords: '' })
+    findSidecarText.mockReset()
+    // 首轮：无 sidecar，缓存事实签名全部为 '-'
+    const [first] = await decorateModels([model])
+    expect(first.note).toBe('用户备注')
+
+    // 扫描期清单（此时 txt 尚不存在），随后目录被外部写入新 sidecar
+    const staleNames = await fs.readdir(root)
+    await fs.writeFile(path.join(root, 'prune-late.txt'), 'late words')
+    const staleSnapshot = new Map([[root, staleNames]])
+
+    // 第 4 条约定：清单未含 txt → 剪枝为缺失 → 事实与缓存一致 → 命中缓存，
+    // 允许本轮漏检（下一轮修正）；已有注解/元数据不得被删除或改写
+    const [stale] = await decorateModels([{ ...model }], null, {
+      forceRefresh: true,
+      dirSnapshot: staleSnapshot,
+    })
+    expect(stale).toBe(first)
+    expect(getModelMeta(model.id).note).toBe('用户备注')
+    expect(stale.triggerWords).toBe('')
+
+    // 下一轮扫描拿到新清单：事实变化 → 完整重装饰并导入 sidecar
+    findSidecarText.mockResolvedValue('late words')
+    const [fresh] = await decorateModels([{ ...model }], null, {
+      forceRefresh: true,
+      dirSnapshot: await snapshotOfDir(),
+    })
+    expect(fresh).not.toBe(stale)
+    expect(fresh.triggerWords).toBe('late words')
+    expect(getModelMeta(model.id).note).toBe('用户备注')
   })
 })

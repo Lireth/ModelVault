@@ -869,3 +869,128 @@ describe('模型对象形状（OPT-11 列表瘦身）', () => {
     }
   })
 })
+
+describe('statSidecarSet 目录清单剪枝（O-3）', () => {
+  let dir
+
+  beforeAll(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-sideprune-'))
+  })
+
+  afterAll(async () => {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+  })
+
+  /** 目录条目名 → 小写名集合（与装饰层 createSidecarDirListings 同构） */
+  function listingOf(names) {
+    return new Set(names.map((n) => n.toLowerCase()))
+  }
+
+  /** 某模型的 9 个 sidecar 候选（小写，便于跨平台比较） */
+  function candidateKeys(modelPath) {
+    return new Set(sidecarFilesFor(modelPath).map((p) => p.toLowerCase()))
+  }
+
+  it('部分候选存在时：事实与旧实现逐字段一致，且未存在候选不再 stat（9 → 3）', async () => {
+    const modelPath = path.join(dir, 'pruned.safetensors')
+    await fs.writeFile(modelPath, 'x')
+    await fs.writeFile(path.join(dir, 'pruned.txt'), 'trigger words')
+    await fs.writeFile(
+      path.join(dir, 'pruned.civitai.info'),
+      '{"trainedWords":["a"]}',
+    )
+    await fs.writeFile(path.join(dir, 'pruned.png'), 'p')
+    const listing = listingOf(await fs.readdir(dir))
+    const candidates = candidateKeys(modelPath)
+
+    const statSpy = vi.spyOn(fs, 'stat')
+    try {
+      // 旧实现（无清单）：9 个候选全部盲 stat
+      const legacy = await statSidecarSet(modelPath)
+      expect(
+        statSpy.mock.calls.filter(([p]) =>
+          candidates.has(String(p).toLowerCase()),
+        ),
+      ).toHaveLength(9)
+
+      // 剪枝后：仅 txt/info/png 三个确实存在的候选 stat
+      statSpy.mockClear()
+      const pruned = await statSidecarSet(modelPath, listing)
+      expect(
+        statSpy.mock.calls.filter(([p]) =>
+          candidates.has(String(p).toLowerCase()),
+        ),
+      ).toHaveLength(3)
+
+      // 候选集合与顺序不变（剪枝不改变 files 形状）
+      expect(pruned.files).toEqual(legacy.files)
+      // 事实逐字段一致（mtime/size/isFile 均以 stat 为准）
+      expect(
+        pruned.stats.map((s) => (s ? [s.isFile(), s.size, s.mtimeMs] : null)),
+      ).toEqual(
+        legacy.stats.map((s) => (s ? [s.isFile(), s.size, s.mtimeMs] : null)),
+      )
+      // 消费侧识别结果一致（防剪枝误伤）
+      expect(await findSidecarPreview(modelPath, pruned)).toBe(
+        path.join(dir, 'pruned.png'),
+      )
+      expect(await findSidecarText(modelPath, pruned)).toBe('trigger words')
+      expect(await findSidecarCivitaiInfo(modelPath, pruned)).toEqual({
+        trainedWords: ['a'],
+      })
+    } finally {
+      statSpy.mockRestore()
+    }
+  })
+
+  it('空清单（目录确无候选）时零 stat，全部记为缺失', async () => {
+    const modelPath = path.join(dir, 'empty.safetensors')
+    await fs.writeFile(modelPath, 'x')
+    const statSpy = vi.spyOn(fs, 'stat')
+    try {
+      const snapshot = await statSidecarSet(modelPath, new Set())
+      expect(statSpy).not.toHaveBeenCalled()
+      expect(snapshot.stats.every((s) => s === null)).toBe(true)
+      expect(await findSidecarPreview(modelPath, snapshot)).toBe('')
+    } finally {
+      statSpy.mockRestore()
+    }
+  })
+
+  it('清单陈旧（扫描后新增 sidecar）→ 本轮漏检，新清单下一轮命中；不虚报存在', async () => {
+    const modelPath = path.join(dir, 'late.safetensors')
+    await fs.writeFile(modelPath, 'x')
+    // 扫描期清单（此时 late.png 尚不存在）
+    const stale = listingOf(await fs.readdir(dir))
+    await fs.writeFile(path.join(dir, 'late.png'), 'p')
+
+    // 第 4 条约定：不在清单中的候选被剪枝 → null（允许本轮漏检，下一轮修正），
+    // 但事实仍由 stat 决定，绝不会凭空产出「存在」
+    const staleSnapshot = await statSidecarSet(modelPath, stale)
+    expect(staleSnapshot.stats[2]).toBeNull()
+    expect(await findSidecarPreview(modelPath, staleSnapshot)).toBe('')
+
+    // 下一轮扫描拿到新清单：命中并 stat 出真实事实
+    const fresh = await statSidecarSet(
+      modelPath,
+      listingOf(await fs.readdir(dir)),
+    )
+    expect(await findSidecarPreview(modelPath, fresh)).toBe(
+      path.join(dir, 'late.png'),
+    )
+  })
+
+  it.skipIf(process.platform === 'linux')(
+    '清单按小写比较：sidecar 与模型基名大小写不一致仍能命中（Windows/macOS 卷）',
+    async () => {
+      const modelPath = path.join(dir, 'CaseModel.safetensors')
+      await fs.writeFile(modelPath, 'x')
+      await fs.writeFile(path.join(dir, 'casemodel.png'), 'p')
+      const listing = listingOf(await fs.readdir(dir))
+      const snapshot = await statSidecarSet(modelPath, listing)
+      expect(await findSidecarPreview(modelPath, snapshot)).toBe(
+        path.join(dir, 'CaseModel.png'),
+      )
+    },
+  )
+})

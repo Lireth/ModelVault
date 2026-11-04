@@ -563,15 +563,28 @@ export function sidecarFilesFor(absModelPath) {
  * 首扫装饰路径此前对同一批候选最多重复 stat 三遍（txt/info 导入各一遍、
  * 预览图候选串行至多 7 遍、缓存事实签名再全量一遍）——装饰未命中路径
  * 以本快照一次并行 stat 供四方复用，串行预览探测的多次往返同步消除。
+ *
+ * O-3 剪枝：传入 dirNames（该模型所在目录的条目名集合）时，不在集合中的
+ * 候选直接记 null，不再发起必然 ENOENT 的 stat——万级库首扫每模型的 9 次
+ * 盲探测降为「实际存在的 sidecar 数」。集合由装饰层按目录构建并复用，
+ * 只用于剪枝：命中集合的候选仍以 fs.stat 的 mtime/size 为准（事实签名必须
+ * 精确）；集合为 null（扫描未提供清单/readdir 失败）时保持旧的逐候选 stat。
+ * 名称按小写比较，兼容 Windows/macOS 大小写不敏感卷上 sidecar 与模型基名
+ * 大小写不一致的写法；清单陈旧（扫描后目录被外部写入）只会让本轮漏检，
+ * 下一轮扫描修正，绝不会凭空产出「存在」的事实。
  * @param {string} modelPath 模型文件绝对路径
+ * @param {Set<string>|null} [dirNames] 模型所在目录的条目名集合（小写）
  * @returns {Promise<{files: string[], stats: Array<import('node:fs').Stats|null>}>}
  *   files 与 stats 一一对应（顺序同 sidecarFilesFor：[0]=txt，[1]=civitai.info，
- *   其后为图片候选）；stat 失败/不存在的条目为 null
+ *   其后为图片候选）；stat 失败/不存在/被清单剪枝的条目为 null
  */
-export async function statSidecarSet(modelPath) {
+export async function statSidecarSet(modelPath, dirNames = null) {
   const files = sidecarFilesFor(modelPath)
   const stats = await Promise.all(
-    files.map((p) => fs.stat(p).catch(() => null)),
+    files.map((p) => {
+      if (dirNames && !dirNames.has(path.basename(p).toLowerCase())) return null
+      return fs.stat(p).catch(() => null)
+    }),
   )
   return { files, stats }
 }

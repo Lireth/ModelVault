@@ -34,6 +34,7 @@ import {
   setThumbDrainPromise,
 } from './model-state'
 import { abortError, boundedMapSet, runWithConcurrency } from '../../utils'
+import logger from '../../logger'
 
 /**
  * 扫描结果装饰管线：为扫描出的模型列表补齐封面、缩略图、元数据标注、
@@ -470,17 +471,69 @@ function sidecarFactsOf(stats) {
 }
 
 /**
+ * 目录条目名清单（O-3）：把扫描期 dirSnapshot（目录 → 条目名数组）按目录
+ * 惰性转成小写名 Set，同一批次内每个目录只构建一次、只保存一份 Set
+ * （目录数远小于模型数，不会为每个模型各建一份）。
+ *
+ * 优先复用扫描阶段已 readdir 过的清单（scan.js 把 dirSnapshot 随扫描结果
+ * 传到本层），避免同一批次对同一目录再补一次 readdir；调用方未提供快照
+ * （直接调用 decorateModels 的测试/其它入口）时按目录懒 readdir 一次，
+ * 目录缺失/权限/离线失败得到 null，装饰层回退旧的逐候选 stat，不抛错。
+ * 清单只用于剪枝：真正的事实仍由 statSidecarSet 的 fs.stat 决定，故清单
+ * 陈旧（扫描后目录被外部写入）只会漏检本轮，不会产出「存在」的假事实。
+ * @param {Map<string, string[]>|null} [dirSnapshot] 扫描期目录名快照
+ * @returns {{get: (dir: string) => Promise<Set<string>|null>}}
+ *   返回按目录的小写文件名集合；null 表示该目录不可剪枝（走旧路径）
+ */
+function createSidecarDirListings(dirSnapshot) {
+  const scanned = dirSnapshot instanceof Map ? dirSnapshot : null
+  /** @type {Map<string, Promise<Set<string>|null>>} */
+  const byDir = new Map()
+  return {
+    get(dir) {
+      const cached = byDir.get(dir)
+      if (cached) return cached
+      let promise
+      if (scanned) {
+        // 扫描快照含该目录：直接复用扫描期 readdir 事实；不含则该目录未被
+        // 扫描读取（模型不应来自其中），不额外补 readdir，回退旧路径
+        const names = scanned.get(dir)
+        promise = Promise.resolve(
+          names ? new Set(names.map((n) => n.toLowerCase())) : null,
+        )
+      } else {
+        promise = fs.readdir(dir).then(
+          (names) => new Set(names.map((n) => n.toLowerCase())),
+          (err) => {
+            if (err?.code !== 'ENOENT') {
+              logger.warn(
+                `sidecar 目录枚举失败（回退逐个探测）: ${err.message}`,
+              )
+            }
+            return null
+          },
+        )
+      }
+      byDir.set(dir, promise)
+      return promise
+    },
+  }
+}
+
+/**
  * 采集 sidecar 家族的文件级事实签名（OPT-8）：
  * 模型同名 sidecar（txt / civitai.info / 预览图候选，即 sidecarFilesFor 全集）
  * 的 mtime+size 串接签名。这些文件的变化不会改变模型 mtime 与元数据签名，
  * 是局部扫描 forceRefresh 语义的真实判定依据——缓存内的签名与文件现状一致
  * ⇒ 重装饰结论必然一致（sidecar 导入只依赖这些文件与当前元数据，而元数据
  * 签名已在命中条件中核对）。P1-2：经 statSidecarSet 一次并行 stat。
+ * O-3：dirNames 为模型所在目录的条目名集合，仅用于剪掉必然不存在的候选。
  * @param {string} id 模型绝对路径
+ * @param {Set<string>|null} [dirNames] 所在目录条目名集合（小写）
  * @returns {Promise<string>} 事实签名
  */
-async function statSidecarFacts(id) {
-  const { stats } = await statSidecarSet(id)
+async function statSidecarFacts(id, dirNames = null) {
+  const { stats } = await statSidecarSet(id, dirNames)
   return sidecarFactsOf(stats)
 }
 
@@ -496,12 +549,16 @@ async function statSidecarFacts(id) {
  * @param {Set<string>|null} [thumbNames] 本批次 thumbs 目录文件名快照（见
  *   readThumbDirSnapshot）；用于缓存命中路径的存在性查表，新生成的缩略图
  *   会就地补进该集合，避免同一批次内重复判定为缺失
+ * @param {Set<string>|null} [sidecarNames] 模型所在目录的条目名集合（小写，
+ *   见 createSidecarDirListings）；sidecar 候选探测只 stat 其中确实存在的
+ *   文件名，null 表示该目录不可剪枝（逐个 stat 的旧路径）
  */
 async function decorateOne(
   model,
   usedThumbs,
   forceRefresh = false,
   thumbNames = null,
+  sidecarNames = null,
 ) {
   const meta0 = getModelMeta(model.id) || {}
   const cached = decorateCache.get(model.id)
@@ -518,7 +575,7 @@ async function decorateOne(
   ) {
     let sidecarVerified = !forceRefresh
     if (forceRefresh) {
-      const facts = await statSidecarFacts(model.id)
+      const facts = await statSidecarFacts(model.id, sidecarNames)
       sidecarVerified = facts === cached.sidecarFacts
     }
     if (sidecarVerified) {
@@ -544,8 +601,10 @@ async function decorateOne(
   // P1-2：sidecar 全集一次并行 stat，供文本/info 导入、预览图命中与缓存
   // 事实签名四方复用——此前同一批候选最多重复 stat 三遍（导入 2 次 +
   // 预览图候选串行至多 7 次 + 事实签名 9 次），万级库首扫每模型多付
-  // 9-18 次系统调用，且串行预览探测的多次 IO 往返一并消除
-  const sidecar = await statSidecarSet(model.id)
+  // 9-18 次系统调用，且串行预览探测的多次 IO 往返一并消除。
+  // O-3：按目录清单剪枝，只对目录内确实存在的候选 stat（sidecarNames 为
+  // 该目录条目名集合；null 时保持逐个 stat 的旧行为）
+  const sidecar = await statSidecarSet(model.id, sidecarNames)
   // sidecar 导入可能更新元数据（首扫或元数据重置后的恢复），
   // 缓存签名按导入后的 meta 计算，确保下一次扫描稳定命中
   const meta = await importSidecarMeta(model, meta0, sidecar)
@@ -707,8 +766,8 @@ function pruneDecorateCache(validIds) {
  * 末尾按已使用的缩略图清单清理失效缩略图文件。
  * @param {Array<object>} models 扫描出的模型列表
  * @param {AbortSignal} [signal] 取消信号（每任务开始前检查）
- * @param {{pruneThumbs?: boolean, forceRefresh?: boolean,
- *   adaptCacheSize?: boolean}} [opts]
+ * @param {{pruneThumbs?: boolean, forceRefresh?: boolean, adaptCacheSize?: boolean,
+ *   dirSnapshot?: Map<string, string[]>|null}} [opts]
  *   pruneThumbs=false 跳过末尾的失效缩略图清理（局部增量扫描必传）：
  *   局部装饰仅覆盖变更子树，usedThumbs 不含子树外模型的缩略图，此时按名单
  *   清理会把子树外有效缩略图全部误删——且装饰缓存命中路径不会重新生成，
@@ -721,6 +780,10 @@ function pruneDecorateCache(validIds) {
  *  （跳过 16MB 级 safetensors 头解析），仅真实变化的模型完整重装饰；
  *   adaptCacheSize=true 表示本次是全量库快照（OPT-04）：按模型总数调整
  *   LRU 容量，并清理不在当前库中的缓存条目；局部扫描不得传。
+ *   dirSnapshot（O-3）= 本次扫描已 readdir 得到的「目录 → 条目名」快照
+ *  （scanModels 返回的 dirSnapshot）：装饰阶段按目录复用它剪枝 sidecar
+ *  候选探测，避免同一批次对同一目录再次 readdir；缺省时装饰层按目录
+ *  懒 readdir 一次，失败则回退逐个 stat。
  */
 export async function decorateModels(models, signal, opts = {}) {
   const usedThumbs = new Set()
@@ -740,6 +803,10 @@ export async function decorateModels(models, signal, opts = {}) {
   // 枚举失败（ENOENT/权限/离线）得到 null，cachedThumbMissing 自动退回
   // 原逐个探测，扫描不会因此中断。
   const thumbNames = await readThumbDirSnapshot()
+  // O-3：sidecar 候选探测按目录复用清单。优先用扫描阶段已 readdir 过的
+  // dirSnapshot（scan.js 随扫描结果传入），同一目录在整批中只构建一份
+  // 小写名 Set；未提供快照时该目录懒 readdir 一次，失败回退逐个 stat。
+  const sidecarListings = createSidecarDirListings(opts.dirSnapshot)
   // 流式固定并发池（与 scanner/watcher 共用 utils.runWithConcurrency，O-5）：
   // 完成一个补位一个，消除「批内并发、批间串行」的整批等待尾延迟——每批
   // 最慢的模型（多封面逐张 stat + safetensors 头解析）不再拖住同批其余任务。
@@ -749,7 +816,16 @@ export async function decorateModels(models, signal, opts = {}) {
     models,
     async (m, index) => {
       if (signal?.aborted) throw abortError()
-      result[index] = await decorateOne(m, usedThumbs, forceRefresh, thumbNames)
+      const sidecarNames = await sidecarListings.get(
+        path.dirname(/** @type {{id: string}} */ (m).id),
+      )
+      result[index] = await decorateOne(
+        m,
+        usedThumbs,
+        forceRefresh,
+        thumbNames,
+        sidecarNames,
+      )
     },
     DECORATE_BATCH_SIZE,
   )
