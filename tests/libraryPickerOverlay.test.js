@@ -84,7 +84,9 @@ describe('选择与确认', () => {
   it('未选择目标时确认按钮禁用', () => {
     openOverlay()
     const wrapper = mountOverlay()
-    expect(wrapper.find('button.btn-primary').attributes('disabled')).toBeDefined()
+    expect(
+      wrapper.find('button.btn-primary').attributes('disabled'),
+    ).toBeDefined()
   })
 
   it('点击目标库后选中并可确认：confirmTransfer 以选中库发起 IPC', async () => {
@@ -109,7 +111,9 @@ describe('选择与确认', () => {
 
     await wrapper.findAll('.transfer-item')[0].trigger('click')
     expect(wrapper.findAll('.transfer-item')[0].classes()).toContain('selected')
-    expect(wrapper.findAll('.transfer-item')[0].attributes('aria-selected')).toBe('true')
+    expect(
+      wrapper.findAll('.transfer-item')[0].attributes('aria-selected'),
+    ).toBe('true')
 
     await wrapper.find('button.btn-primary').trigger('click')
     await settle()
@@ -139,7 +143,9 @@ describe('键盘语义', () => {
   it('Esc 空闲时关闭浮层', async () => {
     openOverlay()
     const wrapper = mountOverlay()
-    await wrapper.find('.transfer-overlay').trigger('keydown', { key: 'Escape' })
+    await wrapper
+      .find('.transfer-overlay')
+      .trigger('keydown', { key: 'Escape' })
     expect(transferState.visible).toBe(false)
   })
 
@@ -165,7 +171,9 @@ describe('键盘语义', () => {
     await settle()
 
     const wrapper = mountOverlay()
-    await wrapper.find('.transfer-overlay').trigger('keydown', { key: 'Escape' })
+    await wrapper
+      .find('.transfer-overlay')
+      .trigger('keydown', { key: 'Escape' })
     expect(window.api.models.cancelOp).toHaveBeenCalledTimes(1)
     expect(transferState.visible).toBe(true)
 

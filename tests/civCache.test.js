@@ -71,9 +71,7 @@ describe('读写删与路径定位', () => {
 
 describe('扩展名推断与 Content-Type 映射', () => {
   it('URL 查询串不影响扩展名推断，大小写归一为小写', () => {
-    expect(getCivImageCachePath('https://x/y.PNG?width=512')).toMatch(
-      /\.png$/,
-    )
+    expect(getCivImageCachePath('https://x/y.PNG?width=512')).toMatch(/\.png$/)
     expect(civCacheContentType('https://x/y.PNG?width=512')).toBe('image/png')
   })
 
@@ -105,7 +103,9 @@ describe('非法 payload 与 no-op 语义', () => {
     await expect(
       saveCivImageCache('https://x/a.png', Buffer.from('x')),
     ).resolves.toBeUndefined()
-    await expect(removeCivImageCache('https://x/a.png')).resolves.toBeUndefined()
+    await expect(
+      removeCivImageCache('https://x/a.png'),
+    ).resolves.toBeUndefined()
   })
 
   it('库根离线时跳过写入（OPT-14：不得重建失效路径目录树）', async () => {

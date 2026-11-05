@@ -9,10 +9,7 @@ import {
   transferState,
   transferTargets,
 } from '../src/renderer/src/store/transfer'
-import {
-  defaultSettings,
-  state,
-} from '../src/renderer/src/store/appStore'
+import { defaultSettings, state } from '../src/renderer/src/store/appStore'
 
 /**
  * 跨库移动/复制渲染层编排测试（F-3，O-1 覆盖盲区回补）：
@@ -94,9 +91,9 @@ describe('openTransferToLibrary / closeTransfer', () => {
     state.settings.modelsFolders = [CUR]
     openTransferToLibrary([`${CUR}\\m.safetensors`])
     expect(transferState.visible).toBe(false)
-    expect(
-      state.toasts.some((t) => t.text.includes('只有这一个模型库')),
-    ).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('只有这一个模型库'))).toBe(
+      true,
+    )
   })
 
   it('单模型默认 move（整理语义），多模型默认 copy（安全）', () => {
@@ -207,9 +204,9 @@ describe('confirmTransfer', () => {
 
     await confirmTransfer(OTHER)
 
-    expect(
-      state.toasts.some((t) => t.text.includes('未传输任何模型')),
-    ).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('未传输任何模型'))).toBe(
+      true,
+    )
     expect(transferState.visible).toBe(false)
   })
 
@@ -266,9 +263,7 @@ describe('confirmTransfer', () => {
 
     await confirmTransfer(OTHER)
 
-    expect(
-      state.toasts.some((t) => t.text.includes('已完成 1 个')),
-    ).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('已完成 1 个'))).toBe(true)
     expect(api.models.scan).toHaveBeenCalledTimes(1)
   })
 
@@ -278,9 +273,7 @@ describe('confirmTransfer', () => {
 
     await confirmTransfer(OTHER)
 
-    expect(
-      state.toasts.some((t) => t.text.includes('跨库传输失败')),
-    ).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('跨库传输失败'))).toBe(true)
     expect(transferState.busy).toBe(false)
   })
 

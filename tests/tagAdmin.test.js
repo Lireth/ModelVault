@@ -49,7 +49,9 @@ describe('全库重命名标签（renameTagGlobally）', () => {
     expect(state.models[2]).toBe(untouched)
     expect(state.toasts.some((t) => t.text.includes('2 个模型'))).toBe(true)
     expect(
-      state.toasts.some((t) => t.type === 'success' && t.text.includes('crimson')),
+      state.toasts.some(
+        (t) => t.type === 'success' && t.text.includes('crimson'),
+      ),
     ).toBe(true)
   })
 
@@ -82,9 +84,9 @@ describe('全库重命名标签（renameTagGlobally）', () => {
     const res = await renameTagGlobally('red', 'x')
 
     expect(res).toEqual({ changed: 0, error: 'IPC 断开' })
-    expect(
-      state.toasts.some((t) => t.text.includes('标签重命名失败')),
-    ).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('标签重命名失败'))).toBe(
+      true,
+    )
     expect(state.models[0].tags).toEqual(['red'])
   })
 })
@@ -135,7 +137,11 @@ describe('全库移除标签（removeTagGlobally）', () => {
   })
 
   it('tags 缺失的模型物化为空数组；有 tags 但未命中的模型保持引用', async () => {
-    state.models = [makeModel('m1'), makeModel('m2', { tags: ['blue'] }), makeModel('m3', { tags: ['red'] })]
+    state.models = [
+      makeModel('m1'),
+      makeModel('m2', { tags: ['blue'] }),
+      makeModel('m3', { tags: ['red'] }),
+    ]
     const untouched = state.models[1]
     api.models.removeTag.mockResolvedValue({ changed: 2 })
 

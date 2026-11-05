@@ -76,9 +76,7 @@ function mountCompare() {
 
 /** 取指定字段名的差异行（tbody tr，首个 th 为字段名） */
 function findRow(wrapper, label) {
-  return wrapper
-    .findAll('tbody tr')
-    .find((r) => r.find('th').text() === label)
+  return wrapper.findAll('tbody tr').find((r) => r.find('th').text() === label)
 }
 
 describe('compare.js 状态守卫', () => {
@@ -92,10 +90,15 @@ describe('compare.js 状态守卫', () => {
   })
 
   it('超过上限拒绝打开并提示上限值', () => {
-    const ids = Array.from({ length: COMPARE_MAX_MODELS + 1 }, (_, i) => `m${i}`)
+    const ids = Array.from(
+      { length: COMPARE_MAX_MODELS + 1 },
+      (_, i) => `m${i}`,
+    )
     expect(openCompare(ids)).toBe(false)
     expect(
-      state.toasts.some((t) => t.text.includes(`最多同时对比 ${COMPARE_MAX_MODELS}`)),
+      state.toasts.some((t) =>
+        t.text.includes(`最多同时对比 ${COMPARE_MAX_MODELS}`),
+      ),
     ).toBe(true)
   })
 

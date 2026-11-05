@@ -45,7 +45,12 @@ let rootA
 let rootB
 
 /** 在源库创建模型文件（可选 sidecar 与元数据），返回模型绝对路径 */
-async function makeSourceModel({ relDir = '', name, sidecarTxt = false, meta = null }) {
+async function makeSourceModel({
+  relDir = '',
+  name,
+  sidecarTxt = false,
+  meta = null,
+}) {
   const dir = path.join(rootA, relDir)
   await fs.mkdir(dir, { recursive: true })
   const file = path.join(dir, name)
@@ -132,7 +137,9 @@ describe('入参校验与前置守卫', () => {
   })
 
   it('目标不在已保存库清单时拒绝（防任意目录写入）', async () => {
-    const outsider = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-tx-x-'))
+    const outsider = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-tx-x-'),
+    )
     roots.push(outsider)
     await updateSettings({ modelsFolders: [rootA] })
     const res = await transferModelsToLibrary({
@@ -205,9 +212,9 @@ describe('copy 模式', () => {
     expect(
       await fs.readFile(path.join(rootB, 'sub', 'm.safetensors'), 'utf-8'),
     ).toBe('model-bytes')
-    expect(
-      await fs.readFile(path.join(rootB, 'sub', 'm.txt'), 'utf-8'),
-    ).toBe('trigger-words')
+    expect(await fs.readFile(path.join(rootB, 'sub', 'm.txt'), 'utf-8')).toBe(
+      'trigger-words',
+    )
     // 源保留（copy 语义）
     expect(await fs.access(file).then(() => true)).toBe(true)
     // 元数据迁移到目标 store.json（相对键一致，标注零重写生效）
@@ -219,7 +226,10 @@ describe('copy 模式', () => {
     })
     // 封面文件复制到目标库，源封面保留
     expect(
-      await fs.readFile(path.join(rootB, '.modelvault', 'covers', 'c1.png'), 'utf-8'),
+      await fs.readFile(
+        path.join(rootB, '.modelvault', 'covers', 'c1.png'),
+        'utf-8',
+      ),
     ).toBe('png-bytes')
     expect(await fs.access(coverSrc).then(() => true)).toBe(true)
   })
@@ -236,9 +246,7 @@ describe('copy 模式', () => {
     })
 
     expect(res.transferred).toBe(0)
-    expect(res.skipped).toEqual([
-      { id: file, reason: '目标库已存在同名文件' },
-    ])
+    expect(res.skipped).toEqual([{ id: file, reason: '目标库已存在同名文件' }])
     expect(
       await fs.readFile(path.join(rootB, 'sub', 'm.safetensors'), 'utf-8'),
     ).toBe('existing')
@@ -358,9 +366,7 @@ describe('取消与 fail-closed 中止', () => {
     })
     // 未写目标元数据、未复制文件
     expect(await readTargetStore()).toBeNull()
-    await expect(
-      fs.access(path.join(rootB, 'm.safetensors')),
-    ).rejects.toThrow()
+    await expect(fs.access(path.join(rootB, 'm.safetensors'))).rejects.toThrow()
   })
 
   it('目标库元数据损坏时中止传输（fail-closed，不按空库覆盖）', async () => {

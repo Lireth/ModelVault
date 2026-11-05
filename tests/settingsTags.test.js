@@ -66,13 +66,12 @@ describe('重命名 / 合并', () => {
     const input = wrapper.find('.tag-edit-input')
     expect(input.exists()).toBe(true)
     await input.setValue('crimson')
-    await wrapper.find('.tag-edit-input + .setting-actions button, button.btn-primary').trigger('click')
+    await wrapper
+      .find('.tag-edit-input + .setting-actions button, button.btn-primary')
+      .trigger('click')
     await settle()
 
-    expect(window.api.models.renameTag).toHaveBeenCalledWith(
-      'red',
-      'crimson',
-    )
+    expect(window.api.models.renameTag).toHaveBeenCalledWith('red', 'crimson')
     expect(state.models[0].tags).toEqual(['crimson', 'blue'])
     expect(state.models[1].tags).toEqual(['crimson'])
     // 编辑态退出，输入框消失
@@ -133,14 +132,16 @@ describe('重命名 / 合并', () => {
     await findRow(wrapper, 'red').find('button').trigger('click')
     const input = wrapper.find('.tag-edit-input')
     await input.setValue('   ')
-    expect(wrapper.find('button.btn-primary').attributes('disabled')).toBeDefined()
+    expect(
+      wrapper.find('button.btn-primary').attributes('disabled'),
+    ).toBeDefined()
 
     await input.trigger('keyup.enter')
     await settle()
 
-    expect(
-      state.toasts.some((t) => t.text.includes('标签名称不能为空')),
-    ).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('标签名称不能为空'))).toBe(
+      true,
+    )
     expect(window.api.models.renameTag).not.toHaveBeenCalled()
   })
 
@@ -150,7 +151,9 @@ describe('重命名 / 合并', () => {
 
     await findRow(wrapper, 'red').find('button').trigger('click')
     await wrapper.find('.tag-edit-input').setValue('red')
-    expect(wrapper.find('button.btn-primary').attributes('disabled')).toBeDefined()
+    expect(
+      wrapper.find('button.btn-primary').attributes('disabled'),
+    ).toBeDefined()
   })
 
   it('busy 锁：IPC 在途时编辑行保存/取消与其他行按钮禁用', async () => {
@@ -170,7 +173,9 @@ describe('重命名 / 合并', () => {
     await settle()
 
     // 在途：编辑行按钮禁用
-    expect(wrapper.find('button.btn-primary').attributes('disabled')).toBeDefined()
+    expect(
+      wrapper.find('button.btn-primary').attributes('disabled'),
+    ).toBeDefined()
     release()
     await settle()
     // 完成：busy 解除，编辑态退出
