@@ -57,8 +57,8 @@
     "vitest": "^5.0.5"
   },
   "allowScripts": {
-    "esbuild@0.25.12": true,
-    "esbuild@0.28.2": true,
-    "electron-winstaller@5.4.0": true
+    "esbuild": true,
+    "electron-winstaller": true,
+    "electron@45.2.1": true
   }
 }
