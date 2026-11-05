@@ -9,11 +9,11 @@ import {
   toggleMultiSelectMode,
 } from '../store/appStore'
 import {
-  SEARCH_SYNTAX,
   applySearchSuggestion,
   caretAfterSuggestion,
   suggestSearchSyntax,
 } from '../store/search-syntax'
+import SearchSyntaxAssist from './SearchSyntaxAssist.vue'
 import { useSearchInput } from '../composables/useSearchInput'
 
 /**
@@ -22,9 +22,9 @@ import { useSearchInput } from '../composables/useSearchInput'
  * 排序（方式/方向）+ 列表/网格视图切换。
  * searchFieldEl 与 clearSearch 经 defineExpose 转供给全局快捷键
  * （App 的 Ctrl+F 聚焦 / Esc 清空搜索）。
- * 搜索语法辅助（FEAT-1）：「?」按钮帮助面板（示例点击插入）与
- * 输入自动补全（前缀/值两级候选，方向键选择、Enter 应用、Esc 关闭），
- * 目录单一来源见 store/search-syntax.js。
+ * 搜索语法辅助（FEAT-1）：「?」按钮帮助面板与输入自动补全的状态/输入联动
+ * 在本组件，展示层拆分至 SearchSyntaxAssist.vue（O-2），语法目录单一来源
+ * 见 store/search-syntax.js。
  */
 
 const { searchInput, searchFieldEl, clearSearch } = useSearchInput()
@@ -226,52 +226,14 @@ defineExpose({ searchFieldEl, clearSearch })
         </svg>
       </button>
 
-      <!-- 搜索语法帮助面板（FEAT-1）：目录单一来源 search-syntax.js，示例点击插入 -->
-      <div
-        v-if="syntaxHelpOpen"
-        class="search-help-panel"
-        role="group"
-        aria-label="结构化搜索语法帮助"
-      >
-        <div class="help-head">
-          结构化语法（与筛选叠加，多条件 AND；点击示例插入搜索框）
-        </div>
-        <ul class="help-list">
-          <li v-for="s in SEARCH_SYNTAX" :key="s.prefix" class="help-row">
-            <button
-              class="help-example"
-              :title="`插入 ${s.example}`"
-              @click="insertSyntaxExample(s)"
-            >
-              {{ s.example }}
-            </button>
-            <span class="help-label">{{ s.label }}</span>
-            <span class="help-desc">{{ s.desc }}</span>
-          </li>
-        </ul>
-      </div>
-
-      <!-- 输入自动补全（FEAT-1）：前缀/值两级候选，Enter 应用、Esc 关闭 -->
-      <ul
-        v-if="suggestion && suggestion.items.length"
-        id="search-syntax-suggest"
-        class="search-suggest"
-        role="listbox"
-        aria-label="搜索语法建议"
-      >
-        <li
-          v-for="(item, i) in suggestion.items"
-          :key="item.key"
-          role="option"
-          :aria-selected="i === suggestionIndex"
-          :class="{ active: i === suggestionIndex }"
-          @mousedown.prevent
-          @click="applyActiveSuggestion"
-        >
-          <code>{{ item.insert }}</code>
-          <span class="suggest-label">{{ item.label }}</span>
-        </li>
-      </ul>
+      <!-- 搜索语法辅助展示层（FEAT-1，O-2 拆分）：面板与候选的状态在本组件 -->
+      <SearchSyntaxAssist
+        :help-open="syntaxHelpOpen"
+        :suggestion="suggestion"
+        :suggestion-index="suggestionIndex"
+        @insert-example="insertSyntaxExample"
+        @apply-suggestion="applyActiveSuggestion"
+      />
     </div>
 
     <!-- 统计与快捷筛选（原结果栏）：与搜索框/排序同一行，减少纵向占用 -->
@@ -512,119 +474,6 @@ defineExpose({ searchFieldEl, clearSearch })
 .search-help.active {
   background: var(--bg-hover);
   color: var(--accent);
-}
-
-/* 语法帮助面板：玻璃浮层，覆盖在搜索框下方 */
-.search-help-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 60;
-  width: max(100%, 440px);
-  padding: 10px 12px;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  background: var(--glass-bg-strong);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
-  box-shadow: var(--shadow-lg);
-  font-size: var(--font-xs);
-}
-
-.help-head {
-  margin-bottom: 8px;
-  color: var(--text-muted);
-}
-
-.help-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.help-row {
-  display: grid;
-  grid-template-columns: auto auto 1fr;
-  gap: 8px;
-  align-items: baseline;
-}
-
-.help-example {
-  justify-self: start;
-  padding: 1px 6px;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--accent);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.help-example:hover {
-  border-color: var(--accent);
-  background: var(--bg-hover);
-}
-
-.help-label {
-  color: var(--text);
-  white-space: nowrap;
-}
-
-.help-desc {
-  color: var(--text-muted);
-  line-height: 1.5;
-}
-
-/* 输入自动补全候选（FEAT-1）：前缀/值两级，键盘上下选择 */
-.search-suggest {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  z-index: 60;
-  max-height: 260px;
-  overflow-y: auto;
-  margin: 0;
-  padding: 4px;
-  list-style: none;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  background: var(--glass-bg-strong);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
-  box-shadow: var(--shadow-lg);
-  font-size: var(--font-xs);
-}
-
-.search-suggest li {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 5px 8px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-.search-suggest li.active {
-  background: var(--bg-hover);
-}
-
-.search-suggest code {
-  color: var(--accent);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-}
-
-.suggest-label {
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* 结果统计（搜索行内，靠右与排序对齐） */
