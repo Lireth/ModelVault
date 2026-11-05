@@ -151,7 +151,10 @@ export async function partialScanModels(dirs) {
       return
     }
     clearQueue()
-    return scanModels()
+    // await 而非 return：与函数其余路径统一为无值返回（noImplicitReturns），
+    // 结算时序与拒绝传播语义不变（调用方只 await 结算，不消费返回值）
+    await scanModels()
+    return
   }
   const scanDirs = prepared.dirs
 
@@ -162,7 +165,8 @@ export async function partialScanModels(dirs) {
   }
   if (scanDirs.length === 0) {
     clearQueue()
-    return scanModels()
+    await scanModels()
+    return
   }
 
   const token = ++scanToken

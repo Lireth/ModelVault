@@ -471,16 +471,18 @@ export function runWalk(w, silent) {
       w.lastHotDirs = changedDirs
       scheduleBroadcast(w, changedDirs)
     })
-    .catch((err) => {
+    .catch(async (err) => {
       // OPT-16：异常不再立即停监控——瞬时故障进入退避重探（根目录恢复可达
       // 后自动恢复巡检），连续失败超限才停止并通知渲染层。
       // 代际校验（B2 修复）：异常来自旧根的在途遍历时，当前监控状态已是新根，
-      // 绝不能被误停——只丢弃该次遍历
+      // 绝不能被误停——只丢弃该次遍历。await 而非 return 传值：与早退路径
+      // 统一为无值返回（noImplicitReturns），catch 链等待 handleWalkError
+      // 结算的时序不变
       if (w !== getWatcher()) {
         logger.warn(`目录监控异常（旧根遍历已丢弃）: ${err.message}`)
         return
       }
-      return handleWalkError(w, err)
+      await handleWalkError(w, err)
     })
     .finally(() => {
       w.polling = false

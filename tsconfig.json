@@ -8,6 +8,24 @@
     "target": "esnext",
     "lib": ["esnext", "dom"],
     "strict": false,
+    // ---- 严格度棘轮（O-4，渐进开启；本注释为棘轮台账单一来源）----
+    // 口径：仅开启「实测零错误（或一次性修复后归零）」的开关，锁住战果
+    // 防退化；高错误量开关记账为后续步骤，待补写 JSDoc 类型标注后分批消化。
+    // 2026-11-05 已开启（7 项，开启时 0 错误）：
+    //   strictFunctionTypes / strictBindCallApply / noImplicitThis /
+    //   noFallthroughCasesInSwitch / noImplicitOverride /
+    //   noUncheckedIndexedAccess / noImplicitReturns（修复 partial-scan.js
+    //   与 watcher-poll.js 共 15 处混合返回路径，语义不变）
+    // 待消化记账（实测错误量为开启成本，修复后随棘轮开启）：
+    //   useUnknownInCatchVariables（228）→ strictNullChecks（604）→
+    //   noImplicitAny（895）→ exactOptionalPropertyTypes（依赖 strictNullChecks）
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "noImplicitThis": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitReturns": true,
     "skipLibCheck": true
   },
   "include": [
