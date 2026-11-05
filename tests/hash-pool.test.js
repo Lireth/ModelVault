@@ -121,12 +121,15 @@ it('OPT-3：并发 2 时第二任务在前一任务完成前启动（并行执�
 it('OPT-3：并发 2 下前台任务只抢占一个后台槽位，另一后台任务继续完成', async () => {
   setHashPoolConcurrency(2)
   try {
-    const a = await writeFixture('pr-a.bin', Buffer.from('bg-a'))
+    const a = await writeFixture('pr-a.bin', Buffer.alloc(64 * 1024 * 1024, 1))
     const b = await writeFixture('pr-b.bin', Buffer.from('bg-b'))
     const c = await writeFixture('pr-c.bin', Buffer.from('priority'))
 
     // 同一 tick 内入队：a/b 占满两个槽位（currentTask 同步置位），
-    // 随后到达的前台任务 c 无空闲槽位 → 抢占其一（a），b 不受影响
+    // 随后到达的前台任务 c 无空闲槽位 → 抢占其一（a），b 不受影响。
+    // a 必须足够大（SHA256 耗时远大于 worker 消息往返）：抢占依赖 worker
+    // 在块边界收到 abort 消息，若 a 过小则可能在 abort 派发前就完成，
+    // 导致 promise 正常 resolve 而非 PreemptedError（CI 低负载下已复现）
     const pa = computeFileHashOffThread(a.abs)
     const pb = computeFileHashOffThread(b.abs)
     const pc = computeFileHashOffThread(c.abs, undefined, undefined, {
