@@ -180,9 +180,10 @@ async function onSave() {
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  /* 自适应水平缩进：窄窗保底 24px，随窗口按比例扩展，宽窗封顶 140px，
-     内容区始终占约 84% 宽度（头部/底部/正文共用，保持纵向对齐） */
-  --page-inset: clamp(24px, 8%, 140px);
+  /* 自适应水平缩进：窄窗保底 16px，常规宽度按 3% 扩展，宽窗封顶 64px。
+     原 8%/140px 封顶让宽窗内容区只占约 84%，两侧空白过多；收紧后正文
+     与头/底栏共用同一缩进保持纵向对齐，内容区约占 94%+（与统计页一致） */
+  --page-inset: clamp(16px, 3%, 64px);
 }
 
 .settings-header {

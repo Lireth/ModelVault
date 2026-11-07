@@ -76,8 +76,10 @@ onMounted(() => window.addEventListener('keydown', onKeydown))
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  /* 自适应水平缩进：与设置页同款（窄窗保底 24px，按比例扩展，宽窗封顶 140px） */
-  --page-inset: clamp(24px, 8%, 140px);
+  /* 自适应水平缩进：与设置页同款。窄窗保底 16px；常规宽度按 3% 扩展；
+     宽窗封顶 64px——此前 8%/140px 封顶在宽窗上留出大片空白列，内容区
+     仅占约 84%，改为内容区约占 94%+，表格/指标卡获得更多可用宽度 */
+  --page-inset: clamp(16px, 3%, 64px);
 }
 
 .stats-header {
