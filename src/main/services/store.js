@@ -87,7 +87,6 @@ export {
   flushStoreSaveBounded,
   setFlushAwaitTimeoutForTests,
   switchDataRoot,
-  SWITCH_FLUSH_TIMEOUT_MS,
   getSwitchFlushTimeoutMs,
   setSwitchFlushTimeoutForTests,
 } from './store-meta'

@@ -46,7 +46,6 @@ export {
 } from './multiselect/batch-files'
 
 export {
-  reportBatchFailures,
   clearBatchFailures,
   reselectFailedItems,
 } from './multiselect/batch-failures'

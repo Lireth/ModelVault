@@ -196,12 +196,6 @@ export async function parseJsonOffThread(text) {
   }
 }
 
-/** 注入解析阈值（仅供单元测试使用；生产代码严禁调用） */
-export function setParseWorkerThresholdForTests(chars) {
-  parseWorkerThreshold =
-    Number.isFinite(chars) && chars >= 0 ? chars : PARSE_WORKER_THRESHOLD
-}
-
 /** 重置线程状态（仅供单元测试使用；生产代码严禁调用） */
 export async function resetJsonSerializerForTests() {
   const w = worker

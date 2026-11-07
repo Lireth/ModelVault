@@ -61,14 +61,6 @@ const PROGRESS_INTERVAL_MS = 200
  */
 const DOWNLOAD_IDLE_TIMEOUT_MS = 60 * 1000
 
-/** 下载空闲超时（测试可注入缩小；生产代码严禁调用注入器） */
-let downloadIdleTimeoutMs = DOWNLOAD_IDLE_TIMEOUT_MS
-
-/** 注入下载流空闲超时（仅供单元测试使用） */
-export function setDownloadIdleTimeoutForTests(ms) {
-  downloadIdleTimeoutMs =
-    Number.isFinite(ms) && ms >= 0 ? ms : DOWNLOAD_IDLE_TIMEOUT_MS
-}
 /** 拉起新实例后退出当前实例的延迟（ms），给 spawn 完成进程创建留出时间 */
 const QUIT_DELAY_MS = 500
 /** Authenticode 验签子进程超时（ms）：PowerShell 冷启动 + 大 EXE 解析留足余量 */
@@ -86,11 +78,6 @@ const BUILD_SIGNER_THUMBPRINT = /** @type {string} */ (
       __MODELVAULT_SIGNER_THUMBPRINT__
     : ''
 )
-
-/** 测试钩子：替换 PowerShell 查询结果（避免单测依赖真实证书/系统命令） */
-let authenticodeQueryOverride = null
-/** 测试钩子：覆盖预期签名指纹 */
-let signerThumbprintOverride = null
 
 /**
  * 校验和文本 → 64 位十六进制哈希（纯函数，单测锁定）：
@@ -154,17 +141,6 @@ export function fetchAllowedUpdateUrl(url, options) {
 
 /** 瞬时网络错误重试的退避间隔（ms） */
 const TRANSIENT_RETRY_DELAY_MS = 500
-/** 重试退避时长（测试可注入 0 避免真实等待） */
-let transientRetryDelayMs = TRANSIENT_RETRY_DELAY_MS
-
-/**
- * 注入瞬时错误重试退避时长（仅供单元测试使用；生产代码严禁调用）
- * @param {number} ms 毫秒
- */
-export function setTransientRetryDelayForTests(ms) {
-  transientRetryDelayMs =
-    Number.isFinite(ms) && ms >= 0 ? ms : TRANSIENT_RETRY_DELAY_MS
-}
 
 /** 等待指定毫秒（重试退避） */
 function delay(ms) {
@@ -189,9 +165,9 @@ async function fetchUpdateUrlReliably(url, buildOptions) {
     } catch (err) {
       if (attempt >= 1 || !isTransientNetworkError(err)) throw err
       logger.warn(
-        `更新请求连接级失败，${transientRetryDelayMs}ms 后重试: ${err.message}`,
+        `更新请求连接级失败，${TRANSIENT_RETRY_DELAY_MS}ms 后重试: ${err.message}`,
       )
-      await delay(transientRetryDelayMs)
+      await delay(TRANSIENT_RETRY_DELAY_MS)
     }
   }
 }
@@ -239,19 +215,6 @@ export function setPendingUpdate(assets, latest) {
   pendingAssets = assets ? { ...assets, latest } : null
 }
 
-/** 是否存在可下载的更新资产（渲染层「下载更新」按钮的显示依据） */
-export function hasPendingUpdate() {
-  return pendingAssets !== null
-}
-
-/** 测试隔离用：清空模块态（pendingAssets / 已下载路径 / 进行中下载） */
-export function resetUpdateStateForTest() {
-  pendingAssets = null
-  downloadedFile = ''
-  downloadAbort?.abort()
-  downloadAbort = null
-}
-
 /** 更新包缓存目录 */
 function getUpdateDir() {
   return path.join(app.getPath('userData'), UPDATE_DIR_NAME)
@@ -277,13 +240,10 @@ export function normalizeThumbprint(value) {
     .toUpperCase()
 }
 
-/** 当前签名者指纹原始值：测试覆盖 > 运行期环境变量 > 构建期注入 */
+/** 当前签名者指纹原始值：运行期环境变量 > 构建期注入 */
 function signerThumbprintSetting() {
   return String(
-    signerThumbprintOverride ||
-      process.env.MODELVAULT_SIGNER_THUMBPRINT ||
-      BUILD_SIGNER_THUMBPRINT ||
-      '',
+    process.env.MODELVAULT_SIGNER_THUMBPRINT || BUILD_SIGNER_THUMBPRINT || '',
   ).trim()
 }
 
@@ -464,9 +424,7 @@ export async function verifyUpdateSignature(filePath) {
     return { ok: false, required: true, error: '更新包路径无效' }
   }
   try {
-    const info = authenticodeQueryOverride
-      ? await authenticodeQueryOverride(filePath)
-      : await queryAuthenticode(filePath)
+    const info = await queryAuthenticode(filePath)
     return evaluateUpdateSignature(info, expected)
   } catch (err) {
     return {
@@ -475,18 +433,6 @@ export async function verifyUpdateSignature(filePath) {
       error: `更新包验签失败: ${err instanceof Error ? err.message : String(err)}`,
     }
   }
-}
-
-/* ---------------- 仅供单元测试使用 ---------------- */
-
-/** 注入 Authenticode 查询结果（传 null 恢复真实 PowerShell 查询） */
-export function setAuthenticodeQueryForTests(fn) {
-  authenticodeQueryOverride = typeof fn === 'function' ? fn : null
-}
-
-/** 覆盖预期签名指纹（传空恢复构建期/环境配置） */
-export function setSignerThumbprintForTests(value) {
-  signerThumbprintOverride = typeof value === 'string' && value ? value : null
 }
 
 /**
@@ -635,7 +581,7 @@ export async function downloadUpdatePackage(onProgress) {
         // 供续传）。总量不设限：慢链路的合法下载耗时不可预估
         const { done, value } = await raceIdleTimeout(
           reader.read(),
-          downloadIdleTimeoutMs,
+          DOWNLOAD_IDLE_TIMEOUT_MS,
           `更新包下载停滞超过 ${DOWNLOAD_IDLE_TIMEOUT_MS / 1000}s 无数据，已中止（已下载部分保留，可续传）`,
           () => {
             reader.cancel().catch(() => {})
