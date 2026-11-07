@@ -18,7 +18,8 @@ import { wrapHandler } from '../handler'
 
 /**
  * 外部模型导入链路（F2，O-2 自 files.js 按域拆出）：
- * - 原生文件选择（多选）+ 目标目录选择（必须位于当前模型库内）；
+ * - 原生文件选择（多选）或拖拽来源路径（F-4）+ 目标目录选择
+ *   （必须位于当前模型库内）；
  * - 逐文件复制/移动，自动搬运同名 `.txt` / `.civitai.info` / 预览图 sidecar；
  * - 目标同名冲突自动追加 ` (n)`，不覆盖库内已有文件；
  * - 源文件已在库内时拒绝（避免绕过库内移动的元数据键迁移）；
@@ -219,32 +220,59 @@ async function getTargetFreeBytes(targetDir) {
 
 /**
  * 导入外部模型文件（复制/移动入台，F2）。
- * @param {{mode?: string, win?: any, signal?: AbortSignal|null}} [options]
- *   导入方式、来源窗口与取消信号（OPT-02：models:cancelOp 在文件间隙/
- *   分块复制中途中止；已完成条目保留，未完成目标清理）
+ * @param {{mode?: string, win?: any, signal?: AbortSignal|null,
+ *   paths?: string[]}} [options]
+ *   导入方式、来源窗口、取消信号（OPT-02：models:cancelOp 在文件间隙/
+ *   分块复制中途中止；已完成条目保留，未完成目标清理）与拖拽来源路径
+ *   （F-4：提供时跳过来源选择框，路径仍走扩展名/普通文件/库内位置校验）
  * @returns {Promise<object>}
  */
-async function importModels({ mode, win, signal } = {}) {
+async function importModels({ mode, win, signal, paths } = {}) {
   if (mode !== 'copy' && mode !== 'move') return { error: '无效的导入方式' }
   const root = getCurrentRoot()
   if (!root) return { error: '尚未选择模型库' }
-  const picked = await dialog.showOpenDialog(win, {
-    title:
-      mode === 'move' ? '选择要移动入台的模型文件' : '选择要复制入台的模型文件',
-    properties: ['openFile', 'multiSelections'],
-    filters: [
-      {
-        name: '模型文件',
-        // .disabled 是 WebUI 的禁用后缀，需单独加入过滤器才可被选中
-        extensions: [
-          ...MODEL_EXTENSION_NAMES.map((e) => e.slice(1)),
-          'disabled',
-        ],
-      },
-    ],
-  })
-  if (picked.canceled || picked.filePaths.length === 0)
-    return { canceled: true }
+  const explicitPaths = Array.isArray(paths)
+  let sourcePaths
+  if (explicitPaths) {
+    if (paths.length === 0) return { error: '未选择模型文件' }
+    sourcePaths = paths
+  } else {
+    const picked = await dialog.showOpenDialog(win, {
+      title:
+        mode === 'move'
+          ? '选择要移动入台的模型文件'
+          : '选择要复制入台的模型文件',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        {
+          name: '模型文件',
+          // .disabled 是 WebUI 的禁用后缀，需单独加入过滤器才可被选中
+          extensions: [
+            ...MODEL_EXTENSION_NAMES.map((e) => e.slice(1)),
+            'disabled',
+          ],
+        },
+      ],
+    })
+    if (picked.canceled || picked.filePaths.length === 0)
+      return { canceled: true }
+    sourcePaths = picked.filePaths
+  }
+
+  const uniqueSources = []
+  const seen = new Set()
+  for (const sourceRaw of sourcePaths) {
+    // F-4 拖拽路径防御：仅接受非空绝对路径（渲染层 webUtils 产出必为绝对路径；
+    // 结构门禁已限制类型/长度/数量，这里拦住相对路径与空白项）
+    if (typeof sourceRaw !== 'string' || !path.isAbsolute(sourceRaw)) continue
+    const source = path.resolve(sourceRaw)
+    if (seen.has(source)) continue
+    seen.add(source)
+    uniqueSources.push(source)
+  }
+  if (uniqueSources.length === 0) {
+    return { error: '未选择有效的模型文件' }
+  }
 
   const targetPick = await dialog.showOpenDialog(win, {
     title: '选择导入目标文件夹（须在当前模型库内）',
@@ -285,14 +313,6 @@ async function importModels({ mode, win, signal } = {}) {
   let renamed = 0
   let canceled = false
   const aborted = () => signal?.aborted === true
-  const uniqueSources = []
-  const seen = new Set()
-  for (const sourceRaw of picked.filePaths) {
-    const source = path.resolve(sourceRaw)
-    if (seen.has(source)) continue
-    seen.add(source)
-    uniqueSources.push(source)
-  }
   const total = uniqueSources.length
   let totalBytes = 0
   let copyBytes = 0
@@ -521,9 +541,10 @@ async function importModels({ mode, win, signal } = {}) {
 export function registerImportModelsHandler() {
   wrapHandler(
     'models:importModels',
-    (event, { mode } = {}, { signal } = {}) =>
+    (event, { mode, paths } = {}, { signal } = {}) =>
       importModels({
         mode,
+        paths,
         win: BrowserWindow.fromWebContents(event.sender),
         signal,
       }),

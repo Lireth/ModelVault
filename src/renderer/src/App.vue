@@ -22,13 +22,17 @@ import VirtualModelGrid from './components/VirtualModelGrid.vue'
 import VirtualModelList from './components/VirtualModelList.vue'
 import { useGlobalShortcuts } from './composables/useGlobalShortcuts'
 import { useMainProcessEvents } from './composables/useMainProcessEvents'
+import { MAX_IMPORT_PATHS } from '../../shared/app-enums'
+import { MODEL_EXTENSION_SET } from '../../shared/model-extensions'
 import {
   cancelImport,
   filteredModels,
+  importModels,
   initApp,
   relocateFolder,
   scanModels,
   state,
+  toast,
 } from './store/appStore'
 
 // 次要页面异步加载（OP-01）：设置页/统计页仅在打开时渲染，按需加载可显著
@@ -112,22 +116,136 @@ const mainEvents = useMainProcessEvents()
 
 /**
  * 拖放兜底（B13）：阻止非文件拖放（文本/链接等）触发默认导航覆盖当前窗口。
- * 文件拖入封面的业务处理在 ModelDetail 内完成（含 preventDefault），
- * 未被业务处理消费的拖放一律在此阻止默认行为。
+ * 文件拖入封面/详情页的业务处理自行 preventDefault；
+ * 未被业务处理消费的文件拖放由下方拖拽导入链路接管（F-4）。
  */
-function onWindowDragOver(e) {
-  e.preventDefault()
-}
 
-function onWindowDrop(e) {
-  // 仅拦截文件类拖放（封面导入业务自行处理 preventDefault）；
-  // 纯文本/链接拖放放行给目标控件（如排除目录 textarea）的默认插入行为（U7）
-  if (Array.from(e.dataTransfer?.types || []).includes('Files')) {
-    e.preventDefault()
+/* ---------------- 拖拽模型导入（F-4） ---------------- */
+
+/** 整窗拖拽提示层是否可见（dragenter/dragleave 计数驱动） */
+const dropActive = ref(false)
+let dropDepth = 0
+/** 拖离窗口的延迟隐藏定时器：dragleave 后短暂保留，若仍在窗口内
+ *  下一条 dragover/dragenter 会取消它，避免子元素切换造成闪烁或卡层 */
+let dropHideTimer = 0
+
+function clearDropHideTimer() {
+  if (dropHideTimer) {
+    clearTimeout(dropHideTimer)
+    dropHideTimer = 0
   }
 }
 
+/** 拖放数据是否包含文件（纯文本/链接拖放仍放行给输入控件的默认行为，U7） */
+function hasDroppedFiles(dataTransfer) {
+  return Array.from(dataTransfer?.types || []).includes('Files')
+}
+
+/**
+ * 拖放目标是否为业务自身的文件接收区（详情页封面导入等）：
+ * 命中时不显示模型导入提示层，drop 也由业务处理（其 preventDefault 后
+ * 本链路按 defaultPrevented 跳过），避免图片拖入封面被当成模型导入。
+ */
+function isBusinessDropTarget(target) {
+  return Boolean(target?.closest?.('[data-drop-images]'))
+}
+
+/**
+ * 拖入文件名是否为支持的模型扩展名（兼容 WebUI 的 `.disabled` 双重后缀）。
+ * 与主进程 isImportableModelFile 同一语义；渲染层先行过滤，避免无模型时
+ * 仍弹出目标目录选择框。
+ */
+function isSupportedModelFile(fileName) {
+  const lower = String(fileName || '').toLowerCase()
+  const name = lower.endsWith('.disabled')
+    ? lower.slice(0, -'.disabled'.length)
+    : lower
+  const dot = name.lastIndexOf('.')
+  return dot > 0 && MODEL_EXTENSION_SET.has(name.slice(dot))
+}
+
+/** 从拖放数据解析可导入的绝对路径（preload webUtils；失败项静默跳过） */
+function modelPathsFromDrop(dataTransfer) {
+  const paths = []
+  for (const file of Array.from(dataTransfer?.files || [])) {
+    if (!isSupportedModelFile(file?.name)) continue
+    try {
+      const filePath = window.api.getPathForFile(file)
+      if (typeof filePath === 'string' && filePath) paths.push(filePath)
+    } catch {
+      /* 路径解析失败按未拖入处理 */
+    }
+  }
+  return paths
+}
+
+function onWindowDragOver(e) {
+  e.preventDefault()
+  // 拖拽仍在窗口内：取消「拖离窗口」的延迟隐藏
+  if (dropActive.value) clearDropHideTimer()
+}
+
+function onWindowDragEnter(e) {
+  if (!hasDroppedFiles(e.dataTransfer)) return
+  if (isBusinessDropTarget(e.target)) {
+    // 进入业务接收区（封面等）：收起模型导入提示，drop 让位给业务处理
+    clearDropHideTimer()
+    dropDepth = 0
+    dropActive.value = false
+    return
+  }
+  clearDropHideTimer()
+  dropDepth += 1
+  dropActive.value = true
+}
+
+/** 子元素间移动会成对触发 dragleave/dragenter：计数归零才隐藏提示层 */
+function onWindowDragLeave() {
+  if (!dropActive.value) return
+  dropDepth = Math.max(0, dropDepth - 1)
+  if (dropDepth > 0) return
+  clearDropHideTimer()
+  dropHideTimer = setTimeout(() => {
+    dropHideTimer = 0
+    dropDepth = 0
+    dropActive.value = false
+  }, 150)
+}
+
+async function onWindowDrop(e) {
+  // 业务接收区（封面拖图等）已处理：不再重复走模型导入
+  const handledByBusiness = e.defaultPrevented
+  const hasFiles = hasDroppedFiles(e.dataTransfer)
+  if (hasFiles) e.preventDefault()
+  clearDropHideTimer()
+  dropDepth = 0
+  dropActive.value = false
+  if (!hasFiles || handledByBusiness) return
+
+  const paths = modelPathsFromDrop(e.dataTransfer)
+  if (paths.length === 0) {
+    toast(
+      'warn',
+      '未检测到受支持的模型文件（支持 safetensors / ckpt / pt / pth / bin）',
+    )
+    return
+  }
+  if (paths.length > MAX_IMPORT_PATHS) {
+    toast(
+      'warn',
+      `一次最多导入 ${MAX_IMPORT_PATHS} 个模型，已截取前 ${MAX_IMPORT_PATHS} 个`,
+    )
+  }
+  // 默认复制入台；按住 Shift 松开则移动入台（与资源管理器拖放语义近似）
+  await importModels(
+    e.shiftKey ? 'move' : 'copy',
+    paths.slice(0, MAX_IMPORT_PATHS),
+  )
+}
+
 onMounted(async () => {
+  window.addEventListener('dragenter', onWindowDragEnter)
+  window.addEventListener('dragleave', onWindowDragLeave)
   window.addEventListener('dragover', onWindowDragOver)
   window.addEventListener('drop', onWindowDrop)
   // 返回顶部按钮：监听内容区滚动（rAF 合帧，仅驱动显隐）
@@ -138,6 +256,9 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  clearDropHideTimer()
+  window.removeEventListener('dragenter', onWindowDragEnter)
+  window.removeEventListener('dragleave', onWindowDragLeave)
   window.removeEventListener('dragover', onWindowDragOver)
   window.removeEventListener('drop', onWindowDrop)
   mainEvents.unsubscribeAll()
@@ -328,6 +449,32 @@ onUnmounted(() => {
       </button>
     </div>
 
+    <!-- F-4 拖拽模型导入：整窗提示层（不拦截指针，drop 仍落到底层并由
+         窗口级监听接管）；松开后由主进程弹出目标文件夹选择 -->
+    <div v-if="dropActive" class="drop-import-mask" aria-hidden="true">
+      <div class="drop-import-card">
+        <svg
+          viewBox="0 0 24 24"
+          width="42"
+          height="42"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M12 3v11" />
+          <path d="M7.5 9.5 12 14l4.5-4.5" />
+          <path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
+        </svg>
+        <strong>松开以导入模型文件</strong>
+        <span>默认复制入台；按住 <kbd>Shift</kbd> 松开则移动入台</span>
+        <span class="drop-import-hint"
+          >松开后选择目标文件夹（须在当前模型库内）</span
+        >
+      </div>
+    </div>
+
     <!-- 自定义确认层（U4，O9 拆分为 ConfirmOverlay 组件）：
          替代 window.confirm，覆盖区不包含标题栏（保持窗口控制可达） -->
     <ConfirmOverlay />
@@ -497,6 +644,69 @@ onUnmounted(() => {
   flex-shrink: 0;
   font-size: var(--font-xs);
   padding: 3px 12px;
+}
+
+/* ---------- 拖拽导入提示层（F-4）：整窗虚线区域 + 中央提示卡 ---------- */
+.drop-import-mask {
+  position: fixed;
+  top: var(--titlebar-height);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--overlay-strong);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  /* 与详情浮层同层：拖拽期间覆盖全部内容；pointer-events: none 保证
+     drop 事件继续落到窗口监听（提示层自身不消费拖放） */
+  z-index: var(--z-detail);
+  pointer-events: none;
+}
+
+.drop-import-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 44px;
+  color: var(--text);
+  background: var(--glass-bg-strong);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+
+.drop-import-card svg {
+  color: var(--accent);
+}
+
+.drop-import-card strong {
+  font-size: var(--font-lg);
+  font-weight: 600;
+}
+
+.drop-import-card span {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+.drop-import-card kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-card) 60%, transparent);
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  color: var(--text);
+}
+
+.drop-import-hint {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  opacity: 0.8;
 }
 
 /* ---------- 返回顶部按钮（U-滚动）：玻璃圆钮与标题栏/浮条质感一致 ---------- */

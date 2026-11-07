@@ -133,12 +133,18 @@ const api = {
     /**
      * F2：导入外部模型文件（复制/移动入台）
      * @param {'copy'|'move'} mode 复制或移动
+     * @param {string} [opId] 取消令牌（OPT-02）
+     * @param {string[]} [paths] 拖拽来源路径（F-4）；提供时跳过原生来源选择框
      * @returns {Promise<{root:string,targetDir:string,targetRelDir:string,
      *   imported:number,renamed:number,failed:object[],warnings:string[]} |
      *   {canceled:true} | {error:string}>}
      */
-    importModels: (mode, opId) =>
-      invokeValidated('models:importModels', opId ? { mode, opId } : { mode }),
+    importModels: (mode, opId, paths) => {
+      const payload = { mode }
+      if (opId) payload.opId = opId
+      if (Array.isArray(paths) && paths.length > 0) payload.paths = paths
+      return invokeValidated('models:importModels', payload)
+    },
     /**
      * 局部增量扫描（A-03）：只扫描指定变更子树，返回这些子树的模型现状。
      * payload 为 { folder, dirs }（dirs 为 POSIX 相对目录数组，'' 为根直属）

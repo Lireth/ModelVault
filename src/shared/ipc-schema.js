@@ -36,7 +36,7 @@
  */
 
 import { MAX_PARTIAL_SCAN_DIRS_INPUT } from './scan-dirs'
-import { MAX_BATCH_META_IDS } from './app-enums'
+import { MAX_BATCH_META_IDS, MAX_IMPORT_PATHS } from './app-enums'
 
 /**
  * 未显式声明 max 时的全局默认规模/深度上限（fail-closed 收口）：
@@ -432,8 +432,13 @@ export const IPC_PAYLOAD_SCHEMAS = {
   }),
   'models:cancelScan': vVoid(),
   // F2：外部模型导入（复制/移动入台），mode 枚举语义在 handler
+  // F-4：paths 为拖拽导入的来源文件路径——提供时跳过原生来源选择框，
+  // 仍由 handler 做扩展名/普通文件/库内路径等语义校验
   'models:importModels': vObj({
-    fields: { mode: vStr({ required: true, max: 16 }) },
+    fields: {
+      mode: vStr({ required: true, max: 16 }),
+      paths: vArr({ max: MAX_IMPORT_PATHS, items: vStr({ max: 4096 }) }),
+    },
   }),
 
   // ---------- 元数据域 ----------

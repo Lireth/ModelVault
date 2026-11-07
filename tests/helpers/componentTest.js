@@ -60,6 +60,16 @@ function makeComponentApiMock() {
       partialScan: vi.fn(() =>
         Promise.resolve({ models: [], dirs: [], relinked: 0 }),
       ),
+      // F2/F-4：外部模型导入（设置页按钮与 App 拖拽导入）
+      importModels: vi.fn(() =>
+        Promise.resolve({
+          imported: 0,
+          renamed: 0,
+          failed: [],
+          warnings: [],
+          targetRelDir: '',
+        }),
+      ),
       transferToLibrary: vi.fn(() =>
         Promise.resolve({ transferred: 0, skipped: [], failed: [] }),
       ),

@@ -550,6 +550,46 @@ describe('F2 模型导入（复制/移动入台）', () => {
       error: '无效的导入方式',
     })
   })
+
+  it('F-4 拖拽导入：payload paths 跳过来源选择框，仅弹目标目录', async () => {
+    const source = await makeSource('drag.safetensors', 'drag-data')
+    const target = path.join(root, 'lora')
+    await fs.mkdir(target, { recursive: true })
+    vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [target],
+    })
+
+    const res = await handler(makeEvent(), {
+      mode: 'copy',
+      paths: [source],
+    })
+
+    expect(res.imported).toBe(1)
+    // 来源选择框被跳过：唯一的对话框调用是目标目录选择
+    expect(dialog.showOpenDialog).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(dialog.showOpenDialog).mock.calls[0][1].title).toContain(
+      '目标文件夹',
+    )
+    await expect(
+      fs.readFile(path.join(target, 'drag.safetensors'), 'utf-8'),
+    ).resolves.toBe('drag-data')
+  })
+
+  it('F-4 空路径 / 非绝对路径：不弹任何对话框并返回错误', async () => {
+    expect(await handler(makeEvent(), { mode: 'copy', paths: [] })).toEqual({
+      error: '未选择模型文件',
+    })
+    expect(dialog.showOpenDialog).not.toHaveBeenCalled()
+
+    expect(
+      await handler(makeEvent(), {
+        mode: 'copy',
+        paths: ['relative.safetensors'],
+      }),
+    ).toEqual({ error: '未选择有效的模型文件' })
+    expect(dialog.showOpenDialog).not.toHaveBeenCalled()
+  })
 })
 
 describe('planRenameTarget（N1 重命名目标计算）', () => {

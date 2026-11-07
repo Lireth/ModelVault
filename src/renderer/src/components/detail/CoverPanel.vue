@@ -238,6 +238,7 @@ onBeforeUnmount(() => {
   <div v-if="selectedModel" class="detail-cover-col">
     <div
       class="detail-cover"
+      data-drop-images
       :class="{ 'drop-active': dropActive, 'can-zoom': covers.length > 0 }"
       :title="
         covers.length > 0

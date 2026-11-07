@@ -98,6 +98,35 @@ describe('F2 模型导入', () => {
     ).toBe(true)
   })
 
+  it('F-4 拖拽导入：来源路径透传给主进程（跳过来源选择框）', async () => {
+    state.folder = 'D:\\models'
+    api.models.importModels.mockResolvedValue({
+      imported: 1,
+      renamed: 0,
+      failed: [],
+      warnings: [],
+      targetRelDir: 'lora',
+    })
+    api.models.partialScan.mockResolvedValue({
+      models: [],
+      dirs: ['lora'],
+      relinked: 0,
+    })
+
+    const ok = await importModels('move', ['D:\\src\\drag.safetensors'])
+
+    expect(ok).toBe(true)
+    expect(api.models.importModels).toHaveBeenCalledWith(
+      'move',
+      expect.any(String),
+      ['D:\\src\\drag.safetensors'],
+    )
+    expect(api.models.partialScan).toHaveBeenCalledWith({
+      folder: 'D:\\models',
+      dirs: ['lora'],
+    })
+  })
+
   it('全部失败时不触发局部扫描；扫描中拒绝导入', async () => {
     state.folder = 'D:\\models'
     api.models.importModels.mockResolvedValue({

@@ -477,10 +477,12 @@ export function cancelImport() {
  * F2：导入外部模型文件（复制/移动入台）。
  * 主进程完成文件搬运后，对目标子树执行局部扫描，让新模型即时入列。
  * OPT-02：附带 opId 取消令牌；进度经 models:importProgress 事件更新。
+ * F-4：paths 为拖拽导入的来源路径，提供时主进程跳过来源选择框。
  * @param {'copy'|'move'} mode 复制或移动
+ * @param {string[]|null} [paths] 拖拽来源路径（可选）
  * @returns {Promise<boolean>} 是否成功导入至少一个模型
  */
-export async function importModels(mode = 'copy') {
+export async function importModels(mode = 'copy', paths = null) {
   if (state.importing) return false
   if (state.scanning || state.partialScanning || state.backgroundScanning) {
     toast('warn', '正在扫描或校验中，请稍候')
@@ -502,7 +504,10 @@ export async function importModels(mode = 'copy') {
     canceling: false,
   }
   try {
-    const res = await window.api.models.importModels(mode, opId)
+    const res =
+      Array.isArray(paths) && paths.length > 0
+        ? await window.api.models.importModels(mode, opId, paths)
+        : await window.api.models.importModels(mode, opId)
     if (res?.canceled) {
       const imported = Number.isFinite(res?.imported) ? res.imported : 0
       if (imported > 0) {

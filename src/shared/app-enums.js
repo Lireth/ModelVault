@@ -64,6 +64,14 @@ export const HASH_WARMUP_KEYS = new Set(HASH_WARMUP_DEFS.map((d) => d.key))
 export const MAX_BATCH_META_IDS = 5000
 
 /**
+ * 单次拖拽导入的文件路径上限（F-4 单一来源）：
+ * 渲染层按此值截断并提示，主进程 payload schema 使用同一上限拒绝超量输入。
+ * 500 条 × 典型绝对路径（约 200B）≈ 100KB，远低于批量标注载荷；
+ * 拖入整文件夹通常为数十个模型，上限只用于防御异常输入。
+ */
+export const MAX_IMPORT_PATHS = 500
+
+/**
  * NSFW 示例图模糊样式（A-12 单一来源：主进程校验与设置页分段选择共用）：
  * - off：不模糊，仅显示红色 NSFW 标记；
  * - blur：标准模糊（默认，与旧版开启时一致）；
