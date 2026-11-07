@@ -20,8 +20,8 @@ import {
  * 详情页面板骨架（O-4 拆分）：
  * - 中部标注表单列（表单状态/脏检测/保存/收藏评分）→ detail/MetaForm.vue
  * - 左侧封面管理 → detail/CoverPanel.vue（C1，既有拆分）
- * - 右侧信息列：文件元数据（自动解析）+ Civitai 识别信息 →
- *   detail/AutoInfoPanel.vue + detail/CivitaiPanel.vue（本文件编排）。
+ * - 右侧信息列：Civitai 识别信息 + 文件元数据（自动解析） →
+ *   detail/CivitaiPanel.vue + detail/AutoInfoPanel.vue（本文件编排）。
  *   AutoInfoPanel 的「一键填入」经 MetaForm 暴露的方法写入其本地表单。
  * 本文件保留：遮罩与面板骨架、打开/关闭焦点管理（O10）、Tab 焦点陷阱、
  * ESC 关闭与面板右键菜单。
@@ -252,8 +252,9 @@ watch(
           <!-- 中部：推荐参数与标注（MetaForm，O-4 拆分） -->
           <MetaForm ref="metaFormRef" />
 
-          <!-- 右侧：识别信息列（文件元数据自动解析 + Civitai 在线识别） -->
+          <!-- 右侧：识别信息列（Civitai 在线识别 + 文件元数据自动解析） -->
           <div class="detail-info-col">
+            <CivitaiPanel />
             <AutoInfoPanel
               @apply-resolution="
                 (resMin, resMax) =>
@@ -263,7 +264,6 @@ watch(
                 (words) => metaFormRef?.onAutoApplyTriggers(words)
               "
             />
-            <CivitaiPanel />
           </div>
         </div>
       </section>
@@ -398,14 +398,14 @@ watch(
 
 .detail-body {
   display: grid;
-  /* 三列：封面 | 标注表单 | 识别信息（AutoInfo + Civitai） */
+  /* 三列：封面 | 标注表单 | 识别信息（Civitai + AutoInfo） */
   grid-template-columns: 300px minmax(0, 1fr) 280px;
   gap: 16px;
   padding: 16px 20px;
   overflow-y: auto;
 }
 
-/* 右侧识别信息列：文件元数据（自动解析）+ Civitai 识别，纵向排布 */
+/* 右侧识别信息列：Civitai 识别 + 文件元数据（自动解析），纵向排布 */
 .detail-info-col {
   display: flex;
   flex-direction: column;
