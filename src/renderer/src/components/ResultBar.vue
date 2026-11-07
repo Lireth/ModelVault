@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import {
   BASE_MODEL_FAMILIES,
   duplicateIdSet,
@@ -38,15 +38,56 @@ function onSelectRedundant() {
 
 /** 同时生效的标签上限（与智能视图 schema 的 tagFilters 上限一致） */
 const MAX_TAG_FILTERS = 20
+/** 无检索词时的快选展示上限：保持下拉轻量，完整标签池由检索覆盖 */
+const QUICK_TAG_LIMIT = 50
+/** 检索命中展示上限：防止一次渲染数千个复选框拖慢下拉 */
+const SEARCH_TAG_LIMIT = 200
+
+/** 标签检索关键词（大小写不敏感包含匹配） */
+const tagSearch = ref('')
 
 /**
- * 标签下拉选项：当前可见标签池 + 已选但不在池中的标签（保证活动筛选始终
- * 可见，例如智能视图应用了已跌出前 50 的标签时仍可取消）。
+ * 标签下拉数据：已选置顶 + 全量可见标签池。
+ * - 无关键词时只展示前 QUICK_TAG_LIMIT 个，保留原快选体验；
+ * - 有关键词时在全量池中检索，避免稀有标签不可选；
+ * - 已选标签始终保留（即使不匹配关键词），保证活动筛选可随时取消。
  */
-const tagOptions = computed(() => {
-  const pool = visibleTags.value
-  const missing = state.tagFilters.filter((t) => !pool.includes(t))
-  return missing.length > 0 ? [...missing, ...pool] : pool
+const tagOptionState = computed(() => {
+  const keyword = tagSearch.value.trim().toLowerCase()
+  const selected = Array.isArray(state.tagFilters) ? state.tagFilters : []
+  // 已选置顶：包含已跌出可见池（隐藏模型/重扫）的标签
+  const base = [
+    ...selected,
+    ...visibleTags.value.filter((tag) => !selected.includes(tag)),
+  ]
+  const matched = keyword
+    ? base.filter(
+        (tag) => selected.includes(tag) || tag.toLowerCase().includes(keyword),
+      )
+    : base
+  const limit = keyword ? SEARCH_TAG_LIMIT : QUICK_TAG_LIMIT
+  return {
+    options: matched.slice(0, limit),
+    total: matched.length,
+    limited: matched.length > limit,
+    keyword,
+  }
+})
+
+const tagOptions = computed(() => tagOptionState.value.options)
+
+/** 标签下拉是否有可展示内容（空库且无已选时不显示入口） */
+const hasTagPool = computed(
+  () => visibleTags.value.length > 0 || state.tagFilters.length > 0,
+)
+
+/** 截断提示（仅在总量超过展示上限时出现） */
+const tagLimitHint = computed(() => {
+  const { total, options, limited, keyword } = tagOptionState.value
+  if (!limited) return ''
+  return keyword
+    ? `匹配 ${total} 个标签，仅显示前 ${options.length} 个，请继续输入缩小范围`
+    : `共 ${total} 个标签，显示前 ${options.length} 个，输入关键词检索全部`
 })
 
 /**
@@ -68,9 +109,10 @@ function toggleTagFilter(tag) {
   state.tagFilters = next
 }
 
-/** 清空标签筛选 */
+/** 清空标签筛选与检索词 */
 function clearTagFilters() {
   state.tagFilters = []
+  tagSearch.value = ''
 }
 </script>
 
@@ -182,7 +224,7 @@ function clearTagFilters() {
     <!-- 自由标签筛选（F-5/FEAT-01）：多选 AND 语义；库内存在标签时显示；
          跨类型维度，不随主分类切换清空（与收藏筛选同类） -->
     <details
-      v-if="tagOptions.length"
+      v-if="hasTagPool"
       class="filter-menu tag-filter-menu"
       :class="{
         'sub-filter':
@@ -208,6 +250,16 @@ function clearTagFilters() {
         role="group"
         aria-label="按标签筛选（多标签同时包含）"
       >
+        <input
+          v-model="tagSearch"
+          class="tag-search-input"
+          type="search"
+          placeholder="搜索标签…"
+          maxlength="64"
+          spellcheck="false"
+          aria-label="搜索标签后勾选筛选"
+        />
+        <p v-if="tagOptions.length === 0" class="tag-empty">没有匹配的标签</p>
         <label v-for="t in tagOptions" :key="t" class="tag-option">
           <input
             type="checkbox"
@@ -216,6 +268,7 @@ function clearTagFilters() {
           />
           <span class="tag-option-text">{{ t }}</span>
         </label>
+        <p v-if="tagLimitHint" class="tag-options-hint">{{ tagLimitHint }}</p>
         <button
           v-if="state.tagFilters.length > 0"
           class="tag-clear"
@@ -315,6 +368,32 @@ function clearTagFilters() {
   backdrop-filter: blur(22px);
   -webkit-backdrop-filter: blur(22px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.tag-search-input {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass-bg-strong);
+  color: var(--text);
+  font-size: var(--font-xs);
+  outline: none;
+}
+
+.tag-search-input:focus {
+  border-color: var(--accent);
+}
+
+.tag-empty,
+.tag-options-hint {
+  margin: 4px 6px;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  line-height: 1.45;
 }
 
 .tag-option {

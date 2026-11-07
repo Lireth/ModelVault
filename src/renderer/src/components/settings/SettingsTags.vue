@@ -13,7 +13,8 @@ import {
  * 设置页「标签管理」板块（F4）：全库自由标签的管理闭环——
  * 重命名/合并（目标名已存在时整库合并）与移除，操作整库生效并即时落盘，
  * 本地模型列表由 tag-admin 同步（无需重扫）。
- * 数据源为 allTags 标签池（按使用次数降序，上限 50，与侧栏筛选同一来源）。
+ * 数据源为 allTags 全量标签池（按使用次数降序，不截断）；标签较多时通过
+ * 搜索框检索，避免「库内存在但管理面板不可见」的盲区。
  */
 
 /** 行内编辑状态：正在重命名的标签名（null = 无编辑行） */
@@ -22,11 +23,19 @@ const editValue = ref('')
 /** 编辑框 DOM 引用（进入编辑态自动聚焦） */
 const editInputEl = ref(null)
 const busy = ref(false)
+/** 标签检索关键词（大小写不敏感包含匹配） */
+const search = ref('')
 
-/** 标签行（名称 + 使用模型数），随本地列表即时刷新 */
-const rows = computed(() =>
-  allTags.value.map((tag) => ({ tag, count: tagCounts.value.get(tag) || 0 })),
-)
+/** 标签行（名称 + 使用模型数），随本地列表即时刷新并受检索词过滤 */
+const rows = computed(() => {
+  const keyword = search.value.trim().toLowerCase()
+  return allTags.value
+    .filter((tag) => !keyword || tag.toLowerCase().includes(keyword))
+    .map((tag) => ({ tag, count: tagCounts.value.get(tag) || 0 }))
+})
+
+/** 库内是否存在标签（检索无结果与空库提示语义不同） */
+const hasTags = computed(() => allTags.value.length > 0)
 
 async function startEdit(tag) {
   editingTag.value = tag
@@ -49,6 +58,21 @@ function cancelEdit() {
   editValue.value = ''
 }
 
+/**
+ * 目标名是否已被其他标签占用（大小写不敏感，与 tag-admin 的去重语义一致）。
+ * 排除当前标签自身：仅大小写变化（hoodie → Hoodie）不算合并冲突。
+ * @param {string} name 目标标签名
+ * @param {string} except 当前标签名
+ * @returns {boolean}
+ */
+function tagNameTaken(name, except) {
+  const key = name.toLowerCase()
+  return allTags.value.some(
+    (tag) =>
+      tag.toLowerCase() === key && tag.toLowerCase() !== except.toLowerCase(),
+  )
+}
+
 /** 保存重命名：目标名已存在时经确认层告知合并语义 */
 async function saveEdit() {
   const from = editingTag.value
@@ -62,7 +86,7 @@ async function saveEdit() {
     cancelEdit()
     return
   }
-  if (allTags.value.includes(to)) {
+  if (tagNameTaken(to, from)) {
     const ok = await confirmDialog(
       `标签「${to}」已存在，重命名将与「${to}」合并：两个标签下的模型都将拥有合并后的「${to}」。`,
     )
@@ -98,10 +122,37 @@ async function onRemove(tag) {
   <!-- 标签管理（O-4 拆分：settings/SettingsTags.vue）：重命名/合并/移除 -->
   <h3>标签管理</h3>
   <div class="settings-group">
-    <div v-if="rows.length === 0" class="setting-row">
+    <div v-if="!hasTags" class="setting-row">
       <div class="setting-info">
         <span class="setting-desc"
           >当前模型库还没有自由标签，可在模型详情页为模型添加标签。</span
+        >
+      </div>
+    </div>
+
+    <div v-else class="setting-row tag-search-row">
+      <div class="setting-info">
+        <input
+          v-model="search"
+          class="tag-search-input"
+          type="search"
+          placeholder="搜索标签…"
+          maxlength="64"
+          spellcheck="false"
+          aria-label="搜索库内标签"
+        />
+        <span class="setting-desc">
+          共 {{ allTags.length }} 个标签{{
+            search.trim() ? `，匹配 ${rows.length} 个` : ''
+          }}
+        </span>
+      </div>
+    </div>
+
+    <div v-if="hasTags && rows.length === 0" class="setting-row">
+      <div class="setting-info">
+        <span class="setting-desc"
+          >没有匹配「{{ search.trim() }}」的标签。</span
         >
       </div>
     </div>
@@ -169,7 +220,8 @@ async function onRemove(tag) {
 </template>
 
 <style scoped>
-.tag-edit-input {
+.tag-edit-input,
+.tag-search-input {
   width: 240px;
   max-width: 100%;
   padding: 7px 12px;

@@ -29,6 +29,20 @@ function seed() {
   ]
 }
 
+/** 超过 Top-50 的标签库：red 仍为高频标签，rare-59 仅在完整池中 */
+function seedManyTags() {
+  const rare = Array.from(
+    { length: 60 },
+    (_, i) => `rare-${String(i).padStart(2, '0')}`,
+  )
+  state.models = [
+    { id: 'm1', tags: ['red', 'blue'] },
+    { id: 'm2', tags: ['red'] },
+    { id: 'm3', tags: ['green'] },
+    ...rare.map((tag, i) => ({ id: `x${i}`, tags: [tag] })),
+  ]
+}
+
 function mountPanel() {
   return mount(SettingsTags)
 }
@@ -37,7 +51,11 @@ function mountPanel() {
 function findRow(wrapper, tag) {
   return wrapper
     .findAll('.setting-row')
-    .find((r) => r.find('.setting-title').text() === tag)
+    .find(
+      (r) =>
+        r.find('.setting-title').exists() &&
+        r.find('.setting-title').text() === tag,
+    )
 }
 
 describe('渲染', () => {
@@ -53,6 +71,45 @@ describe('渲染', () => {
     // red 2 次；blue/green 各 1 次（同频按中文排序）
     expect(titles).toEqual(['red', 'blue', 'green'])
     expect(findRow(wrapper, 'red').text()).toContain('2 个模型使用')
+  })
+})
+
+describe('全量标签检索（O1）', () => {
+  it('标签超过 50 个时管理面板展示全量，并可按关键词检索稀有标签', async () => {
+    seedManyTags()
+    const wrapper = mountPanel()
+    // 63 个标签全部进入管理面板（不再截断为 Top-50）
+    expect(wrapper.findAll('.setting-title')).toHaveLength(63)
+
+    await wrapper.find('.tag-search-input').setValue('rare-59')
+    const titles = wrapper.findAll('.setting-title').map((n) => n.text())
+    expect(titles).toEqual(['rare-59'])
+    expect(wrapper.text()).toContain('匹配 1 个')
+  })
+
+  it('检索无结果时显示空态，而不是空库引导提示', async () => {
+    seedManyTags()
+    const wrapper = mountPanel()
+    await wrapper.find('.tag-search-input').setValue('no-such-tag')
+
+    expect(wrapper.findAll('.setting-title')).toHaveLength(0)
+    expect(wrapper.text()).toContain('没有匹配')
+    expect(wrapper.text()).not.toContain('还没有自由标签')
+  })
+
+  it('目标名是 Top-50 之外的已存在标签时仍弹合并确认', async () => {
+    seedManyTags()
+    const wrapper = mountPanel()
+
+    await findRow(wrapper, 'red').find('button').trigger('click')
+    await wrapper.find('.tag-edit-input').setValue('rare-59')
+    await wrapper.find('button.btn-primary').trigger('click')
+
+    expect(state.confirm.visible).toBe(true)
+    expect(state.confirm.text).toContain('合并')
+    await rejectConfirm()
+    await settle()
+    expect(window.api.models.renameTag).not.toHaveBeenCalled()
   })
 })
 

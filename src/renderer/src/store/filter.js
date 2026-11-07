@@ -407,15 +407,16 @@ export const tagCounts = computed(() => {
 })
 
 /**
- * 全库自由标签池（F-5）：按使用次数降序（同频按中文名稳定排序），上限 50——
- * 筛选下拉的数据源；标签由详情页编辑器维护，随元数据即时落盘。
+ * 全库自由标签池（F-5）：按使用次数降序（同频按中文名稳定排序），不截断——
+ * 标签管理（重命名/合并/移除）与可检索选择器的完整数据源；标签由详情页
+ * 编辑器维护，随元数据即时落盘。筛选下拉的默认快选展示由消费方自行限制，
+ * 避免把「库内标签存在但不可管理/不可检索」的状态固化在数据层。
  * O-4：先物化 [标签, 计数] 数组再排序——原实现在比较器内两次 tagCounts.get()
  * 查表，全库标签量级下把 Map 查找乘进比较次数。
  */
 export const allTags = computed(() =>
   [...tagCounts.value.entries()]
     .sort((a, b) => b[1] - a[1] || zhCollator.compare(a[0], b[0]))
-    .slice(0, 50)
     .map(([tag]) => tag),
 )
 
@@ -436,11 +437,10 @@ export const visibleTagCounts = computed(() => {
   return counts
 })
 
-/** 当前可见标签池（排序/上限与 allTags 一致） */
+/** 当前可见标签池（排序口径与 allTags 一致，不截断；快选/检索由消费方处理） */
 export const visibleTags = computed(() =>
   [...visibleTagCounts.value.entries()]
     .sort((a, b) => b[1] - a[1] || zhCollator.compare(a[0], b[0]))
-    .slice(0, 50)
     .map(([tag]) => tag),
 )
 

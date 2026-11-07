@@ -45,7 +45,10 @@ const summaryText = computed(() => {
   return `将选中的 ${selectedCount.value} 个模型的现有标签整体替换为以下标签`
 })
 
-/** 库内标签建议（排除已选中的；输入文本时按包含匹配过滤） */
+/**
+ * 库内标签建议（排除已选中的；输入文本时在 allTags 全量池中按包含匹配过滤）：
+ * 数据源已不截断为 Top-50，稀有标签同样可通过输入关键词被建议到。
+ */
 const suggestions = computed(() => {
   const keyword = input.value.trim().toLowerCase()
   const selected = new Set(tags.value)

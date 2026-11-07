@@ -164,6 +164,18 @@ describe('筛选与排序（filteredModels）', () => {
     expect(allTags.value).toEqual([])
   })
 
+  it('标签池全量化：超过 50 个标签不截断，可见池同样保留全量', () => {
+    const tags = Array.from(
+      { length: 60 },
+      (_, i) => `rare-${String(i).padStart(2, '0')}`,
+    )
+    state.models = [makeModel('many-tags', { tags })]
+    expect(allTags.value).toHaveLength(60)
+    expect(allTags.value).toContain('rare-59')
+    expect(visibleTags.value).toHaveLength(60)
+    expect(visibleTags.value).toContain('rare-59')
+  })
+
   it('收藏优先排序：收藏在前，组内按名称；固定语义不响应方向翻转（O1）', () => {
     state.models = [
       makeModel('x', { name: 'a', favorite: false }),

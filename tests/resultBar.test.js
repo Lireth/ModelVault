@@ -90,6 +90,38 @@ describe('ResultBar 多标签筛选', () => {
   })
 })
 
+describe('ResultBar 全量标签检索（O1）', () => {
+  const manyTags = Array.from(
+    { length: 60 },
+    (_, i) => `标签${String(i).padStart(2, '0')}`,
+  )
+
+  it('默认快选展示前 50 个，输入关键词可检索稀有标签', async () => {
+    replaceModels([model('many', manyTags)])
+    const wrapper = mount(ResultBar)
+    expect(wrapper.findAll('.tag-option')).toHaveLength(50)
+    expect(wrapper.find('.tag-options-hint').text()).toContain('共 60 个标签')
+
+    const search = wrapper.find('.tag-search-input')
+    await search.setValue('标签59')
+    expect(wrapper.findAll('.tag-option')).toHaveLength(1)
+    expect(wrapper.find('.tag-option').text()).toContain('标签59')
+
+    await search.setValue('不存在')
+    expect(wrapper.find('.tag-empty').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('已选标签即使不在默认快选区间也置顶可见', () => {
+    state.tagFilters = ['标签59']
+    replaceModels([model('many', manyTags)])
+    const wrapper = mount(ResultBar)
+    expect(wrapper.find('.tag-option').text()).toContain('标签59')
+    expect(wrapper.findAll('.tag-option')).toHaveLength(50)
+    wrapper.unmount()
+  })
+})
+
 describe('ResultBar 疑似损坏筛选（FEAT-01）', () => {
   it('仅存在损坏模型时显示入口，点击切换筛选并更新结果', async () => {
     replaceModels([
