@@ -80,6 +80,8 @@ describe('BatchBar 渲染与分组', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.batch-progress').exists()).toBe(true)
     expect(wrapper.find('.batch-busy').text()).toBe('识别中 1/2')
+    // 完整进度文案挂在 title 上：固定宽度省略后仍可悬停查看模型名
+    expect(wrapper.find('.batch-busy').attributes('title')).toBe('识别中 1/2')
     expect(wrapper.find('.btn-danger').attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })

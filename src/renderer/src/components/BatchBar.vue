@@ -127,9 +127,12 @@ onUnmounted(() => {
         反选
       </button>
       <span class="batch-count">已选 {{ state.multiSelect.ids.length }}</span>
-      <span v-if="state.multiSelect.busy" class="batch-busy">{{
-        state.multiSelect.progress || '处理中…'
-      }}</span>
+      <span
+        v-if="state.multiSelect.busy"
+        class="batch-busy"
+        :title="state.multiSelect.progress || '处理中…'"
+        >{{ state.multiSelect.progress || '处理中…' }}</span
+      >
       <!-- 流动进度条（不定时长批量 IPC 的忙碌视觉反馈） -->
       <div
         v-if="state.multiSelect.busy"
@@ -353,8 +356,17 @@ onUnmounted(() => {
   min-width: 52px;
 }
 
-/* 批量提交进行中的忙碌提示（B6） */
+/* 批量提交进行中的忙碌提示（B6）：
+   文案含逐个模型名，长度随模型变化。固定宽度 + 末尾省略，避免名称长短
+   带动整条多选栏重排/换行跳动；完整文案经 title 悬停可查看 */
 .batch-busy {
+  flex: 0 0 180px;
+  width: 180px;
+  /* flex 项默认 min-width:auto（内容最小宽度）会顶开定宽，显式归零 */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--font-xs);
   color: var(--text-muted);
   animation: batch-busy-pulse 1.2s ease-in-out infinite;
