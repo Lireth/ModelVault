@@ -30,10 +30,25 @@ export const COVERS_DIR = 'covers'
 
 /** 当前生效的模型根目录 */
 let currentRoot = null
+/**
+ * 当前根的规范化后缀（root + 分隔符，PERF-PATH）：扫描/索引产出的模型 id
+ * 一律由 path.join(root, ...) 构造，与根字面量前缀完全一致。元数据读取
+ * （装饰、秒开列表、重关联）对万级库逐模型调用 toRelKey，path.relative 的
+ * resolve/normalize 是纯冗余开销；命中此前缀时直接切片即可，形态不一致
+ * （大小写/分隔符/相对段差异）时仍回退 relativeWithin 的完整判定。
+ */
+let currentRootPrefix = ''
 
-/** 切换当前关联存储的模型根目录（重置内存状态） */
+/**
+ * 切换当前关联存储的模型根目录（重置内存状态与快速路径前缀）。
+ * @param {string|null} root 根目录
+ */
 export function setDataRoot(root) {
   currentRoot = root
+  currentRootPrefix =
+    typeof root === 'string' && root
+      ? `${root.replace(/[\\/]+$/, '')}${path.sep}`
+      : ''
 }
 
 /** 当前生效的模型根目录 */
@@ -76,10 +91,17 @@ export function getCoversDir() {
  * 绝对模型路径 -> 相对键（'/' 分隔）；不在根目录内时返回 null。
  * 归属判定与大小写兜底统一收敛在 utils.relativeWithin（O-1 单一实现），
  * 此处只负责「空相对路径（即根目录自身）视为无效键」与 POSIX 分隔转换。
+ * 快速路径：路径与当前根字面量前缀一致（扫描/索引产出的 id 均如此）时，
+ * 相对部分即前缀后缀，零 resolve/normalize 开销；否则回退完整判定。
  * @param {string} absPath 绝对路径
  */
 export function toRelKey(absPath) {
   if (!currentRoot || typeof absPath !== 'string') return null
+  if (currentRootPrefix && absPath.startsWith(currentRootPrefix)) {
+    const rel = absPath.slice(currentRootPrefix.length)
+    // 非规范化输入（含 .. 段）回退完整判定，保证与 path.relative 结果一致
+    if (rel && !rel.includes('..')) return rel.split(path.sep).join('/')
+  }
   const rel = relativeWithin(absPath, currentRoot)
   if (!rel) return null
   return rel.split(path.sep).join('/')

@@ -95,19 +95,52 @@ function estimateBytes(v, depth = 0) {
 }
 
 /**
+ * 体积估算采样阈值（PERF-PAYLOAD）：`approxBytes` 仅用于 [perf] 观测日志，
+ * 但逐模型递归全部字段在万级库上约占列表响应路径 30ms+（实测 1.2 万模型
+ * 深递归约 35ms，而瘦身拷贝本身约 11ms）。超过阈值时按等步长抽样外推，
+ * 把纯诊断开销压到固定量级；样本覆盖整段数组（而非只取前缀），避免
+ * 「前半段无 autoInfo、后半段有」这类分布差异导致明显失真。
+ */
+const PAYLOAD_ESTIMATE_SAMPLE_LIMIT = 64
+
+/**
  * 瘦身模型列表并统计载荷估算体积。
  * @param {any[]} models 完整装饰模型列表
  * @returns {{models: any[], approxBytes: number}} 瘦身副本与估算字节数
  */
 export function slimModelsForList(models) {
   if (!Array.isArray(models)) return { models, approxBytes: 0 }
-  let approxBytes = 0
   const slimmed = new Array(models.length)
   for (let i = 0; i < models.length; i++) {
     slimmed[i] = slimModelForList(models[i])
-    approxBytes += estimateBytes(slimmed[i])
   }
-  return { models: slimmed, approxBytes }
+  return {
+    models: slimmed,
+    approxBytes: estimatePayloadBytes(slimmed),
+  }
+}
+
+/**
+ * 估算瘦身后列表的载荷体积（结构化克隆口径，见 estimateBytes）。
+ * 小列表逐项精确累加；大列表按等步长抽样外推（成本与库规模脱钩）。
+ * @param {any[]} models 已瘦身的模型列表
+ * @returns {number} 估算字节数
+ */
+function estimatePayloadBytes(models) {
+  const total = models.length
+  if (total <= PAYLOAD_ESTIMATE_SAMPLE_LIMIT) {
+    let bytes = 0
+    for (let i = 0; i < total; i++) bytes += estimateBytes(models[i])
+    return bytes
+  }
+  const stride = Math.floor(total / PAYLOAD_ESTIMATE_SAMPLE_LIMIT)
+  let sampledBytes = 0
+  let sampled = 0
+  for (let i = 0; i < total; i += stride) {
+    sampledBytes += estimateBytes(models[i])
+    sampled += 1
+  }
+  return Math.round((sampledBytes / sampled) * total)
 }
 
 /** 载荷体积日志辅助：KB 取整（<1KB 按 1KB 计，便于小库观测） */

@@ -77,9 +77,42 @@ const gridTemplate = computed(() =>
 
 const totalHeight = computed(() => props.models.length * ROW_HEIGHT)
 
-const visibleModels = computed(() =>
-  props.models.slice(startIndex.value, endIndex.value),
-)
+/**
+ * 可视行视图模型（PERF-ROW）：每行展示所需的名称/分类/大小/日期/评分/
+ * 参数摘要一次算好，模板只做字段读取。
+ * 原实现中同一行会在模板内反复调用 formatDate / formatParamSummary /
+ * effectiveFavorite / effectiveRating / displayName / typeText（参数列因
+ * class/title/文本三处引用合计 3 次摘要计算）——滚动时每帧的可见行全部
+ * 重算，是列表视图主要的脚本开销。视图模型随可视区间或展示设置变化才重建，
+ * 数量恒为「可见行数」而非全库。
+ */
+const visibleRows = computed(() => {
+  const start = startIndex.value
+  const end = endIndex.value
+  const list = props.models
+  const showSize = state.settings.showSize
+  const showMtime = state.settings.showMtime
+  const showParams = state.settings.showParams
+  const rows = new Array(Math.max(0, end - start))
+  for (let i = start; i < end; i++) {
+    const m = list[i]
+    if (!m) continue
+    rows[i - start] = {
+      model: m,
+      id: m.id,
+      name: displayName(m),
+      typeLabel: typeText(m),
+      sizeText: showSize ? formatSize(m.size) : '',
+      mtimeText: showMtime ? formatDate(m.mtimeMs) : '',
+      rating: ratingText(m),
+      rated: effectiveRating(m) > 0,
+      favorite: effectiveFavorite(m),
+      nsfw: effectiveNsfw(m),
+      paramSummary: showParams ? formatParamSummary(m.params) : '',
+    }
+  }
+  return rows
+})
 
 /** 多选模式与选中态（E4，与卡片同一语义） */
 const selectedSet = multiSelectIdSet
@@ -219,36 +252,36 @@ function onListKeydown(e) {
         :style="{ transform: `translateY(${startIndex * ROW_HEIGHT}px)` }"
       >
         <div
-          v-for="m in visibleModels"
-          :key="m.id"
+          v-for="r in visibleRows"
+          :key="r.id"
           class="list-row"
-          :class="{ selected: selectedSet.has(m.id) }"
+          :class="{ selected: selectedSet.has(r.id) }"
           :style="{ gridTemplateColumns: gridTemplate }"
-          :title="m.id"
+          :title="r.id"
           tabindex="0"
           role="button"
           :aria-pressed="
-            state.multiSelect.active ? selectedSet.has(m.id) : undefined
+            state.multiSelect.active ? selectedSet.has(r.id) : undefined
           "
-          :aria-label="`查看模型 ${displayName(m)} 的详情`"
-          :data-model-id="m.id"
-          @click="onRowClick(m, $event)"
-          @keydown.enter.prevent="onRowActivate(m)"
-          @keydown.space.prevent="onRowActivate(m)"
-          @contextmenu.prevent="onContextMenu(m)"
+          :aria-label="`查看模型 ${r.name} 的详情`"
+          :data-model-id="r.id"
+          @click="onRowClick(r.model, $event)"
+          @keydown.enter.prevent="onRowActivate(r.model)"
+          @keydown.space.prevent="onRowActivate(r.model)"
+          @contextmenu.prevent="onContextMenu(r.model)"
         >
           <!-- 名称列：多选勾选 + 收藏星标 + 名称 + 迷你角标 -->
           <span class="list-cell col-name">
             <span
               v-if="state.multiSelect.active"
               class="row-check"
-              :class="{ on: selectedSet.has(m.id) }"
+              :class="{ on: selectedSet.has(r.id) }"
               role="checkbox"
-              :aria-checked="selectedSet.has(m.id)"
+              :aria-checked="selectedSet.has(r.id)"
               title="选中/取消选中"
-              @click.stop="toggleSelect(m.id)"
+              @click.stop="toggleSelect(r.id)"
               ><svg
-                v-if="selectedSet.has(m.id)"
+                v-if="selectedSet.has(r.id)"
                 viewBox="0 0 16 16"
                 width="10"
                 height="10"
@@ -263,9 +296,9 @@ function onListKeydown(e) {
             ></span>
             <button
               class="row-fav"
-              :class="{ active: effectiveFavorite(m) }"
-              :title="effectiveFavorite(m) ? '取消收藏' : '收藏'"
-              @click.stop="toggleFavorite(m.id)"
+              :class="{ active: r.favorite }"
+              :title="r.favorite ? '取消收藏' : '收藏'"
+              @click.stop="toggleFavorite(r.id)"
               @keydown.enter.stop.prevent
               @keydown.space.stop.prevent
             >
@@ -273,7 +306,7 @@ function onListKeydown(e) {
                 viewBox="0 0 24 24"
                 width="13"
                 height="13"
-                :fill="effectiveFavorite(m) ? 'currentColor' : 'none'"
+                :fill="r.favorite ? 'currentColor' : 'none'"
                 stroke="currentColor"
                 stroke-width="1.8"
                 stroke-linejoin="round"
@@ -284,44 +317,39 @@ function onListKeydown(e) {
                 />
               </svg>
             </button>
-            <span class="row-name" :title="m.name">{{ displayName(m) }}</span>
-            <span
-              v-if="effectiveNsfw(m)"
-              class="mini-badge nsfw"
-              title="NSFW 标记"
+            <span class="row-name" :title="r.model.name">{{ r.name }}</span>
+            <span v-if="r.nsfw" class="mini-badge nsfw" title="NSFW 标记"
               >NSFW</span
             >
             <span
-              v-if="m.suspect"
+              v-if="r.model.suspect"
               class="mini-badge suspect"
               title="文件疑似损坏（结构校验失败或 0 字节）"
               >损坏</span
             >
             <span
-              v-if="m.disabled"
+              v-if="r.model.disabled"
               class="mini-badge disabled"
               title="已禁用（文件名带 .disabled 后缀）"
               >禁用</span
             >
           </span>
-          <span class="list-cell col-type">{{ typeText(m) }}</span>
+          <span class="list-cell col-type">{{ r.typeLabel }}</span>
           <span v-if="state.settings.showSize" class="list-cell col-size">{{
-            formatSize(m.size)
+            r.sizeText
           }}</span>
           <span v-if="state.settings.showMtime" class="list-cell col-mtime">{{
-            formatDate(m.mtimeMs)
+            r.mtimeText
           }}</span>
-          <span
-            class="list-cell col-rating"
-            :class="{ rated: effectiveRating(m) > 0 }"
-            >{{ ratingText(m) }}</span
-          >
+          <span class="list-cell col-rating" :class="{ rated: r.rated }">{{
+            r.rating
+          }}</span>
           <span
             v-if="state.settings.showParams"
             class="list-cell col-params"
-            :class="{ empty: !formatParamSummary(m.params) }"
-            :title="formatParamSummary(m.params)"
-            >{{ formatParamSummary(m.params) || '未设置推荐参数' }}</span
+            :class="{ empty: !r.paramSummary }"
+            :title="r.paramSummary"
+            >{{ r.paramSummary || '未设置推荐参数' }}</span
           >
         </div>
       </div>

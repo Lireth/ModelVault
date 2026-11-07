@@ -104,8 +104,10 @@ export function useVirtualScroll(opts) {
     scrollRafId = requestAnimationFrame(() => {
       scrollRafId = 0
       if (!scroller) return
+      // 只同步滚动位置：viewportHeight 由 ResizeObserver（同时观察滚动容器）
+      // 与 measure() 维护——滚动不会改变 clientHeight，逐帧读取会强制一次
+      // 布局查询，是滚动热路径上唯一的同步布局开销（PERF-SCROLL）
       scrollTop.value = scroller.scrollTop
-      viewportHeight.value = scroller.clientHeight
       captureAnchor()
     })
   }

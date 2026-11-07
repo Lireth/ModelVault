@@ -29,6 +29,12 @@ const paramSummary = computed(() => formatParamSummary(props.model.params))
 
 const mtimeText = computed(() => formatDate(props.model.mtimeMs))
 
+/**
+ * 收藏态单次求值（P1-1）：模板中 class/title/填充色三处都要读取，
+ * 原实现每次渲染调用三次标注覆盖层读取；computed 只在覆盖/模型变化时重算。
+ */
+const isFavorite = computed(() => effectiveFavorite(props.model))
+
 /** 收藏/取消收藏（click 与键盘 Enter/Space 均在模板层阻断冒泡，避免打开详情页，OPT-3） */
 function onToggleFavorite() {
   toggleFavorite(props.model.id)
@@ -46,8 +52,8 @@ function onToggleFavorite() {
            .prevent 同时阻止 Space 的默认滚动行为（与 article 的处理一致） -->
       <button
         class="fav-btn"
-        :class="{ active: effectiveFavorite(model) }"
-        :title="effectiveFavorite(model) ? '取消收藏' : '收藏'"
+        :class="{ active: isFavorite }"
+        :title="isFavorite ? '取消收藏' : '收藏'"
         @click.stop="onToggleFavorite"
         @keydown.enter.stop.prevent
         @keydown.space.stop.prevent
@@ -56,7 +62,7 @@ function onToggleFavorite() {
           viewBox="0 0 24 24"
           width="15"
           height="15"
-          :fill="effectiveFavorite(model) ? 'currentColor' : 'none'"
+          :fill="isFavorite ? 'currentColor' : 'none'"
           stroke="currentColor"
           stroke-width="1.8"
           stroke-linejoin="round"

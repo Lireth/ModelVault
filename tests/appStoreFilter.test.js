@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { effectiveModelHash } from '../src/renderer/src/store/state'
+import {
+  effectiveModelHash,
+  setMetaOverride,
+} from '../src/renderer/src/store/state'
 import { ensurePinyinEngine } from '../src/renderer/src/store/pinyin'
 import {
   makeApiMock,
@@ -232,6 +235,36 @@ describe('筛选与排序（filteredModels）', () => {
     expect(filteredModels.value.map((m) => m.id)).toEqual(['c', 'b', 'a'])
     state.sortAsc = false
     expect(filteredModels.value.map((m) => m.id)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('排序结果复用（PERF-SORT）：排序键不变时返回新对象且顺序不变；键变化才重排', () => {
+    state.sortBy = 'size'
+    state.sortAsc = true
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['b', 'c', 'a'])
+    // 同尺寸同 id 的替换对象：排序键未变 → 复用有序下标，且物化取新引用
+    const swapped = state.models.map((m) => (m.id === 'c' ? { ...m } : m))
+    const sameSize = swapped.find((m) => m.id === 'c')
+    replaceModels(swapped)
+    const afterReplace = filteredModels.value
+    expect(afterReplace.map((m) => m.id)).toEqual(['b', 'c', 'a'])
+    expect(afterReplace.find((m) => m.id === 'c')).toBe(sameSize)
+    // 尺寸变化：排序键改变，缓存必须失效并重新排序
+    replaceModels(
+      state.models.map((m) => (m.id === 'c' ? { ...m, size: 9999 } : m)),
+    )
+    expect(filteredModels.value.map((m) => m.id)).toEqual(['c', 'b', 'a'])
+  })
+
+  it('收藏优先排序随标注覆盖即时重排（对象引用不变也须失效）', () => {
+    state.sortBy = 'favorite'
+    state.sortAsc = true
+    const before = filteredModels.value.map((m) => m.id)
+    expect(before[0]).toBe('a') // 初始唯一收藏
+    setMetaOverride('c', { favorite: true, nsfw: false, rating: 0 })
+    const ids = filteredModels.value.map((m) => m.id)
+    // 收藏组按名称排序：a/c 在前，未收藏的 b 落到最后
+    expect(ids.slice(0, 2).sort()).toEqual(['a', 'c'])
+    expect(ids[2]).toBe('b')
   })
 
   it('按分类排序遵循固定分类顺序（checkpoint → vae → lora 依 MODEL_TYPES）', () => {

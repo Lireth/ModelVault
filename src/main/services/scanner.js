@@ -145,23 +145,53 @@ const FILE_KEYWORD_RULES = [
 ]
 
 /**
+ * 文件夹规则预处理为 Set（PERF-SCAN）：目录级分类只在小写路径段集合上查表，
+ * 规则内的文件夹名量少但比较次数乘以「文件数 × 路径段数」，Set 令单次命中
+ * 判定为 O(1) 且保留原数组声明顺序（顺序即优先级）。
+ */
+const FOLDER_RULE_SETS = FOLDER_RULES.map((rule) => ({
+  type: rule.type,
+  folders: new Set(rule.folders),
+}))
+
+/**
+ * 按文件夹段匹配模型类型（仅文件夹规则，未命中返回空串）。
+ * 目录级记忆化入口：同一目录下所有模型共享该结果，文件名兜底再逐文件判定。
+ * @param {string[]} lowerSegments 已小写化的相对目录段
+ * @returns {string} 命中的模型类型；无命中返回 ''
+ */
+function folderTypeOf(lowerSegments) {
+  for (const rule of FOLDER_RULE_SETS) {
+    for (const seg of lowerSegments) {
+      if (rule.folders.has(seg)) return rule.type
+    }
+  }
+  return ''
+}
+
+/**
+ * 按文件名关键词兜底分类（仅当文件夹规则未命中时使用）。
+ * @param {string} fileName 文件名（含扩展名）
+ * @returns {string} 模型类型；无命中返回 'other'
+ */
+function typeByFilename(fileName) {
+  for (const rule of FILE_KEYWORD_RULES) {
+    if (rule.re.test(fileName)) return rule.type
+  }
+  return 'other'
+}
+
+/**
  * 根据相对路径文件夹段与文件名推断模型类型。
  * @param {string[]} relSegments 相对目录段（已按 '/' 拆分）
  * @param {string} fileName 文件名（含扩展名）
  * @returns {string} 模型类型
  */
 export function classifyModel(relSegments, fileName) {
-  const lowerSegments = relSegments.map((s) => s.toLowerCase())
-  // 先遍历规则、再遍历路径段：保证 FOLDER_RULES 的声明顺序（lora > vae > text_encoder > checkpoint）
-  // 作为优先级生效，与注释「顺序即优先级」一致；否则优先级会取决于路径段出现的先后
-  for (const rule of FOLDER_RULES) {
-    if (lowerSegments.some((seg) => rule.folders.includes(seg)))
-      return rule.type
-  }
-  for (const rule of FILE_KEYWORD_RULES) {
-    if (rule.re.test(fileName)) return rule.type
-  }
-  return 'other'
+  // 先按文件夹规则（声明顺序即优先级）分类，未命中再按文件名关键词兜底。
+  // 扫描热路径按目录记忆化文件夹结果，此处保持独立可测的完整语义。
+  const folderType = folderTypeOf(relSegments.map((s) => s.toLowerCase()))
+  return folderType || typeByFilename(fileName)
 }
 
 /**
@@ -193,6 +223,13 @@ export function modelAddedMs(stat) {
     ? stat.birthtimeMs
     : stat.mtimeMs
 }
+
+/**
+ * 扫描进度推送最小间隔（ms）：IPC 发送层另有 120ms 节流，此处先合并逐文件
+ * 回调——大库首扫逐文件构造进度对象并调用 Date.now() 会带来数万次纯冗余
+ * 分配；合并后渲染层进度刷新频率不变（仍远低于 120ms 闸门）。
+ */
+const PROGRESS_EMIT_INTERVAL_MS = 80
 
 /**
  * 递归扫描模型目录。
@@ -236,6 +273,26 @@ export async function scanModels(root, onProgress, options = {}) {
   // 扫描结果永远不含重复 id（重复卡片、统计翻倍、缩略图重复登记）。
   const seenIds = new Set()
   let dirCount = 0
+  // 进度推送合并（见 PROGRESS_EMIT_INTERVAL_MS）：只在时间窗到达时构造快照，
+  // 最后一个文件名与计数就地更新，避免逐文件分配进度对象
+  let lastProgressAt = 0
+  let lastProgressFile = ''
+
+  /**
+   * 推送一次进度快照（force=true 用于扫描收尾，保证小库/快速扫描至少一次）。
+   * @param {boolean} force 是否忽略时间窗
+   */
+  function emitProgress(force) {
+    if (!onProgress || models.length === 0) return
+    const now = Date.now()
+    if (!force && now - lastProgressAt < PROGRESS_EMIT_INTERVAL_MS) return
+    lastProgressAt = now
+    onProgress({
+      dirs: dirCount,
+      found: models.length,
+      current: lastProgressFile,
+    })
+  }
 
   // A-03 子树局部扫描：subDirs 为相对根的 POSIX 目录列表，'' 表示根直属。
   // 每个初始节点扫描目录内文件；非根节点递归全部后代，根节点（''）不递归——
@@ -333,11 +390,11 @@ export async function scanModels(root, onProgress, options = {}) {
           ),
           ext,
           disabled: f.disabled === true,
-          type: classifyModel(unit.rel ? unit.rel.split('/') : [], f.name),
-          // 自动分类标签：按文件夹名匹配（装饰层与 meta.subCategory 合成生效）
-          folderSubCategory: classifySubCategory(
-            unit.rel ? unit.rel.split('/') : [],
-          ),
+          // PERF-SCAN：文件夹规则已在目录级记忆化，未命中时按文件名关键词兜底
+          type: unit.folderType || typeByFilename(f.name),
+          // 自动分类标签：按文件夹名匹配（目录级记忆化结果，装饰层与
+          // meta.subCategory 合成生效）
+          folderSubCategory: unit.folderSubCategory,
           relDir: unit.rel,
           // OPT-11：不再携带 folder（所在库根绝对路径）——全库同一长字符串
           // 且可由 dirname(id) 派生，渲染层/主进程均无消费方（字段盘点确认），
@@ -348,11 +405,10 @@ export async function scanModels(root, onProgress, options = {}) {
           // 与本地索引（索引保留装饰层额外字段），渲染层缺省时回退 mtimeMs
           ctimeMs: modelAddedMs(stat),
         })
-        onProgress?.({
-          dirs: dirCount,
-          found: models.length,
-          current: f.relChild,
-        })
+        // 进度合并推送（PROGRESS_EMIT_INTERVAL_MS）：文件名就地更新，
+        // 到达时间窗或扫描收尾时才构造回调载荷
+        lastProgressFile = f.relChild
+        emitProgress(false)
       })
     }
   }
@@ -447,6 +503,16 @@ export async function scanModels(root, onProgress, options = {}) {
       fileEntries.push({ fullPath, name, relChild })
     }
 
+    // PERF-SCAN：文件夹分类与自动标签只依赖相对目录，同一目录内全部模型
+    // 共享同一结果——原实现逐文件重复拆分/小写化路径段并逐段匹配规则，
+    // 万级库首扫产生数万次冗余分配与比较；此处按目录计算一次随单元提交
+    const relSegments = fileEntries.length > 0 && rel ? rel.split('/') : []
+    const folderType =
+      relSegments.length > 0
+        ? folderTypeOf(relSegments.map((s) => s.toLowerCase()))
+        : ''
+    const folderSubCategory = classifySubCategory(relSegments)
+
     // 并行 stat（取 size/mtime/birthtime）：流式固定并发池（与 watcher 共用
     // utils.runWithConcurrency，O-5）——完成一个补位一个。目录级并发后，
     // 同窗口内多个目录的 stat 池自然重叠，在途总量仍有界（≤ 在途单元数 ×
@@ -465,7 +531,15 @@ export async function scanModels(root, onProgress, options = {}) {
       },
       STAT_CONCURRENCY,
     )
-    pendingUnits.set(seq, { dir, rel, fileEntries, stats, visibleNames })
+    pendingUnits.set(seq, {
+      dir,
+      rel,
+      fileEntries,
+      stats,
+      visibleNames,
+      folderType,
+      folderSubCategory,
+    })
     commitReadyUnits()
   }
 
@@ -498,6 +572,8 @@ export async function scanModels(root, onProgress, options = {}) {
   }
   pump()
   await walkDone
+  // 收尾强制推送一次，保证小库/快速扫描（未跨过时间窗）也有进度快照
+  emitProgress(true)
   if (signal?.aborted) throw abortError()
 
   return { models, errors, dirCount, dirSnapshot, failedDirs }

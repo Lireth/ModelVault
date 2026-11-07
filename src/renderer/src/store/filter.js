@@ -332,64 +332,193 @@ const filteredUnsorted = computed(() => {
   return list
 })
 
-/** 筛选 + 搜索 + 排序后的模型列表（导出名与行为不变，仅内部分层） */
-export const filteredModels = computed(() => {
-  // 拷贝后排序：内层结果被 computed 缓存复用，不得原位变异
-  const list = [...filteredUnsorted.value]
-  switch (state.sortBy) {
+/**
+ * 按排序方式构造比较器（仅在缓存未命中、需要真正重排时才创建）。
+ * 语义与原集中式 switch 完全一致（收藏优先/评分为固定语义排序，同组按名称）。
+ * @param {string} sortBy 排序方式 key
+ * @returns {(a: Record<string, any>, b: Record<string, any>) => number}
+ */
+function comparatorFor(sortBy) {
+  switch (sortBy) {
     case 'size':
-      list.sort((a, b) => b.size - a.size)
-      break
+      return (a, b) => b.size - a.size
     case 'mtime':
-      list.sort((a, b) => b.mtimeMs - a.mtimeMs)
-      break
+      return (a, b) => b.mtimeMs - a.mtimeMs
     case 'added':
       // 按添加时间（OPT-1）：与 mtime 同一约定——比较器恒为「新在前」，
       // sortAsc=true 默认即最新入库在前，sortAsc=false 翻转为最早在前
-      list.sort((a, b) => addedMsOf(b) - addedMsOf(a))
-      break
+      return (a, b) => addedMsOf(b) - addedMsOf(a)
     case 'favorite':
       // 收藏优先，同组内按名称（U2）；固定语义排序，不响应方向翻转（O1）。
       // P1-1：收藏态经标注覆盖层读取（即时标注后排序立即生效）
-      list.sort(
-        (a, b) =>
-          (effectiveFavorite(b) ? 1 : 0) - (effectiveFavorite(a) ? 1 : 0) ||
-          zhCollator.compare(a.name, b.name),
-      )
-      break
+      return (a, b) =>
+        (effectiveFavorite(b) ? 1 : 0) - (effectiveFavorite(a) ? 1 : 0) ||
+        zhCollator.compare(a.name, b.name)
     case 'rating':
       // 评分高优先，同分按名称（U2）；固定语义排序，不响应方向翻转（O1）。
       // P1-1：评分经标注覆盖层读取
-      list.sort(
-        (a, b) =>
-          effectiveRating(b) - effectiveRating(a) ||
-          zhCollator.compare(a.name, b.name),
-      )
-      break
+      return (a, b) =>
+        effectiveRating(b) - effectiveRating(a) ||
+        zhCollator.compare(a.name, b.name)
     case 'type':
       // 按分类排序：遵循固定分类顺序（Checkpoint → TextEncoders → VAE → LoRA → 其他），同分类内按名称
-      list.sort(
-        (a, b) =>
-          TYPE_ORDER[a.type] - TYPE_ORDER[b.type] ||
-          zhCollator.compare(a.name, b.name),
-      )
-      break
+      return (a, b) =>
+        TYPE_ORDER[a.type] - TYPE_ORDER[b.type] ||
+        zhCollator.compare(a.name, b.name)
     default:
-      list.sort((a, b) => zhCollator.compare(a.name, b.name))
+      return (a, b) => zhCollator.compare(a.name, b.name)
   }
-  // 排序方向（U2）：sortAsc=false 时翻转当前结果；
-  // 收藏优先/按评分为固定语义排序（收藏/高分恒在前），翻转会反转语义，故不响应（O1）
-  if (!state.sortAsc && sortDirectional(state.sortBy)) list.reverse()
+}
+
+/**
+ * 元素的排序键快照（PERF-SORT）：排序缓存需要保存「排序当时的键值」，而不是
+ * 比较时重新读取——favorite/rating 与哈希经可变覆盖映射读取，若两侧对象
+ * 共用同一覆盖状态，重新读取会把「键已变化」误判为未变化。
+ * 名称参与比较的排序（收藏/评分/分类/默认）把名称并入键串，保证替换对象
+ * 后名称变化同样被识别。
+ * @param {Record<string, any>} m 模型对象
+ * @param {string} sortBy 排序方式 key
+ * @returns {number|string} 可比较的键快照
+ */
+function sortKeyOf(m, sortBy) {
+  switch (sortBy) {
+    case 'size':
+      return m.size
+    case 'mtime':
+      return m.mtimeMs
+    case 'added':
+      return addedMsOf(m)
+    case 'favorite':
+      return `${effectiveFavorite(m) ? 1 : 0}\u0000${m.name}`
+    case 'rating':
+      return `${effectiveRating(m)}\u0000${m.name}`
+    case 'type':
+      return `${TYPE_ORDER[m.type]}\u0000${m.name}`
+    default:
+      return m.name
+  }
+}
+
+/**
+ * 构造「有序下标数组」（PERF-SORT）。
+ *
+ * 以索引排序取代「复制模型数组后直接 sort」：中文 Collator 比较是排序热路径
+ * 中唯一昂贵的环节，索引数组使排序结果可被整体缓存复用（见 sortCache）——
+ * 列表因单模型封面/标注/详情补全等变更而重算时，只要 id 顺序与排序键未变，
+ * 直接按下标物化即可，不再重跑 O(n log n) 次 Collator 比较。
+ * 初始下标递增 = 原输入顺序，配合规范保证稳定的 sort，输出与原实现等价；
+ * 排序方向翻转与重复筛选的二级排序同样在下标层完成，模型数组只物化一次。
+ * @param {Array<Record<string, any>>} src 过滤后的未排序模型数组
+ * @param {string} sortBy 排序方式 key
+ * @param {boolean} sortAsc 是否升序（false 时翻转方向，固定语义排序不响应）
+ * @param {boolean} showDuplicatesOnly 是否按哈希聚拢重复组
+ * @returns {{order: number[], ids: string[], keys: Array<number|string>,
+ *   hashes: string[]|null}} 有序下标与 id/排序键快照
+ */
+function buildSortOrder(src, sortBy, sortAsc, showDuplicatesOnly) {
+  const order = new Array(src.length)
+  const ids = new Array(src.length)
+  const keys = new Array(src.length)
+  const hashes = showDuplicatesOnly ? new Array(src.length) : null
+  for (let i = 0; i < src.length; i++) {
+    order[i] = i
+    ids[i] = src[i].id
+    keys[i] = sortKeyOf(src[i], sortBy)
+    if (hashes) hashes[i] = effectiveModelHash(src[i])
+  }
+  const compare = comparatorFor(sortBy)
+  order.sort((ia, ib) => compare(src[ia], src[ib]))
+  // 排序方向（U2）：收藏优先/按评分为固定语义排序（收藏/高分恒在前），
+  // 翻转会反转语义，故不响应（O1）
+  if (!sortAsc && sortDirectional(sortBy)) order.reverse()
   // 重复筛选（FEAT-1）：按哈希稳定排序把同组模型聚拢为相邻块（组间无语义
   // 顺序），组内相对顺序保持上方排序结果——散落的同组文件会破坏「逐组清理」
   // 的浏览流。筛选语义下此排序随筛选开启/关闭自动生效与退出
-  if (state.showDuplicatesOnly) {
-    list.sort((a, b) => {
-      const ha = effectiveModelHash(a)
-      const hb = effectiveModelHash(b)
+  if (hashes) {
+    order.sort((ia, ib) => {
+      const ha = hashes[ia]
+      const hb = hashes[ib]
       return ha < hb ? -1 : ha > hb ? 1 : 0
     })
   }
+  return { order, ids, keys, hashes }
+}
+
+/**
+ * 上一次排序的有序下标缓存（PERF-SORT）：列表内容未变时复用排序结果。
+ * 缓存只保存「排序当时的 id 顺序与键快照」的标量数组（不保留模型对象，
+ * 避免跨库切换/重扫后缓存把上一代模型对象滞留成额外内存），逐项比对
+ * 判定「能否复用」；仅当真正发生重排（筛选集合/排序键/排序方式变化）才
+ * 重算。模型对象被整体替换但键值一致（封面/详情补全/缩略图回填等高频
+ * 场景）同样命中复用，物化时取当前数组的新对象，展示不会陈旧。
+ * @type {{order: number[], ids: string[], keys: Array<number|string>,
+ *   hashes: string[]|null, sortBy: string, sortAsc: boolean,
+ *   duplicates: boolean}|null}
+ */
+let sortCache = null
+
+/**
+ * 上次排序结果能否整体复用：排序方式/方向/重复聚拢配置一致，且当前数组
+ * 逐项 id 与排序键快照一致。要求 id 逐项相同（而非集合相同），保证稳定
+ * 排序下相等键的输入顺序不变——复用结果与重新排序完全等价。
+ * @param {Array<Record<string, any>>} src 当前未排序数组
+ * @param {string} sortBy 排序方式 key
+ * @param {boolean} sortAsc 排序方向
+ * @param {boolean} showDuplicatesOnly 是否按哈希聚拢
+ * @returns {boolean} 可复用返回 true
+ */
+function canReuseSort(src, sortBy, sortAsc, showDuplicatesOnly) {
+  const cached = sortCache
+  if (
+    !cached ||
+    cached.sortBy !== sortBy ||
+    cached.sortAsc !== sortAsc ||
+    cached.duplicates !== showDuplicatesOnly ||
+    cached.order.length !== src.length
+  ) {
+    return false
+  }
+  for (let i = 0; i < src.length; i++) {
+    const cur = src[i]
+    if (cached.ids[i] !== cur.id) return false
+    // 与「排序当时的键快照」比较：favorite/rating/哈希经可变覆盖映射读取，
+    // 对象引用不变也可能变化，不能在比较时重新读取两侧（会互相抵消）
+    if (cached.keys[i] !== sortKeyOf(cur, sortBy)) return false
+    if (showDuplicatesOnly) {
+      const hash = effectiveModelHash(cur)
+      if (cached.hashes[i] !== hash) return false
+    }
+  }
+  return true
+}
+
+/** 筛选 + 搜索 + 排序后的模型列表（导出名与行为不变，仅内部分层） */
+export const filteredModels = computed(() => {
+  const src = filteredUnsorted.value
+  const sortBy = state.sortBy
+  const sortAsc = Boolean(state.sortAsc)
+  const showDuplicatesOnly = Boolean(state.showDuplicatesOnly)
+  let order
+  if (canReuseSort(src, sortBy, sortAsc, showDuplicatesOnly)) {
+    // PERF-SORT：排序结果未变——按下标物化当前数组（元素可能已被整体替换），
+    // 跳过 O(n log n) 的中文 Collator 比较
+    order = sortCache.order
+  } else {
+    const built = buildSortOrder(src, sortBy, sortAsc, showDuplicatesOnly)
+    order = built.order
+    sortCache = {
+      order,
+      ids: built.ids,
+      keys: built.keys,
+      hashes: built.hashes,
+      sortBy,
+      sortAsc,
+      duplicates: showDuplicatesOnly,
+    }
+  }
+  // 物化：内层结果被 computed 缓存复用，不得原位变异
+  const list = new Array(order.length)
+  for (let i = 0; i < order.length; i++) list[i] = src[order[i]]
   return list
 })
 
