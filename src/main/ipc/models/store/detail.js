@@ -3,7 +3,7 @@
  */
 
 import { wrapHandler, checkModelIdInRoot } from '../../handler'
-import { decorateCache } from '../model-state'
+import { decorateCache } from '../../../services/decorate/state'
 import { readFullModelFromIndex, buildDetailModel } from './list-view'
 
 /** 注册详情拉取通道 */

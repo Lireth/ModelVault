@@ -77,9 +77,16 @@ export default [
         {
           patterns: [
             {
-              group: ['**/ipc/**', '../ipc', '../ipc/*', '../../ipc/*'],
+              group: [
+                '**/ipc/**',
+                '../ipc',
+                '../ipc/*',
+                '../../ipc/*',
+                '../protocol',
+                '../../protocol',
+              ],
               message:
-                '分层约束：services 不得反向依赖 ipc 适配层，请由 ipc 侧注入依赖或改用回调。',
+                '分层约束：services 不得反向依赖 ipc 适配层或 Electron 协议层，请由 ipc 侧注入依赖、改用回调或 shared 纯函数。',
             },
           ],
         },

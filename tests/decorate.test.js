@@ -51,7 +51,7 @@ import {
   getDecorateCacheLimit,
   getThumbDrainPromise,
   resetDecorateCache,
-} from '../src/main/ipc/models/model-state'
+} from '../src/main/services/decorate/state'
 import {
   loadData,
   setDataRoot,

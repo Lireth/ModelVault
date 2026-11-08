@@ -76,7 +76,7 @@ import {
   sidecarFilesFor,
 } from '../src/main/ipc/models/misc'
 import { decorateModels } from '../src/main/ipc/models/decorate'
-import { resetDecorateCache } from '../src/main/ipc/models/model-state'
+import { resetDecorateCache } from '../src/main/services/decorate/state'
 import { registerStoreHandlers } from '../src/main/ipc/models/store'
 import { syncWatcher } from '../src/main/services/watcher'
 import { computeFileHash } from '../src/main/services/civitai'

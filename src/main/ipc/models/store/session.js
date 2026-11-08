@@ -19,7 +19,7 @@ import {
   tryAcquireMaintenance,
 } from '../../../services/maintenance-lock'
 import { checkExistingDirectory } from '../../handler'
-import { awaitThumbDrain } from '../model-state'
+import { awaitThumbDrain } from '../../../services/decorate/state'
 
 /**
  * 库列表全量根目录的存在性快照（F1-offline 库路径失效处理）：

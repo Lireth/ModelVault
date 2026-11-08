@@ -21,7 +21,10 @@ import {
   releaseMaintenance,
   tryAcquireMaintenance,
 } from '../../../services/maintenance-lock'
-import { getDecorateCacheRoot, resetDecorateCache } from '../model-state'
+import {
+  getDecorateCacheRoot,
+  resetDecorateCache,
+} from '../../../services/decorate/state'
 import { clearDeferredOwners, primeHeaderInfoCache } from '../decorate'
 import { clearDeferredJobs } from '../../../services/thumbs'
 import { slimModelsForList, logPayloadSize } from '../list-payload'

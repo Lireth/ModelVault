@@ -8,7 +8,7 @@ import { getCurrentRoot } from './store-paths'
 import { ensureLibrarySubdir } from './store-meta-persist'
 import { runWithConcurrency } from '../utils'
 import { renderThumbFromPath } from './thumb-renderer'
-import { toImageUrl } from '../protocol'
+import { toImageUrl } from '../../shared/image-url'
 
 /**
  * 封面缩略图缓存：

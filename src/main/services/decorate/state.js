@@ -1,10 +1,10 @@
 /**
- * models IPC 域的跨文件共享状态。
+ * 装饰管线的跨模块共享状态（services 层，供 ipc 装饰/扫描/备份链路读写）。
  *
  * 这些状态在多个链路模块间读写（扫描 / 装饰 / 存储加载），
  * 集中收拢在零本地依赖的本模块中，保证链路模块之间依赖单向无环：
- * - thumbDrainPromise：startThumbDrain（decorate.js）写，
- *   ensureRootStore（store.js）与 models:scan（scan.js）读；
+ * - thumbDrainPromise：startThumbDrain（decorate-thumbs）写，
+ *   ensureRootStore（store/session）与 models:scan（scan.js）读；
  * - decorateCache / decorateCacheRoot：decorateOne 与 startThumbDrain 读写，
  *   models:scan 切换根目录时清空。
  *

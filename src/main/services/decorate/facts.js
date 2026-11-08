@@ -1,15 +1,15 @@
 import fs from 'node:fs/promises'
 import logger from '../../logger'
 import { boundedMapSet } from '../../utils'
-import { getModelMeta, setModelMeta } from '../../services/store'
+import { getModelMeta, setModelMeta } from '../store'
 import {
   civitaiImportPatch,
   findSidecarCivitaiInfo,
   findSidecarText,
   sidecarImportPatch,
   statSidecarSet,
-} from '../../services/scanner'
-import { headerInfoCache } from './model-state'
+} from '../scanner'
+import { headerInfoCache } from './state'
 
 /**
  * sidecar / safetensors 头部事实采集与导入（O-2 自 decorate.js 按域拆出）：

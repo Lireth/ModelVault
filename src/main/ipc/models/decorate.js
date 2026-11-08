@@ -1,7 +1,7 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import { getModelMeta, resolveCover } from '../../services/store'
-import { metaDisplayFields } from './meta-display'
+import { metaDisplayFields } from '../../services/meta-display'
 import { findSidecarPreview, statSidecarSet } from '../../services/scanner'
 import { isValidImageFile } from '../../services/covers'
 import {
@@ -20,7 +20,7 @@ import {
   decorateCache,
   getDecorateCacheLimit,
   setDecorateCacheLimit,
-} from './model-state'
+} from '../../services/decorate/state'
 import { abortError, boundedMapSet, runWithConcurrency } from '../../utils'
 import {
   createSidecarDirListings,
@@ -30,19 +30,19 @@ import {
   sidecarFactsOf,
   statSidecarFacts,
   takeHeaderInfoSnapshot,
-} from './decorate-facts'
+} from '../../services/decorate/facts'
 import { trackDeferredThumb } from './decorate-thumbs'
 
 /**
  * 扫描结果装饰管线（核心）：为扫描出的模型列表补齐封面、缩略图、元数据
  * 标注、sidecar 自动导入与 safetensors 头部信息。
- * 装饰结果经 decorateCache（model-state.js）增量复用：
+ * 装饰结果经 decorateCache（services/decorate/state.js）增量复用：
  * mtime 与元数据签名均未变化的模型跳过全部文件 IO。
  *
  * 按域拆分的子模块（O-2，本文件保留核心管线与聚合导出）：
  * - decorate-thumbs.js：缩略图就绪通知子系统（归属登记 / 合批推送 / drain 排队）；
- * - decorate-facts.js：sidecar 与 safetensors 头部的事实采集、快照缓存与
- *   sidecar 元数据自动导入。
+ * - services/decorate/facts.js：sidecar 与 safetensors 头部的事实采集、快照缓存与
+ *   sidecar 元数据自动导入（领域事实，位于 services 层）。
  */
 
 /** 并行装饰的最大在途数（流式并发池上限）：完成一个补位一个，文件句柄峰值恒定 */
@@ -394,7 +394,7 @@ function pruneDecorateCache(validIds) {
     if (!validIds.has(id)) decorateCache.delete(id)
   }
   // 头部快照同属可再生产物：库内已删除/移出的模型不应继续占用内存
-  // （O-2 拆分后头部快照缓存封装在 decorate-facts 内）
+  // （O-2 拆分后头部快照缓存封装在 services/decorate/facts 内）
   pruneHeaderInfoCache(validIds)
   const limit = getDecorateCacheLimit()
   while (decorateCache.size > limit) {
@@ -485,4 +485,4 @@ export {
   startThumbDrain,
   trackDeferredOwner,
 } from './decorate-thumbs'
-export { primeHeaderInfoCache } from './decorate-facts'
+export { primeHeaderInfoCache } from '../../services/decorate/facts'

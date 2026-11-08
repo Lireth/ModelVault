@@ -8,7 +8,10 @@ import {
   reloadLibrarySettings,
 } from '../../services/store'
 import { clearDeferredJobs } from '../../services/thumbs'
-import { resetDecorateCache, awaitThumbDrain } from './model-state'
+import {
+  resetDecorateCache,
+  awaitThumbDrain,
+} from '../../services/decorate/state'
 import { clearDeferredOwners } from './decorate'
 import { wrapHandler } from '../handler'
 

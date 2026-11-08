@@ -7,7 +7,7 @@
 import { getCurrentRoot, getModelMeta } from '../../../services/store'
 import { readLibraryIndex } from '../../../services/library-index'
 import { toImageUrl } from '../../../protocol'
-import { metaDisplayFields } from '../meta-display'
+import { metaDisplayFields } from '../../../services/meta-display'
 import { resolveCoverSafe } from '../decorate'
 
 /**

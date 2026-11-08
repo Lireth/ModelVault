@@ -38,7 +38,7 @@ import {
   getDecorateCacheRoot,
   awaitThumbDrain,
   resetDecorateCache,
-} from './model-state'
+} from '../../services/decorate/state'
 import { wrapHandler, checkExistingDirectory } from '../handler'
 import { samePathIgnoreCase } from '../../utils'
 import { normalizePartialScanDirs } from '../../../shared/scan-dirs'

@@ -152,13 +152,15 @@ ModelVault/
 │   │   ├── windows/mainWindow.js # 主窗口创建/管理（窗口状态记忆、WCO 标题栏）
 │   │   ├── menu.js               # 窗口级快捷键（无原生菜单栏模式）
 │   │   ├── ipc.js                # IPC 处理器注册入口（应用信息/主题/异常上报）
-│   │   ├── ipc/models/           # 模型管理 IPC 处理器（按域拆分：scan/decorate/covers/
-│   │   │                         #   meta/misc/files/civitai/backup/store/model-state）
+│   │   ├── ipc/models/           # 模型管理 IPC 适配层（按域拆分：scan/decorate/covers/
+│   │   │                         #   meta/misc/files/civitai/backup/store/）
 │   │   ├── protocol.js           # mvimg:// / civimg:// 自定义图片协议（白名单校验）
-│   │   ├── fatal-error.js / quit.js / theme.js / logger.js / utils.js
+│   │   ├── fatal-error.js / quit.js / theme.js / logger.js
+│   │   ├── utils.js              # 共享原语门面（utils/：路径/并发/网络/进程/文件系统）
 │   │   └── services/             # 主进程服务层：扫描分类、关联存储（.modelvault/）、
 │   │                             #   原子写入、元数据重关联、目录监控、封面/缩略图、
-│   │                             #   备份恢复、检查更新、Civitai 客户端、哈希预热、
+│   │                             #   装饰管线领域事实（decorate/）、备份恢复、
+│   │                             #   检查更新、Civitai 客户端、哈希预热、
 │   │                             #   safetensors 头部解析等
 │   ├── preload/index.js          # 预加载脚本：contextBridge + IPC 通道白名单
 │   └── renderer/                 # 渲染进程（Vue 3）
