@@ -447,13 +447,27 @@ describe('syncWatcher 目录监控（A8）', () => {
   })
 
   it('防抖合并：静默期内的后续变更重置计时，最终只广播一次', async () => {
-    // 放宽防抖窗，确保第二次变更稳定落在首次防抖触发之前
-    syncWatcher(root, true, [], { pollInterval: 20, broadcastDebounce: 120 })
-    await sleep(60)
-    await moveBundleIn(await makeBundle('b1'), 'b1')
-    await sleep(50) // 轮询已发现 b1（进入 120ms 防抖窗），窗口内
-    await moveBundleIn(await makeBundle('b2'), 'b2') // 窗口内第二次变更：重置防抖
-    await sleep(350) // 等重置后的防抖结束
+    // 预构建文件包：mkdtemp+writeFile 是慢盘高开销操作，必须移出时序关键
+    // 路径——此前在防抖窗内构建 b2，CI 慢盘下耗尽防抖窗，b1 广播先落地
+    // 导致断言到 2 次广播
+    const b1 = await makeBundle('b1')
+    const b2 = await makeBundle('b2')
+    // 放宽防抖窗，关键路径仅剩 rename+sleep(50)，余量覆盖调度抖动
+    let baselineDone = false
+    syncWatcher(root, true, [], {
+      pollInterval: 20,
+      broadcastDebounce: 300,
+      onPollScheduled: () => {
+        baselineDone = true
+      },
+    })
+    // 基准轮完成前移入 b1 会被并入基准快照（零广播），用首个
+    // onPollScheduled 信号做确定性等待，替代与慢基准轮竞态的固定 sleep
+    await waitFor(() => baselineDone, '基准轮未完成')
+    await moveBundleIn(b1, 'b1')
+    await sleep(50) // 轮询已发现 b1（进入 300ms 防抖窗），窗口内
+    await moveBundleIn(b2, 'b2') // 窗口内第二次变更：重置防抖
+    await waitFor(() => sentEvents.length >= 1, '合并广播未发出')
 
     expect(sentEvents).toHaveLength(1)
   })
@@ -1181,6 +1195,7 @@ describe('OPT-9 渐进内容校验（冷区轮转 + 热区即时）', () => {
 
   it('冷目录同名覆盖经轮转渐进检出（无需名称变化）', async () => {
     await makeRotationFixture(40)
+    let baselineDone = false
     syncWatcher(root, true, [], {
       pollInterval: 10,
       broadcastDebounce: 20,
@@ -1188,9 +1203,13 @@ describe('OPT-9 渐进内容校验（冷区轮转 + 热区即时）', () => {
       // 全量覆盖窗口 ≈ fullWalkInterval × 内容校验周期，轮转必然到达冷目录
       contentCheckInterval: 30,
       isVisible: () => true,
-      onPollScheduled: () => {},
+      onPollScheduled: () => {
+        baselineDone = true
+      },
     })
-    await sleep(80) // 基准轮（全树 stat 建立内容基线）完成
+    // 基准轮（全树 stat 建立内容基线）用首个 onPollScheduled 信号确定性
+    // 等待：固定 sleep 在 CI 高并行负载下可能与慢基准轮竞态
+    await waitFor(() => baselineDone, '基准轮未完成', 4000)
     sentEvents.length = 0
 
     // 冷目录同名覆盖写入（条目名不变，仅 size/mtime 变化）
@@ -1203,21 +1222,24 @@ describe('OPT-9 渐进内容校验（冷区轮转 + 热区即时）', () => {
             e.payload.dirs.includes('rot-37'),
         ),
       '轮转未覆盖到冷目录的同名覆盖',
-      3000,
+      6000,
     )
-  })
+  }, 15_000) // 夹具 40 目录 + 轮转检出预算在 CI 慢盘高负载下可超过默认 5s
 
   it('热子树内容覆盖在下一内容轮即时检出（不等待轮转）', async () => {
     await fs.mkdir(path.join(root, 'hot'), { recursive: true })
     await fs.writeFile(path.join(root, 'hot', 'a.safetensors'), 'v1')
+    let baselineDone = false
     syncWatcher(root, true, [], {
       pollInterval: 10,
       broadcastDebounce: 20,
       contentCheckInterval: 30,
       isVisible: () => true,
-      onPollScheduled: () => {},
+      onPollScheduled: () => {
+        baselineDone = true
+      },
     })
-    await sleep(80)
+    await waitFor(() => baselineDone, '基准轮未完成', 4000)
     sentEvents.length = 0
 
     // 第一步：子树内新增文件（名称变化）→ 名称轮检出并记入热点
@@ -1229,7 +1251,7 @@ describe('OPT-9 渐进内容校验（冷区轮转 + 热区即时）', () => {
             e.channel === 'models:fsChanged' && e.payload.dirs.includes('hot'),
         ),
       '名称变化未检出',
-      3000,
+      6000,
     )
 
     // 第二步：同子树内既有文件同名覆盖（纯内容变化）→ 热点目录在下一
@@ -1242,9 +1264,9 @@ describe('OPT-9 渐进内容校验（冷区轮转 + 热区即时）', () => {
             e.channel === 'models:fsChanged' && e.payload.dirs.includes('hot'),
         ).length >= 2,
       '热子树内容覆盖未检出',
-      3000,
+      6000,
     )
-  })
+  }, 15_000) // 两次检出等待 + 基准轮等待在 CI 慢盘高负载下可超过默认 5s
 })
 
 describe('OPT-10 原生事件 filename 缺失降级', () => {

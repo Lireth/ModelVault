@@ -96,6 +96,11 @@ import {
 import { decorateModels } from '../src/main/ipc/models/decorate'
 import { resolveScanExtensions } from '../src/main/ipc/models/scan'
 
+// 本文件全部 hook 均含磁盘 IO（mkdtemp / loadSettings / flushSettingsSave /
+// 递归 rm），CI 托管 runner 高并行负载下偶发超过默认 10s hookTimeout（V-02
+// 用例曾因此误报）。放宽到 30s：hook 无自旋/死锁，真异常仍会被断言暴露
+vi.setConfig({ hookTimeout: 30_000 })
+
 const settingsFile = path.join(fakeUserData, 'settings.json')
 const roots = []
 let root
