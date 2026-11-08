@@ -1,9 +1,7 @@
 import { createHash } from 'node:crypto'
-/* global __MODELVAULT_SIGNER_THUMBPRINT__ */
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
 import { app } from 'electron'
 import logger from '../logger'
 import {
@@ -16,9 +14,11 @@ import {
   fetchWithValidatedRedirects,
   isTransientNetworkError,
 } from './net-fetch'
+import { parseChecksumHash, verifyUpdateSignature } from './update-verify'
 
 /**
- * 应用内更新下载与安装（F-6，portable 形态专用）：
+ * 应用内更新下载（F-6，portable 形态专用；验签见 update-verify.js，安装见
+ * update-install.js）：
  * electron-updater 对 portable 单文件分发无自动替换能力，采用
  * 「应用内下载 + SHA256 校验 + 延迟拉起新 EXE」的轻量方案：
  * - 下载目标为 Release 附加的 ModelVault-<version>.exe 与同名 .sha256
@@ -60,36 +60,6 @@ const PROGRESS_INTERVAL_MS = 200
  * 重置，TCP 停滞超过 60s 判死中止（.part 保留供 Range 续传）。
  */
 const DOWNLOAD_IDLE_TIMEOUT_MS = 60 * 1000
-
-/** 拉起新实例后退出当前实例的延迟（ms），给 spawn 完成进程创建留出时间 */
-const QUIT_DELAY_MS = 500
-/** Authenticode 验签子进程超时（ms）：PowerShell 冷启动 + 大 EXE 解析留足余量 */
-const SIGNATURE_CHECK_TIMEOUT_MS = 20000
-/**
- * 构建期注入的签名者证书 SHA1 指纹（E1）：
- * - release CI 设置 MODELVAULT_SIGNER_THUMBPRINT 后由 Vite define 注入；
- * - 未配置（本地开发/未签名发布）时为空串，验签策略退化为仅 SHA256；
- * - 配置后强制要求更新包 Authenticode 状态 Valid 且指纹一致。
- */
-const BUILD_SIGNER_THUMBPRINT = /** @type {string} */ (
-  // @ts-ignore 构建期常量：release CI 经 Vite define 注入该全局标识符，类型层面不声明
-  typeof __MODELVAULT_SIGNER_THUMBPRINT__ === 'string'
-    ? // @ts-ignore 同一构建期全局标识符的条件分支引用
-      __MODELVAULT_SIGNER_THUMBPRINT__
-    : ''
-)
-
-/**
- * 校验和文本 → 64 位十六进制哈希（纯函数，单测锁定）：
- * 兼容 sha256sum 格式（"<hash>  <文件名>"），取首个 64 位 hex token。
- * @param {unknown} text 校验和文件内容
- * @returns {string} 小写哈希，解析失败为空串
- */
-export function parseChecksumHash(text) {
-  if (typeof text !== 'string') return ''
-  const m = /^\s*([0-9a-fA-F]{64})\b/im.exec(text)
-  return m ? m[1].toLowerCase() : ''
-}
 
 /**
  * 版本号是否可用于拼接文件名（V-06）。
@@ -215,9 +185,14 @@ export function setPendingUpdate(assets, latest) {
   pendingAssets = assets ? { ...assets, latest } : null
 }
 
-/** 更新包缓存目录 */
-function getUpdateDir() {
+/** 更新包缓存目录（安装模块共用） */
+export function getUpdateDir() {
   return path.join(app.getPath('userData'), UPDATE_DIR_NAME)
+}
+
+/** 已完成校验的更新包路径（安装入口的唯一合法来源；仅本模块写入） */
+export function getDownloadedFile() {
+  return downloadedFile
 }
 
 /** 流式计算文件 SHA256（小写 hex） */
@@ -231,208 +206,6 @@ async function hashFile(filePath) {
 async function updateHashFromFile(hash, filePath) {
   const stream = fs.createReadStream(filePath)
   for await (const chunk of stream) hash.update(chunk)
-}
-
-/** 证书指纹规范化：去分隔符并统一大写（Get-AuthenticodeSignature 输出带空格） */
-export function normalizeThumbprint(value) {
-  return String(value || '')
-    .replace(/[^a-fA-F0-9]/g, '')
-    .toUpperCase()
-}
-
-/** 当前签名者指纹原始值：运行期环境变量 > 构建期注入 */
-function signerThumbprintSetting() {
-  return String(
-    process.env.MODELVAULT_SIGNER_THUMBPRINT || BUILD_SIGNER_THUMBPRINT || '',
-  ).trim()
-}
-
-/**
- * 评估 Authenticode 查询结果（纯函数，便于单测）：
- * - Status 必须为 Valid（证书链可信、文件未篡改）；
- * - 指纹必须与预期发布者一致（配置了预期指纹时）。
- * @param {{status?: string, thumbprint?: string, subject?: string}|null} info
- * @param {string} expectedThumbprint 规范化后的预期指纹
- * @returns {{ok: true, required: true, thumbprint: string, subject: string} |
- *   {ok: false, required: true, error: string}}
- */
-export function evaluateUpdateSignature(info, expectedThumbprint) {
-  if (!info) {
-    return {
-      ok: false,
-      required: true,
-      error: '无法读取更新包数字签名（PowerShell 不可用或超时）',
-    }
-  }
-  const status = String(info.status || 'Unknown')
-  if (status !== 'Valid') {
-    return {
-      ok: false,
-      required: true,
-      error: `更新包数字签名无效（${status}）`,
-    }
-  }
-  const thumbprint = normalizeThumbprint(info.thumbprint)
-  if (!thumbprint || thumbprint !== expectedThumbprint) {
-    return {
-      ok: false,
-      required: true,
-      error: '更新包签名者与预期发布者不一致',
-    }
-  }
-  return {
-    ok: true,
-    required: true,
-    thumbprint,
-    subject: typeof info.subject === 'string' ? info.subject : '',
-  }
-}
-
-/** PowerShell 查询脚本：路径经环境变量传入，避免命令拼接注入 */
-const AUTHENTICODE_QUERY_SCRIPT = `
-$ErrorActionPreference = 'Stop'
-$sig = Get-AuthenticodeSignature -LiteralPath $env:MODELVAULT_VERIFY_PATH
-$cert = $sig.SignerCertificate
-$thumb = ''
-$subject = ''
-if ($cert) {
-  $thumb = [string]$cert.Thumbprint
-  $subject = [string]$cert.Subject
-}
-[pscustomobject]@{
-  status = [string]$sig.Status
-  thumbprint = $thumb
-  subject = $subject
-} | ConvertTo-Json -Compress
-`
-
-/**
- * 调用 PowerShell Get-AuthenticodeSignature 查询签名信息。
- * @param {string} filePath 待校验 EXE
- * @returns {Promise<{status:string, thumbprint:string, subject:string}|null>}
- */
-function queryAuthenticode(filePath) {
-  return new Promise((resolve) => {
-    let settled = false
-    let stdout = ''
-    let timer = null
-    let child = null
-    const finish = (value) => {
-      if (settled) return
-      settled = true
-      if (timer) clearTimeout(timer)
-      resolve(value)
-    }
-    try {
-      child = spawn(
-        'powershell.exe',
-        [
-          '-NoProfile',
-          '-NonInteractive',
-          '-ExecutionPolicy',
-          'Bypass',
-          '-Command',
-          AUTHENTICODE_QUERY_SCRIPT,
-        ],
-        {
-          windowsHide: true,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env, MODELVAULT_VERIFY_PATH: filePath },
-        },
-      )
-    } catch {
-      finish(null)
-      return
-    }
-    timer = setTimeout(() => {
-      try {
-        child?.kill()
-      } catch {
-        /* 进程已退出 */
-      }
-      finish(null)
-    }, SIGNATURE_CHECK_TIMEOUT_MS)
-    timer.unref?.()
-    child.stdout?.on('data', (chunk) => {
-      stdout += chunk.toString()
-      if (stdout.length > 256 * 1024) {
-        try {
-          child.kill()
-        } catch {
-          /* 进程已退出 */
-        }
-        finish(null)
-      }
-    })
-    // stderr 必须消费：$ErrorActionPreference='Stop' 下 cmdlet 抛错时
-    // PowerShell 向 stderr 写错误流，stdio 两路 pipe 中仅消费 stdout 的
-    // 话，stderr 管道缓冲写满会阻塞子进程——只能等 20s 超时返回 null
-    // （被解读为「PowerShell 不可用」），且丢失真实错误现场。截尾保留
-    // 最近输出，失败时写入日志辅助排查
-    let stderrTail = ''
-    child.stderr?.on('data', (chunk) => {
-      stderrTail = (stderrTail + chunk.toString()).slice(-2048)
-    })
-    const recentStderr = () =>
-      stderrTail.trim().replace(/\s+/g, ' ').slice(0, 300)
-    child.once('error', () => finish(null))
-    child.once('exit', (code) => {
-      if (code !== 0) {
-        if (stderrTail) {
-          logger.warn(
-            `PowerShell 验签异常退出（code ${code}）: ${recentStderr()}`,
-          )
-        }
-        finish(null)
-        return
-      }
-      try {
-        // PowerShell 管道可能带 UTF-8 BOM，先剥离再解析
-        const parsed = JSON.parse(stdout.replace(/^\uFEFF/, '').trim())
-        finish(parsed && typeof parsed === 'object' ? parsed : null)
-      } catch {
-        if (stderrTail) {
-          logger.warn(`PowerShell 验签输出解析失败: ${recentStderr()}`)
-        }
-        finish(null)
-      }
-    })
-  })
-}
-
-/**
- * 校验更新包 Authenticode 签名（E1）：
- * 未配置预期签名指纹时退化为仅 SHA256（保持未签名发布可更新）；
- * 配置后强制 Valid + 指纹匹配，任何异常均 fail-closed。
- * @param {string} filePath 更新包路径
- * @returns {Promise<{ok: boolean, required: boolean, thumbprint?: string,
- *   subject?: string, error?: string}>}
- *   ok=false 时 error 必有值（fail-closed）
- */
-export async function verifyUpdateSignature(filePath) {
-  const rawExpected = signerThumbprintSetting()
-  if (!rawExpected) return { ok: true, required: false }
-  const expected = normalizeThumbprint(rawExpected)
-  // 配置了值但不是合法 SHA1/SHA256 十六进制指纹：fail-closed，不能静默退化
-  if (expected.length !== 40 && expected.length !== 64) {
-    return { ok: false, required: true, error: '发布者签名指纹配置无效' }
-  }
-  if (process.platform !== 'win32') {
-    return { ok: false, required: true, error: '更新包验签仅支持 Windows' }
-  }
-  if (!filePath || typeof filePath !== 'string') {
-    return { ok: false, required: true, error: '更新包路径无效' }
-  }
-  try {
-    const info = await queryAuthenticode(filePath)
-    return evaluateUpdateSignature(info, expected)
-  } catch (err) {
-    return {
-      ok: false,
-      required: true,
-      error: `更新包验签失败: ${err instanceof Error ? err.message : String(err)}`,
-    }
-  }
 }
 
 /**
@@ -652,66 +425,5 @@ export async function downloadUpdatePackage(onProgress) {
 /** 取消进行中的下载（空闲时为 no-op） */
 export function cancelUpdateDownload() {
   downloadAbort?.abort()
-  return { ok: true }
-}
-
-/**
- * 运行更新程序：拉起新 EXE 并退出当前实例。
- * 新实例携带 `--wait-for-pid=<当前 pid>`，启动时先等待旧实例退出并释放
- * 单实例锁，再正常启动（见 main/index.js 与 utils.waitForProcessExit）。
- *
- * 安全（V-06）：
- * - 不经过 cmd/start，路径作为 spawn 的参数直接传递，无命令拼接注入面；
- * - 仅接受本服务下载并校验通过、且位于 update 目录、文件名符合版本白名单的路径；
- * - E1：启动前再次校验 Authenticode（防止下载后文件被替换），配置了
- *   发布者指纹时失败即拒绝执行。
- * @returns {Promise<{ok: true} | {error: string}>}
- */
-export async function installUpdatePackage() {
-  const file = downloadedFile
-  if (!file) return { error: '尚未下载更新包，请先下载更新' }
-  const dir = getUpdateDir()
-  const resolved = path.resolve(file)
-  const inUpdateDir = resolved
-    .toLowerCase()
-    .startsWith(`${dir.toLowerCase()}${path.sep}`)
-  if (
-    !inUpdateDir ||
-    !/^ModelVault-\d{1,5}\.\d{1,5}\.\d{1,5}\.exe$/.test(path.basename(resolved))
-  ) {
-    logger.warn(`拒绝启动更新目录之外的更新包: ${resolved}`)
-    return { error: '更新包路径异常，请重新下载更新' }
-  }
-  try {
-    // P0-5：主线程同步 IO 清零（数百 MB 更新包的 stat 在网络盘/挂起盘上
-    // 可能阻塞主进程，与文件内其余路径的 fsp 异步口径一致）
-    if (!(await fsp.stat(resolved)).isFile()) {
-      return { error: '更新包不存在，请重新下载更新' }
-    }
-  } catch {
-    return { error: '更新包不存在，请重新下载更新' }
-  }
-  // 安装前复核签名：覆盖「下载后文件被替换」的窗口
-  const signature = await verifyUpdateSignature(resolved)
-  if (!signature.ok) {
-    logger.warn(`拒绝启动验签失败的更新包: ${signature.error}`)
-    return { error: signature.error }
-  }
-  try {
-    const child = spawn(resolved, [`--wait-for-pid=${process.pid}`], {
-      windowsHide: true,
-      detached: true,
-      stdio: 'ignore',
-    })
-    child.once('error', (err) => {
-      logger.warn(`更新程序启动失败: ${err.message}`)
-    })
-    child.unref()
-  } catch (err) {
-    logger.warn(`更新程序启动失败: ${err.message}`)
-    return { error: `启动更新程序失败: ${err.message}` }
-  }
-  logger.info(`已拉起更新程序（等待当前实例退出）: ${resolved}`)
-  setTimeout(() => app.quit(), QUIT_DELAY_MS)
   return { ok: true }
 }

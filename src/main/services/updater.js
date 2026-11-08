@@ -230,7 +230,7 @@ export async function checkForUpdate() {
  * - 设置关闭：直接跳过，不发任何网络请求；
  * - 检查失败/无更新：静默结束（仅由 check 内部记日志），不打扰用户；
  * - 仅「有更新」时经 notify 推送渲染层（载荷为检查结果的渲染层所需子集）。
- * @param {{autoCheckUpdate: boolean}} settings 应用设置（getSettings 合并视图）
+ * @param {{autoCheckUpdate?: boolean}} settings 应用设置（getSettings 合并视图）
  * @param {() => Promise<{error?: string, hasUpdate?: boolean, current?: string,
  *   latest?: string, releaseUrl?: string, releaseNotes?: string,
  *   canDownload?: boolean, downloadSize?: number}>} check 检查函数（生产为 checkForUpdate）

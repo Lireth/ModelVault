@@ -214,61 +214,61 @@ async function getTargetFreeBytes(targetDir) {
 }
 
 /**
- * 导入外部模型文件（复制/移动入台，F2）。
- * @param {{mode?: string, win?: any, signal?: AbortSignal|null,
- *   paths?: string[]}} [options]
- *   导入方式、来源窗口、取消信号（OPT-02：models:cancelOp 在文件间隙/
- *   分块复制中途中止；已完成条目保留，未完成目标清理）与拖拽来源路径
- *   （F-4：提供时跳过来源选择框，路径仍走扩展名/普通文件/库内位置校验）
- * @returns {Promise<object>}
+ * 选择导入来源：显式拖拽路径优先，否则打开原生多选对话框。
+ * @param {{mode: 'copy'|'move', win: any, paths?: string[]}} options
+ * @returns {Promise<{sourcePaths?: string[], canceled?: true, error?: string}>}
  */
-async function importModels({ mode, win, signal, paths } = {}) {
-  if (mode !== 'copy' && mode !== 'move') return { error: '无效的导入方式' }
-  const root = getCurrentRoot()
-  if (!root) return { error: '尚未选择模型库' }
-  const explicitPaths = Array.isArray(paths)
-  let sourcePaths
-  if (explicitPaths) {
+async function pickImportSources({ mode, win, paths }) {
+  if (Array.isArray(paths)) {
     if (paths.length === 0) return { error: '未选择模型文件' }
-    sourcePaths = paths
-  } else {
-    const picked = await dialog.showOpenDialog(win, {
-      title:
-        mode === 'move'
-          ? '选择要移动入台的模型文件'
-          : '选择要复制入台的模型文件',
-      properties: ['openFile', 'multiSelections'],
-      filters: [
-        {
-          name: '模型文件',
-          // .disabled 是 WebUI 的禁用后缀，需单独加入过滤器才可被选中
-          extensions: [
-            ...MODEL_EXTENSION_NAMES.map((e) => e.slice(1)),
-            'disabled',
-          ],
-        },
-      ],
-    })
-    if (picked.canceled || picked.filePaths.length === 0)
-      return { canceled: true }
-    sourcePaths = picked.filePaths
+    return { sourcePaths: paths }
   }
+  const picked = await dialog.showOpenDialog(win, {
+    title:
+      mode === 'move' ? '选择要移动入台的模型文件' : '选择要复制入台的模型文件',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      {
+        name: '模型文件',
+        // .disabled 是 WebUI 的禁用后缀，需单独加入过滤器才可被选中
+        extensions: [
+          ...MODEL_EXTENSION_NAMES.map((e) => e.slice(1)),
+          'disabled',
+        ],
+      },
+    ],
+  })
+  if (picked.canceled || picked.filePaths.length === 0)
+    return { canceled: true }
+  return { sourcePaths: picked.filePaths }
+}
 
+/**
+ * 绝对路径校验与去重（F-4 拖拽路径防御）：仅接受非空绝对路径；
+ * 无有效项返回 null（调用方转换为统一错误文案）。
+ * @param {string[]} sourcePaths 原始来源路径
+ * @returns {string[]|null} 去重后的绝对路径列表
+ */
+function normalizeImportSources(sourcePaths) {
   const uniqueSources = []
   const seen = new Set()
   for (const sourceRaw of sourcePaths) {
-    // F-4 拖拽路径防御：仅接受非空绝对路径（渲染层 webUtils 产出必为绝对路径；
-    // 结构门禁已限制类型/长度/数量，这里拦住相对路径与空白项）
     if (typeof sourceRaw !== 'string' || !path.isAbsolute(sourceRaw)) continue
     const source = path.resolve(sourceRaw)
     if (seen.has(source)) continue
     seen.add(source)
     uniqueSources.push(source)
   }
-  if (uniqueSources.length === 0) {
-    return { error: '未选择有效的模型文件' }
-  }
+  return uniqueSources.length > 0 ? uniqueSources : null
+}
 
+/**
+ * 选择导入目标目录并校验归属（库内 + 非关联存储 + realpath 非越界）。
+ * @param {{win: any, root: string}} options 窗口与当前库根
+ * @returns {Promise<{targetDir?: string, targetRelDir?: string,
+ *   canceled?: true, error?: string}>}
+ */
+async function resolveImportTarget({ win, root }) {
   const targetPick = await dialog.showOpenDialog(win, {
     title: '选择导入目标文件夹（须在当前模型库内）',
     defaultPath: root,
@@ -298,234 +298,339 @@ async function importModels({ mode, win, signal, paths } = {}) {
   } catch (err) {
     return { error: `目标文件夹不可访问: ${err.message}` }
   }
+  return { targetDir, targetRelDir }
+}
+
+/**
+ * 磁盘预检：按「实际需要写入目标卷的字节」汇总（同卷移动为 rename 不占
+ * 额外空间；跨卷 move/copy 计入模型与 sidecar）。statfs 不可用时跳过，
+ * 真正写入仍由 ENOSPC 反馈。
+ * @param {{uniqueSources: string[], mode: 'copy'|'move', root: string,
+ *   targetDir: string, aborted: () => boolean}} options 预检参数
+ * @returns {Promise<{totalBytes: number, copyBytes: number,
+ *   canceled: boolean}>}
+ */
+async function preflightImportBudget({
+  uniqueSources,
+  mode,
+  root,
+  targetDir,
+  aborted,
+}) {
+  let totalBytes = 0
+  let copyBytes = 0
+  let canceled = false
+  const targetVolume = path.parse(targetDir).root.toLowerCase()
+  for (const source of uniqueSources) {
+    if (aborted()) {
+      canceled = true
+      break
+    }
+    const sourceName = path.basename(source)
+    if (!isImportableModelFile(sourceName)) continue
+    if (isInsideDir(root, source)) continue
+    let stat
+    try {
+      stat = await fs.lstat(source)
+    } catch {
+      continue
+    }
+    if (!stat.isFile() || stat.isSymbolicLink()) continue
+    totalBytes += stat.size
+    const sameVolume = path.parse(source).root.toLowerCase() === targetVolume
+    if (mode === 'copy' || !sameVolume) copyBytes += stat.size
+    // sidecar 体积按存在项计入（不存在/目录项忽略；真正搬运时再 stat）
+    const sourceBase = splitModelFileName(sourceName).base
+    for (const suffix of IMPORT_SIDECAR_SUFFIXES) {
+      try {
+        const sidecarStat = await fs.lstat(
+          path.join(path.dirname(source), `${sourceBase}${suffix}`),
+        )
+        if (!sidecarStat.isFile()) continue
+        totalBytes += sidecarStat.size
+        if (mode === 'copy' || !sameVolume) copyBytes += sidecarStat.size
+      } catch {
+        /* sidecar 不存在 */
+      }
+    }
+  }
+  return { totalBytes, copyBytes, canceled }
+}
+
+/**
+ * 目标卷容量校验：空间不足返回错误响应，充足返回 null。
+ * @param {string} targetDir 目标目录
+ * @param {number} copyBytes 需写入字节
+ * @returns {Promise<object|null>} 错误响应或 null
+ */
+async function checkImportCapacity(targetDir, copyBytes) {
+  if (copyBytes <= 0) return null
+  const freeBytes = await getTargetFreeBytes(targetDir)
+  if (freeBytes !== null && copyBytes > freeBytes) {
+    logger.warn(
+      `模型导入磁盘空间不足：需要 ${copyBytes} 字节，可用 ${freeBytes} 字节`,
+    )
+    return {
+      error: `目标磁盘空间不足：需要 ${formatImportBytes(copyBytes)}，当前可用 ${formatImportBytes(freeBytes)}；请清理空间或更换目标目录后重试`,
+      neededBytes: copyBytes,
+      freeBytes,
+    }
+  }
+  return null
+}
+
+/**
+ * 搬运单个来源（模型 + 同名 sidecar），返回导入/取消/失败状态。
+ * @param {string} source 来源绝对路径
+ * @param {{mode: 'copy'|'move', root: string, targetDir: string,
+ *   signal?: AbortSignal|null, aborted: () => boolean,
+ *   onBytes: (bytes: number) => void}} ctx 搬运上下文
+ * @returns {Promise<{imported: boolean, renamed?: boolean, canceled?: boolean,
+ *   failedError?: string, warnings?: string[]}>}
+ */
+async function importOneSource(source, ctx) {
+  const sourceName = path.basename(source)
+  const failed = (error) => ({ imported: false, failedError: error })
+  if (!isImportableModelFile(sourceName)) {
+    return failed('不支持的模型文件类型')
+  }
+  if (isInsideDir(ctx.root, source)) {
+    return failed('源文件已在当前模型库内，请使用库内移动')
+  }
+  let sourceStat
+  try {
+    sourceStat = await fs.lstat(source)
+    if (!sourceStat.isFile() || sourceStat.isSymbolicLink()) {
+      return failed('仅支持导入普通文件')
+    }
+  } catch (err) {
+    return failed(`无法读取源文件: ${err.message}`)
+  }
+
+  let plan
+  try {
+    plan = await planImportTarget(ctx.targetDir, sourceName)
+  } catch (err) {
+    return failed(err.message)
+  }
+  const targetModel = path.join(ctx.targetDir, plan.fileName)
+  try {
+    await transferFile(source, targetModel, ctx.mode, {
+      size: sourceStat.size,
+      signal: ctx.signal,
+      onProgress: ctx.onBytes,
+    })
+  } catch (err) {
+    if (err?.name === 'AbortError') return { imported: false, canceled: true }
+    return failed(`导入失败: ${err.message}`)
+  }
+
+  const renamed = plan.fileName !== sourceName
+  const warnings = []
+  // sidecar 同批搬运（失败只告警，不撤销已成功导入的模型）
+  const sourceBase = splitModelFileName(sourceName).base
+  for (const suffix of IMPORT_SIDECAR_SUFFIXES) {
+    if (ctx.aborted()) {
+      return { imported: true, renamed, canceled: true, warnings }
+    }
+    const sidecarSource = path.join(
+      path.dirname(source),
+      `${sourceBase}${suffix}`,
+    )
+    let sidecarStat
+    try {
+      sidecarStat = await fs.lstat(sidecarSource)
+      if (!sidecarStat.isFile()) continue
+    } catch {
+      continue
+    }
+    const sidecarTarget = path.join(ctx.targetDir, `${plan.base}${suffix}`)
+    try {
+      await transferFile(sidecarSource, sidecarTarget, ctx.mode, {
+        size: sidecarStat.size,
+        signal: ctx.signal,
+        onProgress: ctx.onBytes,
+      })
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        return { imported: true, renamed, canceled: true, warnings }
+      }
+      warnings.push(`${path.basename(sidecarSource)}: ${err.message}`)
+    }
+  }
+  return { imported: true, renamed, warnings }
+}
+
+/**
+ * 逐项搬运并汇总进度/失败/警告（取消在条目间隙与复制分块中生效）。
+ * @param {{uniqueSources: string[], mode: 'copy'|'move', root: string,
+ *   targetDir: string, win: any, signal?: AbortSignal|null,
+ *   totalBytes: number}} options 搬运参数
+ * @returns {Promise<{imported: number, renamed: number, failed: object[],
+ *   warnings: string[], canceled: boolean}>}
+ */
+async function transferImportFiles({
+  uniqueSources,
+  mode,
+  root,
+  targetDir,
+  win,
+  signal,
+  totalBytes,
+}) {
+  const failed = []
+  const warnings = []
+  let imported = 0
+  let renamed = 0
+  let canceled = false
+  const aborted = () => signal?.aborted === true
+  const total = uniqueSources.length
+
+  // OPT-02 进度：done/total 为条目级，bytes/totalBytes 为字节级；
+  // 200ms 节流，复制分块与条目切换都会推进，取消请求也会随事件回传
+  let lastProgressAt = 0
+  let processed = 0
+  let transferredBytes = 0
+  let currentFile = ''
+  const reportProgress = (force = false) => {
+    const now = Date.now()
+    if (!force && now - lastProgressAt < IMPORT_PROGRESS_INTERVAL_MS) return
+    lastProgressAt = now
+    if (!win || win.isDestroyed?.()) return
+    try {
+      win.webContents?.send?.('models:importProgress', {
+        done: processed,
+        total,
+        bytes: transferredBytes,
+        totalBytes,
+        fileName: currentFile,
+        canceled: aborted(),
+      })
+    } catch {
+      /* 窗口销毁/重载：进度推送失败不影响导入主流程 */
+    }
+  }
+  const onBytes = (bytes) => {
+    transferredBytes += bytes
+    reportProgress()
+  }
+  reportProgress(true)
+
+  for (const source of uniqueSources) {
+    if (aborted()) {
+      canceled = true
+      break
+    }
+    currentFile = path.basename(source)
+    reportProgress(true)
+    const result = await importOneSource(source, {
+      mode,
+      root,
+      targetDir,
+      signal,
+      aborted,
+      onBytes,
+    })
+    if (result.warnings?.length) warnings.push(...result.warnings)
+    if (result.imported) {
+      imported += 1
+      if (result.renamed) renamed += 1
+    }
+    if (result.failedError) {
+      failed.push({ source, error: result.failedError })
+    }
+    if (result.canceled && !result.imported) {
+      canceled = true
+      break
+    }
+    processed += 1
+    reportProgress()
+    if (result.canceled) {
+      canceled = true
+      break
+    }
+  }
+  currentFile = ''
+  reportProgress(true)
+  return { imported, renamed, failed, warnings, canceled }
+}
+
+/**
+ * 导入外部模型文件（复制/移动入台，F2）。
+ * @param {{mode?: string, win?: any, signal?: AbortSignal|null,
+ *   paths?: string[]}} [options]
+ *   导入方式、来源窗口、取消信号（OPT-02：models:cancelOp 在文件间隙/
+ *   分块复制中途中止；已完成条目保留，未完成目标清理）与拖拽来源路径
+ *   （F-4：提供时跳过来源选择框，路径仍走扩展名/普通文件/库内位置校验）
+ * @returns {Promise<object>}
+ */
+async function importModels({ mode, win, signal, paths } = {}) {
+  if (mode !== 'copy' && mode !== 'move') return { error: '无效的导入方式' }
+  const root = getCurrentRoot()
+  if (!root) return { error: '尚未选择模型库' }
+
+  const picked = await pickImportSources({ mode, win, paths })
+  if (picked.canceled) return { canceled: true }
+  if (picked.error) return { error: picked.error }
+  const uniqueSources = normalizeImportSources(picked.sourcePaths)
+  if (!uniqueSources) return { error: '未选择有效的模型文件' }
+
+  const target = await resolveImportTarget({ win, root })
+  if (target.canceled) return { canceled: true }
+  if (target.error) return { error: target.error }
 
   if (signal?.aborted) return { canceled: true }
   return withMaintenanceLock('import', root, async () => {
-    const failed = []
-    const warnings = []
-    let imported = 0
-    let renamed = 0
-    let canceled = false
-    const aborted = () => signal?.aborted === true
-    const total = uniqueSources.length
-    let totalBytes = 0
-    let copyBytes = 0
     try {
-      await fs.mkdir(targetDir, { recursive: true })
-      // OPT-02 磁盘预检：按「实际需要写入目标卷的字节」汇总（同卷移动为
-      // rename 不占额外空间；跨卷 move/copy 计入模型与 sidecar）。
-      // statfs 不可用时跳过，真正写入仍由 ENOSPC 反馈。
-      const targetVolume = path.parse(targetDir).root.toLowerCase()
-      for (const source of uniqueSources) {
-        if (aborted()) {
-          canceled = true
-          break
-        }
-        const sourceName = path.basename(source)
-        if (!isImportableModelFile(sourceName)) continue
-        if (isInsideDir(root, source)) continue
-        let stat
-        try {
-          stat = await fs.lstat(source)
-        } catch {
-          continue
-        }
-        if (!stat.isFile() || stat.isSymbolicLink()) continue
-        totalBytes += stat.size
-        const sameVolume =
-          path.parse(source).root.toLowerCase() === targetVolume
-        if (mode === 'copy' || !sameVolume) copyBytes += stat.size
-        // sidecar 体积按存在项计入（不存在/目录项忽略；真正搬运时再 stat）
-        const sourceBase = splitModelFileName(sourceName).base
-        for (const suffix of IMPORT_SIDECAR_SUFFIXES) {
-          try {
-            const sidecarStat = await fs.lstat(
-              path.join(path.dirname(source), `${sourceBase}${suffix}`),
-            )
-            if (!sidecarStat.isFile()) continue
-            totalBytes += sidecarStat.size
-            if (mode === 'copy' || !sameVolume) copyBytes += sidecarStat.size
-          } catch {
-            /* sidecar 不存在 */
-          }
-        }
-      }
-      if (canceled) {
-        logger.info(`模型导入已取消（预检阶段） → ${targetDir}`)
+      await fs.mkdir(target.targetDir, { recursive: true })
+      const aborted = () => signal?.aborted === true
+      const budget = await preflightImportBudget({
+        uniqueSources,
+        mode,
+        root,
+        targetDir: target.targetDir,
+        aborted,
+      })
+      if (budget.canceled) {
+        logger.info(`模型导入已取消（预检阶段） → ${target.targetDir}`)
         return {
           root,
-          targetDir,
-          targetRelDir,
-          imported,
-          renamed,
-          failed,
-          warnings,
+          targetDir: target.targetDir,
+          targetRelDir: target.targetRelDir,
+          imported: 0,
+          renamed: 0,
+          failed: [],
+          warnings: [],
           canceled: true,
         }
       }
-      if (copyBytes > 0) {
-        const freeBytes = await getTargetFreeBytes(targetDir)
-        if (freeBytes !== null && copyBytes > freeBytes) {
-          logger.warn(
-            `模型导入磁盘空间不足：需要 ${copyBytes} 字节，可用 ${freeBytes} 字节`,
-          )
-          return {
-            error: `目标磁盘空间不足：需要 ${formatImportBytes(copyBytes)}，当前可用 ${formatImportBytes(freeBytes)}；请清理空间或更换目标目录后重试`,
-            neededBytes: copyBytes,
-            freeBytes,
-          }
-        }
-      }
+      const capacityError = await checkImportCapacity(
+        target.targetDir,
+        budget.copyBytes,
+      )
+      if (capacityError) return capacityError
 
-      // OPT-02 进度：done/total 为条目级，bytes/totalBytes 为字节级；
-      // 200ms 节流，复制分块与条目切换都会推进，取消请求也会随事件回传
-      let lastProgressAt = 0
-      let processed = 0
-      let transferredBytes = 0
-      let currentFile = ''
-      const reportProgress = (force = false) => {
-        const now = Date.now()
-        if (!force && now - lastProgressAt < IMPORT_PROGRESS_INTERVAL_MS) return
-        lastProgressAt = now
-        if (!win || win.isDestroyed?.()) return
-        try {
-          win.webContents?.send?.('models:importProgress', {
-            done: processed,
-            total,
-            bytes: transferredBytes,
-            totalBytes,
-            fileName: currentFile,
-            canceled: aborted(),
-          })
-        } catch {
-          /* 窗口销毁/重载：进度推送失败不影响导入主流程 */
-        }
-      }
-      const onBytes = (bytes) => {
-        transferredBytes += bytes
-        reportProgress()
-      }
-      reportProgress(true)
-
-      for (const source of uniqueSources) {
-        if (aborted()) {
-          canceled = true
-          break
-        }
-        const sourceName = path.basename(source)
-        currentFile = sourceName
-        reportProgress(true)
-        if (!isImportableModelFile(sourceName)) {
-          failed.push({ source, error: '不支持的模型文件类型' })
-          processed += 1
-          reportProgress()
-          continue
-        }
-        if (isInsideDir(root, source)) {
-          failed.push({
-            source,
-            error: '源文件已在当前模型库内，请使用库内移动',
-          })
-          processed += 1
-          reportProgress()
-          continue
-        }
-        let sourceStat
-        try {
-          sourceStat = await fs.lstat(source)
-          if (!sourceStat.isFile() || sourceStat.isSymbolicLink()) {
-            failed.push({ source, error: '仅支持导入普通文件' })
-            processed += 1
-            reportProgress()
-            continue
-          }
-        } catch (err) {
-          failed.push({ source, error: `无法读取源文件: ${err.message}` })
-          processed += 1
-          reportProgress()
-          continue
-        }
-
-        let plan
-        try {
-          plan = await planImportTarget(targetDir, sourceName)
-        } catch (err) {
-          failed.push({ source, error: err.message })
-          processed += 1
-          reportProgress()
-          continue
-        }
-        const targetModel = path.join(targetDir, plan.fileName)
-        try {
-          await transferFile(source, targetModel, mode, {
-            size: sourceStat.size,
-            signal,
-            onProgress: onBytes,
-          })
-        } catch (err) {
-          if (err?.name === 'AbortError') {
-            canceled = true
-            break
-          }
-          failed.push({ source, error: `导入失败: ${err.message}` })
-          processed += 1
-          reportProgress()
-          continue
-        }
-        imported += 1
-        if (plan.fileName !== sourceName) renamed += 1
-
-        // sidecar 同批搬运（失败只告警，不撤销已成功导入的模型）
-        const sourceBase = splitModelFileName(sourceName).base
-        for (const suffix of IMPORT_SIDECAR_SUFFIXES) {
-          if (aborted()) {
-            canceled = true
-            break
-          }
-          const sidecarSource = path.join(
-            path.dirname(source),
-            `${sourceBase}${suffix}`,
-          )
-          let sidecarStat
-          try {
-            sidecarStat = await fs.lstat(sidecarSource)
-            if (!sidecarStat.isFile()) continue
-          } catch {
-            continue
-          }
-          const sidecarTarget = path.join(targetDir, `${plan.base}${suffix}`)
-          try {
-            await transferFile(sidecarSource, sidecarTarget, mode, {
-              size: sidecarStat.size,
-              signal,
-              onProgress: onBytes,
-            })
-          } catch (err) {
-            if (err?.name === 'AbortError') {
-              canceled = true
-              break
-            }
-            warnings.push(`${path.basename(sidecarSource)}: ${err.message}`)
-          }
-        }
-        processed += 1
-        reportProgress()
-        if (canceled) break
-      }
-      currentFile = ''
-      reportProgress(true)
+      const result = await transferImportFiles({
+        uniqueSources,
+        mode,
+        root,
+        targetDir: target.targetDir,
+        win,
+        signal,
+        totalBytes: budget.totalBytes,
+      })
       logger.info(
-        `模型导入${canceled ? '已取消' : '完成'}（${mode}）：成功 ${imported}，重命名 ${renamed}，失败 ${failed.length} → ${targetDir}`,
+        `模型导入${result.canceled ? '已取消' : '完成'}（${mode}）：成功 ${result.imported}，重命名 ${result.renamed}，失败 ${result.failed.length} → ${target.targetDir}`,
       )
       return {
         root,
-        targetDir,
-        targetRelDir,
-        imported,
-        renamed,
-        failed,
-        warnings,
-        ...(canceled ? { canceled: true } : {}),
+        targetDir: target.targetDir,
+        targetRelDir: target.targetRelDir,
+        imported: result.imported,
+        renamed: result.renamed,
+        failed: result.failed,
+        warnings: result.warnings,
+        ...(result.canceled ? { canceled: true } : {}),
       }
     } catch (err) {
       logger.warn(`模型导入失败: ${err.message}`)

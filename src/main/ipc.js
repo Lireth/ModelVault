@@ -8,8 +8,8 @@ import { exportDiagnostics } from './services/diagnostics'
 import {
   cancelUpdateDownload,
   downloadUpdatePackage,
-  installUpdatePackage,
 } from './services/update-download'
+import { installUpdatePackage } from './services/update-install'
 
 /**
  * 注册所有主进程 IPC 处理器。
