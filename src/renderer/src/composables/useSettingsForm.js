@@ -1,5 +1,8 @@
 import { computed, reactive, watch } from 'vue'
-import { NSFW_BLUR_KEYS } from '../../../shared/app-enums'
+import {
+  MIN_WARMUP_CONCURRENCY,
+  NSFW_BLUR_KEYS,
+} from '../../../shared/app-enums'
 import {
   applyAccent,
   applyTheme,
@@ -76,9 +79,9 @@ export function useSettingsForm() {
     form.hashWarmup = state.settings.hashWarmup || 'candidates'
     form.hashWarmupConcurrency =
       Number.isFinite(state.settings.hashWarmupConcurrency) &&
-      state.settings.hashWarmupConcurrency >= 1
+      state.settings.hashWarmupConcurrency >= MIN_WARMUP_CONCURRENCY
         ? state.settings.hashWarmupConcurrency
-        : 1
+        : MIN_WARMUP_CONCURRENCY
     form.autoBackup = state.settings.autoBackup !== false
     // 填充完成后建立脏检测基线（A9）：此后表单值与快照不一致即为脏
     savedSnapshot = formSnapshotValue()
@@ -113,6 +116,8 @@ export function useSettingsForm() {
       hideNsfwModels: form.hideNsfwModels,
       hashWarmup: form.hashWarmup,
       hashWarmupConcurrency: form.hashWarmupConcurrency,
+      // autoBackup 参与保存载荷（SettingsPage.onSave），必须同口径纳入脏检测
+      autoBackup: form.autoBackup,
     }
   }
 
@@ -136,6 +141,7 @@ export function useSettingsForm() {
       form.hideNsfwModels !== s.hideNsfwModels ||
       form.hashWarmup !== s.hashWarmup ||
       form.hashWarmupConcurrency !== s.hashWarmupConcurrency ||
+      form.autoBackup !== s.autoBackup ||
       form.scanExtensions.length !== s.scanExtensions.length ||
       form.scanExtensions
         .slice()

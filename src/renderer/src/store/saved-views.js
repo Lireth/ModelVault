@@ -7,6 +7,7 @@ import {
   typeInfo,
 } from './state'
 import { BASE_FAMILIES } from '../../../shared/model-categories'
+import { MAX_SAVED_VIEW_NAME, MAX_SAVED_VIEWS } from '../../../shared/app-enums'
 import { saveSettings } from './library'
 import { confirmDialog, toast } from './toast'
 
@@ -17,11 +18,6 @@ import { confirmDialog, toast } from './toast'
  * 平铺字段始终为活动视图的镜像（B-02 约定），应用视图即整体覆写这些字段，
  * 不引入额外派生筛选态；视图列表持久化在应用设置（settings.savedViews）。
  */
-
-/** 视图上限（与主进程 normalizeSavedViews 的截断一致，先在前置校验拦截） */
-const MAX_VIEWS = 20
-/** 视图名称长度上限（与主进程一致） */
-const MAX_NAME = 30
 
 /** 已保存的视图列表（设置项镜像；无该字段的旧数据回退空数组） */
 export const savedViews = computed(() => state.settings.savedViews || [])
@@ -136,12 +132,12 @@ export async function saveCurrentAsView(name) {
     toast('warn', '请输入视图名称')
     return false
   }
-  if (trimmed.length > MAX_NAME) {
-    toast('warn', `视图名称最长 ${MAX_NAME} 字`)
+  if (trimmed.length > MAX_SAVED_VIEW_NAME) {
+    toast('warn', `视图名称最长 ${MAX_SAVED_VIEW_NAME} 字`)
     return false
   }
-  if (savedViews.value.length >= MAX_VIEWS) {
-    toast('warn', `最多保存 ${MAX_VIEWS} 个视图，可先删除不常用的`)
+  if (savedViews.value.length >= MAX_SAVED_VIEWS) {
+    toast('warn', `最多保存 ${MAX_SAVED_VIEWS} 个视图，可先删除不常用的`)
     return false
   }
   const lower = trimmed.toLowerCase()

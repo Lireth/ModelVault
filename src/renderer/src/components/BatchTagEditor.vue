@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { allTags, state } from '../store/appStore'
+import { MAX_TAG_LEN, MAX_TAGS } from '../../../shared/app-enums'
 
 /**
  * 批量自由标签编辑层（FEAT-01）：
@@ -12,10 +13,6 @@ import { allTags, state } from '../store/appStore'
  */
 
 const emit = defineEmits(['close', 'apply'])
-
-/** 单模型标签上限与单个标签长度上限（与 IPC schema 一致） */
-const MAX_TAGS = 20
-const MAX_TAG_LEN = 32
 
 const MODES = [
   { key: 'add', label: '添加', title: '保留现有标签，追加输入的新标签' },

@@ -3,14 +3,12 @@ import { toast, confirmDialog } from './toast'
 import { applyMetaFlags } from './meta-apply'
 import { clearSelectedModel, openDetail } from './detail'
 import { openTransferToLibrary } from './transfer'
+import { MAX_TAGS } from '../../../shared/app-enums'
 
 /**
  * 单模型文件操作、即时标注、自由标签（F-5）、右键菜单
  * （A-04 自 appStore.js 拆出）。
  */
-
-/** 单模型自由标签上限（与 IPC schema / store-meta 规范化保持一致） */
-const MAX_TAGS = 20
 
 /**
  * 标签覆写核心路径：IPC → 成功后以主进程返回的权威标签同步本地列表元素

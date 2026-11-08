@@ -36,7 +36,14 @@
  */
 
 import { MAX_PARTIAL_SCAN_DIRS_INPUT } from './scan-dirs'
-import { MAX_BATCH_META_IDS, MAX_IMPORT_PATHS } from './app-enums'
+import {
+  MAX_BATCH_META_IDS,
+  MAX_IMPORT_IMAGES,
+  MAX_IMPORT_PATHS,
+  MAX_SAVED_VIEWS,
+  MAX_WARMUP_CONCURRENCY,
+  MIN_WARMUP_CONCURRENCY,
+} from './app-enums'
 
 /**
  * 未显式声明 max 时的全局默认规模/深度上限（fail-closed 收口）：
@@ -53,15 +60,13 @@ export const DEFAULT_MAX_ARRAY_ITEMS = 1024
 
 /**
  * 业务上限常量（OPT-13 单一来源）：schema 声明与 handler 内语义校验共用，
- * 此前两侧各写一份魔数（500/10000/20），调限时只改一侧即出现
+ * 此前两侧各写一份魔数（500/10000），调限时只改一侧即出现
  * 「schema 拒绝但文案不同」或 handler 死代码。
  */
 /** 跨库传输单批模型数上限 */
 export const MAX_TRANSFER_IDS = 500
 /** 按标签整理单批移动数上限 */
 export const MAX_ORGANIZE_MOVES = 10000
-/** 单次导入 Civitai 示例图数量上限 */
-export const MAX_IMPORT_IMAGES = 20
 /** 对象/数组最大嵌套深度（顶层 payload 为第 1 层） */
 const DEFAULT_MAX_DEPTH = 5
 
@@ -383,13 +388,16 @@ export const IPC_PAYLOAD_SCHEMAS = {
       autoRescan: vBool(),
       autoCheckUpdate: vBool(),
       hashWarmup: vStr({ max: 16 }),
-      // 哈希预热并发数（OPT-3）：整数 1-4，范围收口仍在 normalizeSettings
-      hashWarmupConcurrency: vInt({ min: 1, max: 4 }),
+      // 哈希预热并发数（OPT-3）：整数区间单一来源 shared/app-enums
+      hashWarmupConcurrency: vInt({
+        min: MIN_WARMUP_CONCURRENCY,
+        max: MAX_WARMUP_CONCURRENCY,
+      }),
       autoBackup: vBool(),
       // 智能视图：字段与 store-settings.normalizeSavedViews 对齐；
       // 文案/枚举回退仍在 normalize（这里只挡类型与未知字段）
       savedViews: vArr({
-        max: 20,
+        max: MAX_SAVED_VIEWS,
         items: vObj({
           max: 16,
           loose: false,

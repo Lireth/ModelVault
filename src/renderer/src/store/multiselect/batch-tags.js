@@ -4,7 +4,11 @@ import { applyMetaUpdates } from '../meta-apply'
 import { modelById } from '../selectors'
 import { beginBatchTagsWrite } from '../model-actions'
 import { reportBatchFailures, clearBatchFailures } from './batch-failures'
-import { MAX_BATCH_META_IDS } from '../../../../shared/app-enums'
+import {
+  MAX_BATCH_META_IDS,
+  MAX_TAG_LEN,
+  MAX_TAGS,
+} from '../../../../shared/app-enums'
 
 /**
  * 批量自由标签编辑（FEAT-01，C1 批量 IPC 改造）：
@@ -17,11 +21,6 @@ import { MAX_BATCH_META_IDS } from '../../../../shared/app-enums'
  * N 次降到 ceil(N/5000) 次，回包从「每模型完整 meta」降为「标签数组 +
  * 失败明细」，并保留「无变化/超上限跳过」的逐项语义。
  */
-
-/** 单模型标签上限（与 IPC schema / store-meta 规范化保持一致） */
-const MAX_TAGS = 20
-/** 单个标签长度上限（与 IPC schema 保持一致） */
-const MAX_TAG_LEN = 32
 
 const MODE_LABELS = {
   add: '添加',

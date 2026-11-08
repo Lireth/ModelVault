@@ -10,6 +10,12 @@ import {
   VIEW_MODE_KEYS,
   HASH_WARMUP_KEYS,
   NSFW_BLUR_KEYS,
+  MAX_SAVED_VIEWS,
+  MAX_SAVED_VIEW_NAME,
+  MAX_TAG_LEN,
+  MAX_VIEW_TAG_FILTERS,
+  MAX_WARMUP_CONCURRENCY,
+  MIN_WARMUP_CONCURRENCY,
 } from '../../shared/app-enums'
 import { DEFAULT_SETTINGS } from '../../shared/defaults'
 import { atomicWriteFile } from './atomic-write'
@@ -124,17 +130,19 @@ function normalizeExtensions(raw) {
 }
 
 /**
- * 规范化哈希预热并发数（OPT-3）：整数收口到 [1, 4]，非法值回退基准值。
- * 上限 4 与 schema（vInt min 1 max 4）一致：并发收益受磁盘随机读限制，
- * 更高并发只放大内存与句柄占用。
+ * 规范化哈希预热并发数（OPT-3）：整数收口到 shared/app-enums 定义的区间，
+ * 非法值回退基准值。并发收益受磁盘随机读限制，更高并发只放大内存与句柄占用。
  * @param {unknown} raw 设置原文
  * @param {number} fallback 非法时的回退值（默认设置或旧值）
- * @returns {number} 1-4 的整数
+ * @returns {number} 合法区间内的整数
  */
 function normalizeHashConcurrency(raw, fallback) {
   const n = Number(raw)
   if (!Number.isFinite(n)) return fallback
-  return Math.min(4, Math.max(1, Math.floor(n)))
+  return Math.min(
+    MAX_WARMUP_CONCURRENCY,
+    Math.max(MIN_WARMUP_CONCURRENCY, Math.floor(n)),
+  )
 }
 
 /**
@@ -153,10 +161,10 @@ function normalizeViewTagFilters(raw) {
   const out = []
   for (const item of list) {
     if (typeof item !== 'string') continue
-    const tag = item.trim().slice(0, 32)
+    const tag = item.trim().slice(0, MAX_TAG_LEN)
     if (!tag || out.includes(tag)) continue
     out.push(tag)
-    if (out.length >= 20) break
+    if (out.length >= MAX_VIEW_TAG_FILTERS) break
   }
   return out
 }
@@ -174,7 +182,13 @@ function normalizeSavedViews(raw) {
     if (!v || typeof v !== 'object') continue
     const id = typeof v.id === 'string' ? v.id.trim() : ''
     const name = typeof v.name === 'string' ? v.name.trim() : ''
-    if (!id || id.length > 40 || !name || name.length > 30 || seen.has(id))
+    if (
+      !id ||
+      id.length > 40 ||
+      !name ||
+      name.length > MAX_SAVED_VIEW_NAME ||
+      seen.has(id)
+    )
       continue
     seen.add(id)
     out.push({
@@ -198,7 +212,7 @@ function normalizeSavedViews(raw) {
       sortBy: SORT_BY_KEYS.has(v.sortBy) ? v.sortBy : 'name',
       sortAsc: typeof v.sortAsc === 'boolean' ? v.sortAsc : true,
     })
-    if (out.length >= 20) break
+    if (out.length >= MAX_SAVED_VIEWS) break
   }
   return out
 }

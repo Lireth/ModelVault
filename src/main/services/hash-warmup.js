@@ -6,6 +6,10 @@ import {
   isRetryableHashPoolError,
   setHashPoolConcurrency,
 } from './hash-worker-pool'
+import {
+  MAX_WARMUP_CONCURRENCY,
+  MIN_WARMUP_CONCURRENCY,
+} from '../../shared/app-enums'
 
 /**
  * 模型哈希后台预热服务（Civitai 识别加速）：
@@ -176,12 +180,9 @@ const DEFAULT_MODE = 'full'
  */
 let warmupConcurrency = 1
 
-/** 并发数合法区间（OPT-3）：与设置 normalize（store-settings）保持一致 */
-const MIN_WARMUP_CONCURRENCY = 1
-const MAX_WARMUP_CONCURRENCY = 4
-
 /**
- * 调整哈希预热并行消费数（OPT-3）：收口到 [1, 4]，同时同步线程池并行度。
+ * 调整哈希预热并行消费数（OPT-3）：收口到 shared/app-enums 定义的区间，
+ * 同时同步线程池并行度。
  * @param {number} n 并行任务数（非法值按 1 处理）
  */
 export function setHashWarmupConcurrency(n) {
