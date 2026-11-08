@@ -17,18 +17,17 @@ import { startPerf } from '../../../services/perf'
 import { syncWatcher } from '../../../services/watcher'
 import { requestHashWarmup } from '../../../services/hash-warmup'
 import {
-  maintenanceBusyMessage,
-  releaseMaintenance,
-  tryAcquireMaintenance,
-} from '../../../services/maintenance-lock'
-import {
   getDecorateCacheRoot,
   resetDecorateCache,
 } from '../../../services/decorate/state'
 import { clearDeferredOwners, primeHeaderInfoCache } from '../decorate'
 import { clearDeferredJobs } from '../../../services/thumbs'
 import { slimModelsForList, logPayloadSize } from '../list-payload'
-import { wrapHandler, checkExistingDirectory } from '../../handler'
+import {
+  withMaintenanceLock,
+  wrapHandler,
+  checkExistingDirectory,
+} from '../../handler'
 import { readLibraryIndex } from '../../../services/library-index'
 import { collectLibraryOverview } from '../../../services/library-overview'
 import { ensureRootStore } from './session'
@@ -65,9 +64,7 @@ export function registerLibraryHandlers() {
         return { root, cached: false }
       }
 
-      const token = tryAcquireMaintenance('switch', root)
-      if (!token) return { error: maintenanceBusyMessage() }
-      try {
+      return withMaintenanceLock('switch', root, async (token) => {
         await ensureRootStore(root, { maintenanceToken: token })
         // IDX-REUSE：切库后的后台校验复用目标库索引中的头部解析结果。
         // 先清空旧根的装饰/头部缓存与延迟缩略图归属，再按目标索引播种，
@@ -120,9 +117,7 @@ export function registerLibraryHandlers() {
           savedAt: cachedIndex.savedAt,
           durationMs: cachedIndex.durationMs,
         }
-      } finally {
-        releaseMaintenance(token)
-      }
+      })
     },
     { errorPrefix: '打开模型库失败', perfWarnMs: 200 },
   )

@@ -374,6 +374,21 @@ export function modelIndexOf(id) {
 }
 
 /**
+ * 模型库是否被在途任务占用（全量扫描 / 增量扫描 / 后台校验 / 外部导入）。
+ * 所有「切库、重扫、重新定位」入口共用同一判定，避免各处枚举漏项；
+ * 需要区分具体原因时再读取对应标志位。
+ * @returns {boolean}
+ */
+export function isLibraryBusy() {
+  return (
+    state.scanning ||
+    state.partialScanning ||
+    state.backgroundScanning ||
+    state.importing
+  )
+}
+
+/**
  * 整体替换模型列表（models 数组级更新的唯一入口）：
  * 传入数组包一层 shallowReactive 后整体赋值——数组代理负责拦截索引读写
  * 与遍历（元素级 `state.models[i] = {...}` 因此可触发更新），元素对象保持

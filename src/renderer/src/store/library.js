@@ -7,6 +7,7 @@ import {
   effectiveModelHash,
   setHashOverride,
   clearHashOverrides,
+  isLibraryBusy,
 } from './state'
 import { applyCoverOverrides, clearCoverOverrides } from './cover-overrides'
 import { clearBatchFailures } from './multiselect/batch-failures'
@@ -240,12 +241,7 @@ export async function saveSettings(patch) {
 export async function chooseFolder() {
   // 扫描/增量刷新/后台校验/导入进行中拒绝切换目录（S2/B-01）：
   // 否则目录已切、列表未刷新，留下半状态
-  if (
-    state.scanning ||
-    state.partialScanning ||
-    state.backgroundScanning ||
-    state.importing
-  ) {
+  if (isLibraryBusy()) {
     toast('warn', '正在扫描、校验或导入中，请稍候')
     return
   }
@@ -268,12 +264,7 @@ export async function chooseFolder() {
  * @param {string} folder 目标根目录绝对路径
  */
 export async function switchRoot(folder) {
-  if (
-    state.scanning ||
-    state.partialScanning ||
-    state.backgroundScanning ||
-    state.importing
-  ) {
+  if (isLibraryBusy()) {
     toast('warn', '正在扫描、校验或导入中，请稍候')
     return
   }
@@ -361,12 +352,7 @@ export async function removeRoot(folder) {
  */
 export async function relocateFolder() {
   // 与 chooseFolder 同规则：扫描/校验/导入进行中拒绝切换，避免半状态
-  if (
-    state.scanning ||
-    state.partialScanning ||
-    state.backgroundScanning ||
-    state.importing
-  ) {
+  if (isLibraryBusy()) {
     toast('warn', '正在扫描、校验或导入中，请稍候')
     return
   }
@@ -413,12 +399,7 @@ export async function scanModels(folder = state.folder, options = {}) {
   }
   // 渲染层防重入（S2/B-01）：主进程虽会拒绝并发扫描，但入口先拦截可避免误导性错误弹窗。
   // 增量刷新在途时同样拒绝：它已持有主进程扫描锁，此时发起全量扫描只会被拒绝。
-  if (
-    state.scanning ||
-    state.backgroundScanning ||
-    state.partialScanning ||
-    state.importing
-  ) {
+  if (isLibraryBusy()) {
     if (!background) {
       toast(
         'warn',

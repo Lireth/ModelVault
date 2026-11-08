@@ -14,13 +14,9 @@ import {
   MAX_ORGANIZE_MOVES,
   MAX_TRANSFER_IDS,
 } from '../../../shared/ipc-schema'
-import {
-  maintenanceBusyMessage,
-  releaseMaintenance,
-  tryAcquireMaintenance,
-} from '../../services/maintenance-lock'
 import { transferModelsToLibrary } from '../../services/library-transfer'
 import {
+  withMaintenanceLock,
   wrapHandler,
   checkModelIdInRootReal,
   getRealRootPath,
@@ -116,9 +112,7 @@ export function registerMoveHandlers() {
         return { path: id, targetRelDir: toRelKey(targetDir) ?? '' }
       // 维护锁（OPT-14）：在对话框与校验之后、移动之前取锁——持锁等待用户
       // 选择目录会长时间冻结扫描/恢复等大操作。file-op 彼此兼容
-      const token = tryAcquireMaintenance('file-op', getCurrentRoot())
-      if (!token) return { error: maintenanceBusyMessage() }
-      try {
+      return withMaintenanceLock('file-op', getCurrentRoot(), async () => {
         try {
           await fs.access(newPath)
           return { error: '目标位置已存在同名文件' }
@@ -147,9 +141,7 @@ export function registerMoveHandlers() {
         // targetRelDir：渲染层据此对目标子树做局部扫描（OPT-03）；
         // 目标为库根时 toRelKey 返回 null，映射为 ''（根直属文件子树）
         return { path: newPath, targetRelDir: toRelKey(targetDir) ?? '' }
-      } finally {
-        releaseMaintenance(token)
-      }
+      })
     },
     { errorPrefix: '移动失败' },
   )
@@ -193,9 +185,7 @@ export function registerMoveHandlers() {
       const aborted = () => signal?.aborted === true
       // 维护锁（OPT-14）：批量移动与扫描 relink/备份恢复互斥；归属校验一并
       // 纳入锁内，保证「校验-移动」与并发大操作的原子边界。file-op 彼此兼容
-      const token = tryAcquireMaintenance('file-op', root)
-      if (!token) return { error: maintenanceBusyMessage() }
-      try {
+      return withMaintenanceLock('file-op', root, async () => {
         // 逐项校验归属（O6：realpath 后仍须在库内）：非法项跳过而非整体失败
         const valid = []
         const skipped = []
@@ -294,9 +284,7 @@ export function registerMoveHandlers() {
           skipped,
           ...(canceled ? { canceled: true } : {}),
         }
-      } finally {
-        releaseMaintenance(token)
-      }
+      })
     },
     { errorPrefix: '一键移动文件失败' },
   )

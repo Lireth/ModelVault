@@ -21,12 +21,7 @@ import {
   requestHashWarmup,
   resumeHashWarmup,
 } from '../../services/hash-warmup'
-import {
-  getMaintenanceState,
-  maintenanceBusyMessage,
-  releaseMaintenance,
-  tryAcquireMaintenance,
-} from '../../services/maintenance-lock'
+import { getMaintenanceState } from '../../services/maintenance-lock'
 import {
   clearDeferredOwners,
   decorateModels,
@@ -39,7 +34,11 @@ import {
   awaitThumbDrain,
   resetDecorateCache,
 } from '../../services/decorate/state'
-import { wrapHandler, checkExistingDirectory } from '../handler'
+import {
+  withMaintenanceLock,
+  wrapHandler,
+  checkExistingDirectory,
+} from '../handler'
 import { samePathIgnoreCase } from '../../utils'
 import { normalizePartialScanDirs } from '../../../shared/scan-dirs'
 import {
@@ -114,206 +113,203 @@ export function registerScanHandlers() {
       }
       // 同步获取全局维护锁（V-02）：任何 await 之前完成，防止并发扫描/切库/
       // 备份恢复在事件循环间隙双重进入
-      const token = tryAcquireMaintenance('scan', root)
-      if (!token) {
-        return { error: maintenanceBusyMessage() }
-      }
-      scanAbort = new AbortController()
-      const signal = scanAbort.signal
-      const startedAt = Date.now()
-      const previousRoot = getCurrentRoot()
-      let rootSwitched = false
-      let completed = false
+      return withMaintenanceLock('scan', root, async (token) => {
+        scanAbort = new AbortController()
+        const signal = scanAbort.signal
+        const startedAt = Date.now()
+        const previousRoot = getCurrentRoot()
+        let rootSwitched = false
+        let completed = false
 
-      try {
-        // OPT-02：扫描期间暂停目录监控巡检与广播，变更先累积；扫描成功后
-        // 用本次目录快照覆盖基线，停扫时只补发未被扫描覆盖的子树
-        setWatcherScanning(true)
-        // 扫描期间暂停后台哈希预热取队（正在计算的单个文件不中断），结束后恢复
-        pauseHashWarmup()
-        // 扫描目录必须是已存在的目录（C6）：防止任意字符串路径（如已删除目录、
-        // 或误传文件/系统根）在 ensureRootStore 中创建 .modelvault 写入元数据
-        const dirInvalid = await checkExistingDirectory(
-          root,
-          '模型文件夹不存在或不是目录',
-        )
-        if (dirInvalid) {
-          // F1-offline：附失效标志，渲染层进入离线态（离线页/横幅承担提示），
-          // 不再弹笼统的扫描失败 toast
-          return { error: dirInvalid, folderMissing: true }
-        }
-        // 白名单校验（B1）：扫描目录必须已在模型库列表中。存在性校验只保证
-        // 「路径可用」，不保证「用户想把这里当库」——无白名单时任意可写目录
-        // 都能经 ensureRootStore 落 .modelvault，构成渲染可控的任意目录写入
-        // 原语。新增库只能走 models:chooseFolder（用户对话框确认）
-        if (!isRegisteredLibrary(root)) {
-          logger.warn(`拒绝扫描模型库列表之外的目录: ${root}`)
-          return { error: '该目录不在模型库列表中' }
-        }
-
-        const win = BrowserWindow.fromWebContents(event.sender)
-        logger.info(`开始扫描模型目录: ${root}`)
-
-        // 等待上一轮后台缩略图生成完成，避免与新扫描的缩略图清理逻辑竞争（C4 单一入口）
-        await awaitThumbDrain()
-        // 切换/加载该根目录的关联存储，并清理孤儿封面文件。
-        // 维护锁由本扫描持有，传入令牌避免 ensureRootStore 再次加锁
-        await ensureRootStore(root, { maintenanceToken: token })
-        rootSwitched =
-          Boolean(previousRoot) && !samePathIgnoreCase(previousRoot, root)
-        await pruneOrphanCovers()
-        // 切换根目录后装饰缓存全部失效；延迟缩略图队列同步清空——
-        // 残留的旧根条目会被下一轮 drain 以「新根」的 thumbs 目录生成（跨根写文件），
-        // 并把无效的封面更新推送回渲染进程（C5，与 B10 同类竞态）
-        const cacheRootChanged = !samePathIgnoreCase(
-          getDecorateCacheRoot(),
-          root,
-        )
-        if (cacheRootChanged) {
-          resetDecorateCache(root)
-          clearDeferredOwners()
-          clearDeferredJobs()
-        }
-        // IDX-REUSE：通过「选择文件夹/重新定位」首次进入某库时，若目标库
-        // 已有本地索引，先播种上次扫描的头部解析结果，避免首扫对全库重复读盘
-        if (cacheRootChanged) {
-          const index = await readLibraryIndex(root)
-          if (index) primeHeaderInfoCache(index.models)
-        }
-
-        let lastSent = 0
-        // 应用扫描规则：排除目录 + 扫描文件扩展名（来自应用设置）
-        const appSettings = getSettings()
-        const { models, errors, dirCount, dirSnapshot } = await scanModels(
-          root,
-          (progress) => {
-            const now = Date.now()
-            if (now - lastSent >= PROGRESS_INTERVAL) {
-              lastSent = now
-              // 窗口可能已在扫描期间关闭：?. 只防 null 不防已销毁（访问 webContents 抛错），须判 isDestroyed
-              if (win && !win.isDestroyed()) {
-                win.webContents.send('models:scanProgress', progress)
-              }
-            }
-          },
-          {
-            excludeDirs: appSettings.excludeDirs || [],
-            // 与局部扫描同一兜底口径（FIX-5）：异常时回退 undefined → scanner
-            // 默认全集；此前 `|| []` 在异常场景会产出空集（扫不到任何文件）
-            extensions: resolveScanExtensions(appSettings),
-            signal,
-          },
-        )
-
-        // 重关联被移动/重命名模型的标注（A-02）：必须在装饰前执行——
-        // decorateOne 按扫描出的新路径键读取元数据，先迁移才能让标注/封面/
-        // 哈希履历在本次结果中即时生效
-        const relinkResult = relinkScannedMeta(models)
-
-        // OPT-04：全量扫描按库规模自适应装饰缓存容量并清理陈旧条目；
-        // O-3：把本次扫描已 readdir 的目录清单（dirSnapshot）传给装饰层，
-        // sidecar 候选探测按目录剪枝，避免对每个模型盲 stat 全部 9 个候选，
-        // 也避免装饰层对同一目录再补一次 readdir
-        const decorated = await decorateModels(models, signal, {
-          adaptCacheSize: true,
-          dirSnapshot,
-        })
-        // 原始扫描数组的元素壳随装饰完成立即释放（O8）：装饰结果为字段浅拷贝的
-        // 新对象，原始元素不再被引用；大库扫描期间原始数组、装饰数组与 IPC
-        // 结构化克隆三份并存，此步可砍掉约 1/3 的瞬时内存峰值
-        models.length = 0
-        const byType = {}
-        for (const m of decorated) {
-          byType[m.type] = (byType[m.type] || 0) + 1
-        }
-
-        logger.info(
-          `扫描完成：${decorated.length} 个模型 / ${dirCount} 个目录 / 耗时 ${Date.now() - startedAt}ms / ${errors.length} 个错误`,
-        )
-        if (errors.length > 0) {
-          logger.warn(`扫描错误详情: ${JSON.stringify(errors.slice(0, 20))}`)
-        }
-
-        // F1：全量扫描完成后写入本地索引（秒切库/启动缓存）。
-        // P1-3/OPT-03：索引写移出扫描响应关键路径——大库序列化已交给
-        // JSON worker，内容未变化时按指纹跳过写盘；索引只是展示缓存
-        // （写失败仅记日志、缺失时秒开回退全量扫描），排队进串行链后立即
-        // 继续构建响应；退出路径经 flushIndexWrites 收尾，进程崩溃丢失的
-        // 极端场景等价于索引不存在，已有兜底
-        void writeLibraryIndex(root, {
-          models: decorated,
-          durationMs: Date.now() - startedAt,
-        })
-
-        // 响应先返回，缺失的缩略图由后台队列补齐（完成后推送 thumbsReady 更新）
-        startThumbDrain(win)
-
-        // 后台预热缺失的模型哈希（Civitai 识别加速）：缓存缺失的条目按
-        // mtime 逐个计算回写，已缓存/文件缺失的条目消费时秒级跳过；
-        // 扫描刚结束磁盘繁忙，预热服务延迟启动。
-        // O1：传入装饰结果的 size/mtime 并标记为完整库快照——候选策略据此
-        // 只对同尺寸模型计算，full=true 同步重置体积索引（清除已删除模型）
-        requestHashWarmup(decorated, {
-          mode: appSettings.hashWarmup,
-          concurrency: appSettings.hashWarmupConcurrency,
-          full: true,
-        })
-
-        // 扫描成功后与 settings.modelsFolder 保持一致（C6）：
-        // 显式传入 folder 的扫描也持久化根目录，与 models:chooseFolder 行为闭环
-        await updateSettings({ modelsFolder: root })
-        // 同步目录监控状态（E8）：autoRescan 开启时监听当前根目录，变更触发自动重扫。
-        // 排除名单须现读内存设置而非扫描前快照：扫描期间用户经 settings:update
-        // 更新过 excludeDirs 时，旧快照会把 watcher 名单回退为扫描前的值
-        const watcherTiming = { nativeWatch: true }
-        // OPT-02：扫描已产出目录名快照，直接交给 watcher 作为基线，跳过
-        // 扫描结束后的重复全树遍历；旧版本/mock 缺该字段时保持原有行为
-        if (dirSnapshot instanceof Map && dirSnapshot.size > 0) {
-          watcherTiming.baseline = dirSnapshot
-        }
-        syncWatcher(
-          root,
-          getSettings().autoRescan === true,
-          getSettings().excludeDirs || [],
-          watcherTiming,
-        )
-
-        completed = true
-        // OPT-PAYLOAD：列表通道下发瘦身模型（索引/预热/装饰缓存仍持有
-        // 完整装饰对象——瘦身只发生在 IPC 边界，decorated 数组不改动）
-        const slimmed = slimModelsForList(decorated)
-        logPayloadSize('models:scan', slimmed.approxBytes)
-        return {
-          root,
-          models: slimmed.models,
-          byType,
-          errors,
-          durationMs: Date.now() - startedAt,
-          // 本次扫描自动重新关联的移动/重命名模型数（A-02，渲染层据此提示）
-          relinked: relinkResult.relinked,
-          // 库设置随模型库走：显式传入 folder 的扫描即切库（chooseFolder/switchRoot
-          // 均经此路径），响应携带目标库合并后的设置供渲染层应用（主题/视图随库切换）
-          settings: getSettings(),
-        }
-      } finally {
-        // 扫描失败/取消且已经切到新根：回滚到原根，避免主进程根目录与
-        // 渲染层保留的旧列表不一致（V-02 切库状态机）
-        if (!completed && rootSwitched && previousRoot) {
-          try {
-            await ensureRootStore(previousRoot, { maintenanceToken: token })
-            logger.warn(
-              `扫描未完成，已回滚模型库根目录: ${root} → ${previousRoot}`,
-            )
-          } catch (err) {
-            logger.error(`扫描失败后回滚模型库根目录失败: ${err.message}`)
+        try {
+          // OPT-02：扫描期间暂停目录监控巡检与广播，变更先累积；扫描成功后
+          // 用本次目录快照覆盖基线，停扫时只补发未被扫描覆盖的子树
+          setWatcherScanning(true)
+          // 扫描期间暂停后台哈希预热取队（正在计算的单个文件不中断），结束后恢复
+          pauseHashWarmup()
+          // 扫描目录必须是已存在的目录（C6）：防止任意字符串路径（如已删除目录、
+          // 或误传文件/系统根）在 ensureRootStore 中创建 .modelvault 写入元数据
+          const dirInvalid = await checkExistingDirectory(
+            root,
+            '模型文件夹不存在或不是目录',
+          )
+          if (dirInvalid) {
+            // F1-offline：附失效标志，渲染层进入离线态（离线页/横幅承担提示），
+            // 不再弹笼统的扫描失败 toast
+            return { error: dirInvalid, folderMissing: true }
           }
+          // 白名单校验（B1）：扫描目录必须已在模型库列表中。存在性校验只保证
+          // 「路径可用」，不保证「用户想把这里当库」——无白名单时任意可写目录
+          // 都能经 ensureRootStore 落 .modelvault，构成渲染可控的任意目录写入
+          // 原语。新增库只能走 models:chooseFolder（用户对话框确认）
+          if (!isRegisteredLibrary(root)) {
+            logger.warn(`拒绝扫描模型库列表之外的目录: ${root}`)
+            return { error: '该目录不在模型库列表中' }
+          }
+
+          const win = BrowserWindow.fromWebContents(event.sender)
+          logger.info(`开始扫描模型目录: ${root}`)
+
+          // 等待上一轮后台缩略图生成完成，避免与新扫描的缩略图清理逻辑竞争（C4 单一入口）
+          await awaitThumbDrain()
+          // 切换/加载该根目录的关联存储，并清理孤儿封面文件。
+          // 维护锁由本扫描持有，传入令牌避免 ensureRootStore 再次加锁
+          await ensureRootStore(root, { maintenanceToken: token })
+          rootSwitched =
+            Boolean(previousRoot) && !samePathIgnoreCase(previousRoot, root)
+          await pruneOrphanCovers()
+          // 切换根目录后装饰缓存全部失效；延迟缩略图队列同步清空——
+          // 残留的旧根条目会被下一轮 drain 以「新根」的 thumbs 目录生成（跨根写文件），
+          // 并把无效的封面更新推送回渲染进程（C5，与 B10 同类竞态）
+          const cacheRootChanged = !samePathIgnoreCase(
+            getDecorateCacheRoot(),
+            root,
+          )
+          if (cacheRootChanged) {
+            resetDecorateCache(root)
+            clearDeferredOwners()
+            clearDeferredJobs()
+          }
+          // IDX-REUSE：通过「选择文件夹/重新定位」首次进入某库时，若目标库
+          // 已有本地索引，先播种上次扫描的头部解析结果，避免首扫对全库重复读盘
+          if (cacheRootChanged) {
+            const index = await readLibraryIndex(root)
+            if (index) primeHeaderInfoCache(index.models)
+          }
+
+          let lastSent = 0
+          // 应用扫描规则：排除目录 + 扫描文件扩展名（来自应用设置）
+          const appSettings = getSettings()
+          const { models, errors, dirCount, dirSnapshot } = await scanModels(
+            root,
+            (progress) => {
+              const now = Date.now()
+              if (now - lastSent >= PROGRESS_INTERVAL) {
+                lastSent = now
+                // 窗口可能已在扫描期间关闭：?. 只防 null 不防已销毁（访问 webContents 抛错），须判 isDestroyed
+                if (win && !win.isDestroyed()) {
+                  win.webContents.send('models:scanProgress', progress)
+                }
+              }
+            },
+            {
+              excludeDirs: appSettings.excludeDirs || [],
+              // 与局部扫描同一兜底口径（FIX-5）：异常时回退 undefined → scanner
+              // 默认全集；此前 `|| []` 在异常场景会产出空集（扫不到任何文件）
+              extensions: resolveScanExtensions(appSettings),
+              signal,
+            },
+          )
+
+          // 重关联被移动/重命名模型的标注（A-02）：必须在装饰前执行——
+          // decorateOne 按扫描出的新路径键读取元数据，先迁移才能让标注/封面/
+          // 哈希履历在本次结果中即时生效
+          const relinkResult = relinkScannedMeta(models)
+
+          // OPT-04：全量扫描按库规模自适应装饰缓存容量并清理陈旧条目；
+          // O-3：把本次扫描已 readdir 的目录清单（dirSnapshot）传给装饰层，
+          // sidecar 候选探测按目录剪枝，避免对每个模型盲 stat 全部 9 个候选，
+          // 也避免装饰层对同一目录再补一次 readdir
+          const decorated = await decorateModels(models, signal, {
+            adaptCacheSize: true,
+            dirSnapshot,
+          })
+          // 原始扫描数组的元素壳随装饰完成立即释放（O8）：装饰结果为字段浅拷贝的
+          // 新对象，原始元素不再被引用；大库扫描期间原始数组、装饰数组与 IPC
+          // 结构化克隆三份并存，此步可砍掉约 1/3 的瞬时内存峰值
+          models.length = 0
+          const byType = {}
+          for (const m of decorated) {
+            byType[m.type] = (byType[m.type] || 0) + 1
+          }
+
+          logger.info(
+            `扫描完成：${decorated.length} 个模型 / ${dirCount} 个目录 / 耗时 ${Date.now() - startedAt}ms / ${errors.length} 个错误`,
+          )
+          if (errors.length > 0) {
+            logger.warn(`扫描错误详情: ${JSON.stringify(errors.slice(0, 20))}`)
+          }
+
+          // F1：全量扫描完成后写入本地索引（秒切库/启动缓存）。
+          // P1-3/OPT-03：索引写移出扫描响应关键路径——大库序列化已交给
+          // JSON worker，内容未变化时按指纹跳过写盘；索引只是展示缓存
+          // （写失败仅记日志、缺失时秒开回退全量扫描），排队进串行链后立即
+          // 继续构建响应；退出路径经 flushIndexWrites 收尾，进程崩溃丢失的
+          // 极端场景等价于索引不存在，已有兜底
+          void writeLibraryIndex(root, {
+            models: decorated,
+            durationMs: Date.now() - startedAt,
+          })
+
+          // 响应先返回，缺失的缩略图由后台队列补齐（完成后推送 thumbsReady 更新）
+          startThumbDrain(win)
+
+          // 后台预热缺失的模型哈希（Civitai 识别加速）：缓存缺失的条目按
+          // mtime 逐个计算回写，已缓存/文件缺失的条目消费时秒级跳过；
+          // 扫描刚结束磁盘繁忙，预热服务延迟启动。
+          // O1：传入装饰结果的 size/mtime 并标记为完整库快照——候选策略据此
+          // 只对同尺寸模型计算，full=true 同步重置体积索引（清除已删除模型）
+          requestHashWarmup(decorated, {
+            mode: appSettings.hashWarmup,
+            concurrency: appSettings.hashWarmupConcurrency,
+            full: true,
+          })
+
+          // 扫描成功后与 settings.modelsFolder 保持一致（C6）：
+          // 显式传入 folder 的扫描也持久化根目录，与 models:chooseFolder 行为闭环
+          await updateSettings({ modelsFolder: root })
+          // 同步目录监控状态（E8）：autoRescan 开启时监听当前根目录，变更触发自动重扫。
+          // 排除名单须现读内存设置而非扫描前快照：扫描期间用户经 settings:update
+          // 更新过 excludeDirs 时，旧快照会把 watcher 名单回退为扫描前的值
+          const watcherTiming = { nativeWatch: true }
+          // OPT-02：扫描已产出目录名快照，直接交给 watcher 作为基线，跳过
+          // 扫描结束后的重复全树遍历；旧版本/mock 缺该字段时保持原有行为
+          if (dirSnapshot instanceof Map && dirSnapshot.size > 0) {
+            watcherTiming.baseline = dirSnapshot
+          }
+          syncWatcher(
+            root,
+            getSettings().autoRescan === true,
+            getSettings().excludeDirs || [],
+            watcherTiming,
+          )
+
+          completed = true
+          // OPT-PAYLOAD：列表通道下发瘦身模型（索引/预热/装饰缓存仍持有
+          // 完整装饰对象——瘦身只发生在 IPC 边界，decorated 数组不改动）
+          const slimmed = slimModelsForList(decorated)
+          logPayloadSize('models:scan', slimmed.approxBytes)
+          return {
+            root,
+            models: slimmed.models,
+            byType,
+            errors,
+            durationMs: Date.now() - startedAt,
+            // 本次扫描自动重新关联的移动/重命名模型数（A-02，渲染层据此提示）
+            relinked: relinkResult.relinked,
+            // 库设置随模型库走：显式传入 folder 的扫描即切库（chooseFolder/switchRoot
+            // 均经此路径），响应携带目标库合并后的设置供渲染层应用（主题/视图随库切换）
+            settings: getSettings(),
+          }
+        } finally {
+          // 扫描失败/取消且已经切到新根：回滚到原根，避免主进程根目录与
+          // 渲染层保留的旧列表不一致（V-02 切库状态机）
+          if (!completed && rootSwitched && previousRoot) {
+            try {
+              await ensureRootStore(previousRoot, { maintenanceToken: token })
+              logger.warn(
+                `扫描未完成，已回滚模型库根目录: ${root} → ${previousRoot}`,
+              )
+            } catch (err) {
+              logger.error(`扫描失败后回滚模型库根目录失败: ${err.message}`)
+            }
+          }
+          scanAbort = null
+          resumeHashWarmup()
+          // 停扫：补发扫描未覆盖的变更子树（已覆盖项由基线回填时清理）
+          setWatcherScanning(false)
         }
-        scanAbort = null
-        releaseMaintenance(token)
-        resumeHashWarmup()
-        // 停扫：补发扫描未覆盖的变更子树（已覆盖项由基线回填时清理）
-        setWatcherScanning(false)
-      }
+      })
     },
     { errorPrefix: '扫描失败', perfWarnMs: 200 },
   )
@@ -343,157 +339,156 @@ export function registerScanHandlers() {
           : getSettings().modelsFolder
       if (!root) return { error: '尚未设置模型文件夹' }
       // 同步获取维护锁（B-01/V-02）：任何 await 之前完成，防止并发穿透
-      const token = tryAcquireMaintenance('partial-scan', root)
-      if (!token) {
-        return { error: maintenanceBusyMessage() }
-      }
-      const abort = new AbortController()
-      scanAbort = abort
-      const signal = abort.signal
-      const startedAt = Date.now()
-      try {
-        // OPT-02：与全量扫描一致，局部扫描期间暂停监控巡检/广播并按扫描
-        // 范围回填基线，避免扫描已覆盖的变更再次触发局部扫描
-        setWatcherScanning(true)
-        // 与全量扫描一致：扫描期间暂停后台哈希预热取队，结束后恢复
-        pauseHashWarmup()
-        // 子树清洗在锁内完成：失败路径统一经 finally 释放锁
-        const normalized = normalizePartialScanDirs(dirs)
-        if (normalized.error) return { error: normalized.error }
-        // O3：子树过多且一级目录收敛后仍超限——明确要求渲染层回退全量扫描，
-        // 绝不静默丢弃部分子树（丢弃会让这些子树停留在陈旧状态）
-        if (normalized.fullScanRequired) {
-          logger.warn('局部扫描子树过多，已要求渲染层改为完整扫描')
-          return { fullScanRequired: true }
-        }
-        const subDirs = normalized.subDirs
-        if (normalized.collapsed) {
-          logger.info(`局部扫描子树过多，已收敛为 ${subDirs.length} 个一级目录`)
-        }
+      return withMaintenanceLock('partial-scan', root, async (token) => {
+        const abort = new AbortController()
+        scanAbort = abort
+        const signal = abort.signal
+        const startedAt = Date.now()
+        try {
+          // OPT-02：与全量扫描一致，局部扫描期间暂停监控巡检/广播并按扫描
+          // 范围回填基线，避免扫描已覆盖的变更再次触发局部扫描
+          setWatcherScanning(true)
+          // 与全量扫描一致：扫描期间暂停后台哈希预热取队，结束后恢复
+          pauseHashWarmup()
+          // 子树清洗在锁内完成：失败路径统一经 finally 释放锁
+          const normalized = normalizePartialScanDirs(dirs)
+          if (normalized.error) return { error: normalized.error }
+          // O3：子树过多且一级目录收敛后仍超限——明确要求渲染层回退全量扫描，
+          // 绝不静默丢弃部分子树（丢弃会让这些子树停留在陈旧状态）
+          if (normalized.fullScanRequired) {
+            logger.warn('局部扫描子树过多，已要求渲染层改为完整扫描')
+            return { fullScanRequired: true }
+          }
+          const subDirs = normalized.subDirs
+          if (normalized.collapsed) {
+            logger.info(
+              `局部扫描子树过多，已收敛为 ${subDirs.length} 个一级目录`,
+            )
+          }
 
-        // 与全量扫描一致的目录前置校验（白名单 + 存在性）
-        if (!isRegisteredLibrary(root)) {
-          logger.warn(`拒绝局部扫描模型库列表之外的目录: ${root}`)
-          return { error: '该目录不在模型库列表中' }
-        }
-        const dirInvalid = await checkExistingDirectory(
-          root,
-          '模型文件夹不存在或不是目录',
-        )
-        if (dirInvalid) {
-          // F1-offline：同全量扫描——附失效标志，渲染层置位离线态且不再
-          // 降级为注定连环失败的全量扫描
-          return { error: dirInvalid, folderMissing: true }
-        }
-        // 局部扫描只作用于当前根（V-02）：渲染层请求发出后根已切换时直接拒绝，
-        // 绝不能借 ensureRootStore 把主进程根目录切回旧库
-        const currentRoot = getCurrentRoot()
-        if (currentRoot && !samePathIgnoreCase(root, currentRoot)) {
-          logger.warn(
-            `拒绝针对非当前根的局部扫描: ${root}（当前 ${currentRoot}）`,
-          )
-          return { error: '模型库已切换，请稍后重试' }
-        }
-
-        await ensureRootStore(root, { maintenanceToken: token })
-        const appSettings = getSettings()
-        const scanResult = await scanModels(root, null, {
-          excludeDirs: appSettings.excludeDirs || [],
-          // 与全量扫描一致地应用用户配置的扫描扩展名（B3 修复）：此前传
-          // undefined 落回默认全集，用户已排除的扩展名（如 .ckpt）会在
-          // watcher 触发一次局部重扫后“复活”，局部结果与全量结果不一致。
-          // 兜底口径与全量扫描共用 resolveScanExtensions（FIX-5）
-          extensions: resolveScanExtensions(appSettings),
-          subDirs,
-          signal,
-        })
-        const models = scanResult.models
-        // B5：读取失败（非 ENOENT）的子树——其旧模型/索引/基线一律保留，
-        // 不参与重关联孤儿判定与移除语义（扫描不到 ≠ 已删除）
-        const failedDirs = Array.isArray(scanResult.failedDirs)
-          ? scanResult.failedDirs
-          : []
-        if (failedDirs.length > 0) {
-          logger.warn(
-            `局部扫描有 ${failedDirs.length} 个目录读取失败，已保留其既有数据: ${failedDirs.slice(0, 10).join(', ')}`,
-          )
-        }
-        // 重关联限定受影响子树：范围外与失败子树内的元数据保持原样
-        const relinkResult = relinkScannedMeta(models, {
-          affectedDirs: subDirs,
-          excludeDirs: failedDirs,
-        })
-        // pruneThumbs=false（OPT-1 修复）：局部装饰仅覆盖变更子树，若按局部
-        // usedThumbs 清理会把子树外模型的全部缩略图误删（缓存命中路径不会重新
-        // 生成，坏图将持续到元数据变化）。失效缩略图与孤儿封面同一约定：
-        // 由下一次全量扫描兜底清理。
-        // forceRefresh（OPT-07/OPT-08）：变更子树内的 sidecar/封面文件变化不
-        // 会改动模型 mtime，必须启用文件级缓存复核，否则新增/修改的 sidecar
-        // 与预览图会被旧缓存遮蔽。OPT-8 起复核细化为 sidecar 家族文件级事实
-        // 比对：子树内未变化的模型照常命中缓存（不再随每轮局部扫描重做
-        // 16MB 级 safetensors 头解析），仅真实变化的模型完整重装饰
-        const decorated = await decorateModels(models, signal, {
-          pruneThumbs: false,
-          forceRefresh: true,
-          // O-3：复用本次局部扫描的目录清单剪枝 sidecar 候选探测
-          dirSnapshot: scanResult.dirSnapshot,
-        })
-        models.length = 0 // 同全量扫描：装饰后立即释放原始数组（O8）
-
-        // O8/OPT-03：局部结果合并入索引更新队列，短窗口内多次局部扫描只做
-        // 一次索引读改写；索引缺失时跳过，不凭空创建不完整索引。
-        // 退出路径经 flushIndexWrites 将待合并更新一并落盘。
-        queueLibraryIndexUpdate(root, {
-          upsertModels: decorated,
-          affectedDirs: subDirs,
-          excludeDirs: failedDirs,
-        })
-
-        const win = BrowserWindow.fromWebContents(event.sender)
-        // 装饰中新登记的缩略图任务经既有后台链生成并推送
-        startThumbDrain(win)
-
-        // 受影响子树的哈希预热（同全量扫描，Civitai 识别加速）。
-        // O1：局部扫描不是完整快照——按 id 合并体积索引，使新增文件与子树外
-        // 同尺寸模型也能被识别为重复候选
-        requestHashWarmup(decorated, {
-          mode: appSettings.hashWarmup,
-          concurrency: appSettings.hashWarmupConcurrency,
-          full: false,
-        })
-
-        // OPT-02：只回填受影响子树的监控基线，并清理这些子树对应的待广播项；
-        // 范围外基线保持原样，未覆盖的新变更仍会在停扫后补发。
-        // B5：失败子树不回填基线也不清待广播——停扫后自动重试直至恢复
-        if (scanResult.dirSnapshot instanceof Map) {
-          refreshWatcherBaseline(
+          // 与全量扫描一致的目录前置校验（白名单 + 存在性）
+          if (!isRegisteredLibrary(root)) {
+            logger.warn(`拒绝局部扫描模型库列表之外的目录: ${root}`)
+            return { error: '该目录不在模型库列表中' }
+          }
+          const dirInvalid = await checkExistingDirectory(
             root,
-            subDirs,
-            scanResult.dirSnapshot,
-            failedDirs,
+            '模型文件夹不存在或不是目录',
           )
-        }
+          if (dirInvalid) {
+            // F1-offline：同全量扫描——附失效标志，渲染层置位离线态且不再
+            // 降级为注定连环失败的全量扫描
+            return { error: dirInvalid, folderMissing: true }
+          }
+          // 局部扫描只作用于当前根（V-02）：渲染层请求发出后根已切换时直接拒绝，
+          // 绝不能借 ensureRootStore 把主进程根目录切回旧库
+          const currentRoot = getCurrentRoot()
+          if (currentRoot && !samePathIgnoreCase(root, currentRoot)) {
+            logger.warn(
+              `拒绝针对非当前根的局部扫描: ${root}（当前 ${currentRoot}）`,
+            )
+            return { error: '模型库已切换，请稍后重试' }
+          }
 
-        logger.info(
-          `局部扫描完成：${subDirs.length} 个子树 → ${decorated.length} 个模型 / 重关联 ${relinkResult.relinked} 个`,
-        )
+          await ensureRootStore(root, { maintenanceToken: token })
+          const appSettings = getSettings()
+          const scanResult = await scanModels(root, null, {
+            excludeDirs: appSettings.excludeDirs || [],
+            // 与全量扫描一致地应用用户配置的扫描扩展名（B3 修复）：此前传
+            // undefined 落回默认全集，用户已排除的扩展名（如 .ckpt）会在
+            // watcher 触发一次局部重扫后“复活”，局部结果与全量结果不一致。
+            // 兜底口径与全量扫描共用 resolveScanExtensions（FIX-5）
+            extensions: resolveScanExtensions(appSettings),
+            subDirs,
+            signal,
+          })
+          const models = scanResult.models
+          // B5：读取失败（非 ENOENT）的子树——其旧模型/索引/基线一律保留，
+          // 不参与重关联孤儿判定与移除语义（扫描不到 ≠ 已删除）
+          const failedDirs = Array.isArray(scanResult.failedDirs)
+            ? scanResult.failedDirs
+            : []
+          if (failedDirs.length > 0) {
+            logger.warn(
+              `局部扫描有 ${failedDirs.length} 个目录读取失败，已保留其既有数据: ${failedDirs.slice(0, 10).join(', ')}`,
+            )
+          }
+          // 重关联限定受影响子树：范围外与失败子树内的元数据保持原样
+          const relinkResult = relinkScannedMeta(models, {
+            affectedDirs: subDirs,
+            excludeDirs: failedDirs,
+          })
+          // pruneThumbs=false（OPT-1 修复）：局部装饰仅覆盖变更子树，若按局部
+          // usedThumbs 清理会把子树外模型的全部缩略图误删（缓存命中路径不会重新
+          // 生成，坏图将持续到元数据变化）。失效缩略图与孤儿封面同一约定：
+          // 由下一次全量扫描兜底清理。
+          // forceRefresh（OPT-07/OPT-08）：变更子树内的 sidecar/封面文件变化不
+          // 会改动模型 mtime，必须启用文件级缓存复核，否则新增/修改的 sidecar
+          // 与预览图会被旧缓存遮蔽。OPT-8 起复核细化为 sidecar 家族文件级事实
+          // 比对：子树内未变化的模型照常命中缓存（不再随每轮局部扫描重做
+          // 16MB 级 safetensors 头解析），仅真实变化的模型完整重装饰
+          const decorated = await decorateModels(models, signal, {
+            pruneThumbs: false,
+            forceRefresh: true,
+            // O-3：复用本次局部扫描的目录清单剪枝 sidecar 候选探测
+            dirSnapshot: scanResult.dirSnapshot,
+          })
+          models.length = 0 // 同全量扫描：装饰后立即释放原始数组（O8）
 
-        // OPT-PAYLOAD：局部结果同全量扫描口径瘦身后再下发
-        const slimmed = slimModelsForList(decorated)
-        logPayloadSize('models:partialScan', slimmed.approxBytes)
-        return {
-          models: slimmed.models,
-          dirs: subDirs,
-          failedDirs,
-          relinked: relinkResult.relinked,
-          durationMs: Date.now() - startedAt,
+          // O8/OPT-03：局部结果合并入索引更新队列，短窗口内多次局部扫描只做
+          // 一次索引读改写；索引缺失时跳过，不凭空创建不完整索引。
+          // 退出路径经 flushIndexWrites 将待合并更新一并落盘。
+          queueLibraryIndexUpdate(root, {
+            upsertModels: decorated,
+            affectedDirs: subDirs,
+            excludeDirs: failedDirs,
+          })
+
+          const win = BrowserWindow.fromWebContents(event.sender)
+          // 装饰中新登记的缩略图任务经既有后台链生成并推送
+          startThumbDrain(win)
+
+          // 受影响子树的哈希预热（同全量扫描，Civitai 识别加速）。
+          // O1：局部扫描不是完整快照——按 id 合并体积索引，使新增文件与子树外
+          // 同尺寸模型也能被识别为重复候选
+          requestHashWarmup(decorated, {
+            mode: appSettings.hashWarmup,
+            concurrency: appSettings.hashWarmupConcurrency,
+            full: false,
+          })
+
+          // OPT-02：只回填受影响子树的监控基线，并清理这些子树对应的待广播项；
+          // 范围外基线保持原样，未覆盖的新变更仍会在停扫后补发。
+          // B5：失败子树不回填基线也不清待广播——停扫后自动重试直至恢复
+          if (scanResult.dirSnapshot instanceof Map) {
+            refreshWatcherBaseline(
+              root,
+              subDirs,
+              scanResult.dirSnapshot,
+              failedDirs,
+            )
+          }
+
+          logger.info(
+            `局部扫描完成：${subDirs.length} 个子树 → ${decorated.length} 个模型 / 重关联 ${relinkResult.relinked} 个`,
+          )
+
+          // OPT-PAYLOAD：局部结果同全量扫描口径瘦身后再下发
+          const slimmed = slimModelsForList(decorated)
+          logPayloadSize('models:partialScan', slimmed.approxBytes)
+          return {
+            models: slimmed.models,
+            dirs: subDirs,
+            failedDirs,
+            relinked: relinkResult.relinked,
+            durationMs: Date.now() - startedAt,
+          }
+        } finally {
+          scanAbort = null
+          resumeHashWarmup()
+          setWatcherScanning(false)
         }
-      } finally {
-        scanAbort = null
-        releaseMaintenance(token)
-        resumeHashWarmup()
-        setWatcherScanning(false)
-      }
+      })
     },
     { errorPrefix: '局部扫描失败', perfWarnMs: 200 },
   )

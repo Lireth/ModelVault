@@ -39,6 +39,8 @@ const EXPECTED_EXPORTS = [
   'effectiveRating',
   'setMetaOverride',
   'clearMetaOverrides',
+  // 库忙碌判定（扫描/校验/增量/导入的统一谓词）
+  'isLibraryBusy',
   // Toast/确认
   'toast',
   'dismissToast',

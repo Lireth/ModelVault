@@ -17,7 +17,11 @@ import {
   MAX_WARMUP_CONCURRENCY,
   MIN_WARMUP_CONCURRENCY,
 } from '../../shared/app-enums'
-import { DEFAULT_SETTINGS } from '../../shared/defaults'
+import {
+  BOOTSTRAP_SETTING_KEYS,
+  DEFAULT_SETTINGS,
+  LIBRARY_SETTING_KEYS,
+} from '../../shared/defaults'
 import { atomicWriteFile } from './atomic-write'
 import {
   isSettledWithin,
@@ -51,8 +55,8 @@ import {
  * 随后将全局文件原子精简为仅引导字段；其余库在首次切换时以默认值初始化。
  */
 
-/** 引导字段（随系统留存 %APPDATA%，不写入任何库文件） */
-const BOOTSTRAP_KEYS = new Set(['modelsFolder', 'modelsFolders'])
+/** 引导字段（随系统留存 %APPDATA%，不写入任何库文件；键清单共享单一来源） */
+const BOOTSTRAP_KEYS = new Set(BOOTSTRAP_SETTING_KEYS)
 
 /** 应用设置允许的主题取值（system 由渲染层解析为有效亮/暗后应用） */
 const VALID_THEMES = new Set(['dark', 'light', 'system'])
@@ -89,32 +93,19 @@ function defaultBootstrapSettings() {
   return { modelsFolder: '', modelsFolders: [] }
 }
 
-/** 默认库设置（默认设置剔除引导字段，数组字段取独立副本） */
+/**
+ * 默认库设置（默认设置剔除引导字段，数组字段取独立副本）：
+ * 字段清单来自 shared/defaults.LIBRARY_SETTING_KEYS，新增设置项无需在此
+ * 复制一份，避免「DEFAULT_SETTINGS 加了、库层默认值漏加」的静默丢失。
+ */
 function defaultLibrarySettings() {
   const base = defaultSettings()
-  return {
-    autoScan: base.autoScan,
-    excludeDirs: [...base.excludeDirs],
-    theme: base.theme,
-    accentColor: base.accentColor,
-    cardSize: base.cardSize,
-    viewMode: base.viewMode,
-    sortBy: base.sortBy,
-    sortAsc: base.sortAsc,
-    scanExtensions: [...base.scanExtensions],
-    showSize: base.showSize,
-    showMtime: base.showMtime,
-    showParams: base.showParams,
-    civitaiEnabled: base.civitaiEnabled,
-    nsfwBlur: base.nsfwBlur,
-    hideNsfwModels: base.hideNsfwModels,
-    autoRescan: base.autoRescan,
-    autoCheckUpdate: base.autoCheckUpdate,
-    hashWarmup: base.hashWarmup,
-    hashWarmupConcurrency: base.hashWarmupConcurrency,
-    autoBackup: base.autoBackup,
-    savedViews: [...base.savedViews],
+  const out = {}
+  for (const key of LIBRARY_SETTING_KEYS) {
+    const value = base[key]
+    out[key] = Array.isArray(value) ? [...value] : value
   }
+  return out
 }
 
 /** 规范化扩展名列表：仅接受已知扩展名并去重；为空时回退到全部 */

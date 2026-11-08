@@ -47,6 +47,7 @@ export {
   effectiveRating,
   setMetaOverride,
   clearMetaOverrides,
+  isLibraryBusy,
 } from './state'
 
 // Toast 与确认层

@@ -84,6 +84,106 @@ function currentTagsOf(model) {
 }
 
 /**
+ * 计算本批需要提交的标签变更（预判与执行共用同一实现）：
+ * 无变化的模型计入 unchanged，超过上限的计入 overflow，其余进入 items。
+ * @param {string[]} ids 选中模型 id
+ * @param {string[]} input 归一化后的输入标签
+ * @param {'add'|'remove'|'replace'} mode 模式
+ * @param {{get: (id: string) => any}} byId id → 模型映射（预判用列表快照，执行用最新映射）
+ * @returns {{items: Array<{id: string, tags: string[]}>, unchanged: number,
+ *   overflow: number}}
+ */
+function collectTagChanges(ids, input, mode, byId) {
+  const items = []
+  let unchanged = 0
+  let overflow = 0
+  for (const id of ids) {
+    const model = byId.get(id)
+    if (!model) continue
+    const result = nextTagsFor(currentTagsOf(model), input, mode)
+    if (result.unchanged) {
+      unchanged += 1
+      continue
+    }
+    if (result.overflow) {
+      overflow += 1
+      continue
+    }
+    items.push({ id, tags: result.tags })
+  }
+  return { items, unchanged, overflow }
+}
+
+/**
+ * 「没有需要更新的模型」提示后缀（无变化/超上限计数）。
+ * @param {number} unchanged 无变化数量
+ * @param {number} overflow 超上限数量
+ * @returns {string} 形如「（标签无变化 2 个，超过 20 个标签上限 1 个）」；无计数为空串
+ */
+function skippedSuffix(unchanged, overflow) {
+  const notes = []
+  if (unchanged > 0) notes.push(`标签无变化 ${unchanged} 个`)
+  if (overflow > 0) notes.push(`超过 ${MAX_TAGS} 个标签上限 ${overflow} 个`)
+  return notes.length ? `（${notes.join('，')}）` : ''
+}
+
+/**
+ * 分块提交标签变更并汇总结果。
+ * @param {Array<{id: string, tags: string[]}>} items 待提交项
+ * @param {string} modeLabel 模式展示文案
+ * @param {Map<string, any>} metas 成功项元数据收集表
+ * @param {Array<{id: string, error: string}>} failedItems 失败明细收集表
+ * @returns {Promise<number>} 因取消而未提交的条目数
+ */
+async function submitTagChunks(items, modeLabel, metas, failedItems) {
+  let canceled = 0
+  let processed = 0
+  for (let offset = 0; offset < items.length; offset += MAX_BATCH_META_IDS) {
+    if (state.multiSelect.cancelRequested) {
+      canceled = items.length - processed
+      break
+    }
+    const chunk = items.slice(offset, offset + MAX_BATCH_META_IDS)
+    processed += chunk.length
+    state.multiSelect.progress = `标签${modeLabel} ${Math.min(processed, items.length)}/${items.length}`
+
+    let res
+    try {
+      res = await window.api.models.setModelTagsBulk(chunk)
+    } catch (err) {
+      for (const item of chunk) failuresPush(failedItems, item.id, err.message)
+      continue
+    }
+    if (res?.error) {
+      for (const item of chunk) failuresPush(failedItems, item.id, res.error)
+      continue
+    }
+
+    const updated = Array.isArray(res?.updated) ? res.updated : []
+    const updatedIds = new Set()
+    for (const item of updated) {
+      if (!item || typeof item.id !== 'string') continue
+      updatedIds.add(item.id)
+      metas.set(item.id, item)
+    }
+    const failed = Array.isArray(res?.failed) ? res.failed : []
+    const failedIds = new Set()
+    for (const item of failed) {
+      if (!item || typeof item.id !== 'string') continue
+      failedIds.add(item.id)
+      failuresPush(failedItems, item.id, item.error || '未返回失败原因')
+    }
+    // 契约防御：既未成功也未显式失败的条目必须显形，不得静默丢失
+    for (const item of chunk) {
+      if (!updatedIds.has(item.id) && !failedIds.has(item.id)) {
+        failuresPush(failedItems, item.id, '未返回结果')
+      }
+    }
+  }
+  return canceled
+}
+
+/**
  * 批量编辑选中模型的自由标签。
  * @param {{mode?: 'add'|'remove'|'replace', tags?: string[]|string}} [options]
  *   模式与标签；输入为空或模式非法时直接提示并返回 false
@@ -104,34 +204,13 @@ export async function batchEditTags(options = {}) {
   }
   if (state.multiSelect.cancelRequested) return false
 
-  const byId = modelById.value
   const modeLabel = MODE_LABELS[mode]
   // 预判参与集：无变化/超上限的模型不进 IPC；最终载荷在执行时按最新标签重算
-  const candidates = []
-  let unchanged = 0
-  let overflow = 0
-  for (const id of ids) {
-    const model = byId.get(id)
-    if (!model) continue
-    const result = nextTagsFor(currentTagsOf(model), input, mode)
-    if (result.unchanged) {
-      unchanged += 1
-      continue
-    }
-    if (result.overflow) {
-      overflow += 1
-      continue
-    }
-    candidates.push(id)
-  }
-
-  if (candidates.length === 0) {
-    const notes = []
-    if (unchanged > 0) notes.push(`标签无变化 ${unchanged} 个`)
-    if (overflow > 0) notes.push(`超过 ${MAX_TAGS} 个标签上限 ${overflow} 个`)
+  const preview = collectTagChanges(ids, input, mode, modelById.value)
+  if (preview.items.length === 0) {
     toast(
       'info',
-      `没有需要更新标签的模型${notes.length ? `（${notes.join('，')}）` : ''}`,
+      `没有需要更新标签的模型${skippedSuffix(preview.unchanged, preview.overflow)}`,
     )
     return false
   }
@@ -144,31 +223,16 @@ export async function batchEditTags(options = {}) {
     // B2/C1：等待全部选中模型的在途操作落定并持有批量锁；锁生效期间新发起
     // 的单模型编辑会排在本批之后，避免批量 IPC 在途时用旧快照反向覆盖
     releaseBulkTags = await beginBatchTagsWrite(ids)
-    unchanged = 0
-    overflow = 0
-    const items = []
-    for (const id of ids) {
-      const model = modelById.value.get(id)
-      if (!model) continue
-      const result = nextTagsFor(currentTagsOf(model), input, mode)
-      if (result.unchanged) {
-        unchanged += 1
-        continue
-      }
-      if (result.overflow) {
-        overflow += 1
-        continue
-      }
-      items.push({ id, tags: result.tags })
-    }
-
+    const { items, unchanged, overflow } = collectTagChanges(
+      ids,
+      input,
+      mode,
+      modelById.value,
+    )
     if (items.length === 0) {
-      const notes = []
-      if (unchanged > 0) notes.push(`标签无变化 ${unchanged} 个`)
-      if (overflow > 0) notes.push(`超过 ${MAX_TAGS} 个标签上限 ${overflow} 个`)
       toast(
         'info',
-        `没有需要更新标签的模型${notes.length ? `（${notes.join('，')}）` : ''}`,
+        `没有需要更新标签的模型${skippedSuffix(unchanged, overflow)}`,
       )
       return false
     }
@@ -176,52 +240,7 @@ export async function batchEditTags(options = {}) {
     const metas = new Map()
     // B20/F3：逐项失败保留真实原因，供失败明细面板定位与重建选区重试
     const failedItems = []
-    let canceled = 0
-    let processed = 0
-
-    for (let offset = 0; offset < items.length; offset += MAX_BATCH_META_IDS) {
-      if (state.multiSelect.cancelRequested) {
-        canceled = items.length - processed
-        break
-      }
-      const chunk = items.slice(offset, offset + MAX_BATCH_META_IDS)
-      processed += chunk.length
-      state.multiSelect.progress = `标签${modeLabel} ${Math.min(processed, items.length)}/${items.length}`
-
-      let res
-      try {
-        res = await window.api.models.setModelTagsBulk(chunk)
-      } catch (err) {
-        for (const item of chunk)
-          failuresPush(failedItems, item.id, err.message)
-        continue
-      }
-      if (res?.error) {
-        for (const item of chunk) failuresPush(failedItems, item.id, res.error)
-        continue
-      }
-
-      const updated = Array.isArray(res?.updated) ? res.updated : []
-      const updatedIds = new Set()
-      for (const item of updated) {
-        if (!item || typeof item.id !== 'string') continue
-        updatedIds.add(item.id)
-        metas.set(item.id, item)
-      }
-      const failed = Array.isArray(res?.failed) ? res.failed : []
-      const failedIds = new Set()
-      for (const item of failed) {
-        if (!item || typeof item.id !== 'string') continue
-        failedIds.add(item.id)
-        failuresPush(failedItems, item.id, item.error || '未返回失败原因')
-      }
-      // 契约防御：既未成功也未显式失败的条目必须显形，不得静默丢失
-      for (const item of chunk) {
-        if (!updatedIds.has(item.id) && !failedIds.has(item.id)) {
-          failuresPush(failedItems, item.id, '未返回结果')
-        }
-      }
-    }
+    const canceled = await submitTagChunks(items, modeLabel, metas, failedItems)
 
     const failed = reportBatchFailures(`批量标签${modeLabel}`, failedItems)
     const ok = applyMetaUpdates(metas, (meta) => ({

@@ -4,11 +4,10 @@ import logger from '../../logger'
 import { getCurrentRoot, renameModelMeta } from '../../services/store'
 import { sidecarFilesFor } from './misc'
 import {
-  maintenanceBusyMessage,
-  releaseMaintenance,
-  tryAcquireMaintenance,
-} from '../../services/maintenance-lock'
-import { wrapHandler, checkModelIdInRootReal } from '../handler'
+  withMaintenanceLock,
+  wrapHandler,
+  checkModelIdInRootReal,
+} from '../handler'
 
 /**
  * 模型改名链路（O-2 自 files.js 按域拆出）：
@@ -80,9 +79,7 @@ export function registerRenameHandlers() {
         : id.replace(/\.disabled$/i, '')
       // 维护锁（OPT-14）：改名与扫描/备份恢复/跨库传输互斥——扫描 relink
       // 不得绑定到改名中途的路径。file-op 彼此兼容（批量启用为串行调用）
-      const token = tryAcquireMaintenance('file-op', getCurrentRoot())
-      if (!token) return { error: maintenanceBusyMessage() }
-      try {
+      return withMaintenanceLock('file-op', getCurrentRoot(), async () => {
         try {
           await fs.access(newPath)
           return { error: '目标文件名已存在' }
@@ -100,9 +97,7 @@ export function registerRenameHandlers() {
           `模型已${disabled ? '禁用' : '启用'}: ${path.basename(newPath)}`,
         )
         return { path: newPath }
-      } finally {
-        releaseMaintenance(token)
-      }
+      })
     },
     { errorPrefix: '禁用/启用失败' },
   )
@@ -121,9 +116,7 @@ export function registerRenameHandlers() {
       }
       // 维护锁（OPT-14）：改名 + sidecar 迁移 + 元数据键迁移与扫描 relink、
       // 备份恢复互斥——恢复中途改路径会让恢复结果与元数据指向错位
-      const token = tryAcquireMaintenance('file-op', getCurrentRoot())
-      if (!token) return { error: maintenanceBusyMessage() }
-      try {
+      return withMaintenanceLock('file-op', getCurrentRoot(), async () => {
         // 目标存在则拒绝；仅大小写变化的改名（Windows 大小写不敏感）跳过存在性检查
         if (plan.path.toLowerCase() !== id.toLowerCase()) {
           try {
@@ -174,9 +167,7 @@ export function registerRenameHandlers() {
           `模型已重命名: ${path.basename(id)} -> ${path.basename(plan.path)}`,
         )
         return { path: plan.path, renamedSidecars, sidecarWarnings }
-      } finally {
-        releaseMaintenance(token)
-      }
+      })
     },
     { errorPrefix: '重命名失败' },
   )

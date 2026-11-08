@@ -187,6 +187,147 @@ function validateOpaque(value, label, depth) {
 }
 
 /**
+ * 字符串规则校验。
+ * @param {any} value 待校验值
+ * @param {SchemaRule} rule 字段规则
+ * @param {string} label 错误信息中的字段名
+ * @returns {string} 合法返回空串
+ */
+function validateString(value, rule, label) {
+  if (typeof value !== 'string') return `${label} 须为字符串`
+  if (rule.max && value.length > rule.max)
+    return `${label} 长度超限（≤${rule.max}）`
+  return ''
+}
+
+/**
+ * 整数规则校验（含区间回显）。
+ * @param {any} value 待校验值
+ * @param {SchemaRule} rule 字段规则
+ * @param {string} label 错误信息中的字段名
+ * @returns {string} 合法返回空串
+ */
+function validateInt(value, rule, label) {
+  if (!Number.isInteger(value)) return `${label} 须为整数`
+  // OPT-13：越界错误回显允许区间——hashWarmupConcurrency 之类的
+  // 1-4 档设置越界时，日志/提示直接可见合法范围而非裸「超限」
+  const range =
+    rule.min !== undefined && rule.max !== undefined
+      ? `（允许 ${rule.min}–${rule.max}）`
+      : rule.min !== undefined
+        ? `（≥${rule.min}）`
+        : rule.max !== undefined
+          ? `（≤${rule.max}）`
+          : ''
+  if (rule.min !== undefined && value < rule.min)
+    return `${label} 超出允许范围${range}`
+  if (rule.max !== undefined && value > rule.max)
+    return `${label} 超出允许范围${range}`
+  return ''
+}
+
+/**
+ * 数组规则校验：规模/深度收口后逐元素递归。
+ * @param {any} value 待校验值
+ * @param {SchemaRule} rule 字段规则
+ * @param {string} label 错误信息中的路径
+ * @param {number} depth 当前嵌套深度
+ * @returns {string} 合法返回空串
+ */
+function validateArray(value, rule, label, depth) {
+  if (!Array.isArray(value)) return `${label} 须为数组`
+  if (depth > DEFAULT_MAX_DEPTH)
+    return `${label} 嵌套层级超限（≤${DEFAULT_MAX_DEPTH}）`
+  // 未声明 max 时取全局默认上限（显式声明始终优先，可大于默认值）
+  const maxItems = rule.max ?? DEFAULT_MAX_ARRAY_ITEMS
+  if (value.length > maxItems) return `${label} 数量超限（≤${maxItems}）`
+  for (let i = 0; i < value.length; i++) {
+    const itemLabel = `${label}[${i}]`
+    // 无逐元素规则：宽松语义保持，但规模/深度按默认上限兜底
+    const err = rule.items
+      ? validateValue(value[i], rule.items, itemLabel, depth + 1)
+      : validateOpaque(value[i], itemLabel, depth + 1)
+    if (err) return err
+  }
+  return ''
+}
+
+/**
+ * 对象规则校验：规模/深度收口、未知字段策略与逐字段递归。
+ * @param {any} value 待校验值
+ * @param {SchemaRule} rule 字段规则
+ * @param {string} label 错误信息中的路径
+ * @param {number} depth 当前嵌套深度
+ * @returns {string} 合法返回空串
+ */
+function validateObject(value, rule, label, depth) {
+  if (typeof value !== 'object' || Array.isArray(value))
+    return `${label} 须为对象`
+  if (depth > DEFAULT_MAX_DEPTH)
+    return `${label} 嵌套层级超限（≤${DEFAULT_MAX_DEPTH}）`
+  const keys = Object.keys(value)
+  // 未声明 max 时取全局默认上限（显式声明始终优先，可大于默认值）
+  const maxKeys = rule.max ?? DEFAULT_MAX_OBJECT_KEYS
+  if (keys.length > maxKeys) return `${label} 字段数超限（≤${maxKeys}）`
+  if (!rule.fields) {
+    // 无 fields 规则（如 saveModelData.params）：值全量按默认上限兜底
+    for (const key of keys) {
+      const err = validateOpaque(
+        value[key],
+        label ? `${label}.${key}` : key,
+        depth + 1,
+      )
+      if (err) return err
+    }
+    return ''
+  }
+  for (const [name, child] of Object.entries(rule.fields)) {
+    // 顶层（label 为空串）错误信息用裸字段名；嵌套字段保留完整路径
+    const err = validateValue(
+      value[name],
+      child,
+      label ? `${label}.${name}` : name,
+      depth + 1,
+    )
+    if (err) return err
+  }
+  if (!rule.loose) {
+    const unknown = keys.filter((k) => !(k in rule.fields))
+    if (unknown.length > 0) {
+      return `${label || '参数'} 包含未知字段: ${unknown.slice(0, 5).join(', ')}`
+    }
+    return ''
+  }
+  // loose 对象的未知键：handler 不消费，但规模/深度仍须兜底
+  for (const key of keys) {
+    if (key in rule.fields) continue
+    const err = validateOpaque(
+      value[key],
+      label ? `${label}.${key}` : key,
+      depth + 1,
+    )
+    if (err) return err
+  }
+  return ''
+}
+
+/**
+ * 各 kind 的校验器表（新增规则类型只在此登记）。
+ * @type {Record<string, (value: any, rule: SchemaRule, label: string,
+ *   depth: number) => string>}
+ */
+const KIND_VALIDATORS = {
+  // 无参规则：undefined/null 已在上方放行，走到此处即渲染进程传了参数
+  void: (_value, _rule, label) => `${label} 不接受参数`,
+  string: validateString,
+  boolean: (value, _rule, label) =>
+    typeof value === 'boolean' ? '' : `${label} 须为布尔值`,
+  int: validateInt,
+  array: validateArray,
+  object: validateObject,
+}
+
+/**
  * 校验单个值是否满足规则。
  * @param {any} value 待校验值
  * @param {SchemaRule} rule 字段规则（构造器产物）
@@ -201,115 +342,8 @@ export function validateValue(value, rule, label, depth = 1) {
   if (value === null) {
     return rule.nullable ? '' : `${label} 不能为 null`
   }
-  switch (rule.kind) {
-    // 无参规则：undefined/null 已在上方放行，走到此处即渲染进程传了参数
-    case 'void':
-      return `${label} 不接受参数`
-    case 'string': {
-      if (typeof value !== 'string') return `${label} 须为字符串`
-      if (rule.max && value.length > rule.max)
-        return `${label} 长度超限（≤${rule.max}）`
-      return ''
-    }
-    case 'boolean':
-      return typeof value === 'boolean' ? '' : `${label} 须为布尔值`
-    case 'int': {
-      if (!Number.isInteger(value)) return `${label} 须为整数`
-      // OPT-13：越界错误回显允许区间——hashWarmupConcurrency 之类的
-      // 1-4 档设置越界时，日志/提示直接可见合法范围而非裸「超限」
-      const range =
-        rule.min !== undefined && rule.max !== undefined
-          ? `（允许 ${rule.min}–${rule.max}）`
-          : rule.min !== undefined
-            ? `（≥${rule.min}）`
-            : rule.max !== undefined
-              ? `（≤${rule.max}）`
-              : ''
-      if (rule.min !== undefined && value < rule.min)
-        return `${label} 超出允许范围${range}`
-      if (rule.max !== undefined && value > rule.max)
-        return `${label} 超出允许范围${range}`
-      return ''
-    }
-    case 'array': {
-      if (!Array.isArray(value)) return `${label} 须为数组`
-      if (depth > DEFAULT_MAX_DEPTH)
-        return `${label} 嵌套层级超限（≤${DEFAULT_MAX_DEPTH}）`
-      // 未声明 max 时取全局默认上限（显式声明始终优先，可大于默认值）
-      const maxItems = rule.max ?? DEFAULT_MAX_ARRAY_ITEMS
-      if (value.length > maxItems) return `${label} 数量超限（≤${maxItems}）`
-      if (rule.items) {
-        for (let i = 0; i < value.length; i++) {
-          const err = validateValue(
-            value[i],
-            rule.items,
-            `${label}[${i}]`,
-            depth + 1,
-          )
-          if (err) return err
-        }
-      } else {
-        // 无逐元素规则：宽松语义保持，但规模/深度按默认上限兜底
-        for (let i = 0; i < value.length; i++) {
-          const err = validateOpaque(value[i], `${label}[${i}]`, depth + 1)
-          if (err) return err
-        }
-      }
-      return ''
-    }
-    case 'object': {
-      if (typeof value !== 'object' || Array.isArray(value))
-        return `${label} 须为对象`
-      if (depth > DEFAULT_MAX_DEPTH)
-        return `${label} 嵌套层级超限（≤${DEFAULT_MAX_DEPTH}）`
-      const keys = Object.keys(value)
-      // 未声明 max 时取全局默认上限（显式声明始终优先，可大于默认值）
-      const maxKeys = rule.max ?? DEFAULT_MAX_OBJECT_KEYS
-      if (keys.length > maxKeys) return `${label} 字段数超限（≤${maxKeys}）`
-      if (rule.fields) {
-        for (const [name, child] of Object.entries(rule.fields)) {
-          // 顶层（label 为空串）错误信息用裸字段名；嵌套字段保留完整路径
-          const err = validateValue(
-            value[name],
-            child,
-            label ? `${label}.${name}` : name,
-            depth + 1,
-          )
-          if (err) return err
-        }
-        if (!rule.loose) {
-          const unknown = keys.filter((k) => !(k in rule.fields))
-          if (unknown.length > 0) {
-            return `${label || '参数'} 包含未知字段: ${unknown.slice(0, 5).join(', ')}`
-          }
-        } else {
-          // loose 对象的未知键：handler 不消费，但规模/深度仍须兜底
-          for (const key of keys) {
-            if (key in rule.fields) continue
-            const err = validateOpaque(
-              value[key],
-              label ? `${label}.${key}` : key,
-              depth + 1,
-            )
-            if (err) return err
-          }
-        }
-      } else {
-        // 无 fields 规则（如 saveModelData.params）：值全量按默认上限兜底
-        for (const key of keys) {
-          const err = validateOpaque(
-            value[key],
-            label ? `${label}.${key}` : key,
-            depth + 1,
-          )
-          if (err) return err
-        }
-      }
-      return ''
-    }
-    default:
-      return ''
-  }
+  const validate = KIND_VALIDATORS[rule.kind]
+  return validate ? validate(value, rule, label, depth) : ''
 }
 
 /** 模型 id（绝对路径）：只查类型与长度上限；空串语义文案由 handler 产出 */

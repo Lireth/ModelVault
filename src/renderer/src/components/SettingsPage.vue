@@ -7,6 +7,7 @@ import SettingsGeneral from './settings/SettingsGeneral.vue'
 import SettingsScan from './settings/SettingsScan.vue'
 import SettingsTags from './settings/SettingsTags.vue'
 import { useSettingsForm } from '../composables/useSettingsForm'
+import { SETTINGS_FORM_FIELDS } from '../../../shared/defaults'
 import {
   closeSettings,
   saveSettings,
@@ -58,36 +59,37 @@ function onKeydown(e) {
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
+/**
+ * 由共享字段清单生成保存载荷（字段增减只需改 shared/defaults，
+ * 表单值与 settings 同名映射；excludeText 经解析回填 excludeDirs）。
+ * @returns {Record<string, any>} 设置增量
+ */
+function buildSettingsPatch() {
+  const patch = {}
+  for (const field of SETTINGS_FORM_FIELDS) {
+    if (field.kind === 'text') {
+      patch[field.source] = parseExcludeDirs()
+      continue
+    }
+    patch[field.source || field.key] =
+      field.kind === 'array' ? [...form[field.key]] : form[field.key]
+  }
+  return patch
+}
+
 async function onSave() {
   saving.value = true
   try {
-    const excludeDirs = parseExcludeDirs()
+    const patch = buildSettingsPatch()
+    const excludeDirs = patch.excludeDirs
     const excludeChanged =
       JSON.stringify(excludeDirs) !==
       JSON.stringify(state.settings.excludeDirs || [])
     const scanChanged =
-      JSON.stringify([...form.scanExtensions].sort()) !==
+      JSON.stringify([...patch.scanExtensions].sort()) !==
       JSON.stringify([...(state.settings.scanExtensions || [])].sort())
-    const hashWarmupChanged = form.hashWarmup !== state.settings.hashWarmup
-    const ok = await saveSettings({
-      autoScan: form.autoScan,
-      autoRescan: form.autoRescan,
-      hashWarmup: form.hashWarmup,
-      hashWarmupConcurrency: form.hashWarmupConcurrency,
-      excludeDirs,
-      theme: form.theme,
-      accentColor: form.accentColor,
-      cardSize: form.cardSize,
-      sortBy: form.sortBy,
-      scanExtensions: [...form.scanExtensions],
-      showSize: form.showSize,
-      showMtime: form.showMtime,
-      showParams: form.showParams,
-      civitaiEnabled: form.civitaiEnabled,
-      nsfwBlur: form.nsfwBlur,
-      hideNsfwModels: form.hideNsfwModels,
-      autoBackup: form.autoBackup,
-    })
+    const hashWarmupChanged = patch.hashWarmup !== state.settings.hashWarmup
+    const ok = await saveSettings(patch)
     if (!ok) return
     // 默认排序方式立即生效
     state.sortBy = form.sortBy

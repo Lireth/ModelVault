@@ -15,15 +15,11 @@ import {
 import { sidecarFilesFor } from '../../services/scanner'
 import {
   cancelActiveOp,
+  withMaintenanceLock,
   wrapHandler,
   checkModelIdInRootReal,
   getRealRootPath,
 } from '../handler'
-import {
-  maintenanceBusyMessage,
-  releaseMaintenance,
-  tryAcquireMaintenance,
-} from '../../services/maintenance-lock'
 import { isPathRealWithin } from '../../utils'
 
 /**
@@ -71,9 +67,7 @@ export function registerMiscHandlers() {
       // 维护锁（OPT-14）：删除与扫描/备份恢复/跨库传输互斥——恢复期间删除
       // 会让恢复结果与元数据指向错位。file-op 彼此兼容：渲染层批量删除按
       // 8 路并发调用本通道，严格互斥会让其中 7 路误报忙失败
-      const token = tryAcquireMaintenance('file-op', getCurrentRoot())
-      if (!token) return { error: maintenanceBusyMessage() }
-      try {
+      return withMaintenanceLock('file-op', getCurrentRoot(), async () => {
         // O6：破坏性操作按 realpath 校验归属，拦截库内 junction 指向库外的删除
         const invalid = await checkModelIdInRootReal(id, {
           message: '模型不在当前根目录内，无法删除',
@@ -109,9 +103,7 @@ export function registerMiscHandlers() {
         queueLibraryIndexUpdate(getCurrentRoot(), { removeIds: [id] })
         logger.info(`模型已移入回收站: ${id}`)
         return { ok: true }
-      } finally {
-        releaseMaintenance(token)
-      }
+      })
     },
     { errorPrefix: '删除失败' },
   )
