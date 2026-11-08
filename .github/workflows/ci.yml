@@ -1,13 +1,17 @@
 # ModelVault 持续集成工作流（CI）
 #
 # 触发条件：推送到 main 分支、针对 main 的 PR、手动触发
-# 职责（矩阵分工）：Node 22 基准腿执行全量门禁——依赖安装 → 运行时依赖
-#   漏洞审计 → ESLint → Prettier 格式检查 → 类型检查（shared 契约层 +
-#   preload）→ 单元测试（含覆盖率）→ 三端编译 → 编译产物完整性校验 →
-#   启动冒烟（out/ 与 win-unpacked）→ 覆盖率报告归档；Node 24 兼容性腿
-#   仅运行单元测试（验证 engines 纸面承诺）。PR 另做依赖差分审查
+# 职责：Node 24 单腿全量门禁——依赖安装 → 运行时依赖漏洞审计 → ESLint →
+#   Prettier 格式检查 → 类型检查（shared 契约层 + preload + main + renderer）
+#   → 单元测试（含覆盖率）→ 三端编译 → 编译产物完整性校验 → 启动冒烟
+#   （out/ 与 win-unpacked）→ 覆盖率报告归档。PR 另做依赖差分审查
 #   （dependency-review，含 license 白名单）。CodeQL 静态扫描见独立的
 #   codeql.yml。
+# Node 版本说明：engines 声明 >=22.22.2（jsdom 30 强制要求，Node 20 已
+#   EOL）。CI 仅以 Node 24（当前 LTS）执行门禁：此前的 22/24 双腿矩阵中
+#   22 承担全量门禁、24 仅复跑测试，而静态检查/测试/编译产物只依赖源码
+#   与 lock 文件、不随 Node 版本漂移，双跑纯属重复耗时——合并单腿后运行
+#   器时间约减半；22 兼容性由 engines 字段在安装侧约束（npm 版本越界告警）。
 # 与 release.yml 的分工：本工作流只做质量门禁与目录产物（--dir）启动冒烟，
 #   不生成便携版/安装包、不发布；正式产物由推送 v* 标签触发的 release.yml 负责。
 
@@ -58,18 +62,9 @@ jobs:
             LGPL-3.0-or-later
 
   test-and-build:
-    name: Test & Build (Node ${{ matrix.node }})
+    name: Test & Build (Node 24)
     runs-on: windows-latest
     timeout-minutes: 20
-    # D6：engines 声明 >=22.22.2（jsdom 30 强制要求，Node 20 已 EOL），
-    # 矩阵覆盖 22/24 双版本验证（避免纸面承诺）。矩阵分工：22 为基准腿
-    # 跑全量门禁（审计/静态检查/编译/冒烟均与本腿绑定），24 为兼容性腿
-    # 仅运行单元测试——静态检查与编译产物只依赖源码与 lock 文件，不随
-    # Node 版本变化，双跑纯属重复耗时
-    strategy:
-      fail-fast: false
-      matrix:
-        node: ['22', '24']
 
     steps:
       # ---------- 环境准备 ----------
@@ -77,10 +72,10 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v7
 
-      - name: 安装 Node.js ${{ matrix.node }}
+      - name: 安装 Node.js 24
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ matrix.node }}
+          node-version: '24'
           cache: npm # 缓存 npm 依赖包
 
       # 缓存 Electron / electron-builder 二进制（.npmrc 指向 npmmirror 镜像，
@@ -101,9 +96,7 @@ jobs:
       # OP-08 供应链门禁：只审计运行时依赖（vue / fflate），避免 devDependencies
       # 的噪音；.npmrc 指向的镜像不提供 audit 端点，显式使用官方 registry。
       # high 及以上漏洞阻断构建，其余等级输出告警供人工评估。
-      # 审计结果只依赖 lock 文件，仅基准腿执行（避免矩阵重复）
       - name: 运行时依赖漏洞审计
-        if: matrix.node == '22'
         shell: pwsh
         run: |
           npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org
@@ -115,44 +108,32 @@ jobs:
       # ---------- 测试与构建 ----------
 
       # D1 代码质量门禁：ESLint（flat config，错误级规则）不通过则终止 CI。
-      # 静态检查只依赖源码，仅基准腿执行（Node 24 兼容腿只跑测试）
+      # 静态检查只依赖源码，置于慢速测试前快速失败
       - name: ESLint 代码检查
-        if: matrix.node == '22'
         run: npm run lint
 
       # 格式门禁：ESLint 已配 eslint-config-prettier 关闭风格类规则，格式
-      # 一致性由 Prettier 单独把关（本地 `npm run format` 修复）。仅基准腿执行
+      # 一致性由 Prettier 单独把关（本地 `npm run format` 修复）
       - name: Prettier 格式检查
-        if: matrix.node == '22'
         run: npm run format:check
 
       # O10 渐进式类型门禁：TypeScript checkJs 覆盖 shared 契约层、preload、
       # main 全层与 renderer 全部 JS（.vue 模板由组件测试覆盖），捕获字段漂移类回归；
       # strict 渐进收紧，新增文件默认纳入检查范围
       - name: 类型检查（shared / preload / main / renderer JS）
-        if: matrix.node == '22'
         run: npm run typecheck
 
-      # 覆盖率统计的 instrumentation 有明显开销：仅在 Node 22 基准腿生成
-      # 报告并归档；Node 24 兼容性腿跑普通测试，缩短矩阵总时长
-      - name: 运行单元测试（含覆盖率统计，D6）
-        if: matrix.node == '22'
+      # 覆盖率统计的 instrumentation 有明显开销，但门禁阈值（见
+      # vitest.config.mjs）随测试执行强制生效，报告归档到运行页面供追溯
+      - name: 运行单元测试（含覆盖率统计）
         run: npm run test:coverage
 
-      - name: 运行单元测试（Node 24 兼容性腿）
-        if: matrix.node == '24'
-        run: npm test
+      # ---------- 编译产物验证 ----------
 
-      # 编译产物同样只依赖源码与依赖树，仅基准腿生成并校验（兼容腿跑完
-      # 测试即结束，缩短矩阵总时长）
       - name: 编译主进程 / preload / 渲染进程
-        if: matrix.node == '22'
         run: npm run build
 
-      # ---------- 构建产物验证 ----------
-
       - name: 验证编译产物
-        if: matrix.node == '22'
         shell: pwsh
         run: |
           $required = @(
@@ -172,31 +153,28 @@ jobs:
       # ---------- 启动冒烟（V-05） ----------
 
       # 编译产物冒烟：真实启动 Electron，验证主窗口/生产页面加载/preload+
-      # IPC 往返/自定义图片协议。仅 Node 22 基准腿执行，避免矩阵重复耗时。
+      # IPC 往返/自定义图片协议。
       - name: 启动冒烟（out/ 编译产物）
-        if: matrix.node == '22'
         run: npm run smoke
 
       # 目录产物冒烟：electron-builder --dir 生成 win-unpacked（asar 路径、
       # 打包后资源解析与开发态不同），再以真实 exe 走同一套检查。
       - name: 打包目录产物（不生成安装包）
-        if: matrix.node == '22'
         run: npx electron-builder --dir --publish never
 
       - name: 启动冒烟（win-unpacked 打包产物）
-        if: matrix.node == '22'
         run: node scripts/smoke.mjs --packaged
 
       # ---------- 构建产物与覆盖率归档 ----------
 
       # test:coverage 生成的报告归档到运行页面，便于追溯历史覆盖率变化；
-      # 仅基准腿生成报告，兼容腿无 coverage/ 目录（此前 if: always() 使该腿
-      # 空跑一次上传）；若前置步骤失败导致目录不存在，仅告警不阻断 CI
+      # if: always() 使测试失败时报告仍可上传，供排查覆盖率退化；若前置
+      # 步骤失败导致目录不存在，仅告警不阻断 CI
       - name: 上传覆盖率报告
-        if: always() && matrix.node == '22'
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-node-${{ matrix.node }}
+          name: coverage-node-24
           path: coverage/
           if-no-files-found: warn
           retention-days: 14
@@ -211,19 +189,18 @@ jobs:
         env:
           ACTOR: ${{ github.actor }}
           SHA: ${{ github.sha }}
-          NODE_VERSION: ${{ matrix.node }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           $url = $env:RUN_URL
           $ok = "${{ job.status }}" -eq "success"
           $result = if ($ok) { "✅ 通过" } else { "❌ 失败" }
           Add-Content $env:GITHUB_STEP_SUMMARY @"
-          ## CI 结果：$result（Node $env:NODE_VERSION）
+          ## CI 结果：$result（Node 24）
 
           - 触发者：``$env:ACTOR``
           - 提交：``$env:SHA``
           - [查看运行日志]($url)
           "@
           if (-not $ok) {
-            Write-Host "::error::CI 失败（分支 ${{ github.ref_name }}，Node $env:NODE_VERSION），请查看日志: $url"
+            Write-Host "::error::CI 失败（分支 ${{ github.ref_name }}，Node 24），请查看日志: $url"
           }
