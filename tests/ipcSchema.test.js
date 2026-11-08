@@ -45,12 +45,17 @@ function extractPreloadSubscribeChannels() {
   return [...source.matchAll(/subscribe\(\s*'([^']+)'/g)].map((m) => m[1])
 }
 
-/** 从主进程源码提取 wrapHandler 注册点通道（ipc.js + ipc/models/*.js） */
+/** 从主进程源码提取 wrapHandler 注册点通道（ipc.js + ipc/models 递归全部 .js） */
 function extractMainHandlerChannels() {
   const files = [path.resolve(__dirname, '../src/main/ipc.js')]
   const modelsDir = path.resolve(__dirname, '../src/main/ipc/models')
-  for (const name of fs.readdirSync(modelsDir)) {
-    if (name.endsWith('.js')) files.push(path.join(modelsDir, name))
+  // 分层拆分后通道注册点可能位于 models 的子目录（如 models/store/），
+  // 对账必须覆盖整棵子树，否则拆分会被误判为「登记通道无注册」
+  for (const name of fs.readdirSync(modelsDir, { recursive: true })) {
+    const full = path.join(modelsDir, String(name))
+    if (String(name).endsWith('.js') && fs.statSync(full).isFile()) {
+      files.push(full)
+    }
   }
   const channels = new Set()
   for (const file of files) {

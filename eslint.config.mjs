@@ -66,4 +66,48 @@ export default [
       ],
     },
   },
+  {
+    // 分层依赖方向（主进程）：services 为业务/基础设施层，ipc 为 Electron
+    // 适配层；下层不得反向依赖上层——需要窗口/对话框能力时由 ipc 侧注入或
+    // 经事件回调上抛，避免 services 重新耦合到通道注册与窗口生命周期。
+    files: ['src/main/services/**/*.js'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/ipc/**', '../ipc', '../ipc/*', '../../ipc/*'],
+              message:
+                '分层约束：services 不得反向依赖 ipc 适配层，请由 ipc 侧注入依赖或改用回调。',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // 共享契约层（src/shared）被主进程/preload/渲染层共同引用，必须保持
+    // 无运行时依赖：仅允许纯 JS 常量、类型与纯函数，不得引入 Electron 或
+    // 任一端实现。
+    files: ['src/shared/**/*.js'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                'electron',
+                '../main/**',
+                '../preload/**',
+                '../renderer/**',
+              ],
+              message: '分层约束：shared 为纯契约层，不得依赖任一端实现。',
+            },
+          ],
+        },
+      ],
+    },
+  },
 ]
