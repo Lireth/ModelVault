@@ -98,7 +98,7 @@ npm start
 | electron-vite    | ^6   | 构建/开发工具链，内置 HMR 热重载       |
 | Vue 3            | ^3.5 | 渲染进程前端框架                       |
 | electron-builder | ^26  | Windows 打包（portable 单文件便携版）  |
-| Vite             | ^7   | 底层构建引擎                           |
+| Vite             | ^8   | 底层构建引擎（Rolldown 内核）          |
 | vitest           | ^5   | 单元测试（主进程 + 渲染层 store/组件） |
 
 ## 键盘与鼠标快捷键

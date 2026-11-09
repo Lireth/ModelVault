@@ -212,8 +212,10 @@ describe('CoverGallery 缩放与平移', () => {
     fireMouse(el, 'pointerup')
     pressKey('ArrowRight')
     await settle()
-    expect(wrapper.find('.gallery-img').attributes('style')).toContain(
-      'translate(0px, 0px)',
+    // 归零断言兼容两种序列化形态：jsdom 31 起 cssstyle 将等值双参简写为
+    // translate(0px)，旧版输出 translate(0px, 0px)——语义一致，断言取两者
+    expect(wrapper.find('.gallery-img').attributes('style')).toMatch(
+      /translate\(0px(, 0px)?\)/,
     )
     wrapper.unmount()
   })
