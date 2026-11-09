@@ -1,6 +1,10 @@
 import { computed, reactive, watch } from 'vue'
 import { NSFW_BLUR_KEYS } from '../../../shared/app-enums'
 import {
+  DEFAULT_SETTINGS,
+  SETTINGS_FORM_FIELDS,
+} from '../../../shared/defaults'
+import {
   applyAccent,
   applyTheme,
   closeSettings,
@@ -17,6 +21,28 @@ function normalizeNsfwBlur(raw) {
 }
 
 /**
+ * 读取单个表单字段的取值（初始值/打开时填充共用）：
+ * text 为数组字段的换行文本镜像；boolean 按「缺省开/缺省关」语义；
+ * number 收口下限；nsfwBlur 兼容旧版布尔值迁移。
+ * @param {any} field SETTINGS_FORM_FIELDS 条目
+ * @param {Record<string, any>} settings 设置来源（默认值或当前 settings）
+ * @returns {any} 表单值
+ */
+function fieldValue(field, settings) {
+  const raw = settings[field.source || field.key]
+  if (field.kind === 'text') return Array.isArray(raw) ? raw.join('\n') : ''
+  if (field.kind === 'array') return Array.isArray(raw) ? [...raw] : []
+  if (field.kind === 'boolean') {
+    return field.defaultWhenMissing === true ? raw !== false : raw === true
+  }
+  if (field.kind === 'number') {
+    return Number.isFinite(raw) && raw >= field.min ? raw : field.fallback
+  }
+  if (field.key === 'nsfwBlur') return normalizeNsfwBlur(raw)
+  return raw || field.fallback
+}
+
+/**
  * 设置页表单状态与脏数据保护（O-4 自 SettingsPage.vue 按域拆出）：
  * 表单本地副本（保存时才提交）、打开时填充与快照基线、实时预览侦听
  * （主题/强调色/卡片尺寸）、关闭时还原预览与脏数据确认（A9）。
@@ -27,26 +53,15 @@ function normalizeNsfwBlur(raw) {
  * 打开设置页时记录已保存值，用于关闭时还原预览。
  */
 export function useSettingsForm() {
-  /** 设置表单本地副本：保存时才提交 */
-  const form = reactive({
-    autoScan: true,
-    autoRescan: false,
-    excludeText: '',
-    theme: 'dark',
-    accentColor: 'blue',
-    cardSize: 'normal',
-    sortBy: 'name',
-    scanExtensions: [],
-    showSize: true,
-    showMtime: true,
-    showParams: true,
-    civitaiEnabled: true,
-    nsfwBlur: 'blur',
-    hideNsfwModels: false,
-    hashWarmup: 'candidates',
-    hashWarmupConcurrency: 1,
-    autoBackup: true,
-  })
+  /** 设置表单本地副本：字段清单驱动（保存时才提交） */
+  const form = reactive(
+    Object.fromEntries(
+      SETTINGS_FORM_FIELDS.map((field) => [
+        field.key,
+        fieldValue(field, DEFAULT_SETTINGS),
+      ]),
+    ),
+  )
 
   let savedTheme = 'dark'
   let savedAccent = 'blue'
@@ -57,29 +72,12 @@ export function useSettingsForm() {
     savedTheme = state.settings.theme || 'dark'
     savedAccent = state.settings.accentColor || 'blue'
     savedCardSize = state.settings.cardSize || 'normal'
-    form.autoScan = state.settings.autoScan !== false
-    form.autoRescan = state.settings.autoRescan === true
-    form.excludeText = (state.settings.excludeDirs || []).join('\n')
-    form.theme = savedTheme
-    form.accentColor = savedAccent
-    form.cardSize = savedCardSize
-    form.sortBy = state.settings.sortBy || 'name'
-    form.scanExtensions = [...(state.settings.scanExtensions || [])]
-    form.showSize = state.settings.showSize !== false
-    form.showMtime = state.settings.showMtime !== false
-    form.showParams = state.settings.showParams !== false
-    form.civitaiEnabled = state.settings.civitaiEnabled !== false
-    // NSFW 模糊样式（off/blur/heavy）：旧版布尔值迁移（true=blur/false=off），
-    // 与主进程 normalizeNsfwBlur 同语义，防御内存态尚未规范化的情况
-    form.nsfwBlur = normalizeNsfwBlur(state.settings.nsfwBlur)
-    form.hideNsfwModels = state.settings.hideNsfwModels === true
-    form.hashWarmup = state.settings.hashWarmup || 'candidates'
-    form.hashWarmupConcurrency =
-      Number.isFinite(state.settings.hashWarmupConcurrency) &&
-      state.settings.hashWarmupConcurrency >= 1
-        ? state.settings.hashWarmupConcurrency
-        : 1
-    form.autoBackup = state.settings.autoBackup !== false
+    for (const field of SETTINGS_FORM_FIELDS) {
+      form[field.key] = fieldValue(field, state.settings)
+    }
+    // 打开即按已保存设置预览：表单初值与设置相同时 watch 不会触发，
+    // 需显式应用一次，保证上次关闭后的外观还原与本次打开一致
+    applyTheme(form.theme)
     // 填充完成后建立脏检测基线（A9）：此后表单值与快照不一致即为脏
     savedSnapshot = formSnapshotValue()
   }
@@ -91,57 +89,37 @@ export function useSettingsForm() {
    * JSON.stringify——excludeText 是多行 textarea 击键热路径，此前每次
    * 击键都执行行解析 + Set 去重 + 数组排序 + 全对象序列化；字段比较
    * O(1)，规范化只在保存时发生一次）。
+   * @type {Record<string, any>|null}
    */
   let savedSnapshot = null
 
-  /** 表单字段快照（excludeDirs 按原文记录：文本相同解析结果必相同） */
+  /** 表单字段快照（数组字段排序复制；excludeDirs 按原文记录） */
   function formSnapshotValue() {
-    return {
-      autoScan: form.autoScan,
-      autoRescan: form.autoRescan,
-      excludeText: form.excludeText,
-      theme: form.theme,
-      accentColor: form.accentColor,
-      cardSize: form.cardSize,
-      sortBy: form.sortBy,
-      scanExtensions: [...form.scanExtensions].sort(),
-      showSize: form.showSize,
-      showMtime: form.showMtime,
-      showParams: form.showParams,
-      civitaiEnabled: form.civitaiEnabled,
-      nsfwBlur: form.nsfwBlur,
-      hideNsfwModels: form.hideNsfwModels,
-      hashWarmup: form.hashWarmup,
-      hashWarmupConcurrency: form.hashWarmupConcurrency,
+    const snapshot = {}
+    for (const [key, value] of Object.entries(form)) {
+      snapshot[key] = Array.isArray(value) ? [...value].sort() : value
     }
+    return snapshot
   }
 
-  /** 设置表单是否有未保存的修改（逐字段比较；响应式依赖收敛到具体字段） */
+  /**
+   * 设置表单是否有未保存的修改（遍历同一个 form 对象，字段清单增减无需
+   * 同步修改脏检测——A9 的字段级比较开销保持不变）。
+   */
   const settingsDirty = computed(() => {
-    const s = savedSnapshot
-    if (!s) return false
-    return (
-      form.autoScan !== s.autoScan ||
-      form.autoRescan !== s.autoRescan ||
-      form.excludeText !== s.excludeText ||
-      form.theme !== s.theme ||
-      form.accentColor !== s.accentColor ||
-      form.cardSize !== s.cardSize ||
-      form.sortBy !== s.sortBy ||
-      form.showSize !== s.showSize ||
-      form.showMtime !== s.showMtime ||
-      form.showParams !== s.showParams ||
-      form.civitaiEnabled !== s.civitaiEnabled ||
-      form.nsfwBlur !== s.nsfwBlur ||
-      form.hideNsfwModels !== s.hideNsfwModels ||
-      form.hashWarmup !== s.hashWarmup ||
-      form.hashWarmupConcurrency !== s.hashWarmupConcurrency ||
-      form.scanExtensions.length !== s.scanExtensions.length ||
-      form.scanExtensions
-        .slice()
-        .sort()
-        .some((e, i) => e !== s.scanExtensions[i])
-    )
+    const saved = savedSnapshot
+    if (!saved) return false
+    for (const [key, value] of Object.entries(form)) {
+      const base = saved[key]
+      if (Array.isArray(value)) {
+        if (value.length !== base.length) return true
+        const sorted = value.slice().sort()
+        if (sorted.some((item, i) => item !== base[i])) return true
+      } else if (value !== base) {
+        return true
+      }
+    }
+    return false
   })
 
   /** 实时预览：主题与卡片尺寸改动立即应用到界面，无需先保存 */

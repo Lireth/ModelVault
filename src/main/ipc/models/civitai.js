@@ -23,6 +23,8 @@ import {
   civitaiTagsToTag,
   civitaiTypeToTag,
 } from '../../../shared/model-categories'
+// OPT-13：单次导入的示例图数量上限与 schema 共用 shared 单一来源
+import { MAX_IMPORT_IMAGES } from '../../../shared/app-enums'
 import {
   computeAndCacheHash,
   requestHashWarmup,
@@ -35,6 +37,7 @@ import {
 } from './covers'
 import { resolveCoverSafe } from './decorate'
 import { wrapHandler, checkModelIdInRoot } from '../handler'
+import { errorName } from '../../../shared/error-text'
 
 /**
  * Civitai 在线识别链路：
@@ -47,9 +50,6 @@ import { wrapHandler, checkModelIdInRoot } from '../handler'
  * 大文件哈希计算可能耗时数十秒，渲染层需提供忙碌提示；哈希结果缓存于
  * 元数据的 hash/hashMtime 字段（文件未变更时免重算，与 relink 履书共用）。
  */
-
-// OPT-13：单次导入的示例图数量上限与 schema 共用 shared 单一来源
-import { MAX_IMPORT_IMAGES } from '../../../shared/ipc-schema'
 
 /**
  * Civitai 网络入口统一隐私门禁（OPT-03）：设置页的 civitaiEnabled 此前
@@ -81,7 +81,7 @@ async function ensureHash(id, meta, mtimeMs) {
     hash = await computeAndCacheHash(id, mtimeMs, { priority: true })
   } catch (err) {
     // 共享的后台任务可能被另一个前台任务抢占：本次识别重试一次（前台通道）
-    if (err?.name !== 'PreemptedError') throw err
+    if (errorName(err) !== 'PreemptedError') throw err
     hash = await computeAndCacheHash(id, mtimeMs, { priority: true })
   }
   // 重读最新元数据：哈希计算期间用户可能已并发保存其他字段

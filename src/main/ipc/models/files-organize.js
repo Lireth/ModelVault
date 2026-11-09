@@ -14,17 +14,14 @@ import {
   MAX_ORGANIZE_MOVES,
   MAX_TRANSFER_IDS,
 } from '../../../shared/ipc-schema'
-import {
-  maintenanceBusyMessage,
-  releaseMaintenance,
-  tryAcquireMaintenance,
-} from '../../services/maintenance-lock'
 import { transferModelsToLibrary } from '../../services/library-transfer'
 import {
+  withMaintenanceLock,
   wrapHandler,
   checkModelIdInRootReal,
   getRealRootPath,
 } from '../handler'
+import { errorCode, errorMessage } from '../../../shared/error-text'
 
 /**
  * 模型移动/整理链路（O-2 自 files.js 按域拆出）：
@@ -116,9 +113,7 @@ export function registerMoveHandlers() {
         return { path: id, targetRelDir: toRelKey(targetDir) ?? '' }
       // 维护锁（OPT-14）：在对话框与校验之后、移动之前取锁——持锁等待用户
       // 选择目录会长时间冻结扫描/恢复等大操作。file-op 彼此兼容
-      const token = tryAcquireMaintenance('file-op', getCurrentRoot())
-      if (!token) return { error: maintenanceBusyMessage() }
-      try {
+      return withMaintenanceLock('file-op', getCurrentRoot(), async () => {
         try {
           await fs.access(newPath)
           return { error: '目标位置已存在同名文件' }
@@ -128,13 +123,13 @@ export function registerMoveHandlers() {
         try {
           await fs.rename(id, newPath)
         } catch (err) {
-          if (err.code === 'EXDEV') {
+          if (errorCode(err) === 'EXDEV') {
             return {
               error: '不支持跨磁盘移动（目标文件夹须与模型库在同一磁盘）',
             }
           }
-          logger.warn(`模型移动失败: ${id} ${err.message}`)
-          return { error: `移动失败: ${err.message}` }
+          logger.warn(`模型移动失败: ${id} ${errorMessage(err)}`)
+          return { error: `移动失败: ${errorMessage(err)}` }
         }
         // 同名 sidecar（预览图/说明文本）一并移动：整理场景下说明与模型不应分家
         for (const f of sidecarFilesFor(id)) {
@@ -147,9 +142,7 @@ export function registerMoveHandlers() {
         // targetRelDir：渲染层据此对目标子树做局部扫描（OPT-03）；
         // 目标为库根时 toRelKey 返回 null，映射为 ''（根直属文件子树）
         return { path: newPath, targetRelDir: toRelKey(targetDir) ?? '' }
-      } finally {
-        releaseMaintenance(token)
-      }
+      })
     },
     { errorPrefix: '移动失败' },
   )
@@ -193,9 +186,7 @@ export function registerMoveHandlers() {
       const aborted = () => signal?.aborted === true
       // 维护锁（OPT-14）：批量移动与扫描 relink/备份恢复互斥；归属校验一并
       // 纳入锁内，保证「校验-移动」与并发大操作的原子边界。file-op 彼此兼容
-      const token = tryAcquireMaintenance('file-op', root)
-      if (!token) return { error: maintenanceBusyMessage() }
-      try {
+      return withMaintenanceLock('file-op', root, async () => {
         // 逐项校验归属（O6：realpath 后仍须在库内）：非法项跳过而非整体失败
         const valid = []
         const skipped = []
@@ -236,7 +227,7 @@ export function registerMoveHandlers() {
             await fs.mkdir(path.join(loraDir, folder), { recursive: true })
           }
         } catch (err) {
-          return { error: `创建分类文件夹失败: ${err.message}` }
+          return { error: `创建分类文件夹失败: ${errorMessage(err)}` }
         }
         let moved = 0
         let canceled = false
@@ -272,8 +263,8 @@ export function registerMoveHandlers() {
           try {
             await fs.rename(id, newPath)
           } catch (err) {
-            logger.warn(`一键移动失败: ${id} ${err.message}`)
-            failed.push({ id, error: err.message })
+            logger.warn(`一键移动失败: ${id} ${errorMessage(err)}`)
+            failed.push({ id, error: errorMessage(err) })
             continue
           }
           // 同名 sidecar（预览图/说明文本）一并移动，与 moveModelTo 同一约定
@@ -294,9 +285,7 @@ export function registerMoveHandlers() {
           skipped,
           ...(canceled ? { canceled: true } : {}),
         }
-      } finally {
-        releaseMaintenance(token)
-      }
+      })
     },
     { errorPrefix: '一键移动文件失败' },
   )

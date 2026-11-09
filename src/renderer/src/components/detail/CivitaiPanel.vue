@@ -8,6 +8,7 @@ import {
   selectedModel,
   state,
 } from '../../store/appStore'
+import { MAX_IMPORT_IMAGES } from '../../../../shared/app-enums'
 
 /**
  * Civitai 在线识别面板（详情页）：
@@ -315,7 +316,8 @@ async function importSelected() {
             </button>
           </div>
           <span v-if="images.length > 0" class="civitai-hint"
-            >导入的图片会追加到模型封面列表（单次最多 20 张）</span
+            >导入的图片会追加到模型封面列表（单次最多
+            {{ MAX_IMPORT_IMAGES }} 张）</span
           >
         </template>
         <div v-else class="civitai-hint">该模型版本暂无示例图或视频</div>

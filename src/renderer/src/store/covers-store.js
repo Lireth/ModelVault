@@ -1,6 +1,7 @@
 import { state, modelIndexOf } from './state'
 import { setModelCoverUrl } from './cover-overrides'
 import { toast } from './toast'
+import { errorMessage } from '../../../shared/error-text'
 
 /**
  * 模型详情数据保存与封面操作（A-04 自 appStore.js 拆出）。
@@ -17,7 +18,7 @@ export async function saveModelData(id, payload, opts = {}) {
   try {
     res = await window.api.models.saveModelData({ id, ...payload })
   } catch (err) {
-    toast('error', `保存失败: ${err.message}`)
+    toast('error', `保存失败: ${errorMessage(err)}`)
     return false
   }
   if (res.error) {
@@ -196,7 +197,7 @@ export async function importCoversFromDrop(id, sourcePaths) {
       if (res?.error) errors.push(res.error)
       else lastRes = res
     } catch (err) {
-      errors.push(err.message)
+      errors.push(errorMessage(err))
     }
   }
   // 单趟同步：最后一次成功响应已包含全部封面（含本次导入的所有张）

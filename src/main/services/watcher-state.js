@@ -1,4 +1,5 @@
 import logger from '../logger'
+import { errorMessage } from '../../shared/error-text'
 
 /**
  * 目录监控共享状态与常量（O12 自 watcher.js 拆出）：
@@ -169,7 +170,7 @@ export function notifyWatcherStopped(info) {
   try {
     stoppedListener(info)
   } catch (err) {
-    logger.warn(`监控停止通知监听器异常: ${err.message}`)
+    logger.warn(`监控停止通知监听器异常: ${errorMessage(err)}`)
   }
 }
 

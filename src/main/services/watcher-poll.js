@@ -20,6 +20,7 @@ import {
   statSelectedDirEntries,
 } from './watcher-snapshot'
 import { scheduleBroadcast } from './watcher-broadcast'
+import { errorCode } from '../../shared/error-text'
 
 /**
  * 轮询巡检引擎（O12 自 watcher.js 拆出）：
@@ -154,7 +155,7 @@ async function collectHotSnapshot(w, hotRels) {
     } catch (err) {
       // 子树在两轮之间被删除/不可读：跳过采集即可——差异会经「旧基线有、
       // 本轮无」检出，合并阶段移除其基线条目；其余错误按巡检异常上抛
-      if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR') continue
+      if (errorCode(err) === 'ENOENT' || errorCode(err) === 'ENOTDIR') continue
       throw err
     }
   }
@@ -179,6 +180,350 @@ function hotOldSub(w, root, hotRels, partial) {
   return oldSub
 }
 
+/** 遍历期间基线被其他路径更新/监控已替换：本轮结果作废（代际校验 B2） */
+function isWalkStale(w, revisionAtStart) {
+  return (
+    w !== getWatcher() ||
+    w.refreshing ||
+    w.scanning ||
+    w.snapshotRevision !== revisionAtStart
+  )
+}
+
+/**
+ * 基准轮：无条件全树遍历建立基线（不消耗 PERF-4 的全量/热点交替周期，
+ * 也不读热点状态）——基准后首轮比对轮恒为全量轮，确保首个比对有完整视野。
+ * @param {WatcherState} w 监控状态
+ * @param {boolean} wantStats 是否建立内容基线
+ * @param {number} revisionAtStart 轮次开始时的快照修订号
+ * @returns {Promise<void>}
+ */
+async function runBaselineWalk(w, wantStats, revisionAtStart) {
+  const snapshot = await collectDirSnapshot(w.root, w.excludeNames, {
+    withStats: wantStats,
+    concurrency: w.traversalConcurrency,
+  })
+  // 遍历期间进入扫描期/开始原生事件回填/基线已被其他路径更新：本轮结果
+  // 可能落后于对方基线，直接丢弃，避免用旧快照覆盖新基线并重复广播
+  if (isWalkStale(w, revisionAtStart)) {
+    w.idleRounds = 0
+    return
+  }
+  if (wantStats) {
+    w.statSnapshot = /** @type {Map<string, SnapshotEntry[]>} */ (snapshot)
+    w.snapshot = namesFromSnapshot(snapshot)
+    w.lastContentCheckAt = Date.now()
+    // OPT-9：基线轮全树已 stat，全部目录记为本轮已校验
+    const checkedAt = Date.now()
+    w.contentCheckedAt = new Map()
+    for (const dir of snapshot.keys()) w.contentCheckedAt.set(dir, checkedAt)
+  } else {
+    w.snapshot = /** @type {Map<string, string[]>} */ (snapshot)
+    w.statSnapshot = null
+    w.lastContentCheckAt = 0
+    w.contentCheckedAt = new Map()
+  }
+  w.snapshotRevision += 1
+}
+
+/**
+ * 常规轮的采集计划（PERF-4）：内容校验轮、无热点或到达全量回扫周期时
+ * 走全树遍历；否则只巡「根直属条目 + 热点子树」。
+ * @param {WatcherState} w 监控状态
+ * @param {boolean} wantStats 是否内容校验轮
+ * @returns {{hotRels: string[], isFullRound: boolean}}
+ */
+function planWalk(w, wantStats) {
+  w.walkCount += 1
+  // 根直属变更（rel=''）由热点轮的根 readdir 天然覆盖，不进子树集——
+  // 否则 collectDirSnapshot(root) 会整树递归，破坏分层意义
+  const hotRels =
+    (w.walkCount - 1) % Math.max(1, w.fullWalkInterval) === 0
+      ? []
+      : dedupeAndPruneDescendants([...w.lastHotDirs]).filter(
+          (rel) => rel !== '',
+        )
+  return { hotRels, isFullRound: wantStats || hotRels.length === 0 }
+}
+
+/**
+ * 采集本轮快照：内容轮在渐进分支内自行采集（此处返回空），全量轮整树
+ * 采集，热点轮只采集根直属与热点子树。
+ * @param {WatcherState} w 监控状态
+ * @param {{wantStats: boolean, isFullRound: boolean, hotRels: string[]}} plan
+ * @returns {Promise<{snapshot?: Map<string, any>|null,
+ *   hot?: {partial: Map<string, string[]>, hotRels: string[]}|null}>}
+ */
+async function collectRoundSnapshot(w, { wantStats, isFullRound, hotRels }) {
+  if (wantStats) return { snapshot: null, hot: null }
+  if (isFullRound) {
+    return {
+      snapshot: await collectDirSnapshot(w.root, w.excludeNames, {
+        concurrency: w.traversalConcurrency,
+      }),
+      hot: null,
+    }
+  }
+  return { snapshot: null, hot: await collectHotSnapshot(w, hotRels) }
+}
+
+/**
+ * 内容基线缺失（扫描完成/切换根后的静默重建）：整树 stat 建立完整内容
+ * 基线，全部目录记为本轮已校验。
+ * @param {WatcherState} w 监控状态
+ * @param {number} revisionAtStart 轮次开始时的快照修订号
+ * @returns {Promise<void>}
+ */
+async function rebuildStatBaseline(w, revisionAtStart) {
+  const snapshot = await collectDirSnapshot(w.root, w.excludeNames, {
+    withStats: true,
+    concurrency: w.traversalConcurrency,
+  })
+  if (isWalkStale(w, revisionAtStart)) {
+    w.idleRounds = 0
+    return
+  }
+  w.statSnapshot = /** @type {Map<string, SnapshotEntry[]>} */ (snapshot)
+  w.snapshot = namesFromSnapshot(snapshot)
+  const checkedAt = Date.now()
+  w.contentCheckedAt = new Map()
+  for (const dir of snapshot.keys()) w.contentCheckedAt.set(dir, checkedAt)
+  w.snapshotRevision += 1
+  w.idleRounds += 1
+  w.lastHotDirs = []
+}
+
+/**
+ * 选择本轮需要 stat 的目录：名称变化目录与热点子树当轮必检，其余按
+ * 「上次内容校验时间」最旧优先补足配额（ceil(目录数/fullWalkInterval)，下限 32）。
+ * @param {WatcherState} w 监控状态
+ * @param {Map<string, string[]>} nameSnapshot 本轮名称快照
+ * @returns {Set<string>} 待 stat 的绝对目录集合
+ */
+function selectContentCheckDirs(w, nameSnapshot) {
+  // 名称变化目录必 stat：其内容条目已随增删失真，且变更目录正是
+  // 内容变化高发处
+  const nameChangedDirs = new Set()
+  for (const rel of computeSnapshotDiff(w.root, w.snapshot, nameSnapshot)) {
+    nameChangedDirs.add(
+      rel === '' ? w.root : path.join(w.root, ...rel.split('/')),
+    )
+  }
+
+  // 热点子树（近期检出变更，POSIX rel）展开为绝对目录集合（含后代）
+  const hotAbs = w.lastHotDirs
+    .filter((rel) => rel !== '')
+    .map((rel) => path.join(w.root, ...rel.split('/')))
+  const selected = new Set(nameChangedDirs)
+  if (w.lastHotDirs.includes('')) selected.add(w.root)
+  for (const dir of nameSnapshot.keys()) {
+    if (
+      dir !== w.root &&
+      !selected.has(dir) &&
+      hotAbs.some((abs) => relativeWithin(dir, abs) !== null)
+    ) {
+      selected.add(dir)
+    }
+  }
+  // 轮转配额：其余目录按上次内容校验时间最旧优先补足
+  const budget = Math.max(
+    32,
+    Math.ceil(nameSnapshot.size / Math.max(1, w.fullWalkInterval)),
+  )
+  if (selected.size < budget) {
+    const rest = [...nameSnapshot.keys()]
+      .filter((dir) => !selected.has(dir))
+      .sort(
+        (a, b) =>
+          (w.contentCheckedAt.get(a) || 0) - (w.contentCheckedAt.get(b) || 0),
+      )
+    for (const dir of rest) {
+      if (selected.size >= budget) break
+      selected.add(dir)
+    }
+  }
+  return selected
+}
+
+/**
+ * stat 选中目录并与旧内容快照合并（未选中目录沿用旧条目，树中消失的
+ * 目录随合并自然移除），返回内容差异目录。
+ * @param {WatcherState} w 监控状态
+ * @param {Map<string, string[]>} nameSnapshot 本轮名称快照
+ * @param {Set<string>} selected 待 stat 目录集合
+ * @returns {Promise<string[]>} 内容差异目录（POSIX 相对路径）
+ */
+async function applyContentCheckResult(w, nameSnapshot, selected) {
+  // 未选中目录沿用旧条目（其名称事实未变——名称变化的目录已在必检集合内；
+  // size/mtime 陈旧由轮转保证有限窗口内刷新）
+  const fresh = await statSelectedDirEntries(nameSnapshot, selected)
+  const merged = new Map()
+  const checkedAt = Date.now()
+  for (const dir of nameSnapshot.keys()) {
+    const freshEntries = fresh.get(dir)
+    if (freshEntries) {
+      merged.set(dir, freshEntries)
+      w.contentCheckedAt.set(dir, checkedAt)
+      continue
+    }
+    const oldEntries = w.statSnapshot.get(dir)
+    if (oldEntries) merged.set(dir, oldEntries)
+  }
+  for (const dir of [...w.contentCheckedAt.keys()]) {
+    if (!nameSnapshot.has(dir)) w.contentCheckedAt.delete(dir)
+  }
+
+  // 内容差异（选中目录内的条目增删与同名覆盖一并显形；未选中目录
+  // 新旧条目相同不产生差异）
+  const changedDirs = computeStatSnapshotDiff(w.root, w.statSnapshot, merged)
+  w.statSnapshot = merged
+  w.snapshot = nameSnapshot
+  w.snapshotRevision += 1
+  return changedDirs
+}
+
+/**
+ * 内容校验轮（OPT-9 渐进分桶）：名称快照整树 readdir，stat 按目录轮转，
+ * 热点与名称变化目录当轮必检。
+ * @param {WatcherState} w 监控状态
+ * @param {number} revisionAtStart 轮次开始时的快照修订号
+ * @returns {Promise<void>}
+ */
+async function runContentCheck(w, revisionAtStart) {
+  w.lastContentCheckAt = Date.now()
+  if (!w.statSnapshot) {
+    await rebuildStatBaseline(w, revisionAtStart)
+    return
+  }
+  const nameSnapshot = /** @type {Map<string, string[]>} */ (
+    await collectDirSnapshot(w.root, w.excludeNames, {
+      concurrency: w.traversalConcurrency,
+    })
+  )
+  if (isWalkStale(w, revisionAtStart)) {
+    w.idleRounds = 0
+    return
+  }
+  const selected = selectContentCheckDirs(w, nameSnapshot)
+  const changedDirs = await applyContentCheckResult(w, nameSnapshot, selected)
+  if (changedDirs.length === 0) {
+    w.idleRounds += 1
+    // 热点子树本轮内容校验未见变化：清空热点，后续轮次回到全树遍历
+    w.lastHotDirs = []
+    return
+  }
+  w.idleRounds = 0
+  w.lastHotDirs = changedDirs
+  scheduleBroadcast(w, changedDirs)
+}
+
+/**
+ * 全量轮差异收尾：无变化清空热点，有变化更新基线与热点并广播。
+ * @param {WatcherState} w 监控状态
+ * @param {Map<string, string[]>} snapshot 本轮全树名称快照
+ */
+function finishFullRound(w, snapshot) {
+  const changedDirs = computeSnapshotDiff(w.root, w.snapshot, snapshot)
+  if (changedDirs.length === 0) {
+    w.idleRounds += 1
+    w.lastHotDirs = [] // 全树确认无变更：无热点，后续轮次保持全树遍历
+    return
+  }
+  w.snapshot = snapshot
+  w.snapshotRevision += 1
+  // 名称变化已触发重扫（扫描会读到当前内容）。OPT-9：内容基线不再整体
+  // 置空——变化目录已记入热点，下个内容校验轮按渐进分桶 stat 这些目录
+  // 并合并刷新基线（扫描完成时基线仍由 applyFull/PartialBaseline 置空
+  // 重建，两条路径互不冲突）
+  w.idleRounds = 0 // 有变更：退避重置，下一轮回到基础间隔
+  w.lastHotDirs = changedDirs
+  scheduleBroadcast(w, changedDirs)
+}
+
+/**
+ * 热点轮差异收尾：只比较本轮访问的子树，基线按子树合并——范围外目录
+ * 视为未变，由周期性全量轮兜底冷区域。
+ * @param {WatcherState} w 监控状态
+ * @param {{partial: Map<string, string[]>, hotRels: string[]}} hot 本轮热点采集结果
+ */
+function finishHotRound(w, hot) {
+  const changedDirs = computeSnapshotDiff(
+    w.root,
+    hotOldSub(w, w.root, hot.hotRels, hot.partial),
+    hot.partial,
+  )
+  // 基线合并：先移除各热点子树的旧条目（含本轮发现已删除的子树），
+  // 再写入新采集条目；根目录条目直接覆盖
+  for (const rel of hot.hotRels) {
+    removeSnapshotSubtree(w, path.join(w.root, ...rel.split('/')))
+  }
+  for (const [dir, names] of hot.partial) w.snapshot.set(dir, names)
+  if (changedDirs.length === 0) {
+    // 热点区域暂无新变化：保留热点继续盯（下载/解压可能分批写入），
+    // 退避照常爬梯；全量回扫周期到期后由全量轮确认并清空热点
+    w.idleRounds += 1
+    return
+  }
+  // OPT-9：内容基线不再整体置空——变化目录已记入热点，下个内容校验轮
+  // 按渐进分桶 stat 并合并刷新（扫描完成时仍由 baseline 置空重建）
+  w.snapshotRevision += 1
+  w.idleRounds = 0
+  w.lastHotDirs = changedDirs
+  scheduleBroadcast(w, changedDirs)
+}
+
+/**
+ * 单轮巡检主体：可见性探测 → 基准/常规轮 → 采集 → 代际校验 → 差异收尾。
+ * @param {WatcherState} w 监控状态
+ * @param {boolean} silent 是否基准轮
+ * @returns {Promise<void>}
+ */
+async function walkOnce(w, silent) {
+  // 非基准轮且窗口隐藏（最小化）：跳过目录遍历，零磁盘 IO——
+  // 仅靠下一轮定时器轻量探测可见性，移动硬盘/网络盘不被 readdir 唤醒。
+  // 隐藏期间不增减空闲计数；恢复后暂停期间积累的变更由首次比对自然发现。
+  if (!silent && typeof w.isVisible === 'function' && !w.isVisible()) return
+
+  // O4：内容校验轮采集 size/mtime；其余轮次只做低成本名称比对。
+  // 基准轮（silent）必须建立内容基线，否则首个间隔内的同名覆盖无法发现。
+  const contentEnabled =
+    Number.isFinite(w.contentCheckInterval) && w.contentCheckInterval > 0
+  const wantStats =
+    contentEnabled &&
+    (silent || Date.now() - w.lastContentCheckAt >= w.contentCheckInterval)
+  const revisionAtStart = w.snapshotRevision
+
+  if (silent) {
+    await runBaselineWalk(w, wantStats, revisionAtStart)
+    return
+  }
+
+  const plan = planWalk(w, wantStats)
+  const collected = await collectRoundSnapshot(w, { ...plan, wantStats })
+  // 遍历期间进入扫描期/开始原生事件回填/基线已被其他路径更新：本轮结果
+  // 可能落后于对方基线，直接丢弃，避免用旧快照覆盖新基线并重复广播
+  if (isWalkStale(w, revisionAtStart)) {
+    // 对方基线更新意味着目录刚有活动：退避重置，下一轮尽快复核
+    w.idleRounds = 0
+    return
+  }
+
+  if (wantStats) {
+    await runContentCheck(w, revisionAtStart)
+    return
+  }
+  if (plan.isFullRound) {
+    if (collected.snapshot) finishFullRound(w, collected.snapshot)
+    return
+  }
+  if (collected.hot) finishHotRound(w, collected.hot)
+}
+
+/**
+ * 执行一轮轮询巡检（对外入口）：忙态跳过读盘，成功后按退避阶梯安排下一轮。
+ * @param {WatcherState} w 监控状态
+ * @param {boolean} silent 是否基准轮（写入基线而非比对）
+ */
 export function runWalk(w, silent) {
   // 上一次遍历未完成（超大目录树）/快照回填中/扫描期：本轮跳过读盘，
   // 仅安排下一轮，避免并发遍历或与扫描基线互相覆盖（OPT-02）
@@ -188,289 +533,7 @@ export function runWalk(w, silent) {
   }
   w.polling = true
   Promise.resolve()
-    .then(async () => {
-      // 非基准轮且窗口隐藏（最小化）：跳过目录遍历，零磁盘 IO——
-      // 仅靠下一轮定时器轻量探测可见性，移动硬盘/网络盘不被 readdir 唤醒。
-      // 隐藏期间不增减空闲计数；恢复后暂停期间积累的变更由首次比对自然发现。
-      if (!silent && typeof w.isVisible === 'function' && !w.isVisible()) return
-
-      // O4：内容校验轮采集 size/mtime；其余轮次只做低成本名称比对。
-      // 基准轮（silent）必须建立内容基线，否则首个间隔内的同名覆盖无法发现。
-      const contentEnabled =
-        Number.isFinite(w.contentCheckInterval) && w.contentCheckInterval > 0
-      const wantStats =
-        contentEnabled &&
-        (silent || Date.now() - w.lastContentCheckAt >= w.contentCheckInterval)
-      const revisionAtStart = w.snapshotRevision
-
-      // 基准轮：无条件全树遍历建立基线（不消耗 PERF-4 的全量/热点交替周期，
-      // 也不读热点状态）——基准后首轮比对轮恒为全量轮，确保首个比对有完整视野
-      if (silent) {
-        const snapshot = await collectDirSnapshot(w.root, w.excludeNames, {
-          withStats: wantStats,
-          concurrency: w.traversalConcurrency,
-        })
-        // 遍历期间进入扫描期/开始原生事件回填/基线已被其他路径更新：本轮结果
-        // 可能落后于对方基线，直接丢弃，避免用旧快照覆盖新基线并重复广播
-        if (
-          w !== getWatcher() ||
-          w.refreshing ||
-          w.scanning ||
-          w.snapshotRevision !== revisionAtStart
-        ) {
-          w.idleRounds = 0
-          return
-        }
-        if (wantStats) {
-          w.statSnapshot = snapshot
-          w.snapshot = namesFromSnapshot(snapshot)
-          w.lastContentCheckAt = Date.now()
-          // OPT-9：基线轮全树已 stat，全部目录记为本轮已校验
-          const checkedAt = Date.now()
-          w.contentCheckedAt = new Map()
-          for (const dir of snapshot.keys())
-            w.contentCheckedAt.set(dir, checkedAt)
-        } else {
-          w.snapshot = snapshot
-          w.statSnapshot = null
-          w.lastContentCheckAt = 0
-          w.contentCheckedAt = new Map()
-        }
-        w.snapshotRevision += 1
-        return
-      }
-
-      // PERF-4：全量/热点轮判定——内容校验轮、无热点或到达全量回扫周期时
-      // 走全树遍历；否则只巡「根直属条目 + 热点子树」。
-      w.walkCount += 1
-      // 根直属变更（rel=''）由热点轮的根 readdir 天然覆盖，不进子树集——
-      // 否则 collectDirSnapshot(root) 会整树递归，破坏分层意义
-      const hotRels =
-        (w.walkCount - 1) % Math.max(1, w.fullWalkInterval) === 0
-          ? []
-          : dedupeAndPruneDescendants([...w.lastHotDirs]).filter(
-              (rel) => rel !== '',
-            )
-      const isFullRound = wantStats || hotRels.length === 0
-
-      let snapshot = null
-      let hot = null
-      if (wantStats) {
-        // OPT-9：内容轮的采集在下方渐进分支内完成（基线重建与渐进两态各自
-        // 采集所需的快照形态不同，此处不预采集以免双整树遍历）
-      } else if (isFullRound) {
-        snapshot = await collectDirSnapshot(w.root, w.excludeNames, {
-          concurrency: w.traversalConcurrency,
-        })
-      } else {
-        hot = await collectHotSnapshot(w, hotRels)
-      }
-
-      // 遍历期间进入扫描期/开始原生事件回填/基线已被其他路径更新：本轮结果
-      // 可能落后于对方基线，直接丢弃，避免用旧快照覆盖新基线并重复广播
-      if (
-        w !== getWatcher() ||
-        w.refreshing ||
-        w.scanning ||
-        w.snapshotRevision !== revisionAtStart
-      ) {
-        // 对方基线更新意味着目录刚有活动：退避重置，下一轮尽快复核
-        w.idleRounds = 0
-        return
-      }
-
-      if (wantStats) {
-        w.lastContentCheckAt = Date.now()
-        // 基线缺失（扫描完成/切换根后的静默重建）：整树 stat 建立完整内容
-        // 基线，全部目录记为本轮已校验。扫描本身会重排目录内容，一次性
-        // 全量 stat 与事件相称；稳态下的渐进分桶才是常驻成本的大头
-        if (!w.statSnapshot) {
-          const snapshot = await collectDirSnapshot(w.root, w.excludeNames, {
-            withStats: true,
-            concurrency: w.traversalConcurrency,
-          })
-          if (
-            w !== getWatcher() ||
-            w.refreshing ||
-            w.scanning ||
-            w.snapshotRevision !== revisionAtStart
-          ) {
-            w.idleRounds = 0
-            return
-          }
-          w.statSnapshot = snapshot
-          w.snapshot = namesFromSnapshot(snapshot)
-          const checkedAt = Date.now()
-          w.contentCheckedAt = new Map()
-          for (const dir of snapshot.keys())
-            w.contentCheckedAt.set(dir, checkedAt)
-          w.snapshotRevision += 1
-          w.idleRounds += 1
-          w.lastHotDirs = []
-          return
-        }
-
-        // OPT-9 渐进内容校验：整树仅 readdir（名称事实，本就属于全量轮），
-        // stat 按目录分桶——热点子树（近期检出变更处）与名称变化目录当轮
-        // 必检（内容变化高发处），其余按「上次内容校验时间」最旧优先取每轮
-        // 配额（ceil(目录数/fullWalkInterval)，下限 32），未校验目录沿用旧
-        // size/mtime。同名覆盖写入的发现延迟 = 所在桶的轮转等待，全量覆盖
-        // 窗口 ≈ fullWalkInterval × 内容校验周期；与名称分层（PERF-4）同一
-        // 「热点即时、冷区轮转」的分层哲学，大库稳态的常驻 stat 底噪按
-        // 配额比例下降
-        const nameSnapshot = /** @type {Map<string, string[]>} */ (
-          await collectDirSnapshot(w.root, w.excludeNames, {
-            concurrency: w.traversalConcurrency,
-          })
-        )
-        if (
-          w !== getWatcher() ||
-          w.refreshing ||
-          w.scanning ||
-          w.snapshotRevision !== revisionAtStart
-        ) {
-          w.idleRounds = 0
-          return
-        }
-
-        // 名称变化目录必 stat：其内容条目已随增删失真，且变更目录正是
-        // 内容变化高发处
-        const nameChangedDirs = new Set()
-        for (const rel of computeSnapshotDiff(
-          w.root,
-          w.snapshot,
-          nameSnapshot,
-        )) {
-          nameChangedDirs.add(
-            rel === '' ? w.root : path.join(w.root, ...rel.split('/')),
-          )
-        }
-
-        // 热点子树（近期检出变更，POSIX rel）展开为绝对目录集合（含后代）
-        const hotAbs = w.lastHotDirs
-          .filter((rel) => rel !== '')
-          .map((rel) => path.join(w.root, ...rel.split('/')))
-        const selected = new Set(nameChangedDirs)
-        if (w.lastHotDirs.includes('')) selected.add(w.root)
-        for (const dir of nameSnapshot.keys()) {
-          if (
-            dir !== w.root &&
-            !selected.has(dir) &&
-            hotAbs.some((abs) => relativeWithin(dir, abs) !== null)
-          ) {
-            selected.add(dir)
-          }
-        }
-        // 轮转配额：其余目录按上次内容校验时间最旧优先补足
-        const budget = Math.max(
-          32,
-          Math.ceil(nameSnapshot.size / Math.max(1, w.fullWalkInterval)),
-        )
-        if (selected.size < budget) {
-          const rest = [...nameSnapshot.keys()]
-            .filter((dir) => !selected.has(dir))
-            .sort(
-              (a, b) =>
-                (w.contentCheckedAt.get(a) || 0) -
-                (w.contentCheckedAt.get(b) || 0),
-            )
-          for (const dir of rest) {
-            if (selected.size >= budget) break
-            selected.add(dir)
-          }
-        }
-
-        // stat 选中目录并与旧内容快照合并：未选中目录沿用旧条目（其名称
-        // 事实未变——名称变化的目录已在必检集合内；size/mtime 陈旧由轮转
-        // 保证有限窗口内刷新）。树中消失的目录随合并自然移除
-        const fresh = await statSelectedDirEntries(nameSnapshot, selected)
-        const merged = new Map()
-        const checkedAt = Date.now()
-        for (const dir of nameSnapshot.keys()) {
-          const freshEntries = fresh.get(dir)
-          if (freshEntries) {
-            merged.set(dir, freshEntries)
-            w.contentCheckedAt.set(dir, checkedAt)
-            continue
-          }
-          const oldEntries = w.statSnapshot.get(dir)
-          if (oldEntries) merged.set(dir, oldEntries)
-        }
-        for (const dir of [...w.contentCheckedAt.keys()]) {
-          if (!nameSnapshot.has(dir)) w.contentCheckedAt.delete(dir)
-        }
-
-        // 内容差异（选中目录内的条目增删与同名覆盖一并显形；未选中目录
-        // 新旧条目相同不产生差异）
-        const changedDirs = computeStatSnapshotDiff(
-          w.root,
-          w.statSnapshot,
-          merged,
-        )
-        w.statSnapshot = merged
-        w.snapshot = nameSnapshot
-        w.snapshotRevision += 1
-        if (changedDirs.length === 0) {
-          w.idleRounds += 1
-          // 热点子树本轮内容校验未见变化：清空热点，后续轮次回到全树遍历
-          w.lastHotDirs = []
-          return
-        }
-        w.idleRounds = 0
-        w.lastHotDirs = changedDirs
-        scheduleBroadcast(w, changedDirs)
-        return
-      }
-
-      if (isFullRound) {
-        const changedDirs = computeSnapshotDiff(
-          w.root,
-          w.snapshot,
-          /** @type {Map<string, string[]>} */ (snapshot),
-        )
-        if (changedDirs.length === 0) {
-          w.idleRounds += 1
-          w.lastHotDirs = [] // 全树确认无变更：无热点，后续轮次保持全树遍历
-          return
-        }
-        w.snapshot = snapshot
-        w.snapshotRevision += 1
-        // 名称变化已触发重扫（扫描会读到当前内容）。OPT-9：内容基线不再整体
-        // 置空——变化目录已记入热点，下个内容校验轮按渐进分桶 stat 这些目录
-        // 并合并刷新基线（扫描完成时基线仍由 applyFull/PartialBaseline 置空
-        // 重建，两条路径互不冲突）
-        w.idleRounds = 0 // 有变更：退避重置，下一轮回到基础间隔
-        w.lastHotDirs = changedDirs
-        scheduleBroadcast(w, changedDirs)
-        return
-      }
-
-      // 热点轮（PERF-4）：差异只比较本轮访问的子树，基线按子树合并——
-      // 范围外目录视为未变，由周期性全量轮兜底冷区域。
-      const changedDirs = computeSnapshotDiff(
-        w.root,
-        hotOldSub(w, w.root, hot.hotRels, hot.partial),
-        hot.partial,
-      )
-      // 基线合并：先移除各热点子树的旧条目（含本轮发现已删除的子树），
-      // 再写入新采集条目；根目录条目直接覆盖
-      for (const rel of hot.hotRels) {
-        removeSnapshotSubtree(w, path.join(w.root, ...rel.split('/')))
-      }
-      for (const [dir, names] of hot.partial) w.snapshot.set(dir, names)
-      if (changedDirs.length === 0) {
-        // 热点区域暂无新变化：保留热点继续盯（下载/解压可能分批写入），
-        // 退避照常爬梯；全量回扫周期到期后由全量轮确认并清空热点
-        w.idleRounds += 1
-        return
-      }
-      // OPT-9：内容基线不再整体置空——变化目录已记入热点，下个内容校验轮
-      // 按渐进分桶 stat 并合并刷新（扫描完成时仍由 baseline 置空重建）
-      w.snapshotRevision += 1
-      w.idleRounds = 0
-      w.lastHotDirs = changedDirs
-      scheduleBroadcast(w, changedDirs)
-    })
+    .then(() => walkOnce(w, silent))
     .catch(async (err) => {
       // OPT-16：异常不再立即停监控——瞬时故障进入退避重探（根目录恢复可达
       // 后自动恢复巡检），连续失败超限才停止并通知渲染层。

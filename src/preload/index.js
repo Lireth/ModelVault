@@ -4,14 +4,14 @@ import { attachIpcErrorCode } from '../shared/error-codes'
 
 /**
  * IPC 通道白名单：渲染进程只能通过以下通道通信，防止任意通道调用。
- * 所有 invoke 均经过白名单校验（统一入口，新增通道必须先在 shared/ipc-schema.js
+ * 所有 invoke 均经过白名单校验（统一入口，新增通道必须先在 shared/ipc-schema/
  * 注册表登记）。O2 单一来源：白名单由 schema 注册表键集派生，不再独立维护，
  * 与主进程注册点的一致性由 tests/ipcSchema.test.js 双向对账锁定。
  */
 const VALID_INVOKE_CHANNELS = new Set(Object.keys(IPC_PAYLOAD_SCHEMAS))
 
 /**
- * 事件通道白名单（O9 单一来源）：由 shared/ipc-schema.js 的
+ * 事件通道白名单（O9 单一来源）：由 shared/ipc-schema/ 的
  * IPC_EVENT_CHANNELS 派生，不再独立维护；preload 的 subscribe 调用点
  * 与该清单的一致性由 tests/ipcSchema.test.js 对账锁定。
  */

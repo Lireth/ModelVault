@@ -240,6 +240,25 @@ describe('SettingsPage 主题跟随系统与自定义强调色', () => {
   })
 })
 
+describe('SettingsPage 脏检测覆盖全部保存字段', () => {
+  it('仅切换「自动每日备份标注」也视为未保存修改，关闭需确认', async () => {
+    const wrapper = await mountSettings()
+    const row = wrapper
+      .findAll('.setting-row')
+      .find((r) => r.text().includes('自动每日备份标注'))
+    expect(row).toBeTruthy()
+    // 默认开启：关闭该开关后即存在未保存修改
+    await row.find('input[type="checkbox"]').setValue(false)
+    await wrapper.find('button[title="关闭设置页面"]').trigger('click')
+    await flushPromises()
+    expect(state.confirm.visible).toBe(true)
+    acceptConfirm()
+    await flushPromises()
+    expect(state.settingsOpen).toBe(false)
+    wrapper.unmount()
+  })
+})
+
 describe('SettingsPage 后台哈希预热策略（O1）', () => {
   it('切换策略后进入保存载荷（默认仅重复候选）', async () => {
     window.api.settings.update.mockImplementation((patch) =>

@@ -45,7 +45,7 @@ import {
   slimModelsForList,
   logPayloadSize,
 } from '../src/main/ipc/models/list-payload'
-import { decorateCache } from '../src/main/ipc/models/model-state'
+import { decorateCache } from '../src/main/services/decorate/state'
 import { setModelMeta } from '../src/main/services/store'
 import { getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
 import logger from '../src/main/logger'

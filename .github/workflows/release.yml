@@ -45,10 +45,13 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v7
 
-      - name: 安装 Node.js 22
+      # Node 口径与 ci.yml 门禁腿统一（O-6）：CI 绿即出货构建环境已逐 PR
+      # 验证，消除「验证环境与发布环境行为漂移」；此前「沿用 Node 22」为
+      # 历史遗留而非刻意选择。engines >=22.22.2 仍为开发者环境下限
+      - name: 安装 Node.js 24
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm # 缓存 npm 依赖包
 
       # 缓存 Electron / electron-builder 二进制（.npmrc 指向 npmmirror，

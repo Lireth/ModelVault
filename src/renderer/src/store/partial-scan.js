@@ -10,6 +10,7 @@ import {
   dedupeAndPruneDescendants,
   isRelDirInScope,
 } from '../../../shared/scan-dirs'
+import { errorMessage } from '../../../shared/error-text'
 
 /**
  * 局部增量扫描（A-03，watcher 变更子树驱动，A-04 自 appStore.js 拆出）。
@@ -309,7 +310,7 @@ export async function partialScanModels(dirs) {
     }
   } catch (err) {
     if (root === state.folder && token === scanToken) {
-      toast('error', `增量刷新失败: ${err.message}`)
+      toast('error', `增量刷新失败: ${errorMessage(err)}`)
     }
   } finally {
     finalize()

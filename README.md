@@ -1,10 +1,10 @@
 # ModelVault（模匣）
 
 ![Platform](https://img.shields.io/badge/Windows-10%2B-0078D6?logo=windows11&logoColor=white)
-![Electron](https://img.shields.io/badge/Electron-44-47848F?logo=electron&logoColor=white)
+![Electron](https://img.shields.io/badge/Electron-45-47848F?logo=electron&logoColor=white)
 ![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D?logo=vuedotjs&logoColor=white)
 ![Node](https://img.shields.io/badge/Node.js-%E2%89%A522.22-339933?logo=nodedotjs&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-vitest%201235%2B-6E9F18?logo=vitest&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-vitest%201600%2B-6E9F18?logo=vitest&logoColor=white)
 ![Release](https://img.shields.io/github/v/release/Lireth/ModelVault?include_prereleases&label=release)
 ![License](https://img.shields.io/github/license/Lireth/ModelVault)
 
@@ -78,22 +78,24 @@
 
 ## 快速开始
 
-环境要求：Windows 10 及以上，Node.js ≥ 22.22.2（`package.json` `engines` 强制要求）。
+环境要求：Windows 10 及以上，Node.js ≥ 22.22.2（`package.json` `engines` 强制要求；CI 与发布构建统一以 Node 24 执行）。
 
 ```bash
-# 1. 安装依赖
+# 1. 安装依赖（prepare 脚本自动激活 husky pre-commit 钩子）
 npm install
 
 # 2. 启动开发模式（热重载）
 npm start
 ```
 
+> pre-commit 门禁（lint-staged）：提交前对**暂存文件**依次执行 `eslint --fix` 与 `prettier --write`（js/mjs/cjs/vue），json/css/html/md/yml 走 `prettier --write`；修复结果自动重新暂存，ESLint 报错即阻断提交。CI 全量门禁口径不变，钩子仅把反馈前移到本地。
+
 ## 技术栈
 
 | 组件             | 版本 | 说明                                   |
 | ---------------- | ---- | -------------------------------------- |
-| Electron         | ^44  | 跨平台桌面运行时                       |
-| electron-vite    | ^5   | 构建/开发工具链，内置 HMR 热重载       |
+| Electron         | ^45  | 跨平台桌面运行时                       |
+| electron-vite    | ^6   | 构建/开发工具链，内置 HMR 热重载       |
 | Vue 3            | ^3.5 | 渲染进程前端框架                       |
 | electron-builder | ^26  | Windows 打包（portable 单文件便携版）  |
 | Vite             | ^7   | 底层构建引擎                           |
@@ -118,17 +120,18 @@ npm start
 
 ## 常用脚本
 
-| 命令                        | 说明                                                                            |
-| --------------------------- | ------------------------------------------------------------------------------- |
-| `npm start` / `npm run dev` | 启动开发模式（主进程/渲染进程热重载）                                           |
-| `npm run build`             | 编译主进程、preload、渲染进程到 `out/`                                          |
-| `npm run lint`              | ESLint 代码检查（flat config，错误级规则）                                      |
-| `npm run typecheck`         | TypeScript checkJs 类型检查（shared 契约层 + preload + 主进程服务层，渐进扩展） |
-| `npm test`                  | 运行单元测试（vitest，`test:watch` 为监视模式）                                 |
-| `npm run test:coverage`     | 运行单元测试并生成覆盖率报告（含防退化阈值门禁）                                |
-| `npm run preview`           | 以生产构建产物启动应用预览                                                      |
-| `npm run dist`              | 编译并打包单文件便携版 EXE 到 `dist/{version}/`                                 |
-| `npm run dist:dir`          | 编译并生成免安装目录（快速验证打包结果）                                        |
+| 命令                        | 说明                                                                         |
+| --------------------------- | ---------------------------------------------------------------------------- |
+| `npm start` / `npm run dev` | 启动开发模式（主进程/渲染进程热重载）                                        |
+| `npm run build`             | 编译主进程、preload、渲染进程到 `out/`                                       |
+| `npm run lint`              | ESLint 代码检查（flat config，错误级规则）                                   |
+| `npm run typecheck`         | TypeScript checkJs 纯类型检查（shared/preload/main/renderer JS，严格度棘轮） |
+| `npm test`                  | 运行单元测试（vitest，`test:watch` 为监视模式）                              |
+| `npm run test:coverage`     | 运行单元测试并生成覆盖率报告（含防退化阈值门禁）                             |
+| `npm run smoke`             | 启动 `out/` 编译产物冒烟检查（主窗口/页面加载/preload+IPC 往返/图片协议）    |
+| `npm run preview`           | 以生产构建产物启动应用预览                                                   |
+| `npm run dist`              | 编译并打包单文件便携版 EXE 到 `dist/{version}/`                              |
+| `npm run dist:dir`          | 编译并生成免安装目录（快速验证打包结果）                                     |
 
 ## 打包说明
 
@@ -144,23 +147,29 @@ ModelVault/
 ├── build/                        # 打包资源：应用图标 icon.ico
 ├── image/                        # 软件界面截图（README 展示用）
 ├── .github/workflows/            # CI 质量门禁（ci.yml）+ 标签发布构建（release.yml）
-├── scripts/                      # 工具脚本（应用图标生成 / CSP 检查）
+├── scripts/                      # 工具脚本（启动冒烟 smoke / 应用图标生成 / CSP 检查）
 ├── src/
-│   ├── shared/                   # 主/渲染进程共享常量（分类标签/扩展名/默认设置/枚举）
+│   ├── shared/                   # 主/渲染进程共享契约与常量（分类标签/扩展名/默认设置/
+│   │                             #   枚举/错误码；IPC 契约注册表按域拆分在 ipc-schema/，
+│   │                             #   异常字段安全读取助手 error-text.js）
 │   ├── main/                     # 主进程
 │   │   ├── index.js              # 应用入口：生命周期、单实例锁、全局错误处理
 │   │   ├── windows/mainWindow.js # 主窗口创建/管理（窗口状态记忆、WCO 标题栏）
 │   │   ├── menu.js               # 窗口级快捷键（无原生菜单栏模式）
 │   │   ├── ipc.js                # IPC 处理器注册入口（应用信息/主题/异常上报）
-│   │   ├── ipc/models/           # 模型管理 IPC 处理器（按域拆分：scan/decorate/covers/
-│   │   │                         #   meta/misc/files/civitai/backup/store/model-state）
-│   │   ├── protocol.js           # mvimg:// / civimg:// 自定义图片协议（白名单校验）
-│   │   ├── fatal-error.js / quit.js / theme.js / logger.js / utils.js
+│   │   ├── ipc/models/           # 模型管理 IPC 适配层（按域拆分：scan/decorate/covers/
+│   │   │                         #   meta/misc/files/civitai/backup/store/）
+│   │   ├── protocol.js           # mvimg:// / civimg:// 图片协议门面（protocol/：
+│   │   │                         #   local-image 白名单校验 / remote-image CDN 代理）
+│   │   ├── fatal-error.js / quit.js / theme.js / logger.js / smoke.js（冒烟检查项）
+│   │   ├── utils.js              # 共享原语门面（utils/：路径/并发/网络/进程/文件系统）
 │   │   └── services/             # 主进程服务层：扫描分类、关联存储（.modelvault/）、
 │   │                             #   原子写入、元数据重关联、目录监控、封面/缩略图、
-│   │                             #   备份恢复、检查更新、Civitai 客户端、哈希预热、
+│   │                             #   装饰管线领域事实（decorate/）、备份恢复、
+│   │                             #   检查更新、Civitai 客户端、哈希预热、
 │   │                             #   safetensors 头部解析等
-│   ├── preload/index.js          # 预加载脚本：contextBridge + IPC 通道白名单
+│   ├── preload/                  # 预加载脚本：index.js contextBridge + IPC 通道白名单、
+│   │                             #   thumb-preload.js 缩略图渲染子窗口
 │   └── renderer/                 # 渲染进程（Vue 3）
 │       └── src/
 │           ├── App.vue / main.js / error-report.js  # 根组件 / 入口 / 错误上报链路
@@ -182,9 +191,9 @@ ModelVault/
 
 ### 主进程与渲染进程通信
 
-渲染进程**没有**裸 `invoke` 入口，所有 invoke 通道必须在 `src/shared/ipc-schema.js` 注册表登记（单一来源：preload 白名单由注册表键集派生，payload schema 一并声明，未登记通道被 fail-closed 拒绝）：
+渲染进程**没有**裸 `invoke` 入口，所有 invoke 通道必须在 `src/shared/ipc-schema/` 注册表登记（O-3 按域拆分：`schema-*.js` 域文件声明、`index.js` 聚合门面为唯一导入入口；单一来源：preload 白名单由注册表键集派生，payload schema 一并声明，未登记通道被 fail-closed 拒绝）：
 
-1. 在 `src/shared/ipc-schema.js` 的 `IPC_PAYLOAD_SCHEMAS` 中登记通道：带参通道用 `vObj`/`vStr` 等构造器声明 payload 结构门禁，无参通道登记 `vVoid()`：
+1. 在 `src/shared/ipc-schema/` 对应域文件（`schema-app.js` / `schema-meta.js` 等 `schema-*.js`）中登记通道：带参通道用 `vObj`/`vStr` 等构造器声明 payload 结构门禁，无参通道登记 `vVoid()`：
 
 ```js
 'my:channel': vObj({ fields: { id: vStr({ required: true, max: 2000 }) } })
@@ -206,7 +215,7 @@ wrapHandler('my:channel', async (event, payload) => {
 
 ### 类型检查
 
-项目为纯 JavaScript，以 TypeScript 编译器 `checkJs` 模式做**纯类型检查**（`npm run typecheck`，无构建产物）：`tsconfig.json` 当前覆盖 `src/shared/`（IPC 通道单一来源注册表、默认设置等跨进程契约）、`src/preload/`、`src/main/` 全层（services、ipc handlers、协议/窗口/入口）以及 `src/renderer/src/` 全部 `.js`（store/composables/components 纯逻辑/常量；`.vue` 模板不在 checkJs 范围，由组件测试覆盖）。`src/renderer/src/store/global.d.ts` 声明 `window.api` 与 `*.vue`/`*.css` 模块。覆盖范围与严格度按棘轮渐进扩展：严格度开关仅开启「实测零错误（或一次性修复后归零）」的项（当前已开启 `strictFunctionTypes` / `strictBindCallApply` / `noImplicitThis` / `noFallthroughCasesInSwitch` / `noImplicitOverride` / `noUncheckedIndexedAccess` / `noImplicitReturns` 七项；`strictNullChecks` / `noImplicitAny` / `useUnknownInCatchVariables` 等高错误量开关记账待消化，棘轮台账见 `tsconfig.json` 注释）；为跨模块共享的数据结构补写 JSDoc 类型标注（如 `SchemaRule`/`WatcherState`/`BackupManifest` typedef）即可让检查器捕获字段改名/漏改类回归，也是消化剩余严格度开关的主要途径。
+项目为纯 JavaScript，以 TypeScript 编译器 `checkJs` 模式做**纯类型检查**（`npm run typecheck`，无构建产物）：`tsconfig.json` 当前覆盖 `src/shared/`（IPC 通道单一来源注册表、默认设置等跨进程契约）、`src/preload/`、`src/main/` 全层（services、ipc handlers、协议/窗口/入口）以及 `src/renderer/src/` 全部 `.js`（store/composables/components 纯逻辑/常量；`.vue` 模板不在 checkJs 范围，由组件测试覆盖）。`src/renderer/src/store/global.d.ts` 声明 `window.api` 与 `*.vue`/`*.css` 模块。覆盖范围与严格度按棘轮渐进扩展：严格度开关仅开启「实测零错误（或一次性修复后归零）」的项（当前已开启八项：`strictFunctionTypes` / `strictBindCallApply` / `noImplicitThis` / `noFallthroughCasesInSwitch` / `noImplicitOverride` / `noUncheckedIndexedAccess` / `noImplicitReturns` / `useUnknownInCatchVariables`；剩余 `strictNullChecks`（629）→ `noImplicitAny`（879）→ `exactOptionalPropertyTypes` 按错误量递增记账待消化，棘轮台账见 `tsconfig.json` 注释）。`useUnknownInCatchVariables` 消化模式已固化：catch 变量按 unknown 处理，`.message/.code/.name/.stack` 一律经 `src/shared/error-text.js` 纯助手（`errorMessage`/`errorCode`/`errorName`/`errorStack`）安全读取，非 Error 抛出值降级为可读文案、行为不漂移；为跨模块共享的数据结构补写 JSDoc 类型标注（如 `SchemaRule`/`WatcherState`/`BackupManifest` typedef）即可让检查器捕获字段改名/漏改类回归，也是消化剩余严格度开关的主要途径。
 
 ### 快捷键与窗口
 
@@ -221,11 +230,11 @@ wrapHandler('my:channel', async (event, payload) => {
 
 ### 测试
 
-单元测试位于 `tests/`（85 个文件 / 1518 用例；渲染层 store 测试自 appStore.test.js 按域拆分为 appStore*.test.js，共享装配在 `tests/helpers/storeTest.js`）：主进程纯逻辑与 IPC handler（node 环境）、渲染层 store 按域拆分测试、组件交互测试（`@vue/test-utils` + jsdom，文件头 `// @vitest-environment jsdom` 声明）。Electron API 在 `tests/setup.js` 中统一 mock，公共挂载/IPC 脚手架在 `tests/helpers/` 中复用。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证；`npm run test:coverage` 受防退化阈值门禁约束（Statements 75% / Branches 68% / Functions 72% / Lines 77%），门禁按「实测基线下浮 ~10pt」口径随基线上移棘轮渐进上调（棘轮记录见 `vitest.config.mjs` 注释）。
+单元测试位于 `tests/`（91 个文件 / 1623 用例；渲染层 store 测试自 appStore.test.js 按域拆分为 appStore*.test.js，共享装配在 `tests/helpers/storeTest.js`）：主进程纯逻辑与 IPC handler（node 环境）、渲染层 store 按域拆分测试、组件交互测试（`@vue/test-utils` + jsdom，文件头 `// @vitest-environment jsdom` 声明）。Electron API 在 `tests/setup.js` 中统一 mock，公共挂载/IPC 脚手架在 `tests/helpers/` 中复用。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证；`npm run test:coverage` 受防退化阈值门禁约束（Statements 75% / Branches 68% / Functions 72% / Lines 77%），门禁按「实测基线下浮 ~10pt」口径随基线上移棘轮渐进上调（棘轮记录见 `vitest.config.mjs` 注释）。
 
 ### CI 与发版
 
-- `ci.yml`：push 到 main / PR 时运行质量门禁（Node 22/24 矩阵：ESLint → 类型检查 → 单元测试 → 三端编译 → 产物完整性校验 → 覆盖率归档）
+- `ci.yml`：push 到 main / PR 时运行质量门禁（Node 24 单腿：ESLint → Prettier → 类型检查 → 单元测试（含覆盖率门禁）→ 三端编译 → 产物完整性校验 → 启动冒烟 → 覆盖率归档；`release.yml` 打包同为 Node 24，验证与出货构建口径统一）
 - `release.yml`：推送 `v*` 标签触发 Windows 打包，自动创建 GitHub Release 并附加 EXE 与 SHA256 校验和
 - **发版流程与版本号约定（A2）**：版本标签统一采用 `v{major}.{minor}.{patch}` 语义化格式（如 `v0.6.0`），且必须与 `package.json` 的 `version` 一致（workflow 内置校验，不一致即失败）。发版步骤：更新 `package.json` 版本号并提交 → `git tag v0.6.0` → 推送标签即自动构建并创建 Release（新 Release 默认标记为 Latest）；打包流程可在 Actions 页用 `workflow_dispatch` 输入版本号做不建 Release 的演练。历史 `Beta-0.x` 标签为遗留格式：应用内更新只识别 v 前缀纯数字三段版本（V-06 安全设计），Latest 为遗留标签时会自动回查 Release 列表取最新合规版本，列表内也无合规版本则视为暂无更新
 - **代码签名（E1）**：配置仓库 Secrets `CSC_LINK`（base64 PFX）与 `CSC_KEY_PASSWORD` 后，electron-builder 自动为 EXE 做 SHA256 Authenticode 签名；`MODELVAULT_SIGNER_THUMBPRINT`（证书 SHA1 指纹）会在构建期注入主进程，应用内更新下载复用与安装前均强制「签名有效 + 指纹一致」。未配置证书时构建继续，应用内更新退化为仅 SHA256 校验

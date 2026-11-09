@@ -92,3 +92,25 @@ export const NSFW_BLUR_KEYS = new Set(NSFW_BLUR_DEFS.map((d) => d.key))
  * 上限 4：并发收益受磁盘随机读限制，更高并发只放大内存与句柄占用。
  */
 export const WARMUP_CONCURRENCY_OPTIONS = [1, 2, 3, 4]
+
+/** 哈希预热并发数合法区间（由选项派生，避免多处硬编码 1/4） */
+export const MIN_WARMUP_CONCURRENCY = Math.min(...WARMUP_CONCURRENCY_OPTIONS)
+export const MAX_WARMUP_CONCURRENCY = Math.max(...WARMUP_CONCURRENCY_OPTIONS)
+
+/**
+ * 模型自由标签上限（F-5 单一来源）：主进程规范化、IPC 前置校验与
+ * 渲染层编辑器共用，避免三端各自维护 20/32 两份魔数。
+ */
+export const MAX_TAGS = 20
+/** 单个标签文本长度上限（trim 后截断） */
+export const MAX_TAG_LEN = 32
+
+/** 智能视图数量与名称长度上限（主进程规范化与渲染层前置校验共用） */
+export const MAX_SAVED_VIEWS = 20
+export const MAX_SAVED_VIEW_NAME = 30
+
+/** 智能视图内自由标签筛选数量上限（与单模型标签上限同值但语义独立） */
+export const MAX_VIEW_TAG_FILTERS = 20
+
+/** 单次导入 Civitai 示例图数量上限（schema、handler 与详情页文案共用） */
+export const MAX_IMPORT_IMAGES = 20

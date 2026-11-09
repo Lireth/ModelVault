@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { errorCode } from '../../shared/error-text'
 
 /**
  * 原子写入文本文件（先写临时文件再重命名）（C2 自 store.js 拆出）。
@@ -33,10 +34,10 @@ export async function renameReplacing(tmp, file) {
       return
     } catch (err) {
       const retriable =
-        err.code === 'EPERM' ||
-        err.code === 'EEXIST' ||
-        err.code === 'EBUSY' ||
-        err.code === 'EACCES'
+        errorCode(err) === 'EPERM' ||
+        errorCode(err) === 'EEXIST' ||
+        errorCode(err) === 'EBUSY' ||
+        errorCode(err) === 'EACCES'
       if (!retriable || attempt >= RENAME_MAX_ATTEMPTS) throw err
       // OPT-13：线性 20ms×5（总 300ms）在杀毒/索引器占用窗口面前偏短，
       // 改指数退避（25→50→100→200→400，总 ~775ms）覆盖更长的占用窗口

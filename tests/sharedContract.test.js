@@ -30,7 +30,12 @@ import {
   NSFW_BLUR_DEFS,
   NSFW_BLUR_KEYS,
 } from '../src/shared/app-enums'
-import { DEFAULT_SETTINGS } from '../src/shared/defaults'
+import {
+  BOOTSTRAP_SETTING_KEYS,
+  DEFAULT_SETTINGS,
+  LIBRARY_SETTING_KEYS,
+  SETTINGS_FORM_FIELDS,
+} from '../src/shared/defaults'
 import { isRelDirInScope, isRelKeyInScope } from '../src/shared/scan-dirs'
 // scanner 不依赖 electron（仅 node 内置 + shared），可直接在 node 环境导入
 import { MODEL_EXTENSIONS as SCANNER_EXTS } from '../src/main/services/scanner'
@@ -228,5 +233,42 @@ describe('shared/defaults', () => {
 
   it('DEFAULT_SETTINGS 被冻结（防止双端运行期意外改写共享默认值）', () => {
     expect(Object.isFrozen(DEFAULT_SETTINGS)).toBe(true)
+  })
+
+  it('库设置键清单 = 默认设置剔除引导字段（新增字段自动纳入）', () => {
+    expect([...BOOTSTRAP_SETTING_KEYS].sort()).toEqual([
+      'modelsFolder',
+      'modelsFolders',
+    ])
+    const expected = Object.keys(DEFAULT_SETTINGS)
+      .filter((key) => !BOOTSTRAP_SETTING_KEYS.includes(key))
+      .sort()
+    expect([...LIBRARY_SETTING_KEYS].sort()).toEqual(expected)
+  })
+
+  it('设置页表单字段均来自库设置清单且无重复', () => {
+    const allowed = new Set(LIBRARY_SETTING_KEYS)
+    const keys = SETTINGS_FORM_FIELDS.map((field) => field.key)
+    expect(new Set(keys).size).toBe(keys.length)
+    for (const field of SETTINGS_FORM_FIELDS) {
+      expect(allowed.has(field.source || field.key)).toBe(true)
+    }
+  })
+
+  it('设置页表单覆盖所有「库层布尔/文本/数组/数字」字段（白名单除外）', () => {
+    // 这些库字段由其它入口维护，不属于设置页表单
+    const excluded = new Set([
+      'viewMode',
+      'sortAsc',
+      'autoCheckUpdate',
+      'savedViews',
+    ])
+    const formSources = new Set(
+      SETTINGS_FORM_FIELDS.map((field) => field.source || field.key),
+    )
+    const missing = LIBRARY_SETTING_KEYS.filter(
+      (key) => !excluded.has(key) && !formSources.has(key),
+    )
+    expect(missing).toEqual([])
   })
 })

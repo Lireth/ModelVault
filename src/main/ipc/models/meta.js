@@ -7,15 +7,13 @@ import {
   setModelMetaMany,
 } from '../../services/store'
 import { wrapHandler, checkModelId, checkModelIdInRoot } from '../handler'
+import { MAX_TAGS } from '../../../shared/app-enums'
 
 /**
  * 元数据链路：详情页标注保存、快捷标记（收藏/NSFW/评分）、自由标签（F-5）。
  * C1：批量标记/标签由单次 IPC 合并处理（逐项校验 + 逐项失败原因），避免
  * 万级选中时产生万次 invoke 与完整 meta 回包。
  */
-
-/** 自由标签上限（与 store-meta normalizeTags 的截断一致，前置校验用） */
-const MAX_TAGS = 20
 
 /** 标签名称校验（F4 全库操作入口）：非空字符串（长度上限由 schema 门禁约束） */
 function checkTagName(tag) {

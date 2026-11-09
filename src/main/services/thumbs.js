@@ -8,7 +8,8 @@ import { getCurrentRoot } from './store-paths'
 import { ensureLibrarySubdir } from './store-meta-persist'
 import { runWithConcurrency } from '../utils'
 import { renderThumbFromPath } from './thumb-renderer'
-import { toImageUrl } from '../protocol'
+import { toImageUrl } from '../../shared/image-url'
+import { errorCode, errorMessage } from '../../shared/error-text'
 
 /**
  * 封面缩略图缓存：
@@ -177,8 +178,8 @@ export async function readThumbDirSnapshot() {
   try {
     return new Set(await fs.readdir(getThumbsDir()))
   } catch (err) {
-    if (err?.code !== 'ENOENT')
-      logger.warn(`缩略图目录枚举失败（回退逐个探测）: ${err.message}`)
+    if (errorCode(err) !== 'ENOENT')
+      logger.warn(`缩略图目录枚举失败（回退逐个探测）: ${errorMessage(err)}`)
     return null
   }
 }
@@ -293,7 +294,7 @@ export async function getThumbPathDeferred(absCover) {
     return ''
   } catch (err) {
     // 源图 stat 失败（被删/离线）不缓存：可能是瞬时状态，下轮请求重新探测
-    logger.warn(`缩略图预检失败（回退原图）: ${err.message}`)
+    logger.warn(`缩略图预检失败（回退原图）: ${errorMessage(err)}`)
     return ''
   }
 }
@@ -372,7 +373,7 @@ export async function drainDeferredThumbs(
         }
       } catch (err) {
         // 源图 stat 失败/落盘失败等瞬态异常：仅记日志，不负缓存
-        logger.warn(`后台缩略图生成失败（回退原图）: ${err.message}`)
+        logger.warn(`后台缩略图生成失败（回退原图）: ${errorMessage(err)}`)
       }
     },
     concurrency,
@@ -404,7 +405,8 @@ export async function pruneThumbs(keepNames) {
     )
     logger.info(`已清理 ${stale.length} 个失效缩略图`)
   } catch (err) {
-    if (err.code !== 'ENOENT') logger.warn(`缩略图清理失败: ${err.message}`)
+    if (errorCode(err) !== 'ENOENT')
+      logger.warn(`缩略图清理失败: ${errorMessage(err)}`)
   }
 }
 
@@ -442,6 +444,7 @@ export async function removeThumbsForSources(absCovers) {
     )
     logger.info(`已清理 ${stale.length} 个移除封面对应的缩略图`)
   } catch (err) {
-    if (err.code !== 'ENOENT') logger.warn(`缩略图清理失败: ${err.message}`)
+    if (errorCode(err) !== 'ENOENT')
+      logger.warn(`缩略图清理失败: ${errorMessage(err)}`)
   }
 }

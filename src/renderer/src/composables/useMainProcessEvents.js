@@ -4,6 +4,7 @@ import {
   applyThumbUpdates,
   applyUpdateAvailable,
   handleMenuAction,
+  isLibraryBusy,
   partialScanModels,
   state,
   toast,
@@ -40,6 +41,12 @@ export function useMainProcessEvents() {
    */
   let fsChangedPendingDirs = null
 
+  /** 把本轮变更子树并入待处理集合（多轮事件合并，null 表示当前无待处理） */
+  function queuePendingDirs(dirs) {
+    if (!fsChangedPendingDirs) fsChangedPendingDirs = new Set()
+    for (const d of dirs || []) fsChangedPendingDirs.add(d)
+  }
+
   /**
    * 安排一次二级防抖后的刷新（A-03）：
    * 有变更子树走局部增量扫描，空列表（旧载荷/无法定位）由 store 回退全量扫描。
@@ -53,14 +60,8 @@ export function useMainProcessEvents() {
       if (root !== state.folder || !state.settings.autoRescan) return
       // 扫描/增量刷新/后台校验已占用主进程扫描锁：本轮子树转入待处理，
       // 由忙闲侦听器补扫
-      if (
-        state.scanning ||
-        state.partialScanning ||
-        state.backgroundScanning ||
-        state.importing
-      ) {
-        if (!fsChangedPendingDirs) fsChangedPendingDirs = new Set()
-        for (const d of dirs || []) fsChangedPendingDirs.add(d)
+      if (isLibraryBusy()) {
+        queuePendingDirs(dirs)
         return
       }
       partialScanModels(dirs || [])
@@ -71,14 +72,8 @@ export function useMainProcessEvents() {
     if (root !== state.folder || !state.settings.autoRescan) return
     const subDirs = Array.isArray(dirs) ? dirs : []
     // 扫描/增量刷新/后台校验进行中：累积变更子树，结束后由侦听器补一次局部扫描
-    if (
-      state.scanning ||
-      state.partialScanning ||
-      state.backgroundScanning ||
-      state.importing
-    ) {
-      if (!fsChangedPendingDirs) fsChangedPendingDirs = new Set()
-      for (const d of subDirs) fsChangedPendingDirs.add(d)
+    if (isLibraryBusy()) {
+      queuePendingDirs(subDirs)
       return
     }
     scheduleFsRescan(subDirs, root)

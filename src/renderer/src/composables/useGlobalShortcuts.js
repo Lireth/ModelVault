@@ -43,100 +43,117 @@ export function useGlobalShortcuts(searchFieldEl, clearSearch) {
     return state.settingsOpen || state.statsOpen
   }
 
-  function onGlobalKeydown(e) {
-    const key = e.key.toLowerCase()
-    const ctrl = e.ctrlKey || e.metaKey
-
-    // Ctrl+F：只要网格区可用就聚焦搜索（输入态同样适用，便于随时跳转检索）
-    if (ctrl && key === 'f') {
-      if (isOverlayPanelOpen() || state.scanning || !state.folder) return
+  /**
+   * Ctrl+F：只要网格区可用就聚焦搜索（输入态同样适用，便于随时跳转检索）。
+   * 命中按键即消费（即使当前不可动作），避免落到后续列表快捷键。
+   * @param {KeyboardEvent} e 键盘事件
+   * @param {{key: string, ctrl: boolean}} ctx 归一化按键信息
+   * @returns {boolean} 是否已消费
+   */
+  function handleFocusSearch(e, ctx) {
+    if (!ctx.ctrl || ctx.key !== 'f') return false
+    if (!isOverlayPanelOpen() && !state.scanning && state.folder) {
       const el = /** @type {any} */ (searchFieldEl.value)
       if (el) {
         e.preventDefault()
         el.focus()
         el.select?.()
       }
-      return
     }
+    return true
+  }
 
-    // 输入态保留原生编辑行为；确认层/面板打开时整键让位（F1 独占策略）
-    if (isEditableTarget(e) || state.confirm.visible || isOverlayPanelOpen())
-      return
-
-    const detailOpen = state.selectedId !== null
-
-    if (e.key === 'Escape') {
-      // 详情打开时 Esc 由 ModelDetail 处理（可能涉及脏表单确认）
-      if (!detailOpen) {
-        // 多选为模式态，优先退出；再次 Esc 才轮到清空搜索词
-        if (state.multiSelect.active) {
-          // 长耗时批量进行中：Esc 先请求取消而非直接退出多选（防误退丢上下文），
-          // 批量收尾后再次 Esc 才退出
-          if (state.multiSelect.busy) {
-            requestBatchCancel()
-            toast('info', '已请求取消批量操作，完成后可再次按 Esc 退出多选')
-          } else {
-            exitMultiSelect()
-          }
-          e.preventDefault()
-          return
+  /**
+   * Esc：多选模式优先退出；再次 Esc 才清空搜索词。
+   * 详情打开时 Esc 由 ModelDetail 处理（可能涉及脏表单确认）。
+   * @param {KeyboardEvent} e 键盘事件
+   * @returns {boolean} 是否已消费
+   */
+  function handleEscape(e) {
+    if (e.key !== 'Escape') return false
+    if (state.selectedId === null) {
+      if (state.multiSelect.active) {
+        // 长耗时批量进行中：Esc 先请求取消而非直接退出多选（防误退丢上下文），
+        // 批量收尾后再次 Esc 才退出
+        if (state.multiSelect.busy) {
+          requestBatchCancel()
+          toast('info', '已请求取消批量操作，完成后可再次按 Esc 退出多选')
+        } else {
+          exitMultiSelect()
         }
-        if (state.search) {
-          clearSearch()
-          e.preventDefault()
-        }
-      }
-      return
-    }
-
-    // 详情打开时：←/→ 序列导航（FEA-01，逐个审阅标注的核心工作流）；
-    // Ctrl+D 收藏当前模型；其余让位详情
-    if (detailOpen) {
-      if (
-        (e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
-        !e.altKey &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        !e.shiftKey
-      ) {
         e.preventDefault()
-        openAdjacentDetail(e.key === 'ArrowRight' ? 1 : -1)
-        return
-      }
-      if (ctrl && key === 'd') {
+      } else if (state.search) {
+        clearSearch()
         e.preventDefault()
-        toggleFavorite(state.selectedId)
       }
-      return
     }
+    return true
+  }
 
-    if (ctrl && key === 'a' && state.models.length > 0) {
+  /**
+   * 详情打开时：←/→ 序列导航（FEA-01，逐个审阅标注的核心工作流）；
+   * Ctrl+D 收藏当前模型；其余按键让位详情自有逻辑。
+   * @param {KeyboardEvent} e 键盘事件
+   * @param {{key: string, ctrl: boolean}} ctx 归一化按键信息
+   * @returns {boolean} 是否处于详情态（详情态下后续列表快捷键不再参与）
+   */
+  function handleDetailKeys(e, ctx) {
+    if (state.selectedId === null) return false
+    if (
+      (e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
+      !e.altKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.shiftKey
+    ) {
+      e.preventDefault()
+      openAdjacentDetail(e.key === 'ArrowRight' ? 1 : -1)
+    } else if (ctx.ctrl && ctx.key === 'd') {
+      e.preventDefault()
+      toggleFavorite(state.selectedId)
+    }
+    return true
+  }
+
+  /**
+   * 列表态多选快捷键：Ctrl+A 全选 / Ctrl+D 批量收藏 /
+   * Delete 批量删除（自带确认层，不会直接删文件）。
+   * @param {KeyboardEvent} e 键盘事件
+   * @param {{key: string, ctrl: boolean}} ctx 归一化按键信息
+   */
+  function handleListKeys(e, ctx) {
+    const hasSelection =
+      state.multiSelect.active && state.multiSelect.ids.length > 0
+    if (ctx.ctrl && ctx.key === 'a' && state.models.length > 0) {
       e.preventDefault()
       if (!state.multiSelect.active) toggleMultiSelectMode()
       if (!allFilteredSelected.value) toggleSelectAllFiltered()
       return
     }
-
-    if (
-      ctrl &&
-      key === 'd' &&
-      state.multiSelect.active &&
-      state.multiSelect.ids.length > 0
-    ) {
+    if (ctx.ctrl && ctx.key === 'd' && hasSelection) {
       e.preventDefault()
       batchFavorite(true)
       return
     }
-
-    // Delete 仅在多选且有选中时触发（批量删除自带确认层，不会直接删文件）
-    if (
-      e.key === 'Delete' &&
-      state.multiSelect.active &&
-      state.multiSelect.ids.length > 0
-    ) {
+    if (e.key === 'Delete' && hasSelection) {
       e.preventDefault()
       batchDeleteModels()
     }
+  }
+
+  function onGlobalKeydown(e) {
+    const ctx = {
+      key: e.key.toLowerCase(),
+      ctrl: e.ctrlKey || e.metaKey,
+    }
+    // 有序分发：Ctrl+F 在各态均优先；随后输入态/确认层/面板整键让位，
+    // 最后按详情态/列表态分流（详情态消费全部按键，不落到列表快捷键）
+    if (handleFocusSearch(e, ctx)) return
+    if (isEditableTarget(e) || state.confirm.visible || isOverlayPanelOpen())
+      return
+    if (handleEscape(e)) return
+    if (handleDetailKeys(e, ctx)) return
+    handleListKeys(e, ctx)
   }
 
   onMounted(() => window.addEventListener('keydown', onGlobalKeydown))

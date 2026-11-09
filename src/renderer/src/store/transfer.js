@@ -1,6 +1,7 @@
 import { computed, reactive } from 'vue'
 import { state } from './state'
 import { toast } from './toast'
+import { errorMessage } from '../../../shared/error-text'
 
 /**
  * 跨库移动/复制（F-3，自 appStore 按域拆分的独立小仓库）：
@@ -149,7 +150,7 @@ export async function confirmTransfer(targetRoot) {
       await scanModels()
     }
   } catch (err) {
-    toast('error', `跨库传输失败: ${err.message}`)
+    toast('error', `跨库传输失败: ${errorMessage(err)}`)
   } finally {
     activeTransferOpId = null
     transferState.progress = null

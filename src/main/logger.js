@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import util from 'node:util'
 import { app } from 'electron'
+import { errorMessage } from '../shared/error-text'
 
 /**
  * 轻量级日志模块：同时输出到控制台与日志文件。
@@ -180,7 +181,7 @@ class Logger {
       stream.write(line)
       this.bytesWritten += bytes
     } catch (err) {
-      console.error(`日志写入失败: ${err.message}`)
+      console.error(`日志写入失败: ${errorMessage(err)}`)
     }
   }
 

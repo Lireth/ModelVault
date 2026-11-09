@@ -5,7 +5,7 @@ import {
   decorateCache,
   getThumbDrainPromise,
   setThumbDrainPromise,
-} from './model-state'
+} from '../../services/decorate/state'
 
 /**
  * 缩略图就绪通知子系统（O-2 自 decorate.js 按域拆出）：

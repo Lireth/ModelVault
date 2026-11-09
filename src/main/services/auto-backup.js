@@ -8,6 +8,7 @@ import { DATA_DIR, getCurrentRoot, getSettings } from './store'
 import { releaseMaintenance, tryAcquireMaintenance } from './maintenance-lock'
 import { buildBackupParts } from './backup-export'
 import { writeBackupZipToFile } from './backup-zip'
+import { errorMessage } from '../../shared/error-text'
 
 /**
  * 自动定期元数据备份（OPT-07）：
@@ -260,7 +261,7 @@ export async function runAutoBackupIfDue(now = Date.now()) {
       await renameReplacing(tmp, target)
     } catch (err) {
       await fs.rm(tmp, { force: true }).catch(() => {})
-      return { error: `自动备份写入失败: ${err.message}` }
+      return { error: `自动备份写入失败: ${errorMessage(err)}` }
     }
     await pruneAutoBackups(dir)
     logger.info(`自动元数据备份完成: ${target}（${built.models} 模型）`)

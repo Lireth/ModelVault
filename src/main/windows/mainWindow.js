@@ -5,6 +5,7 @@ import logger from '../logger'
 import { getSettings, atomicWriteFile } from '../services/store'
 import { destroyThumbRenderer } from '../services/thumb-renderer'
 import { themeColors } from '../theme'
+import { errorMessage } from '../../shared/error-text'
 
 /** 默认窗口尺寸 */
 const DEFAULT_WIDTH = 1200
@@ -207,7 +208,7 @@ async function saveWindowState(win) {
     const file = path.join(app.getPath('userData'), WINDOW_STATE_FILE)
     await atomicWriteFile(file, JSON.stringify(state, null, 2))
   } catch (err) {
-    logger.warn(`窗口状态保存失败: ${err.message}`)
+    logger.warn(`窗口状态保存失败: ${errorMessage(err)}`)
   }
 }
 

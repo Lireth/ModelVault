@@ -1,5 +1,6 @@
 import { Worker } from 'node:worker_threads'
 import logger from '../logger'
+import { errorMessage } from '../../shared/error-text'
 
 /**
  * 模型文件 SHA256 计算的后台线程池（P1 主进程非阻塞改造）：
@@ -326,7 +327,7 @@ function recordCrash() {
  * 槽位 worker 崩溃处理：置空实例、终止残留、拒绝当前任务并进入重启流程。
  * @param {HashPoolSlot} slot 崩溃的槽位
  * @param {Worker} w 崩溃的 worker 实例
- * @param {Error} cause 崩溃原因
+ * @param {unknown} cause 崩溃原因
  */
 function handleSlotFailure(slot, w, cause) {
   if (slot.worker !== w) return
@@ -339,7 +340,7 @@ function handleSlotFailure(slot, w, cause) {
   const task = slot.currentTask
   if (task) {
     settleSlot(slot)
-    task.reject(workerCrashError(`哈希工作线程异常: ${cause.message}`))
+    task.reject(workerCrashError(`哈希工作线程异常: ${errorMessage(cause)}`))
   }
   recordCrash()
 }
@@ -450,7 +451,9 @@ function pump() {
     try {
       w = ensureSlotWorker(slot)
     } catch (err) {
-      const failure = workerCrashError(`哈希工作线程创建失败: ${err.message}`)
+      const failure = workerCrashError(
+        `哈希工作线程创建失败: ${errorMessage(err)}`,
+      )
       settleSlot(slot)
       task.reject(failure)
       recordCrash()

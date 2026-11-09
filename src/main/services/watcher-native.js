@@ -8,6 +8,7 @@ import {
   getWatcher,
 } from './watcher-state'
 import { scheduleBroadcast } from './watcher-broadcast'
+import { errorMessage } from '../../shared/error-text'
 
 /**
  * 原生目录事件监听（O12 自 watcher.js 拆出；OP-05）：
@@ -76,7 +77,7 @@ export function startNativeWatch(w) {
     w.nativeWatcher = native
     return true
   } catch (err) {
-    logger.warn(`原生目录监听不可用，继续使用轮询: ${err.message}`)
+    logger.warn(`原生目录监听不可用，继续使用轮询: ${errorMessage(err)}`)
     w.nativeWatcher = null
     return false
   }

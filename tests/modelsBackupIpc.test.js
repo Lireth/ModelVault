@@ -51,7 +51,7 @@ vi.mock('../src/main/services/store.js', async (importOriginal) => {
   }
 })
 
-vi.mock('../src/main/ipc/models/model-state.js', () => ({
+vi.mock('../src/main/services/decorate/state.js', () => ({
   resetDecorateCache: vi.fn(),
   awaitThumbDrain: vi.fn(async () => {}),
 }))
@@ -75,7 +75,7 @@ import {
 import {
   resetDecorateCache,
   awaitThumbDrain,
-} from '../src/main/ipc/models/model-state'
+} from '../src/main/services/decorate/state'
 import { clearDeferredOwners } from '../src/main/ipc/models/decorate'
 import { clearDeferredJobs } from '../src/main/services/thumbs'
 

@@ -6,6 +6,7 @@ import logger from '../logger'
 // 重导出链在模块初始化顺序变化时拿到未就绪绑定）
 import { getCurrentRoot } from './store-paths'
 import { ensureLibrarySubdir } from './store-meta-persist'
+import { errorCode, errorMessage } from '../../shared/error-text'
 
 /**
  * civimg:// 远程图磁盘缓存（O-5）：
@@ -103,7 +104,7 @@ export async function saveCivImageCache(url, buf) {
     try {
       await fs.mkdir(path.dirname(file))
     } catch (err) {
-      if (err.code !== 'EEXIST') throw err
+      if (errorCode(err) !== 'EEXIST') throw err
     }
     // 临时文件 + rename：进程内单调序号防同 URL 并发写入互相截断
     const tmp = `${file}.${process.pid}.${++tmpSeq}.tmp`
@@ -113,7 +114,7 @@ export async function saveCivImageCache(url, buf) {
       await fs.rm(tmp, { force: true }).catch(() => {})
     })
   } catch (err) {
-    logger.warn(`civimg 缓存写入失败（不影响返回）: ${err.message}`)
+    logger.warn(`civimg 缓存写入失败（不影响返回）: ${errorMessage(err)}`)
     return
   }
   pruneCivImageCache().catch(() => {})

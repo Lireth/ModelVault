@@ -1,4 +1,5 @@
 import logger from '../logger'
+import { errorMessage } from '../../shared/error-text'
 
 /**
  * 持久化失败通知（C2 自 store.js 拆出）：
@@ -11,7 +12,7 @@ let storeSaveErrorListener = null
 
 /**
  * 注册持久化失败监听器（传 null 可清除）。
- * @param {((err: Error) => void) | null} fn
+ * @param {((err: unknown) => void) | null} fn
  */
 export function setStoreSaveErrorListener(fn) {
   storeSaveErrorListener = typeof fn === 'function' ? fn : null
@@ -20,15 +21,15 @@ export function setStoreSaveErrorListener(fn) {
 /**
  * 统一处理持久化失败：写日志并通知监听器。
  * 监听器自身异常不影响保存流程（仅降级为日志）。
- * @param {Error} err
+ * @param {unknown} err
  */
 export function notifyStoreSaveError(err) {
-  logger.error(`持久化写入失败: ${err.message}`)
+  logger.error(`持久化写入失败: ${errorMessage(err)}`)
   if (storeSaveErrorListener) {
     try {
       storeSaveErrorListener(err)
     } catch (listenErr) {
-      logger.warn(`落盘失败监听器异常: ${listenErr.message}`)
+      logger.warn(`落盘失败监听器异常: ${errorMessage(listenErr)}`)
     }
   }
 }

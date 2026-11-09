@@ -3,14 +3,13 @@ import { toast, confirmDialog } from './toast'
 import { applyMetaFlags } from './meta-apply'
 import { clearSelectedModel, openDetail } from './detail'
 import { openTransferToLibrary } from './transfer'
+import { MAX_TAGS } from '../../../shared/app-enums'
+import { errorMessage } from '../../../shared/error-text'
 
 /**
  * 单模型文件操作、即时标注、自由标签（F-5）、右键菜单
  * （A-04 自 appStore.js 拆出）。
  */
-
-/** 单模型自由标签上限（与 IPC schema / store-meta 规范化保持一致） */
-const MAX_TAGS = 20
 
 /**
  * 标签覆写核心路径：IPC → 成功后以主进程返回的权威标签同步本地列表元素
@@ -27,8 +26,8 @@ async function writeModelTags(id, tags, opts = {}) {
   try {
     res = await window.api.models.setModelTags(id, tags)
   } catch (err) {
-    if (!opts.silent) toast('error', `标签保存失败: ${err.message}`)
-    return { error: err.message }
+    if (!opts.silent) toast('error', `标签保存失败: ${errorMessage(err)}`)
+    return { error: errorMessage(err) }
   }
   if (res?.error) {
     if (!opts.silent) toast('error', res.error)
@@ -159,7 +158,7 @@ export async function revealModel(modelPath) {
   try {
     res = await window.api.models.reveal(modelPath)
   } catch (err) {
-    toast('error', `打开所在文件夹失败: ${err.message}`)
+    toast('error', `打开所在文件夹失败: ${errorMessage(err)}`)
     return
   }
   if (res?.error) toast('error', res.error)
@@ -175,7 +174,7 @@ export async function deleteModel(id, opts = {}) {
   try {
     res = await window.api.models.deleteModel(id)
   } catch (err) {
-    toast('error', `删除模型失败: ${err.message}`)
+    toast('error', `删除模型失败: ${errorMessage(err)}`)
     return false
   }
   if (res?.error) {
@@ -239,7 +238,7 @@ export function toggleFavorite(id) {
     try {
       res = await window.api.models.setMetaFlags({ id, favorite: next })
     } catch (err) {
-      toast('error', `收藏操作失败: ${err.message}`)
+      toast('error', `收藏操作失败: ${errorMessage(err)}`)
       return false
     }
     if (res?.error) {
@@ -294,7 +293,7 @@ export async function showContextMenu(id) {
   try {
     res = await window.api.models.popupMenu(id)
   } catch (err) {
-    toast('error', `打开右键菜单失败: ${err.message}`)
+    toast('error', `打开右键菜单失败: ${errorMessage(err)}`)
     return
   }
   if (res?.error) toast('error', res.error)
@@ -359,7 +358,7 @@ export async function toggleDisabledModel(id, disabled) {
   try {
     res = await window.api.models.toggleDisabled(id, disabled)
   } catch (err) {
-    toast('error', `禁用/启用失败: ${err.message}`)
+    toast('error', `禁用/启用失败: ${errorMessage(err)}`)
     return false
   }
   if (res?.error) {
@@ -396,7 +395,7 @@ export async function renameModel(id, name) {
   try {
     res = await window.api.models.renameModel(id, trimmed)
   } catch (err) {
-    toast('error', `重命名失败: ${err.message}`)
+    toast('error', `重命名失败: ${errorMessage(err)}`)
     return false
   }
   if (res?.canceled) return false
@@ -435,7 +434,7 @@ export async function moveModelTo(id) {
   try {
     res = await window.api.models.moveModelTo(id)
   } catch (err) {
-    toast('error', `移动失败: ${err.message}`)
+    toast('error', `移动失败: ${errorMessage(err)}`)
     return false
   }
   if (res?.canceled) return false
@@ -552,7 +551,7 @@ export async function importModels(mode = 'copy', paths = null) {
     await partialScanModels([res.targetRelDir ?? ''])
     return true
   } catch (err) {
-    toast('error', `导入失败: ${err.message}`)
+    toast('error', `导入失败: ${errorMessage(err)}`)
     return false
   } finally {
     state.importing = false

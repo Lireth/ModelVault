@@ -4,6 +4,7 @@ import logger from '../logger'
 import { getJournalDir } from './store-paths'
 import { isUnsafeModelKey, normalizeModelMeta } from './store-meta-normalize'
 import { metaState } from './store-meta-state'
+import { errorCode, errorMessage } from '../../shared/error-text'
 
 /**
  * 增量日志（O5，自 store-meta.js 拆出）：
@@ -65,7 +66,7 @@ export async function removeJournalDir() {
   try {
     await fs.rm(getJournalDir(), { recursive: true, force: true })
   } catch (err) {
-    logger.warn(`增量日志目录清理失败: ${err.message}`)
+    logger.warn(`增量日志目录清理失败: ${errorMessage(err)}`)
   }
 }
 
@@ -83,7 +84,8 @@ export async function loadJournal(snapshotSeq) {
   try {
     files = await fs.readdir(getJournalDir())
   } catch (err) {
-    if (err.code !== 'ENOENT') logger.warn(`增量日志读取失败: ${err.message}`)
+    if (errorCode(err) !== 'ENOENT')
+      logger.warn(`增量日志读取失败: ${errorMessage(err)}`)
     return
   }
   // 按文件名 seq 数值升序回放（写盘侧零填充，字符串序与数值序一致；
@@ -102,7 +104,7 @@ export async function loadJournal(snapshotSeq) {
     } catch (err) {
       // 原子写保证正常情况下不会出现；损坏批次隔离后继续回放后续批次，
       // 避免一个坏文件让之后所有增量永久无法加载
-      logger.warn(`增量日志批次损坏，已隔离（${name}）: ${err.message}`)
+      logger.warn(`增量日志批次损坏，已隔离（${name}）: ${errorMessage(err)}`)
       try {
         await fs.rm(file, { force: true })
       } catch {

@@ -9,6 +9,7 @@ import {
   isSafeUpdateVersion,
   setPendingUpdate,
 } from './update-download'
+import { errorMessage } from '../../shared/error-text'
 
 /**
  * 应用内检查更新（E1，F-6 扩展下载链路）：
@@ -116,7 +117,7 @@ async function fetchReleaseJson(url, current) {
     )
     return { data }
   } catch (err) {
-    return { error: `更新信息解析失败: ${err.message}` }
+    return { error: `更新信息解析失败: ${errorMessage(err)}` }
   }
 }
 
@@ -219,7 +220,7 @@ export async function checkForUpdate() {
     ) {
       return { error: '更新检查超时，请检查网络后重试', current }
     }
-    return { error: `更新检查失败: ${err.message}`, current }
+    return { error: `更新检查失败: ${errorMessage(err)}`, current }
   }
 }
 
@@ -230,7 +231,7 @@ export async function checkForUpdate() {
  * - 设置关闭：直接跳过，不发任何网络请求；
  * - 检查失败/无更新：静默结束（仅由 check 内部记日志），不打扰用户；
  * - 仅「有更新」时经 notify 推送渲染层（载荷为检查结果的渲染层所需子集）。
- * @param {{autoCheckUpdate: boolean}} settings 应用设置（getSettings 合并视图）
+ * @param {{autoCheckUpdate?: boolean}} settings 应用设置（getSettings 合并视图）
  * @param {() => Promise<{error?: string, hasUpdate?: boolean, current?: string,
  *   latest?: string, releaseUrl?: string, releaseNotes?: string,
  *   canDownload?: boolean, downloadSize?: number}>} check 检查函数（生产为 checkForUpdate）

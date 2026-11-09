@@ -7,6 +7,12 @@ import { validateIpcPayload } from '../../shared/ipc-schema'
 import { IPC_ERROR, classifyException } from '../../shared/error-codes'
 import { isPathRealWithin, resolveRealPath } from '../utils'
 import { isThumbRendererContents } from '../services/thumb-renderer'
+import {
+  maintenanceBusyMessage,
+  releaseMaintenance,
+  tryAcquireMaintenance,
+} from '../services/maintenance-lock'
+import { errorMessage, errorName, errorStack } from '../../shared/error-text'
 
 /**
  * IPC handler 统一包装与入参校验助手（O1/O2 样板收敛）：
@@ -20,7 +26,7 @@ import { isThumbRendererContents } from '../services/thumb-renderer'
  *
  * wrapHandler 收敛为统一约定：
  * - 校验助手（checkModelId 等）返回错误文案，handler 首行短路返回 { error }；
- * - payload 结构校验（O-2）：按通道 schema 前置校验（shared/ipc-schema.js
+ * - payload 结构校验（O-2）：按通道 schema 前置校验（shared/ipc-schema/
  *   注册表，O2 单一来源），非法 payload 在进入业务代码前即拒绝——schema 只查
  *   类型/边界，handler 内的语义校验与专属文案保持不变；未登记 schema 的通道
  *   一律拒绝并告警（O1 fail-closed），新增通道漏登记不会静默绕过结构门禁；
@@ -103,6 +109,28 @@ export function cancelActiveOp(opId) {
 }
 
 /**
+ * 在全局维护锁内执行 IPC 业务体（OPT-14）：
+ * 拿不到锁时返回统一的忙错误文案，业务体成功/抛错/提前返回均释放令牌，
+ * 语义与各 handler 此前手写的 `tryAcquire + try/finally` 完全一致。
+ * 需要令牌传下游（如 ensureRootStore）时经回调参数取用；服务层内部的
+ * 组合式复用仍使用 maintenance-lock.runMaintenance（抛错版）。
+ * @template T
+ * @param {'scan'|'partial-scan'|'switch'|'load'|'restore'|'health'|'repair'|'import'|'backup'|'file-op'} kind 维护类型
+ * @param {string|null} root 操作绑定的模型根目录
+ * @param {(token: {id: number, kind: string, root: string|null, startedAt: number}) => Promise<T>} fn 业务体
+ * @returns {Promise<T | {error: string}>} 业务体结果或统一忙错误
+ */
+export async function withMaintenanceLock(kind, root, fn) {
+  const token = tryAcquireMaintenance(kind, root)
+  if (!token) return { error: maintenanceBusyMessage() }
+  try {
+    return await fn(token)
+  } finally {
+    releaseMaintenance(token)
+  }
+}
+
+/**
  * 注册一个带统一异常兜底的 IPC handler。
  * @param {string} channel 通道名（日志定位用）
  * @param {(event: import('electron').IpcMainInvokeEvent, payload: any,
@@ -146,18 +174,18 @@ export function wrapHandler(channel, handler, opts = {}) {
       done()
       return result
     } catch (err) {
-      if (err?.name === 'AbortError') {
+      if (errorName(err) === 'AbortError') {
         done('用户取消')
         logger.info(`IPC ${channel}: 用户已取消 [${IPC_ERROR.CANCELED}]`)
         return { canceled: true }
       }
       // 失败路径不受 quiet 静默：done 恒返回耗时，随异常日志带出
       const errorCode = classifyException(err)
-      const ms = done(err?.message || '异常')
+      const ms = done(errorMessage(err) || '异常')
       logger.error(
-        `IPC ${channel} 处理异常 [${errorCode}]（耗时 ${ms}ms）: ${err.stack || err.message}`,
+        `IPC ${channel} 处理异常 [${errorCode}]（耗时 ${ms}ms）: ${errorStack(err) || errorMessage(err)}`,
       )
-      return { error: `${prefix}: ${err.message}` }
+      return { error: `${prefix}: ${errorMessage(err)}` }
     } finally {
       if (opId) activeOps.delete(opId)
     }

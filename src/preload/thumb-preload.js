@@ -1,4 +1,5 @@
 import { ipcRenderer } from 'electron'
+import { errorMessage } from '../shared/error-text'
 
 /* global Image, OffscreenCanvas, createImageBitmap */
 
@@ -63,7 +64,7 @@ ipcRenderer.on('thumb:render', async (_event, task) => {
   } catch (err) {
     ipcRenderer.send('thumb:done', {
       id,
-      error: (err && err.message) || String(err),
+      error: (err && errorMessage(err)) || String(err),
     })
   } finally {
     if (bitmap) bitmap.close()

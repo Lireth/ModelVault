@@ -37,7 +37,11 @@ import {
   updateSettings,
 } from '../src/main/services/store'
 import logger from '../src/main/logger'
-import { setSettingsSaveDelayForTests } from '../src/main/services/store-settings'
+import {
+  normalizeLibrarySettings,
+  setSettingsSaveDelayForTests,
+} from '../src/main/services/store-settings'
+import { LIBRARY_SETTING_KEYS } from '../src/shared/defaults'
 import {
   setSaveRetryDelayForTests,
   setSnapshotWorkerThresholdForTests,
@@ -1000,6 +1004,12 @@ describe('应用设置规范化', () => {
     await flushSettingsSave()
     return loadSettings()
   }
+  it('库设置规范化输出与共享字段清单一致（新增设置项不漏注册）', () => {
+    expect(Object.keys(normalizeLibrarySettings({})).sort()).toEqual(
+      [...LIBRARY_SETTING_KEYS].sort(),
+    )
+  })
+
   it('autoBackup 默认开启，显式关闭保留，非法值回退开启（OPT-07）', async () => {
     let s = await loadSettingsFlushed()
     expect(s.autoBackup).toBe(true)

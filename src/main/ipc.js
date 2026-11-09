@@ -8,13 +8,14 @@ import { exportDiagnostics } from './services/diagnostics'
 import {
   cancelUpdateDownload,
   downloadUpdatePackage,
-  installUpdatePackage,
 } from './services/update-download'
+import { installUpdatePackage } from './services/update-install'
+import { errorMessage } from '../shared/error-text'
 
 /**
  * 注册所有主进程 IPC 处理器。
  * 渲染进程通过 preload 暴露的 window.api 调用这些处理器。
- * 全部通道经 wrapHandler 统一注册（O1 fail-closed）：payload 按 shared/ipc-schema.js
+ * 全部通道经 wrapHandler 统一注册（O1 fail-closed）：payload 按 shared/ipc-schema/
  * 注册表（O2 单一来源）前置校验，未登记 schema 的通道直接拒绝并写告警日志。
  */
 export function registerIpcHandlers() {
@@ -88,7 +89,7 @@ export function registerIpcHandlers() {
       try {
         win.setBackgroundColor(colors.backgroundColor)
       } catch (err) {
-        logger.warn(`窗口背景色更新失败: ${err.message}`)
+        logger.warn(`窗口背景色更新失败: ${errorMessage(err)}`)
       }
     }
     if (win && typeof win.setTitleBarOverlay === 'function') {
@@ -98,7 +99,7 @@ export function registerIpcHandlers() {
           symbolColor: colors.symbolColor,
         })
       } catch (err) {
-        logger.warn(`标题栏主题更新失败: ${err.message}`)
+        logger.warn(`标题栏主题更新失败: ${errorMessage(err)}`)
       }
     }
   })

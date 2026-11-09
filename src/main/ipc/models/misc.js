@@ -15,16 +15,13 @@ import {
 import { sidecarFilesFor } from '../../services/scanner'
 import {
   cancelActiveOp,
+  withMaintenanceLock,
   wrapHandler,
   checkModelIdInRootReal,
   getRealRootPath,
 } from '../handler'
-import {
-  maintenanceBusyMessage,
-  releaseMaintenance,
-  tryAcquireMaintenance,
-} from '../../services/maintenance-lock'
 import { isPathRealWithin } from '../../utils'
+import { errorMessage } from '../../../shared/error-text'
 
 /**
  * 其他模型操作链路：删除模型（回收站 + sidecar 清理）、
@@ -71,9 +68,7 @@ export function registerMiscHandlers() {
       // 维护锁（OPT-14）：删除与扫描/备份恢复/跨库传输互斥——恢复期间删除
       // 会让恢复结果与元数据指向错位。file-op 彼此兼容：渲染层批量删除按
       // 8 路并发调用本通道，严格互斥会让其中 7 路误报忙失败
-      const token = tryAcquireMaintenance('file-op', getCurrentRoot())
-      if (!token) return { error: maintenanceBusyMessage() }
-      try {
+      return withMaintenanceLock('file-op', getCurrentRoot(), async () => {
         // O6：破坏性操作按 realpath 校验归属，拦截库内 junction 指向库外的删除
         const invalid = await checkModelIdInRootReal(id, {
           message: '模型不在当前根目录内，无法删除',
@@ -90,8 +85,8 @@ export function registerMiscHandlers() {
         try {
           await shell.trashItem(id)
         } catch (err) {
-          logger.warn(`模型删除失败: ${err.message}`)
-          return { error: `删除失败: ${err.message}` }
+          logger.warn(`模型删除失败: ${errorMessage(err)}`)
+          return { error: `删除失败: ${errorMessage(err)}` }
         }
         // 同步移除同名的 sidecar 预览图/说明文件（失败不阻塞）
         for (const f of sidecarFilesFor(id)) {
@@ -109,9 +104,7 @@ export function registerMiscHandlers() {
         queueLibraryIndexUpdate(getCurrentRoot(), { removeIds: [id] })
         logger.info(`模型已移入回收站: ${id}`)
         return { ok: true }
-      } finally {
-        releaseMaintenance(token)
-      }
+      })
     },
     { errorPrefix: '删除失败' },
   )
@@ -247,8 +240,8 @@ export function registerMiscHandlers() {
         logger.info(`模型清单已导出: ${result.filePath}（${stat.size} 字节）`)
         return { ok: true, path: result.filePath, sizeBytes: stat.size }
       } catch (err) {
-        logger.warn(`模型清单导出失败: ${err.message}`)
-        return { error: `模型清单导出失败: ${err.message}` }
+        logger.warn(`模型清单导出失败: ${errorMessage(err)}`)
+        return { error: `模型清单导出失败: ${errorMessage(err)}` }
       }
     },
     { errorPrefix: '模型清单导出失败' },

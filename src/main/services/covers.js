@@ -20,6 +20,7 @@ import {
 } from './store-paths'
 import { getReferencedCovers, wasDataReset } from './store-meta'
 import { ensureLibrarySubdir } from './store-meta-persist'
+import { errorCode, errorMessage } from '../../shared/error-text'
 
 /**
  * 封面图片管理：用户在详情页上传的预览图会复制到
@@ -137,8 +138,8 @@ export async function importCoverFromPath(source) {
     logger.info(`封面已保存: ${dest}`)
     return { cover: dest }
   } catch (err) {
-    logger.error(`封面保存失败: ${err.message}`)
-    return { error: `封面保存失败: ${err.message}` }
+    logger.error(`封面保存失败: ${errorMessage(err)}`)
+    return { error: `封面保存失败: ${errorMessage(err)}` }
   }
 }
 
@@ -178,8 +179,8 @@ export async function saveCoverBuffer(buf, ext) {
     logger.info(`Civitai 示例图已保存: ${dest}`)
     return { cover: dest }
   } catch (err) {
-    logger.error(`Civitai 示例图保存失败: ${err.message}`)
-    return { error: `示例图保存失败: ${err.message}` }
+    logger.error(`Civitai 示例图保存失败: ${errorMessage(err)}`)
+    return { error: `示例图保存失败: ${errorMessage(err)}` }
   }
 }
 
@@ -272,8 +273,8 @@ export async function saveClipboardImage() {
     logger.info(`剪贴板图片已保存: ${dest}`)
     return { cover: dest }
   } catch (err) {
-    logger.error(`剪贴板图片保存失败: ${err.message}`)
-    return { error: `剪贴板图片保存失败: ${err.message}` }
+    logger.error(`剪贴板图片保存失败: ${errorMessage(err)}`)
+    return { error: `剪贴板图片保存失败: ${errorMessage(err)}` }
   }
 }
 
@@ -289,7 +290,7 @@ export async function deleteCoverFile(absCover) {
     await fs.rm(absCover, { force: true })
     return true
   } catch (err) {
-    logger.warn(`封面文件删除失败: ${err.message}`)
+    logger.warn(`封面文件删除失败: ${errorMessage(err)}`)
     return false
   }
 }
@@ -332,6 +333,7 @@ export async function pruneOrphanCovers() {
     )
     logger.info(`已清理 ${stale.length} 个孤儿封面文件`)
   } catch (err) {
-    if (err.code !== 'ENOENT') logger.warn(`孤儿封面清理失败: ${err.message}`)
+    if (errorCode(err) !== 'ENOENT')
+      logger.warn(`孤儿封面清理失败: ${errorMessage(err)}`)
   }
 }

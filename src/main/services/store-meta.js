@@ -36,6 +36,7 @@ import {
   setDataRoot,
   toRelKey,
 } from './store-paths'
+import { errorCode, errorMessage } from '../../shared/error-text'
 
 /**
  * 关联存储（C2 自 store.js 拆出；O1 二次拆分为五个模块）：
@@ -90,7 +91,7 @@ export async function loadData() {
       `关联存储加载完成：${Object.keys(metaState.data.models).length} 条记录（${file}）`,
     )
   } catch (err) {
-    if (err.code === 'ENOENT') {
+    if (errorCode(err) === 'ENOENT') {
       metaState.data = { version: 1, models: {} }
       await loadJournal(0)
       await migrateLegacyData()
@@ -103,11 +104,11 @@ export async function loadData() {
       try {
         const backup = await preserveCorruptedFile(file)
         logger.error(
-          `关联存储文件损坏，原文件已备份为 ${path.basename(backup)} 后重置: ${err.message}`,
+          `关联存储文件损坏，原文件已备份为 ${path.basename(backup)} 后重置: ${errorMessage(err)}`,
         )
       } catch (backupErr) {
         logger.error(
-          `关联存储加载失败，已重置（备份失败: ${backupErr.message}）: ${err.message}`,
+          `关联存储加载失败，已重置（备份失败: ${errorMessage(backupErr)}）: ${errorMessage(err)}`,
         )
       }
       await removeJournalDir()
@@ -219,8 +220,8 @@ async function migrateLegacyData() {
       logger.info(`已从旧版存储迁移 ${imported} 条记录到 ${getDataDir()}`)
     }
   } catch (err) {
-    if (err.code !== 'ENOENT') {
-      logger.warn(`旧版存储迁移跳过: ${err.message}`)
+    if (errorCode(err) !== 'ENOENT') {
+      logger.warn(`旧版存储迁移跳过: ${errorMessage(err)}`)
     }
   }
 }

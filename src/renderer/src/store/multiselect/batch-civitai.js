@@ -4,6 +4,7 @@ import { applyMetaUpdates } from '../meta-apply'
 import { setModelCoverUrl } from '../cover-overrides'
 import { modelById } from '../selectors'
 import { reportBatchFailures, clearBatchFailures } from './batch-failures'
+import { errorMessage } from '../../../../shared/error-text'
 
 /**
  * 批量 Civitai 操作（O-4 自 multiselect.js 按域拆出）：
@@ -62,7 +63,7 @@ export async function batchAssignCivitaiTags() {
       try {
         res = await window.api.models.civitaiCategory(id)
       } catch (err) {
-        failures.push({ id, error: err?.message || 'IPC 异常' })
+        failures.push({ id, error: errorMessage(err) || 'IPC 异常' })
         continue
       }
       if (res.error) {
@@ -154,7 +155,7 @@ async function identifySequentially(ids, label) {
     try {
       res = await window.api.models.civitaiIdentify(id)
     } catch (err) {
-      failures.push({ id, error: err?.message || 'IPC 异常' })
+      failures.push({ id, error: errorMessage(err) || 'IPC 异常' })
       continue
     }
     if (res.error) {
@@ -264,7 +265,7 @@ export async function batchCivitaiImages() {
       try {
         res = await window.api.models.civitaiIdentify(id)
       } catch (err) {
-        failures.push({ id, error: err?.message || 'IPC 异常' })
+        failures.push({ id, error: errorMessage(err) || 'IPC 异常' })
         continue
       }
       if (res.error) {
@@ -291,7 +292,7 @@ export async function batchCivitaiImages() {
       try {
         imp = await window.api.models.civitaiImportImages(id, picked)
       } catch (err) {
-        failures.push({ id, error: err?.message || 'IPC 异常' })
+        failures.push({ id, error: errorMessage(err) || 'IPC 异常' })
         continue
       }
       if (!imp || imp.error) {

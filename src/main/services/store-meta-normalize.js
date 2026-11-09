@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { toRelKey } from './store-paths'
 import { ALL_CATEGORY_KEYS } from '../../shared/model-categories'
+import { MAX_TAG_LEN, MAX_TAGS } from '../../shared/app-enums'
 
 /**
  * 关联存储的输入规范化（O1 自 store-meta.js 拆出，叶子模块）：
@@ -80,10 +81,6 @@ function pickLegacyRes(value, legacyValues) {
   const legacy = legacyValues.filter((v) => Number.isFinite(v))
   return legacy.length > 0 ? Math.min(...legacy) : null
 }
-
-/** 自由标签上限：单模型标签数与单标签长度（F-5） */
-const MAX_TAGS = 20
-const MAX_TAG_LEN = 32
 
 /**
  * 规范化自由标签列表（F-5）：逐项 trim + 截断长度，去空项与重复项
