@@ -634,6 +634,12 @@ describe('stripHtml', () => {
     expect(stripHtml('<b>bold</b> text')).toBe('bold text')
   })
 
+  it('实体只解码一层（CodeQL #2 单趟解码回归）', () => {
+    // 链式 replace 会把 &amp;lt; 二次解码为 <；单趟解码保持一层语义
+    expect(stripHtml('&amp;lt;script&amp;gt;')).toBe('&lt;script&gt;')
+    expect(stripHtml('&amp;amp;')).toBe('&amp;')
+  })
+
   it('连续空行压缩与非字符串容错', () => {
     expect(stripHtml('<p>a</p><div></div><div></div><p>b</p>')).not.toMatch(
       /\n{3,}/,

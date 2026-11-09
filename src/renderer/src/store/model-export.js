@@ -122,10 +122,16 @@ function csvCell(value, numeric = false) {
   return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe
 }
 
-/** Markdown 单元格转义（竖线/换行） */
+/** Markdown 单元格转义（反斜杠/竖线/换行） */
 function mdCell(value) {
   const text = value === null || value === undefined ? '' : String(value)
-  return text.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
+  // CodeQL #12：先转义反斜杠再转义竖线——只转 | 时输入自带的 \ 会
+  // 「吞掉」后续转义符（`a\` + `|` → `a\\|` 渲染为字面 \ 加分隔符 |，
+  // 造成表格单元格注入）
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|')
+    .replace(/\r?\n/g, ' ')
 }
 
 /**
