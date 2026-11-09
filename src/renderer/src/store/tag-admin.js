@@ -1,5 +1,6 @@
 import { state } from './state'
 import { toast } from './toast'
+import { errorMessage } from '../../../shared/error-text'
 
 /**
  * 全库标签管理（F4，设置页标签管理面板的数据动作）：
@@ -48,8 +49,8 @@ export async function renameTagGlobally(from, to) {
   try {
     res = await window.api.models.renameTag(from, to)
   } catch (err) {
-    toast('error', `标签重命名失败: ${err.message}`)
-    return { changed: 0, error: err.message }
+    toast('error', `标签重命名失败: ${errorMessage(err)}`)
+    return { changed: 0, error: errorMessage(err) }
   }
   if (res.error) {
     toast('error', res.error)
@@ -73,8 +74,8 @@ export async function removeTagGlobally(tag) {
   try {
     res = await window.api.models.removeTag(tag)
   } catch (err) {
-    toast('error', `标签移除失败: ${err.message}`)
-    return { changed: 0, error: err.message }
+    toast('error', `标签移除失败: ${errorMessage(err)}`)
+    return { changed: 0, error: errorMessage(err) }
   }
   if (res.error) {
     toast('error', res.error)

@@ -14,6 +14,7 @@ import { clearBatchFailures } from './multiselect/batch-failures'
 import { toast } from './toast'
 import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
 import { IPC_ERROR } from '../../../shared/error-codes'
+import { errorMessage } from '../../../shared/error-text'
 
 /**
  * 模型库生命周期与扫描（A-04 自 appStore.js 拆出）：
@@ -135,7 +136,7 @@ export async function initApp() {
       await scanModels()
     }
   } catch (err) {
-    toast('error', `初始化失败: ${err.message}`)
+    toast('error', `初始化失败: ${errorMessage(err)}`)
   } finally {
     // 启动完成（B8）：清除启动态，「开始使用」引导页只在真正未配置
     // 文件夹时出现——异步恢复 folder 之前它不得对老用户闪现
@@ -223,7 +224,7 @@ export async function saveSettings(patch) {
   try {
     res = await window.api.settings.update(patch)
   } catch (err) {
-    toast('error', `设置保存失败: ${err.message}`)
+    toast('error', `设置保存失败: ${errorMessage(err)}`)
     return false
   }
   if (res?.error) {
@@ -252,7 +253,7 @@ export async function chooseFolder() {
     // 失败/取消时保持原库与旧列表
     await scanModels(folder)
   } catch (err) {
-    toast('error', `选择文件夹失败: ${err.message}`)
+    toast('error', `选择文件夹失败: ${errorMessage(err)}`)
   }
 }
 
@@ -319,7 +320,7 @@ export async function switchRoot(folder) {
     // 无可用索引：主进程未切换根目录，交由扫描链路完成 V-02 状态机
     await scanModels(folder)
   } catch (err) {
-    toast('error', `切换模型库失败: ${err.message}`)
+    toast('error', `切换模型库失败: ${errorMessage(err)}`)
   }
 }
 
@@ -375,7 +376,7 @@ export async function relocateFolder() {
     }
     await scanModels(folder)
   } catch (err) {
-    toast('error', `重新定位文件夹失败: ${err.message}`)
+    toast('error', `重新定位文件夹失败: ${errorMessage(err)}`)
   }
 }
 
@@ -475,10 +476,10 @@ export async function scanModels(folder = state.folder, options = {}) {
     return true
   } catch (err) {
     if (background) {
-      toast('warn', `后台校验失败，继续使用本地索引：${err.message}`)
+      toast('warn', `后台校验失败，继续使用本地索引：${errorMessage(err)}`)
     } else {
-      state.scanError = err.message
-      toast('error', `扫描失败: ${err.message}`)
+      state.scanError = errorMessage(err)
+      toast('error', `扫描失败: ${errorMessage(err)}`)
     }
     return false
   } finally {

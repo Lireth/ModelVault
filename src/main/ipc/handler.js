@@ -12,6 +12,7 @@ import {
   releaseMaintenance,
   tryAcquireMaintenance,
 } from '../services/maintenance-lock'
+import { errorMessage, errorName, errorStack } from '../../shared/error-text'
 
 /**
  * IPC handler 统一包装与入参校验助手（O1/O2 样板收敛）：
@@ -173,18 +174,18 @@ export function wrapHandler(channel, handler, opts = {}) {
       done()
       return result
     } catch (err) {
-      if (err?.name === 'AbortError') {
+      if (errorName(err) === 'AbortError') {
         done('用户取消')
         logger.info(`IPC ${channel}: 用户已取消 [${IPC_ERROR.CANCELED}]`)
         return { canceled: true }
       }
       // 失败路径不受 quiet 静默：done 恒返回耗时，随异常日志带出
       const errorCode = classifyException(err)
-      const ms = done(err?.message || '异常')
+      const ms = done(errorMessage(err) || '异常')
       logger.error(
-        `IPC ${channel} 处理异常 [${errorCode}]（耗时 ${ms}ms）: ${err.stack || err.message}`,
+        `IPC ${channel} 处理异常 [${errorCode}]（耗时 ${ms}ms）: ${errorStack(err) || errorMessage(err)}`,
       )
-      return { error: `${prefix}: ${err.message}` }
+      return { error: `${prefix}: ${errorMessage(err)}` }
     } finally {
       if (opId) activeOps.delete(opId)
     }

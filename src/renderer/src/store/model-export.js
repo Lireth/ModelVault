@@ -8,6 +8,7 @@ import {
   effectiveRating,
 } from './state'
 import { toast } from './toast'
+import { errorMessage } from '../../../shared/error-text'
 
 /**
  * 模型清单导出（FN-04）：
@@ -266,7 +267,7 @@ export async function exportModelList(format) {
     toast('success', `已导出 ${rows.length} 个模型（${format.toUpperCase()}）`)
     return true
   } catch (err) {
-    toast('error', `导出模型清单失败: ${err.message}`)
+    toast('error', `导出模型清单失败: ${errorMessage(err)}`)
     return false
   }
 }

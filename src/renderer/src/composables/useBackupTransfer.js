@@ -8,6 +8,7 @@ import {
   state,
   toast,
 } from '../store/appStore'
+import { errorMessage } from '../../../shared/error-text'
 
 /**
  * 备份导出/恢复（FN-08，OPT-04 自 SettingsBackup.vue 抽出）：
@@ -44,7 +45,7 @@ export function useBackupTransfer({ onRestored } = {}) {
         : '应用设置（当前库暂无标注数据）'
       toast('success', `${modeLabel}备份已导出（${scope}）→ ${res.path}`)
     } catch (err) {
-      toast('error', `备份导出失败: ${err.message}`)
+      toast('error', `备份导出失败: ${errorMessage(err)}`)
     } finally {
       backupBusy.value = false
     }
@@ -105,7 +106,7 @@ export function useBackupTransfer({ onRestored } = {}) {
       }
       toast('success', `备份已恢复：${parts.join('、')}`)
     } catch (err) {
-      toast('error', `备份恢复失败: ${err.message}`)
+      toast('error', `备份恢复失败: ${errorMessage(err)}`)
     } finally {
       backupBusy.value = false
     }

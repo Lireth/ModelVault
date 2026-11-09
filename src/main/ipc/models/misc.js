@@ -21,6 +21,7 @@ import {
   getRealRootPath,
 } from '../handler'
 import { isPathRealWithin } from '../../utils'
+import { errorMessage } from '../../../shared/error-text'
 
 /**
  * 其他模型操作链路：删除模型（回收站 + sidecar 清理）、
@@ -84,8 +85,8 @@ export function registerMiscHandlers() {
         try {
           await shell.trashItem(id)
         } catch (err) {
-          logger.warn(`模型删除失败: ${err.message}`)
-          return { error: `删除失败: ${err.message}` }
+          logger.warn(`模型删除失败: ${errorMessage(err)}`)
+          return { error: `删除失败: ${errorMessage(err)}` }
         }
         // 同步移除同名的 sidecar 预览图/说明文件（失败不阻塞）
         for (const f of sidecarFilesFor(id)) {
@@ -239,8 +240,8 @@ export function registerMiscHandlers() {
         logger.info(`模型清单已导出: ${result.filePath}（${stat.size} 字节）`)
         return { ok: true, path: result.filePath, sizeBytes: stat.size }
       } catch (err) {
-        logger.warn(`模型清单导出失败: ${err.message}`)
-        return { error: `模型清单导出失败: ${err.message}` }
+        logger.warn(`模型清单导出失败: ${errorMessage(err)}`)
+        return { error: `模型清单导出失败: ${errorMessage(err)}` }
       }
     },
     { errorPrefix: '模型清单导出失败' },

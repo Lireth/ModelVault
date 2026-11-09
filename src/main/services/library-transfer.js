@@ -21,6 +21,7 @@ import {
   removeModelMeta,
 } from './store-meta'
 import { getSettings } from './store-settings'
+import { errorCode, errorMessage } from '../../shared/error-text'
 
 /**
  * 跨库移动/复制模型（F-3）：把当前库的模型（文件 + 同名 sidecar + 封面 +
@@ -59,9 +60,9 @@ async function hasPendingJournal(targetRoot) {
   try {
     names = await fs.readdir(journalDir)
   } catch (err) {
-    if (err.code === 'ENOENT') return false
+    if (errorCode(err) === 'ENOENT') return false
     logger.warn(
-      `目标库增量日志目录不可读，按存在未合并日志处理: ${journalDir} ${err.message}`,
+      `目标库增量日志目录不可读，按存在未合并日志处理: ${journalDir} ${errorMessage(err)}`,
     )
     return true
   }
@@ -85,7 +86,7 @@ async function readTargetStore(targetRoot) {
   try {
     text = await fs.readFile(file, 'utf-8')
   } catch (err) {
-    if (err.code === 'ENOENT') return { version: 1, models: {} }
+    if (errorCode(err) === 'ENOENT') return { version: 1, models: {} }
     throw err
   }
   try {
@@ -95,9 +96,12 @@ async function readTargetStore(targetRoot) {
     // 语义不变）——数十 MB 元数据不再冻结主进程数百 ms 到秒级
     return normalizeStoreData(await parseJsonOffThread(text))
   } catch (err) {
-    throw new Error(`目标库元数据文件损坏，无法解析: ${file} ${err.message}`, {
-      cause: err,
-    })
+    throw new Error(
+      `目标库元数据文件损坏，无法解析: ${file} ${errorMessage(err)}`,
+      {
+        cause: err,
+      },
+    )
   }
 }
 
@@ -138,7 +142,7 @@ async function moveFile(src, dest) {
     await fs.rename(src, dest)
     return
   } catch (err) {
-    if (err?.code !== 'EXDEV') throw err
+    if (errorCode(err) !== 'EXDEV') throw err
   }
   await fs.copyFile(src, dest)
   await fs.rm(src, { force: true })
@@ -294,9 +298,9 @@ export async function transferModelsToLibrary({
       try {
         store = await readTargetStore(targetRoot)
       } catch (err) {
-        logger.error(`目标库元数据读取失败，已中止迁移: ${err.message}`)
+        logger.error(`目标库元数据读取失败，已中止迁移: ${errorMessage(err)}`)
         return {
-          error: `目标库元数据读取失败（可能被占用或损坏），已中止传输: ${err.message}`,
+          error: `目标库元数据读取失败（可能被占用或损坏），已中止传输: ${errorMessage(err)}`,
         }
       }
       for (const item of planned) {
@@ -311,7 +315,9 @@ export async function transferModelsToLibrary({
             await fs.mkdir(path.dirname(destCover), { recursive: true })
             await copyIfMissing(path.join(currentRoot, rel), destCover)
           } catch (err) {
-            logger.warn(`封面跨库复制失败（引用保留）: ${rel} ${err.message}`)
+            logger.warn(
+              `封面跨库复制失败（引用保留）: ${rel} ${errorMessage(err)}`,
+            )
           }
         }
         store.models[item.relKey] = item.meta
@@ -321,8 +327,10 @@ export async function transferModelsToLibrary({
         try {
           await writeTargetStore(targetRoot, store)
         } catch (err) {
-          logger.error(`目标库元数据写入失败: ${err.message}`)
-          return { error: `目标库元数据写入失败，已中止传输: ${err.message}` }
+          logger.error(`目标库元数据写入失败: ${errorMessage(err)}`)
+          return {
+            error: `目标库元数据写入失败，已中止传输: ${errorMessage(err)}`,
+          }
         }
       }
     }
@@ -357,7 +365,7 @@ export async function transferModelsToLibrary({
           } catch (err) {
             // sidecar 传输失败不阻塞模型本体
             logger.warn(
-              `sidecar 跨库传输失败（不影响模型）: ${sidecar} ${err.message}`,
+              `sidecar 跨库传输失败（不影响模型）: ${sidecar} ${errorMessage(err)}`,
             )
           }
         }
@@ -365,7 +373,7 @@ export async function transferModelsToLibrary({
         transferred.push(item)
         transferredBytes += item.size
       } catch (err) {
-        failed.push({ id, error: `文件传输失败: ${err.message}` })
+        failed.push({ id, error: `文件传输失败: ${errorMessage(err)}` })
         rollbackKeys.push(relKey)
         // move 半途失败（如跨盘拷贝中断）：rename 原子（源仍在）或 copy 已删源
         // （目标半文件），清掉目标半成品
@@ -414,7 +422,7 @@ export async function transferModelsToLibrary({
         await writeTargetStore(targetRoot, store)
       } catch (err) {
         logger.warn(
-          `失败项元数据回滚失败（目标库健康检查可清理无效条目）: ${err.message}`,
+          `失败项元数据回滚失败（目标库健康检查可清理无效条目）: ${errorMessage(err)}`,
         )
       }
     }
@@ -428,7 +436,9 @@ export async function transferModelsToLibrary({
         try {
           await flushStoreSave()
         } catch (err) {
-          logger.warn(`源库元数据落盘失败（防抖链会重试）: ${err.message}`)
+          logger.warn(
+            `源库元数据落盘失败（防抖链会重试）: ${errorMessage(err)}`,
+          )
         }
       }
     }

@@ -3,6 +3,8 @@
  * 更新安装自等待（--wait-for-pid）与进程存活探测。
  */
 
+import { errorCode } from '../../shared/error-text'
+
 /**
  * 从启动参数解析 `--wait-for-pid=<pid>`（V-06 更新安装自等待）。
  * 新版本实例拉起时先等待旧实例退出并释放单实例锁，避免更新后闪退。
@@ -29,7 +31,7 @@ function isProcessAlive(pid) {
     process.kill(pid, 0)
     return true
   } catch (err) {
-    return err?.code === 'EPERM'
+    return errorCode(err) === 'EPERM'
   }
 }
 

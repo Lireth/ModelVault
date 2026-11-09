@@ -6,6 +6,7 @@ import { readLibraryIndex } from './library-index'
 import { getCurrentRoot, getDataFilePath } from './store-paths'
 import { parseJsonOffThread } from './json-serializer'
 import { getSettings } from './store-settings'
+import { errorCode, errorMessage } from '../../shared/error-text'
 
 /**
  * 跨库存储总览（FN-01）：
@@ -146,8 +147,8 @@ async function readStoreEntries(root) {
     }
     return { entries, savedAt: stat.mtimeMs }
   } catch (err) {
-    if (err.code !== 'ENOENT')
-      logger.warn(`跨库总览读取元数据失败（${root}）: ${err.message}`)
+    if (errorCode(err) !== 'ENOENT')
+      logger.warn(`跨库总览读取元数据失败（${root}）: ${errorMessage(err)}`)
     return null
   }
 }

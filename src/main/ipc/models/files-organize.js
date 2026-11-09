@@ -21,6 +21,7 @@ import {
   checkModelIdInRootReal,
   getRealRootPath,
 } from '../handler'
+import { errorCode, errorMessage } from '../../../shared/error-text'
 
 /**
  * 模型移动/整理链路（O-2 自 files.js 按域拆出）：
@@ -122,13 +123,13 @@ export function registerMoveHandlers() {
         try {
           await fs.rename(id, newPath)
         } catch (err) {
-          if (err.code === 'EXDEV') {
+          if (errorCode(err) === 'EXDEV') {
             return {
               error: '不支持跨磁盘移动（目标文件夹须与模型库在同一磁盘）',
             }
           }
-          logger.warn(`模型移动失败: ${id} ${err.message}`)
-          return { error: `移动失败: ${err.message}` }
+          logger.warn(`模型移动失败: ${id} ${errorMessage(err)}`)
+          return { error: `移动失败: ${errorMessage(err)}` }
         }
         // 同名 sidecar（预览图/说明文本）一并移动：整理场景下说明与模型不应分家
         for (const f of sidecarFilesFor(id)) {
@@ -226,7 +227,7 @@ export function registerMoveHandlers() {
             await fs.mkdir(path.join(loraDir, folder), { recursive: true })
           }
         } catch (err) {
-          return { error: `创建分类文件夹失败: ${err.message}` }
+          return { error: `创建分类文件夹失败: ${errorMessage(err)}` }
         }
         let moved = 0
         let canceled = false
@@ -262,8 +263,8 @@ export function registerMoveHandlers() {
           try {
             await fs.rename(id, newPath)
           } catch (err) {
-            logger.warn(`一键移动失败: ${id} ${err.message}`)
-            failed.push({ id, error: err.message })
+            logger.warn(`一键移动失败: ${id} ${errorMessage(err)}`)
+            failed.push({ id, error: errorMessage(err) })
             continue
           }
           // 同名 sidecar（预览图/说明文本）一并移动，与 moveModelTo 同一约定

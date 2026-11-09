@@ -47,6 +47,7 @@ import {
   writeLibraryIndex,
 } from '../../services/library-index'
 import { slimModelsForList, logPayloadSize } from './list-payload'
+import { errorMessage } from '../../../shared/error-text'
 
 /**
  * 扫描链路：全量扫描模型目录（进度推送、可取消）、局部增量扫描与取消入口。
@@ -301,7 +302,9 @@ export function registerScanHandlers() {
                 `扫描未完成，已回滚模型库根目录: ${root} → ${previousRoot}`,
               )
             } catch (err) {
-              logger.error(`扫描失败后回滚模型库根目录失败: ${err.message}`)
+              logger.error(
+                `扫描失败后回滚模型库根目录失败: ${errorMessage(err)}`,
+              )
             }
           }
           scanAbort = null

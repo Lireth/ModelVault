@@ -14,6 +14,7 @@ import {
   getDataFilePath,
   getJournalDir,
 } from './store-paths'
+import { errorCode, errorMessage } from '../../shared/error-text'
 
 /**
  * 关联存储落盘链（O5/O1 自 store-meta.js 拆出）：
@@ -119,12 +120,12 @@ export async function ensureLibrarySubdir(dir) {
   try {
     await fs.mkdir(getDataDir())
   } catch (err) {
-    if (err.code !== 'EEXIST') return false
+    if (errorCode(err) !== 'EEXIST') return false
   }
   try {
     await fs.mkdir(dir)
   } catch (err) {
-    if (err.code !== 'EEXIST') return false
+    if (errorCode(err) !== 'EEXIST') return false
   }
   return true
 }
@@ -139,8 +140,8 @@ async function ensureDataDir() {
     await fs.mkdir(getDataDir())
     return true
   } catch (err) {
-    if (err.code === 'EEXIST') return true
-    logger.warn(`关联存储目录不可用，已跳过元数据落盘: ${err.message}`)
+    if (errorCode(err) === 'EEXIST') return true
+    logger.warn(`关联存储目录不可用，已跳过元数据落盘: ${errorMessage(err)}`)
     return false
   }
 }
@@ -288,8 +289,8 @@ async function writeDeltaJournal(keys, rootAtStart) {
   try {
     await fs.mkdir(journalDir)
   } catch (err) {
-    if (err.code !== 'EEXIST') {
-      logger.warn(`增量日志目录不可用，已跳过元数据落盘: ${err.message}`)
+    if (errorCode(err) !== 'EEXIST') {
+      logger.warn(`增量日志目录不可用，已跳过元数据落盘: ${errorMessage(err)}`)
       return false
     }
   }

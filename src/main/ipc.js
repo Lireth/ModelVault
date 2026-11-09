@@ -10,6 +10,7 @@ import {
   downloadUpdatePackage,
 } from './services/update-download'
 import { installUpdatePackage } from './services/update-install'
+import { errorMessage } from '../shared/error-text'
 
 /**
  * 注册所有主进程 IPC 处理器。
@@ -88,7 +89,7 @@ export function registerIpcHandlers() {
       try {
         win.setBackgroundColor(colors.backgroundColor)
       } catch (err) {
-        logger.warn(`窗口背景色更新失败: ${err.message}`)
+        logger.warn(`窗口背景色更新失败: ${errorMessage(err)}`)
       }
     }
     if (win && typeof win.setTitleBarOverlay === 'function') {
@@ -98,7 +99,7 @@ export function registerIpcHandlers() {
           symbolColor: colors.symbolColor,
         })
       } catch (err) {
-        logger.warn(`标题栏主题更新失败: ${err.message}`)
+        logger.warn(`标题栏主题更新失败: ${errorMessage(err)}`)
       }
     }
   })

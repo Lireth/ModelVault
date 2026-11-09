@@ -24,6 +24,7 @@ import {
   setModelMeta,
   wasDataReset,
 } from './store-meta'
+import { errorCode, errorMessage } from '../../shared/error-text'
 
 /**
  * 模型库体检与修复（V-07）：
@@ -49,7 +50,7 @@ async function statOutcome(target) {
   try {
     return { stat: await fs.stat(target), code: '' }
   } catch (err) {
-    return { stat: null, code: err?.code || 'UNKNOWN' }
+    return { stat: null, code: errorCode(err) || 'UNKNOWN' }
   }
 }
 
@@ -287,7 +288,7 @@ async function collectHealth(root) {
       await fs.readdir(coversDir, { withFileTypes: true })
     ).filter((e) => e.isFile())
   } catch (err) {
-    if (err.code !== 'ENOENT') throw err
+    if (errorCode(err) !== 'ENOENT') throw err
   }
   const referenced = getReferencedCovers()
   const orphanCovers = []
@@ -376,7 +377,7 @@ async function moveOrphansToTrash(root, names) {
       )
       moved += 1
     } catch (err) {
-      logger.warn(`孤儿封面移入回收目录失败（${name}）: ${err.message}`)
+      logger.warn(`孤儿封面移入回收目录失败（${name}）: ${errorMessage(err)}`)
     }
   }
   return moved
@@ -428,7 +429,7 @@ export async function checkLibraryHealth() {
       report: await collectHealth(root),
     }))
   } catch (err) {
-    if (err?.code === 'EBUSY') return { error: err.message }
+    if (errorCode(err) === 'EBUSY') return { error: errorMessage(err) }
     throw err
   }
 }
@@ -481,7 +482,7 @@ export async function repairLibraryHealth() {
             (name) => !referenced.has(`${DATA_DIR}/${COVERS_DIR}/${name}`),
           )
         } catch (err) {
-          if (err.code !== 'ENOENT') throw err
+          if (errorCode(err) !== 'ENOENT') throw err
         }
         movedOrphanCovers = await moveOrphansToTrash(root, entries)
       } else {
@@ -501,7 +502,7 @@ export async function repairLibraryHealth() {
       return { report, repaired, backupPath, dataResetSkipped }
     })
   } catch (err) {
-    if (err?.code === 'EBUSY') return { error: err.message }
+    if (errorCode(err) === 'EBUSY') return { error: errorMessage(err) }
     throw err
   }
 }

@@ -8,6 +8,7 @@ import {
   wrapHandler,
   checkModelIdInRootReal,
 } from '../handler'
+import { errorCode, errorMessage } from '../../../shared/error-text'
 
 /**
  * 模型改名链路（O-2 自 files.js 按域拆出）：
@@ -89,8 +90,8 @@ export function registerRenameHandlers() {
         try {
           await fs.rename(id, newPath)
         } catch (err) {
-          logger.warn(`禁用/启用改名失败: ${id} ${err.message}`)
-          return { error: `改名失败: ${err.message}` }
+          logger.warn(`禁用/启用改名失败: ${id} ${errorMessage(err)}`)
+          return { error: `改名失败: ${errorMessage(err)}` }
         }
         renameModelMeta(id, newPath)
         logger.info(
@@ -129,11 +130,11 @@ export function registerRenameHandlers() {
         try {
           await fs.rename(id, plan.path)
         } catch (err) {
-          if (err.code === 'EXDEV') {
+          if (errorCode(err) === 'EXDEV') {
             return { error: '不支持跨磁盘重命名（目标须与模型在同一磁盘）' }
           }
-          logger.warn(`模型重命名失败: ${id} ${err.message}`)
-          return { error: `重命名失败: ${err.message}` }
+          logger.warn(`模型重命名失败: ${id} ${errorMessage(err)}`)
+          return { error: `重命名失败: ${errorMessage(err)}` }
         }
         const dir = path.dirname(id)
         const oldBase = path.basename(id, path.extname(id))
@@ -157,8 +158,8 @@ export function registerRenameHandlers() {
             await fs.rename(f, target)
             renamedSidecars += 1
           } catch (err) {
-            if (err.code !== 'ENOENT') {
-              sidecarWarnings.push(`${path.basename(f)}: ${err.message}`)
+            if (errorCode(err) !== 'ENOENT') {
+              sidecarWarnings.push(`${path.basename(f)}: ${errorMessage(err)}`)
             }
           }
         }

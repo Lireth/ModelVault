@@ -9,6 +9,7 @@ import {
   MAX_TAG_LEN,
   MAX_TAGS,
 } from '../../../../shared/app-enums'
+import { errorMessage } from '../../../../shared/error-text'
 
 /**
  * 批量自由标签编辑（FEAT-01，C1 批量 IPC 改造）：
@@ -151,7 +152,8 @@ async function submitTagChunks(items, modeLabel, metas, failedItems) {
     try {
       res = await window.api.models.setModelTagsBulk(chunk)
     } catch (err) {
-      for (const item of chunk) failuresPush(failedItems, item.id, err.message)
+      for (const item of chunk)
+        failuresPush(failedItems, item.id, errorMessage(err))
       continue
     }
     if (res?.error) {

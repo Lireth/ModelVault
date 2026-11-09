@@ -2,6 +2,7 @@ import { app, dialog } from 'electron'
 import logger from './logger'
 import { flushSettingsSave, flushStoreSave } from './services/store'
 import { flushWindowStateSave } from './windows/mainWindow'
+import { errorMessage } from '../shared/error-text'
 
 /**
  * 主进程未捕获异常处理（A3）。
@@ -65,7 +66,7 @@ export async function handleUncaughtException(error) {
           '若同一问题反复出现，请查看日志目录（%APPDATA%\\modelvault\\logs）并联系开发者。',
       )
     } catch (dialogErr) {
-      logger.warn(`错误框展示失败: ${dialogErr?.message || dialogErr}`)
+      logger.warn(`错误框展示失败: ${errorMessage(dialogErr) || dialogErr}`)
     }
     app.relaunch()
     app.exit(1)

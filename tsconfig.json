@@ -16,9 +16,15 @@
     //   noFallthroughCasesInSwitch / noImplicitOverride /
     //   noUncheckedIndexedAccess / noImplicitReturns（修复 partial-scan.js
     //   与 watcher-poll.js 共 15 处混合返回路径，语义不变）
+    // 2026-11-09 已开启（O-5 第一批，228→0）：useUnknownInCatchVariables
+    //   ——catch 变量按 unknown 处理：225 处 .message/.code/.name/.stack
+    //   经 shared/error-text.js 纯助手（errorMessage/errorCode/errorName/
+    //   errorStack）统一安全读取，3 处 callee JSDoc 放宽为 unknown；
+    //   语义逐点对齐（Error 抛出值行为不变，非 Error 呈现可读文案）
     // 待消化记账（实测错误量为开启成本，修复后随棘轮开启）：
-    //   useUnknownInCatchVariables（228）→ strictNullChecks（604）→
-    //   noImplicitAny（895）→ exactOptionalPropertyTypes（依赖 strictNullChecks）
+    //   strictNullChecks（629）→ noImplicitAny（879）→
+    //   exactOptionalPropertyTypes（依赖 strictNullChecks）
+    "useUnknownInCatchVariables": true,
     "strictFunctionTypes": true,
     "strictBindCallApply": true,
     "noImplicitThis": true,

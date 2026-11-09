@@ -9,6 +9,7 @@ import {
   isSafeUpdateVersion,
   setPendingUpdate,
 } from './update-download'
+import { errorMessage } from '../../shared/error-text'
 
 /**
  * 应用内检查更新（E1，F-6 扩展下载链路）：
@@ -116,7 +117,7 @@ async function fetchReleaseJson(url, current) {
     )
     return { data }
   } catch (err) {
-    return { error: `更新信息解析失败: ${err.message}` }
+    return { error: `更新信息解析失败: ${errorMessage(err)}` }
   }
 }
 
@@ -219,7 +220,7 @@ export async function checkForUpdate() {
     ) {
       return { error: '更新检查超时，请检查网络后重试', current }
     }
-    return { error: `更新检查失败: ${err.message}`, current }
+    return { error: `更新检查失败: ${errorMessage(err)}`, current }
   }
 }
 

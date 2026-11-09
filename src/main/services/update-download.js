@@ -15,6 +15,7 @@ import {
   isTransientNetworkError,
 } from './net-fetch'
 import { parseChecksumHash, verifyUpdateSignature } from './update-verify'
+import { errorMessage } from '../../shared/error-text'
 
 /**
  * 应用内更新下载（F-6，portable 形态专用；验签见 update-verify.js，安装见
@@ -135,7 +136,7 @@ async function fetchUpdateUrlReliably(url, buildOptions) {
     } catch (err) {
       if (attempt >= 1 || !isTransientNetworkError(err)) throw err
       logger.warn(
-        `更新请求连接级失败，${TRANSIENT_RETRY_DELAY_MS}ms 后重试: ${err.message}`,
+        `更新请求连接级失败，${TRANSIENT_RETRY_DELAY_MS}ms 后重试: ${errorMessage(err)}`,
       )
       await delay(TRANSIENT_RETRY_DELAY_MS)
     }
@@ -236,7 +237,7 @@ export async function downloadUpdatePackage(onProgress) {
     try {
       await fsp.mkdir(dir, { recursive: true })
     } catch (err) {
-      return { error: `创建更新目录失败: ${err.message}` }
+      return { error: `创建更新目录失败: ${errorMessage(err)}` }
     }
 
     // 校验和：expected = sha256sum 兼容文件首 token。
@@ -257,7 +258,7 @@ export async function downloadUpdatePackage(onProgress) {
       ) {
         return { error: '校验和下载超时，请检查网络后重试' }
       }
-      return { error: `校验和下载失败: ${err.message}` }
+      return { error: `校验和下载失败: ${errorMessage(err)}` }
     }
     if (!expected) return { error: '校验和文件格式异常' }
 
@@ -415,8 +416,8 @@ export async function downloadUpdatePackage(onProgress) {
       logger.warn(`更新包下载停滞中止: ${err.message}`)
       return { error: err.message }
     }
-    logger.warn(`更新包下载失败: ${err?.message || err}`)
-    return { error: `更新包下载失败: ${err?.message || err}` }
+    logger.warn(`更新包下载失败: ${errorMessage(err) || err}`)
+    return { error: `更新包下载失败: ${errorMessage(err) || err}` }
   } finally {
     downloadAbort = null
   }

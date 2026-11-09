@@ -15,6 +15,7 @@ import {
   notModifiedResponse,
   withCacheHeaders,
 } from './http-cache'
+import { errorMessage } from '../../shared/error-text'
 
 /**
  * mvimg:// 本地受控图片协议处理器（自 protocol.js 拆出）：
@@ -179,7 +180,7 @@ export function registerMvimgHandler() {
         immutable,
       )
     } catch (err) {
-      logger.error(`mvimg 协议处理失败: ${err.message}`)
+      logger.error(`mvimg 协议处理失败: ${errorMessage(err)}`)
       return new Response('Internal Error', { status: 500 })
     }
   })

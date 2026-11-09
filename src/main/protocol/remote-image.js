@@ -16,6 +16,7 @@ import {
 } from '../services/civ-cache'
 import { isImageBuffer } from '../services/covers'
 import { proxyMediaHeaders, toBodyView } from './http-cache'
+import { errorMessage } from '../../shared/error-text'
 
 /**
  * civimg:// 远程图片/视频代理（自 protocol.js 拆出）：
@@ -146,7 +147,7 @@ function fetchCivImageShared(target) {
       try {
         buf = await readCivitaiImageBody(upstream)
       } catch (err) {
-        logger.warn(`civimg 上游内容读取失败: ${err.message}`)
+        logger.warn(`civimg 上游内容读取失败: ${errorMessage(err)}`)
         recordCivimgFailure(target)
         return { errorStatus: 502 }
       }
@@ -233,7 +234,7 @@ export function registerCivimgHandler() {
       try {
         shared = await fetchCivImageShared(target)
       } catch (err) {
-        logger.warn(`civimg 回源网络失败: ${err.message}`)
+        logger.warn(`civimg 回源网络失败: ${errorMessage(err)}`)
         return new Response('Upstream Error', { status: 502 })
       }
       if (shared.errorStatus) {
@@ -252,7 +253,7 @@ export function registerCivimgHandler() {
         headers,
       })
     } catch (err) {
-      logger.error(`civimg 协议处理失败: ${err.message}`)
+      logger.error(`civimg 协议处理失败: ${errorMessage(err)}`)
       return new Response('Internal Error', { status: 500 })
     }
   })
@@ -304,7 +305,7 @@ async function proxyCivitaiVideo(target, request, acquireSlot) {
       headers,
     })
   } catch (err) {
-    logger.warn(`civimg 视频代理失败: ${err.message}`)
+    logger.warn(`civimg 视频代理失败: ${errorMessage(err)}`)
     return new Response('Upstream Error', { status: 502 })
   } finally {
     release?.()

@@ -20,6 +20,7 @@ import {
 import { MAX_COVERS_BYTES, writeBackupZipToFile } from './backup-zip'
 import { renameReplacing } from './atomic-write'
 import { parseJsonOffThread } from './json-serializer'
+import { errorCode, errorMessage } from '../../shared/error-text'
 
 /**
  * 备份导出流程（O2 拆分）：
@@ -115,8 +116,8 @@ export async function buildBackupParts(options = {}) {
       parsedStore = await parseJsonOffThread(storeText)
       models = Object.keys(parsedStore?.models || {}).length
     } catch (err) {
-      if (err.code !== 'ENOENT') {
-        return { error: `读取关联存储失败: ${err.message}` }
+      if (errorCode(err) !== 'ENOENT') {
+        return { error: `读取关联存储失败: ${errorMessage(err)}` }
       }
       // 该库尚未生成过关联数据：仅备份应用设置
     }
@@ -261,7 +262,7 @@ export async function exportBackup(win, options = {}) {
   } catch (err) {
     // 失败时只清理本次半成品 tmp；目标位置（可能是用户既有文件）不动
     await fs.rm(tmp, { force: true }).catch(() => {})
-    logger.warn(`备份导出失败: ${err.message}`)
-    return { error: `备份写入失败: ${err.message}` }
+    logger.warn(`备份导出失败: ${errorMessage(err)}`)
+    return { error: `备份写入失败: ${errorMessage(err)}` }
   }
 }

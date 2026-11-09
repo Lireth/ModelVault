@@ -2,6 +2,7 @@ import { app, BrowserWindow, nativeImage, protocol } from 'electron'
 import fs from 'node:fs/promises'
 import logger from './logger'
 import { renderThumbJpeg } from './services/thumb-renderer'
+import { errorMessage } from '../shared/error-text'
 
 /**
  * 启动冒烟检查（V-05，仅 MODELVAULT_SMOKE=1 时由 index.js 调用）：
@@ -97,7 +98,7 @@ export async function runStartupSmoke(win) {
           'utf-8',
         )
       } catch (writeErr) {
-        logger.error(`冒烟结果写入失败: ${writeErr.message}`)
+        logger.error(`冒烟结果写入失败: ${errorMessage(writeErr)}`)
       }
     }
     if (ok) {

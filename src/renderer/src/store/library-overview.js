@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { errorMessage } from '../../../shared/error-text'
 
 /**
  * 跨库存储总览状态（FN-01）：
@@ -49,7 +50,7 @@ export async function loadLibraryOverview(force = false) {
     libraryOverview.loadedAt = Date.now()
     return true
   } catch (err) {
-    if (token === requestToken) libraryOverview.error = err.message
+    if (token === requestToken) libraryOverview.error = errorMessage(err)
     return false
   } finally {
     if (token === requestToken) libraryOverview.loading = false

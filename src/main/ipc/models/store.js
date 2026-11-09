@@ -11,6 +11,7 @@
  */
 
 import { BrowserWindow } from 'electron'
+import { errorMessage } from '../../../shared/error-text'
 import { setStoreSaveErrorListener } from '../../services/store'
 import { registerLoadHandlers } from './store/load'
 import { registerLibraryHandlers } from './store/library'
@@ -29,7 +30,9 @@ export function setupStoreErrorForwarding() {
   setStoreSaveErrorListener((err) => {
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) {
-        win.webContents.send('models:storeError', { message: err.message })
+        win.webContents.send('models:storeError', {
+          message: errorMessage(err),
+        })
       }
     }
   })

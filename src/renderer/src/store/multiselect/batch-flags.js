@@ -3,6 +3,7 @@ import { toast } from '../toast'
 import { applyMetaFlagUpdates } from '../meta-apply'
 import { reportBatchFailures, clearBatchFailures } from './batch-failures'
 import { MAX_BATCH_META_IDS } from '../../../../shared/app-enums'
+import { errorMessage } from '../../../../shared/error-text'
 
 /**
  * 批量快捷标记（E6，C1 批量 IPC 改造）：
@@ -41,7 +42,7 @@ async function batchApplyFlags(patch, label) {
           ...patch,
         })
       } catch (err) {
-        for (const id of chunk) failures.push({ id, error: err.message })
+        for (const id of chunk) failures.push({ id, error: errorMessage(err) })
         continue
       }
       if (res?.error) {

@@ -10,6 +10,7 @@ import {
 } from '../../../shared/model-extensions'
 import { SIDECAR_PREVIEW_EXTS, sidecarBaseOf } from '../../services/scanner'
 import { withMaintenanceLock, wrapHandler } from '../handler'
+import { errorCode, errorMessage, errorName } from '../../../shared/error-text'
 
 /**
  * 外部模型导入链路（F2，O-2 自 files.js 按域拆出）：
@@ -182,7 +183,7 @@ async function transferFile(src, dst, mode, { size, signal, onProgress }) {
       onProgress?.(size)
       return
     } catch (err) {
-      if (err.code !== 'EXDEV') throw err
+      if (errorCode(err) !== 'EXDEV') throw err
     }
   }
   await copyFileWithProgress(src, dst, { signal, onProgress })
@@ -296,7 +297,7 @@ async function resolveImportTarget({ win, root }) {
       return { error: '目标文件夹真实路径不在当前模型库内' }
     }
   } catch (err) {
-    return { error: `目标文件夹不可访问: ${err.message}` }
+    return { error: `目标文件夹不可访问: ${errorMessage(err)}` }
   }
   return { targetDir, targetRelDir }
 }
@@ -404,14 +405,14 @@ async function importOneSource(source, ctx) {
       return failed('仅支持导入普通文件')
     }
   } catch (err) {
-    return failed(`无法读取源文件: ${err.message}`)
+    return failed(`无法读取源文件: ${errorMessage(err)}`)
   }
 
   let plan
   try {
     plan = await planImportTarget(ctx.targetDir, sourceName)
   } catch (err) {
-    return failed(err.message)
+    return failed(errorMessage(err))
   }
   const targetModel = path.join(ctx.targetDir, plan.fileName)
   try {
@@ -421,8 +422,9 @@ async function importOneSource(source, ctx) {
       onProgress: ctx.onBytes,
     })
   } catch (err) {
-    if (err?.name === 'AbortError') return { imported: false, canceled: true }
-    return failed(`导入失败: ${err.message}`)
+    if (errorName(err) === 'AbortError')
+      return { imported: false, canceled: true }
+    return failed(`导入失败: ${errorMessage(err)}`)
   }
 
   const renamed = plan.fileName !== sourceName
@@ -452,10 +454,10 @@ async function importOneSource(source, ctx) {
         onProgress: ctx.onBytes,
       })
     } catch (err) {
-      if (err?.name === 'AbortError') {
+      if (errorName(err) === 'AbortError') {
         return { imported: true, renamed, canceled: true, warnings }
       }
-      warnings.push(`${path.basename(sidecarSource)}: ${err.message}`)
+      warnings.push(`${path.basename(sidecarSource)}: ${errorMessage(err)}`)
     }
   }
   return { imported: true, renamed, warnings }
@@ -633,8 +635,8 @@ async function importModels({ mode, win, signal, paths } = {}) {
         ...(result.canceled ? { canceled: true } : {}),
       }
     } catch (err) {
-      logger.warn(`模型导入失败: ${err.message}`)
-      return { error: `模型导入失败: ${err.message}` }
+      logger.warn(`模型导入失败: ${errorMessage(err)}`)
+      return { error: `模型导入失败: ${errorMessage(err)}` }
     }
   })
 }

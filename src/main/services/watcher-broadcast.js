@@ -12,6 +12,7 @@ import {
   namesFromSnapshot,
 } from './watcher-snapshot'
 import { removeSnapshotSubtree } from './watcher-baseline'
+import { errorCode, errorMessage } from '../../shared/error-text'
 
 /**
  * 防抖广播与投递（O12 自 watcher.js 拆出）：
@@ -74,7 +75,10 @@ async function refreshSnapshotScopes(w, relDirs, unlocated = false) {
         })
       } catch (err) {
         // 子树在事件与回填之间被删除：移除其快照即可，由父目录条目反映变更
-        if (rel !== '' && (err?.code === 'ENOENT' || err?.code === 'ENOTDIR')) {
+        if (
+          rel !== '' &&
+          (errorCode(err) === 'ENOENT' || errorCode(err) === 'ENOTDIR')
+        ) {
           removeSnapshotSubtree(w, abs)
           continue
         }
@@ -102,7 +106,7 @@ async function refreshSnapshotScopes(w, relDirs, unlocated = false) {
     // 基线自然复核（回填只是加速触发）；根目录持续不可达时由轮询异常路径
     // 统一退避重探/停止，不会出现两条路径各自停止的竞态
     logger.warn(
-      `原生事件快照回填失败${w === getWatcher() ? '（轮询链继续，待下轮巡检复核）' : '（旧根已丢弃）'}: ${err.message}`,
+      `原生事件快照回填失败${w === getWatcher() ? '（轮询链继续，待下轮巡检复核）' : '（旧根已丢弃）'}: ${errorMessage(err)}`,
     )
   } finally {
     if (w === getWatcher()) {
@@ -184,7 +188,7 @@ async function pumpDeliverQueue(w) {
         )
       } catch (err) {
         // 单批失败不阻塞后续批次；下一轮轮询仍会兜底检出未广播的变更
-        logger.warn(`目录变更广播交付失败: ${err.message}`)
+        logger.warn(`目录变更广播交付失败: ${errorMessage(err)}`)
       }
     }
   } finally {

@@ -1,6 +1,7 @@
 import { state, modelIndexOf } from './state'
 import { setModelCoverUrl } from './cover-overrides'
 import { toast } from './toast'
+import { errorMessage } from '../../../shared/error-text'
 
 /**
  * Civitai 在线识别与一键补全（详情页）：
@@ -41,8 +42,8 @@ export async function civitaiIdentify(id) {
   try {
     res = await window.api.models.civitaiIdentify(id)
   } catch (err) {
-    toast('error', `Civitai 识别失败: ${err.message}`)
-    return { found: false, error: err.message }
+    toast('error', `Civitai 识别失败: ${errorMessage(err)}`)
+    return { found: false, error: errorMessage(err) }
   }
   if (res.error) {
     toast('error', res.error)
@@ -63,8 +64,8 @@ export async function civitaiComplete(id) {
   try {
     res = await window.api.models.civitaiComplete(id)
   } catch (err) {
-    toast('error', `Civitai 补全失败: ${err.message}`)
-    return { found: false, error: err.message }
+    toast('error', `Civitai 补全失败: ${errorMessage(err)}`)
+    return { found: false, error: errorMessage(err) }
   }
   if (res.error) {
     toast('error', res.error)
@@ -108,8 +109,8 @@ export async function civitaiImportImages(id, images) {
   try {
     res = await window.api.models.civitaiImportImages(id, images)
   } catch (err) {
-    toast('error', `示例图导入失败: ${err.message}`)
-    return { error: err.message }
+    toast('error', `示例图导入失败: ${errorMessage(err)}`)
+    return { error: errorMessage(err) }
   }
   if (res.error) {
     toast('error', res.error)

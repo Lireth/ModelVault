@@ -25,6 +25,7 @@ import {
   unzipBackupEntries,
 } from './backup-zip'
 import { parseJsonOffThread } from './json-serializer'
+import { errorCode, errorMessage } from '../../shared/error-text'
 
 /**
  * 备份恢复流程（O2 拆分）：
@@ -242,7 +243,7 @@ async function snapshotSelectiveStore(root, stamp) {
     }
     return dest
   } catch (err) {
-    logger.warn(`选择性恢复前快照失败（继续合并）: ${err.message}`)
+    logger.warn(`选择性恢复前快照失败（继续合并）: ${errorMessage(err)}`)
     return ''
   }
 }
@@ -385,7 +386,7 @@ export async function importBackup(win) {
     // 第一遍：流式只读 manifest（B-04）。无效备份不进入完整解压。
     manifestBytes = await readBackupManifest(filePath)
   } catch (err) {
-    return { error: `备份文件读取失败: ${err.message}` }
+    return { error: `备份文件读取失败: ${errorMessage(err)}` }
   }
   const parsedManifest = parseBackupManifest(manifestBytes)
   if (!parsedManifest.ok) return { error: parsedManifest.error }
@@ -433,12 +434,16 @@ export async function importBackup(win) {
         skipped: libraryRestored.skipped,
       }
     } catch (err) {
-      if (err?.code === 'EBUSY') {
-        return { error: err.message, settingsRestored: false, partial: true }
+      if (errorCode(err) === 'EBUSY') {
+        return {
+          error: errorMessage(err),
+          settingsRestored: false,
+          partial: true,
+        }
       }
-      logger.warn(`选择性备份合并失败: ${err.message}`)
+      logger.warn(`选择性备份合并失败: ${errorMessage(err)}`)
       return {
-        error: `选择性备份合并失败: ${err.message}`,
+        error: `选择性备份合并失败: ${errorMessage(err)}`,
         settingsRestored: false,
         partial: true,
       }
@@ -498,9 +503,9 @@ export async function importBackup(win) {
         skipped: libraryRestored.skipped,
       }
     } catch (err) {
-      logger.warn(`备份恢复失败: ${err.message}`)
+      logger.warn(`备份恢复失败: ${errorMessage(err)}`)
       return {
-        error: `库数据恢复失败: ${err.message}`,
+        error: `库数据恢复失败: ${errorMessage(err)}`,
         settingsRestored: false,
         partial: true,
       }
@@ -514,7 +519,7 @@ export async function importBackup(win) {
   try {
     unpacked = await unzipBackupEntries(filePath, { skipCovers: true })
   } catch (err) {
-    return { error: `备份文件解压失败: ${err.message}` }
+    return { error: `备份文件解压失败: ${errorMessage(err)}` }
   }
   let settingsPayload = null
   if (manifest.settings && unpacked.files['settings.json']) {
@@ -524,7 +529,7 @@ export async function importBackup(win) {
       )
       settingsPayload = normalizeLibrarySettings(parsed)
     } catch (err) {
-      return { error: `备份中的设置数据损坏: ${err.message}` }
+      return { error: `备份中的设置数据损坏: ${errorMessage(err)}` }
     }
   }
   if (settingsPayload) {

@@ -5,6 +5,7 @@ import { app } from 'electron'
 import logger from '../logger'
 import { getDownloadedFile, getUpdateDir } from './update-download'
 import { verifyUpdateSignature } from './update-verify'
+import { errorMessage } from '../../shared/error-text'
 
 /**
  * 更新包安装（自 update-download.js 拆出）：
@@ -68,8 +69,8 @@ export async function installUpdatePackage() {
     })
     child.unref()
   } catch (err) {
-    logger.warn(`更新程序启动失败: ${err.message}`)
-    return { error: `启动更新程序失败: ${err.message}` }
+    logger.warn(`更新程序启动失败: ${errorMessage(err)}`)
+    return { error: `启动更新程序失败: ${errorMessage(err)}` }
   }
   logger.info(`已拉起更新程序（等待当前实例退出）: ${resolved}`)
   setTimeout(() => app.quit(), QUIT_DELAY_MS)

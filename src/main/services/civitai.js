@@ -6,6 +6,7 @@ import {
   fetchWithValidatedRedirects,
   isTransientNetworkError,
 } from './net-fetch'
+import { errorMessage, errorName } from '../../shared/error-text'
 
 /**
  * Civitai 在线识别服务：
@@ -182,7 +183,7 @@ async function fetchCivitaiApi(url, options = {}) {
       ) {
         transientRetries += 1
         logger.warn(
-          `Civitai API 连接级失败，${civitaiTransientRetryDelayMs}ms 后重试: ${err.message}`,
+          `Civitai API 连接级失败，${civitaiTransientRetryDelayMs}ms 后重试: ${errorMessage(err)}`,
         )
         await sleep(civitaiTransientRetryDelayMs)
         continue
@@ -302,7 +303,7 @@ export async function fetchCivitaiVersionByHash(hash) {
       ),
     )
   } catch (err) {
-    return { found: false, error: `响应解析失败: ${err.message}` }
+    return { found: false, error: `响应解析失败: ${errorMessage(err)}` }
   }
   const info = normalizeVersionInfo(raw)
   if (!info) {
@@ -450,7 +451,7 @@ export async function fetchCivitaiModelType(modelId) {
       ),
     )
   } catch (err) {
-    return { found: false, error: `响应解析失败: ${err.message}` }
+    return { found: false, error: `响应解析失败: ${errorMessage(err)}` }
   }
   if (
     !raw ||
@@ -549,7 +550,7 @@ export async function fetchCivitaiImage(url) {
       { useSessionCookies: true },
     )
   } catch (err) {
-    if (controller.signal.aborted && err?.name === 'AbortError') {
+    if (controller.signal.aborted && errorName(err) === 'AbortError') {
       throw new Error(
         `图片上游 ${IMAGE_HEADER_TIMEOUT_MS / 1000}s 内未响应（连接挂起），已中止`,
         { cause: err },
@@ -607,7 +608,7 @@ export async function fetchCivitaiVideo(url, range = '') {
       { useSessionCookies: true },
     )
   } catch (err) {
-    if (controller.signal.aborted && err?.name === 'AbortError') {
+    if (controller.signal.aborted && errorName(err) === 'AbortError') {
       throw new Error(
         `视频上游 ${VIDEO_HEADER_TIMEOUT_MS / 1000}s 内未响应（连接挂起），已中止`,
         {
@@ -657,7 +658,7 @@ export async function downloadCivitaiImage(url) {
     ) {
       return { error: '图片下载超时' }
     }
-    return { error: `图片下载失败: ${err.message}` }
+    return { error: `图片下载失败: ${errorMessage(err)}` }
   }
   if (!response.ok) {
     return { error: `图片下载失败（HTTP ${response.status}）` }
@@ -668,7 +669,7 @@ export async function downloadCivitaiImage(url) {
       idleTimeoutMs: IMAGE_BODY_IDLE_TIMEOUT_MS,
     })
   } catch (err) {
-    return { error: `图片内容读取失败: ${err.message}` }
+    return { error: `图片内容读取失败: ${errorMessage(err)}` }
   }
   if (buf.length === 0) {
     return { error: '图片内容为空' }

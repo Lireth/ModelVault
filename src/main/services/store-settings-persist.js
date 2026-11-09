@@ -6,6 +6,7 @@ import { atomicWriteFile } from './atomic-write'
 import { notifyStoreSaveError } from './store-events'
 import { isSettledWithin } from '../utils'
 import { SETTINGS_FILE, getLibSettingsFilePath } from './store-paths'
+import { errorCode } from '../../shared/error-text'
 
 /**
  * 应用设置的持久化层（自 store-settings.js 拆出）：
@@ -177,7 +178,7 @@ function enqueueLibraryWrite(root, text) {
       // 非递归 mkdir：库根离线时返回 ENOENT，绝不重建根目录树
       await fs.mkdir(path.dirname(file))
     } catch (err) {
-      if (err.code !== 'EEXIST') throw err
+      if (errorCode(err) !== 'EEXIST') throw err
     }
     await atomicWriteFile(file, text, { createDirs: false })
   })

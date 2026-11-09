@@ -7,6 +7,7 @@ import { atomicWriteFile } from './atomic-write'
 import { parseJsonOffThread, serializeJsonOffThread } from './json-serializer'
 import { DATA_DIR, getIndexFilePath } from './store-paths'
 import { isRelDirInScope } from '../../shared/scan-dirs'
+import { errorCode, errorMessage } from '../../shared/error-text'
 
 /**
  * 每库本地扫描索引（F1）：
@@ -146,8 +147,8 @@ export async function readLibraryIndex(root) {
       durationMs: Number.isFinite(parsed.durationMs) ? parsed.durationMs : 0,
     }
   } catch (err) {
-    if (err.code !== 'ENOENT')
-      logger.warn(`本地索引读取失败（忽略）: ${err.message}`)
+    if (errorCode(err) !== 'ENOENT')
+      logger.warn(`本地索引读取失败（忽略）: ${errorMessage(err)}`)
     return null
   }
 }
@@ -254,8 +255,8 @@ async function writeIndexBody(root, models, durationMs) {
     try {
       await fs.mkdir(path.join(root, DATA_DIR))
     } catch (err) {
-      if (err.code !== 'EEXIST') {
-        logger.warn(`本地索引目录不可用，跳过写入: ${err.message}`)
+      if (errorCode(err) !== 'EEXIST') {
+        logger.warn(`本地索引目录不可用，跳过写入: ${errorMessage(err)}`)
         return false
       }
     }
@@ -264,7 +265,7 @@ async function writeIndexBody(root, models, durationMs) {
     lastWrittenSize.set(key, bytes)
     return true
   } catch (err) {
-    logger.warn(`本地索引写入失败（不影响扫描）: ${err.message}`)
+    logger.warn(`本地索引写入失败（不影响扫描）: ${errorMessage(err)}`)
     return false
   }
 }
@@ -429,7 +430,7 @@ export async function updateLibraryIndex(root, payload = {}) {
       }
       return await writeIndexBody(root, models, existing.durationMs)
     } catch (err) {
-      logger.warn(`本地索引增量更新失败（忽略）: ${err.message}`)
+      logger.warn(`本地索引增量更新失败（忽略）: ${errorMessage(err)}`)
       return false
     }
   })

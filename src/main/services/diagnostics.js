@@ -16,6 +16,7 @@ import {
 import { getMetaMapByAbsPath } from './store-meta'
 import { getSettings } from './store-settings'
 import { normalizeLibraryRoots } from './library-overview'
+import { errorMessage } from '../../shared/error-text'
 
 /**
  * 诊断包导出（FN-05）：
@@ -274,8 +275,8 @@ export async function exportDiagnostics(win) {
     report = await collectDiagnosticsReport()
     logs = await collectLogs()
   } catch (err) {
-    logger.warn(`诊断信息收集失败: ${err.message}`)
-    return { error: `诊断信息收集失败: ${err.message}` }
+    logger.warn(`诊断信息收集失败: ${errorMessage(err)}`)
+    return { error: `诊断信息收集失败: ${errorMessage(err)}` }
   }
 
   const date = new Date().toISOString().slice(0, 10)
@@ -307,7 +308,7 @@ export async function exportDiagnostics(win) {
     return { ok: true, path: target, sizeBytes: stat.size, logs: logs.length }
   } catch (err) {
     await fs.rm(tmp, { force: true }).catch(() => {})
-    logger.warn(`诊断包导出失败: ${err.message}`)
-    return { error: `诊断包导出失败: ${err.message}` }
+    logger.warn(`诊断包导出失败: ${errorMessage(err)}`)
+    return { error: `诊断包导出失败: ${errorMessage(err)}` }
   }
 }

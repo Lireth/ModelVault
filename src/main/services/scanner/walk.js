@@ -16,6 +16,7 @@ import {
   modelAddedMs,
   typeByFilename,
 } from './rules'
+import { errorCode, errorMessage } from '../../../shared/error-text'
 
 /**
  * 并行 stat 的并发上限：与 watcher 等共用 utils.runWithConcurrency（流式取任务，无批间屏障）
@@ -242,12 +243,12 @@ export async function scanModels(root, onProgress, options = {}) {
       //   保留该子树的既有模型/索引/监控基线，绝不用空结果覆盖；
       // - 全量模式（根节点不可读）：仍计入错误由调用方决定停止监控。
       // 三类均以占位/错误单元进提交链：序号连续、errors 顺序确定
-      const code = err?.code
+      const code = errorCode(err)
       if (scoped && code !== 'ENOENT' && code !== 'ENOTDIR') {
         pendingUnits.set(seq, {
           dir,
           rel,
-          error: err?.message || String(err),
+          error: errorMessage(err) || String(err),
           failedDir: rel,
         })
         commitReadyUnits()
@@ -258,7 +259,7 @@ export async function scanModels(root, onProgress, options = {}) {
         commitReadyUnits()
         return
       }
-      pendingUnits.set(seq, { dir, error: err?.message || String(err) })
+      pendingUnits.set(seq, { dir, error: errorMessage(err) || String(err) })
       commitReadyUnits()
       return
     }
@@ -332,7 +333,7 @@ export async function scanModels(root, onProgress, options = {}) {
         try {
           stats[index] = { stat: await fs.stat(f.fullPath) }
         } catch (err) {
-          stats[index] = { err: err?.message || String(err) }
+          stats[index] = { err: errorMessage(err) || String(err) }
         }
       },
       STAT_CONCURRENCY,

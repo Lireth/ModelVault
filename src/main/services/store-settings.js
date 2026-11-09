@@ -25,6 +25,7 @@ import {
   writeBootstrapNow,
   writeLibraryNow,
 } from './store-settings-persist'
+import { errorCode, errorMessage } from '../../shared/error-text'
 
 /**
  * 应用设置门面（C2 自 store.js 拆出；按职责再拆为 normalize/persist）：
@@ -75,7 +76,7 @@ async function loadLibrarySettings(root, seedRaw = null) {
     }
     return normalizeLibrarySettings(parsed)
   } catch (err) {
-    if (err.code === 'ENOENT') {
+    if (errorCode(err) === 'ENOENT') {
       // 该库首次打开：以迁移种子（旧版全局设置遗留字段）或默认值初始化并落盘。
       // O5：库目录离线（被移动/盘符未挂载）时只驻内存，不写入（否则 mkdir
       // 会把 .modelvault 重建到已失效的旧路径）
@@ -89,7 +90,9 @@ async function loadLibrarySettings(root, seedRaw = null) {
         if (seedRaw) logger.info(`应用设置已迁移至模型库: ${file}`)
       } catch (writeErr) {
         // 目录只读/磁盘离线等：库文件不落盘，设置本次会话仅内存生效
-        logger.warn(`库设置初始化写入失败（仅内存生效）: ${writeErr.message}`)
+        logger.warn(
+          `库设置初始化写入失败（仅内存生效）: ${errorMessage(writeErr)}`,
+        )
       }
       return seeded
     }
@@ -98,11 +101,11 @@ async function loadLibrarySettings(root, seedRaw = null) {
     try {
       const backup = await preserveCorruptedFile(file)
       logger.error(
-        `库设置文件损坏，原文件已备份为 ${path.basename(backup)} 后重置: ${err.message}`,
+        `库设置文件损坏，原文件已备份为 ${path.basename(backup)} 后重置: ${errorMessage(err)}`,
       )
     } catch (backupErr) {
       logger.error(
-        `库设置加载失败，已重置（备份失败: ${backupErr.message}）: ${err.message}`,
+        `库设置加载失败，已重置（备份失败: ${errorMessage(backupErr)}）: ${errorMessage(err)}`,
       )
     }
     return defaultLibrarySettings()
@@ -136,7 +139,7 @@ export async function loadSettings() {
     }
     rawGlobal = parsed
   } catch (err) {
-    if (err.code !== 'ENOENT') {
+    if (errorCode(err) !== 'ENOENT') {
       globalCorrupt = true
       // settings.json 损坏：备份原文件后重置，保留手动恢复机会
       // （时间戳命名滚动保留，连续损坏不互相覆盖）
@@ -144,11 +147,11 @@ export async function loadSettings() {
       try {
         const backup = await preserveCorruptedFile(getSettingsFilePath())
         logger.error(
-          `应用设置文件损坏，原文件已备份为 ${path.basename(backup)} 后重置: ${err.message}`,
+          `应用设置文件损坏，原文件已备份为 ${path.basename(backup)} 后重置: ${errorMessage(err)}`,
         )
       } catch (backupErr) {
         logger.error(
-          `应用设置加载失败，已重置（备份失败: ${backupErr.message}）: ${err.message}`,
+          `应用设置加载失败，已重置（备份失败: ${errorMessage(backupErr)}）: ${errorMessage(err)}`,
         )
       }
     }

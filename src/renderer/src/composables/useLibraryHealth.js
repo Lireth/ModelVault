@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { confirmDialog, scanModels, state, toast } from '../store/appStore'
+import { errorMessage } from '../../../shared/error-text'
 
 /**
  * 模型库体检（V-07，OPT-04 自 SettingsBackup.vue 抽出）：
@@ -102,7 +103,7 @@ export function useLibraryHealth() {
         toast('warn', `体检完成：发现 ${issueCount} 类问题`)
       }
     } catch (err) {
-      toast('error', `模型库检查失败: ${err.message}`)
+      toast('error', `模型库检查失败: ${errorMessage(err)}`)
     } finally {
       healthBusy.value = false
     }
@@ -142,7 +143,7 @@ export function useLibraryHealth() {
         await scanModels()
       }
     } catch (err) {
-      toast('error', `模型库修复失败: ${err.message}`)
+      toast('error', `模型库修复失败: ${errorMessage(err)}`)
     } finally {
       healthRepairing.value = false
     }

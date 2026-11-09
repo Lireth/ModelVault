@@ -37,6 +37,7 @@ import {
 } from './covers'
 import { resolveCoverSafe } from './decorate'
 import { wrapHandler, checkModelIdInRoot } from '../handler'
+import { errorName } from '../../../shared/error-text'
 
 /**
  * Civitai 在线识别链路：
@@ -80,7 +81,7 @@ async function ensureHash(id, meta, mtimeMs) {
     hash = await computeAndCacheHash(id, mtimeMs, { priority: true })
   } catch (err) {
     // 共享的后台任务可能被另一个前台任务抢占：本次识别重试一次（前台通道）
-    if (err?.name !== 'PreemptedError') throw err
+    if (errorName(err) !== 'PreemptedError') throw err
     hash = await computeAndCacheHash(id, mtimeMs, { priority: true })
   }
   // 重读最新元数据：哈希计算期间用户可能已并发保存其他字段

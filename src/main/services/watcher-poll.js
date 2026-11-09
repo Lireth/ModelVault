@@ -20,6 +20,7 @@ import {
   statSelectedDirEntries,
 } from './watcher-snapshot'
 import { scheduleBroadcast } from './watcher-broadcast'
+import { errorCode } from '../../shared/error-text'
 
 /**
  * 轮询巡检引擎（O12 自 watcher.js 拆出）：
@@ -154,7 +155,7 @@ async function collectHotSnapshot(w, hotRels) {
     } catch (err) {
       // 子树在两轮之间被删除/不可读：跳过采集即可——差异会经「旧基线有、
       // 本轮无」检出，合并阶段移除其基线条目；其余错误按巡检异常上抛
-      if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR') continue
+      if (errorCode(err) === 'ENOENT' || errorCode(err) === 'ENOTDIR') continue
       throw err
     }
   }

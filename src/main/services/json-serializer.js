@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { Worker } from 'node:worker_threads'
 import logger from '../logger'
+import { errorMessage } from '../../shared/error-text'
 
 /**
  * JSON 序列化线程（OPT-03）：
@@ -156,7 +157,7 @@ export async function serializeJsonOffThread(value, options = {}) {
       }
     })
   } catch (err) {
-    logger.warn(`JSON 序列化线程不可用，回退主线程: ${err.message}`)
+    logger.warn(`JSON 序列化线程不可用，回退主线程: ${errorMessage(err)}`)
     return serializeOnMainThread(value, hashPrefix, needHash)
   }
 }
@@ -191,7 +192,7 @@ export async function parseJsonOffThread(text) {
       }
     })
   } catch (err) {
-    logger.warn(`JSON 解析线程不可用，回退主线程: ${err.message}`)
+    logger.warn(`JSON 解析线程不可用，回退主线程: ${errorMessage(err)}`)
     return JSON.parse(text)
   }
 }

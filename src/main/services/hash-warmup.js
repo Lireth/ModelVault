@@ -10,6 +10,7 @@ import {
   MAX_WARMUP_CONCURRENCY,
   MIN_WARMUP_CONCURRENCY,
 } from '../../shared/app-enums'
+import { errorMessage, errorName } from '../../shared/error-text'
 
 /**
  * 模型哈希后台预热服务（Civitai 识别加速）：
@@ -129,7 +130,7 @@ function isHashFailSuppressed(id, mtimeMs) {
  * 新版本（mtime 变化）从基准重新计起。
  * @param {string} id 模型绝对路径
  * @param {number|null} mtimeMs 失败时已知的文件 mtime（drain stat 结果）
- * @param {Error} err 失败原因（仅用于日志）
+ * @param {unknown} err 失败原因（仅用于日志）
  */
 function recordHashFailure(id, mtimeMs, err) {
   const prev = hashFailures.get(id)
@@ -155,7 +156,7 @@ function recordHashFailure(id, mtimeMs, err) {
   logger.warn(
     `后台哈希预热失败，已记入负缓存` +
       `（第 ${attempts} 次，${Math.round(backoff / 1000)}s 内批量预热跳过）` +
-      `: ${id} ${err.message}`,
+      `: ${id} ${errorMessage(err)}`,
   )
 }
 
@@ -332,7 +333,7 @@ async function computeHashWithRetry(id, priority, snap, signal) {
         throw err
       logger.warn(
         `哈希计算临时失败，${transientRetryDelayMs}ms 后重试` +
-          `（第 ${attempt + 1}/${TRANSIENT_RETRY_MAX} 次）: ${id} ${err.message}`,
+          `（第 ${attempt + 1}/${TRANSIENT_RETRY_MAX} 次）: ${id} ${errorMessage(err)}`,
       )
       // 上一次尝试可能已推送过部分进度：重试前复位，避免界面停在旧百分比
       snap.percent = 0
@@ -713,7 +714,7 @@ async function drainLane() {
       await computeAndCacheHash(id, stat.mtimeMs, { priority: task.force })
       logger.info(`后台哈希预热完成: ${id}`)
     } catch (err) {
-      if (err?.name === 'PreemptedError') {
+      if (errorName(err) === 'PreemptedError') {
         // 前台任务让路：后台任务被线程池在块边界中止，重新入队等待前台完成，
         // 不视为失败，避免用户打开详情后批量预热静默丢模型。
         logger.info(`后台哈希任务让路，已重新入队: ${id}`)
@@ -726,7 +727,7 @@ async function drainLane() {
         }
         continue
       }
-      if (err?.name === 'AbortError') {
+      if (errorName(err) === 'AbortError') {
         // OPT-13：任务被同 id 新 mtime 请求取代（文件已被改写）——静默跳过，
         // 新版本由下一次扫描/按需请求照常入队，不计入失败负缓存
         logger.info(`后台哈希任务被新版本请求取代，已跳过: ${id}`)

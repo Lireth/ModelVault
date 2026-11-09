@@ -25,6 +25,7 @@ import {
   trackDeferredOwner,
 } from './decorate'
 import { wrapHandler, checkModelId } from '../handler'
+import { errorMessage } from '../../../shared/error-text'
 
 /**
  * 封面链路：上传 / 粘贴 / 拖拽导入 / 设置默认 / 删除封面。
@@ -107,7 +108,7 @@ export async function refreshCoverThumbnail(win, modelId, absCover) {
     }
   } catch (err) {
     // 缩略图是锦上添花：失败不影响封面设置结果，下次扫描仍会补齐
-    logger.warn(`封面即时缩略图失败: ${err.message}`)
+    logger.warn(`封面即时缩略图失败: ${errorMessage(err)}`)
   }
 }
 
