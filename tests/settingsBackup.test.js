@@ -12,6 +12,7 @@ import {
 import {
   buildCsv,
   buildExportRows,
+  buildMarkdown,
 } from '../src/renderer/src/store/model-export'
 import { setupComponentTest } from './helpers/componentTest'
 
@@ -510,5 +511,17 @@ describe('CSV 导出公式注入中和（O-4）', () => {
     // 前缀落在引号内，原双引号按原有规则翻倍；\r\n 记录分隔未被破坏
     expect(csv).toContain(`"'=1,""quoted""\nline,next"`)
     expect(csv.split('\r\n')).toHaveLength(3)
+  })
+})
+
+describe('Markdown 导出转义（CodeQL #12）', () => {
+  it('反斜杠先行转义：输入自带的 \\ 不会吞掉竖线转义符分裂单元格', () => {
+    // 输入 a\|b → 输出字面序列 a\\\|b（\\ 渲染为字面 \，\| 渲染为字面 |）
+    expect(buildMarkdown([csvRow({ name: 'a\\|b' })])).toContain('a\\\\\\|b')
+  })
+
+  it('普通竖线仍按 \\| 转义、换行折叠为空格', () => {
+    const md = buildMarkdown([csvRow({ note: 'x|y\nz' })])
+    expect(md).toContain('x\\|y z')
   })
 })

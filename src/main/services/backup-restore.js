@@ -283,12 +283,15 @@ async function restorePartialLibrary(root, filePath, manifest) {
       const unzipped = await streamBackupZip(filePath, {
         coverWriter: async (name, data) => {
           const dest = path.join(coversDir, name)
-          const exists = await fs.access(dest).then(
-            () => true,
-            () => false,
-          )
-          if (exists) return
-          await fs.writeFile(dest, data)
+          // CodeQL #15：access 预检 + writeFile 存在 check-then-write 竞态，
+          // 改用 wx 独占创建标志——已存在即 EEXIST 原子失败，语义与原
+          // 「不覆盖既有封面」一致且无竞态窗口
+          try {
+            await fs.writeFile(dest, data, { flag: 'wx' })
+          } catch (err) {
+            if (errorCode(err) === 'EEXIST') return
+            throw err
+          }
           writtenCovers.push(dest)
           covers += 1
         },
