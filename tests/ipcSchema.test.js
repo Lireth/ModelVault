@@ -20,7 +20,7 @@ import { MAX_BATCH_META_IDS } from '../src/shared/app-enums'
 /**
  * IPC 通道单一来源对账 + payload 入口结构校验（O-2 / O1 fail-closed / O2）：
  * - 校验器纯函数单测（类型/边界/嵌套规则）；
- * - 单一来源对账（O2）：shared/ipc-schema.js 注册表是全部 invoke 通道的唯一
+ * - 单一来源对账（O2）：shared/ipc-schema/ 注册表是全部 invoke 通道的唯一
  *   声明处（preload 白名单由键集派生），本测试锁定注册表与两侧调用点的
  *   双向一致——preload api 的 invokeValidated 调用点、主进程的 wrapHandler
  *   注册点，任一侧出现未登记通道或登记通道无调用/注册即失败；

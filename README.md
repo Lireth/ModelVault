@@ -184,9 +184,9 @@ ModelVault/
 
 ### 主进程与渲染进程通信
 
-渲染进程**没有**裸 `invoke` 入口，所有 invoke 通道必须在 `src/shared/ipc-schema.js` 注册表登记（单一来源：preload 白名单由注册表键集派生，payload schema 一并声明，未登记通道被 fail-closed 拒绝）：
+渲染进程**没有**裸 `invoke` 入口，所有 invoke 通道必须在 `src/shared/ipc-schema/` 注册表登记（O-3 按域拆分：`schema-*.js` 域文件声明、`index.js` 聚合门面为唯一导入入口；单一来源：preload 白名单由注册表键集派生，payload schema 一并声明，未登记通道被 fail-closed 拒绝）：
 
-1. 在 `src/shared/ipc-schema.js` 的 `IPC_PAYLOAD_SCHEMAS` 中登记通道：带参通道用 `vObj`/`vStr` 等构造器声明 payload 结构门禁，无参通道登记 `vVoid()`：
+1. 在 `src/shared/ipc-schema/` 对应域文件（`schema-app.js` / `schema-meta.js` 等 `schema-*.js`）中登记通道：带参通道用 `vObj`/`vStr` 等构造器声明 payload 结构门禁，无参通道登记 `vVoid()`：
 
 ```js
 'my:channel': vObj({ fields: { id: vStr({ required: true, max: 2000 }) } })
