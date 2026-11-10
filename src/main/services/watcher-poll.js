@@ -79,7 +79,7 @@ export function scheduleNextWalk(w) {
  * @param {Error} err 巡检异常
  * @returns {boolean} 是否进入退避重探（true 时调用方暂停常规巡检链）
  */
-export function handleWalkError(w, err) {
+function handleWalkError(w, err) {
   const ladder = Array.isArray(w.errorRetryLadder)
     ? w.errorRetryLadder
     : WATCHER_ERROR_RETRY_LADDER

@@ -40,7 +40,7 @@ const RENDERER_RECOVER_TOTAL_MAX = 20
  * @returns {{onRendererGone: (details?: {reason?: string}) => void,
  *   onRendererLoaded: () => void, manualReload: () => void, dispose: () => void}}
  */
-export function createRendererCrashRecovery(win, hooks = {}, timing = {}) {
+function createRendererCrashRecovery(win, hooks = {}, timing = {}) {
   const maxAutoReloads =
     Number.isFinite(timing.maxAutoReloads) && timing.maxAutoReloads > 0
       ? timing.maxAutoReloads

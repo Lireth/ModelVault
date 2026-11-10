@@ -86,7 +86,7 @@ export function setSaveRetryDelayForTests(ms) {
  * 双保险：即便门禁通过后根目录恰好消失，非递归 mkdir 也只是失败（ENOENT）
  * 而非把整棵根目录树重建到失效路径。
  */
-export async function isCurrentRootAvailable() {
+async function isCurrentRootAvailable() {
   const root = getCurrentRoot()
   if (!root) return false
   const now = Date.now()

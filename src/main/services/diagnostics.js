@@ -158,7 +158,7 @@ async function fileInfo(file) {
  * @returns {{models: number, withCovers: number, withTags: number,
  *   withParams: number, withNote: number, withHash: number}}
  */
-export function summarizeMetadata(metaMap) {
+function summarizeMetadata(metaMap) {
   const summary = {
     models: 0,
     withCovers: 0,

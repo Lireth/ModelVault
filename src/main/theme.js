@@ -3,7 +3,7 @@
  * 窗口创建时的底色/标题栏叠加层颜色与主题切换时的同步更新
  * 必须使用同一份数据，避免双份维护导致改色遗漏。
  */
-export const THEME_COLORS = {
+const THEME_COLORS = {
   dark: {
     backgroundColor: '#101418',
     overlayColor: '#101418',

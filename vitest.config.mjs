@@ -41,6 +41,8 @@ export default defineConfig({
         'src/main/services/backup.js',
         'src/renderer/src/store/appStore.js',
         'src/renderer/src/store/multiselect.js',
+        // 测试脚手架（挂载/IPC 装配助手）：非产品代码，计入分母无意义
+        'tests/helpers/**',
       ],
       thresholds: {
         statements: 75,
