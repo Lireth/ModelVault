@@ -304,6 +304,32 @@ describe('scanModels', () => {
     expect(partial.dirSnapshot.has(root)).toBe(false)
   })
 
+  it('O-3b：dirRawNames 仅登记含被过滤条目的目录，且为可见+被过滤全量', async () => {
+    const { dirSnapshot, dirRawNames } = await scanModels(root, undefined, {
+      excludeDirs: ['temp'],
+    })
+    expect(dirRawNames).toBeInstanceOf(Map)
+    // 根目录含被可见性过滤的条目（put_ 文件与排除/隐藏目录）：全量清单登记
+    const rawRoot = dirRawNames.get(root)
+    expect(rawRoot).toContain('put_interfaces.bin')
+    expect(rawRoot).toContain('.git')
+    expect(rawRoot).toContain('$RECYCLE.BIN')
+    // watcher 基线口径不变：dirSnapshot 仍不含被过滤条目
+    const visibleRoot = dirSnapshot.get(root)
+    expect(visibleRoot).not.toContain('put_interfaces.bin')
+    expect(visibleRoot).not.toContain('.git')
+    // 全量 ⊇ 可见：剪枝清单不丢任何扫描期可见条目名
+    for (const name of visibleRoot) expect(rawRoot).toContain(name)
+    // 无被过滤条目的目录不登记（消费方回落 dirSnapshot，两者等价）
+    expect(dirRawNames.has(path.join(root, 'lora'))).toBe(false)
+    expect(dirRawNames.has(path.join(root, 'notes'))).toBe(false)
+
+    // 子树局部扫描同样只登记实际读取且含被过滤条目的目录
+    const partial = await scanModels(root, undefined, { subDirs: ['lora'] })
+    expect(partial.dirRawNames.has(root)).toBe(false)
+    expect(partial.dirRawNames.has(path.join(root, 'lora'))).toBe(false)
+  })
+
   it('并发遍历：多次扫描输出完全一致（运行间确定性，OPT-02）', async () => {
     // 多层级多文件树：跨目录的提交顺序是并发调度最敏感的面
     await fs.mkdir(path.join(root, 'lora', '角色', 'deep'), {

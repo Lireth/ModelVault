@@ -122,22 +122,29 @@ export function sidecarFactsOf(stats) {
 }
 
 /**
- * 目录条目名清单（O-3）：把扫描期 dirSnapshot（目录 → 条目名数组）按目录
+ * 目录条目名清单（O-3）：把扫描期目录快照（目录 → 条目名数组）按目录
  * 惰性转成小写名 Set，同一批次内每个目录只构建一次、只保存一份 Set
  * （目录数远小于模型数，不会为每个模型各建一份）。
  *
- * 优先复用扫描阶段已 readdir 过的清单（scan.js 把 dirSnapshot 随扫描结果
- * 传到本层），避免同一批次对同一目录再补一次 readdir；调用方未提供快照
+ * 优先复用扫描阶段已 readdir 过的清单（scan.js 把 dirSnapshot/dirRawNames
+ * 随扫描结果传到本层），避免同一批次对同一目录再补一次 readdir；调用方未提供快照
  * （直接调用 decorateModels 的测试/其它入口）时按目录懒 readdir 一次，
  * 目录缺失/权限/离线失败得到 null，装饰层回退旧的逐候选 stat，不抛错。
  * 清单只用于剪枝：真正的事实仍由 statSidecarSet 的 fs.stat 决定，故清单
  * 陈旧（扫描后目录被外部写入）只会漏检本轮，不会产出「存在」的假事实。
- * @param {Map<string, string[]>|null} [dirSnapshot] 扫描期目录名快照
+ *
+ * O-3b：dirRawNames 为含被可见性过滤条目（符号链接/隐藏项）目录的全量
+ * 条目名清单，命中该目录时优先使用——剪枝口径与懒 readdir 回退（原始
+ * 条目名）一致，符号链接 sidecar 不再因清单过滤而漏检；未登记的目录
+ * 回落 dirSnapshot（该目录无被过滤条目，两者等价）。
+ * @param {Map<string, string[]>|null} [dirSnapshot] 扫描期可见条目名快照（watcher 同构口径）
+ * @param {Map<string, string[]>|null} [dirRawNames] 含被过滤条目目录的全量条目名清单（O-3b）
  * @returns {{get: (dir: string) => Promise<Set<string>|null>}}
  *   返回按目录的小写文件名集合；null 表示该目录不可剪枝（走旧路径）
  */
-export function createSidecarDirListings(dirSnapshot) {
+export function createSidecarDirListings(dirSnapshot, dirRawNames) {
   const scanned = dirSnapshot instanceof Map ? dirSnapshot : null
+  const rawScanned = dirRawNames instanceof Map ? dirRawNames : null
   /** @type {Map<string, Promise<Set<string>|null>>} */
   const byDir = new Map()
   return {
@@ -145,10 +152,11 @@ export function createSidecarDirListings(dirSnapshot) {
       const cached = byDir.get(dir)
       if (cached) return cached
       let promise
-      if (scanned) {
-        // 扫描快照含该目录：直接复用扫描期 readdir 事实；不含则该目录未被
+      if (scanned || rawScanned) {
+        // 快照含该目录：直接复用扫描期 readdir 事实；不含则该目录未被
         // 扫描读取（模型不应来自其中），不额外补 readdir，回退旧路径
-        const names = scanned.get(dir)
+        // O-3b：全量清单（含符号链接/隐藏条目名）优先，回落可见性快照
+        const names = rawScanned?.get(dir) ?? scanned?.get(dir) ?? null
         promise = Promise.resolve(
           names ? new Set(names.map((n) => n.toLowerCase())) : null,
         )

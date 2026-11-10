@@ -52,6 +52,7 @@ import {
   getThumbDrainPromise,
   resetDecorateCache,
 } from '../src/main/services/decorate/state'
+import { createSidecarDirListings } from '../src/main/services/decorate/facts'
 import {
   loadData,
   setDataRoot,
@@ -1251,5 +1252,66 @@ describe('O-3 sidecar 候选探测按目录清单剪枝', () => {
     expect(fresh).not.toBe(stale)
     expect(fresh.triggerWords).toBe('late words')
     expect(getModelMeta(model.id).note).toBe('用户备注')
+  })
+
+  it('O-3b：清单构建优先全量清单、回落可见快照、两者不含该目录返回 null', async () => {
+    const dirA = path.join(root, 'only-raw')
+    const dirB = path.join(root, 'both')
+    const dirC = path.join(root, 'neither')
+    const visible = new Map([
+      [dirB, ['b.safetensors']],
+      [dirC, ['c.safetensors']],
+    ])
+    const raw = new Map([
+      [dirA, ['a.safetensors', 'a.png']],
+      [dirB, ['b.safetensors', 'b.png']],
+    ])
+    const listings = createSidecarDirListings(visible, raw)
+    // 全量清单命中：含可见性过滤掉的符号链接/隐藏条目名
+    expect(await listings.get(dirA)).toEqual(
+      new Set(['a.safetensors', 'a.png']),
+    )
+    // 两表都含该目录：全量优先（可见清单缺 b.png）
+    expect(await listings.get(dirB)).toEqual(
+      new Set(['b.safetensors', 'b.png']),
+    )
+    // 仅可见清单：回落（该目录无被过滤条目，两者等价）
+    expect(await listings.get(dirC)).toEqual(new Set(['c.safetensors']))
+    // 都不含：null → 不剪枝，回退逐个 stat（不额外 readdir）
+    expect(await listings.get(path.join(root, 'unknown'))).toBeNull()
+  })
+
+  it('O-3b：符号链接 sidecar 预览图经全量清单命中（可见清单漏检回归）', async (ctx) => {
+    const model = await writeModel('prune-sym.safetensors')
+    const target = path.join(root, 'prune-sym-target.png')
+    await fs.writeFile(target, PNG_MAGIC)
+    const link = path.join(root, 'prune-sym.png')
+    try {
+      // Windows 普通权限可能无法创建文件符号链接：受限环境跳过（同 junction 用例约定）
+      await fs.symlink(target, link, 'file')
+    } catch {
+      ctx.skip()
+    }
+    const allNames = await fs.readdir(root)
+    // 模拟扫描期两表：dirSnapshot 为可见性口径（不含符号链接名），
+    // dirRawNames 为全量口径（含）
+    const visibleNames = allNames.filter((n) => n !== 'prune-sym.png')
+
+    // 仅可见清单（回归前的剪枝口径）：符号链接预览图被剪掉 → 封面漏检
+    const [visibleOnly] = await decorateModels([{ ...model }], null, {
+      forceRefresh: true,
+      dirSnapshot: new Map([[root, visibleNames]]),
+    })
+    expect(visibleOnly.cover).not.toBe(link)
+
+    // 全量清单（O-3b 修复后口径）：与基线盲 stat 一致命中符号链接预览图
+    resetDecorateCache(root)
+    const [withRaw] = await decorateModels([{ ...model }], null, {
+      forceRefresh: true,
+      dirSnapshot: new Map([[root, visibleNames]]),
+      dirRawNames: new Map([[root, allNames]]),
+    })
+    expect(withRaw.cover).toBe(link)
+    expect(withRaw.coverUrl).toContain(encodeURIComponent(link))
   })
 })

@@ -181,26 +181,27 @@ export function registerScanHandlers() {
           let lastSent = 0
           // 应用扫描规则：排除目录 + 扫描文件扩展名（来自应用设置）
           const appSettings = getSettings()
-          const { models, errors, dirCount, dirSnapshot } = await scanModels(
-            root,
-            (progress) => {
-              const now = Date.now()
-              if (now - lastSent >= PROGRESS_INTERVAL) {
-                lastSent = now
-                // 窗口可能已在扫描期间关闭：?. 只防 null 不防已销毁（访问 webContents 抛错），须判 isDestroyed
-                if (win && !win.isDestroyed()) {
-                  win.webContents.send('models:scanProgress', progress)
+          const { models, errors, dirCount, dirSnapshot, dirRawNames } =
+            await scanModels(
+              root,
+              (progress) => {
+                const now = Date.now()
+                if (now - lastSent >= PROGRESS_INTERVAL) {
+                  lastSent = now
+                  // 窗口可能已在扫描期间关闭：?. 只防 null 不防已销毁（访问 webContents 抛错），须判 isDestroyed
+                  if (win && !win.isDestroyed()) {
+                    win.webContents.send('models:scanProgress', progress)
+                  }
                 }
-              }
-            },
-            {
-              excludeDirs: appSettings.excludeDirs || [],
-              // 与局部扫描同一兜底口径（FIX-5）：异常时回退 undefined → scanner
-              // 默认全集；此前 `|| []` 在异常场景会产出空集（扫不到任何文件）
-              extensions: resolveScanExtensions(appSettings),
-              signal,
-            },
-          )
+              },
+              {
+                excludeDirs: appSettings.excludeDirs || [],
+                // 与局部扫描同一兜底口径（FIX-5）：异常时回退 undefined → scanner
+                // 默认全集；此前 `|| []` 在异常场景会产出空集（扫不到任何文件）
+                extensions: resolveScanExtensions(appSettings),
+                signal,
+              },
+            )
 
           // 重关联被移动/重命名模型的标注（A-02）：必须在装饰前执行——
           // decorateOne 按扫描出的新路径键读取元数据，先迁移才能让标注/封面/
@@ -208,12 +209,15 @@ export function registerScanHandlers() {
           const relinkResult = relinkScannedMeta(models)
 
           // OPT-04：全量扫描按库规模自适应装饰缓存容量并清理陈旧条目；
-          // O-3：把本次扫描已 readdir 的目录清单（dirSnapshot）传给装饰层，
-          // sidecar 候选探测按目录剪枝，避免对每个模型盲 stat 全部 9 个候选，
-          // 也避免装饰层对同一目录再补一次 readdir
+          // O-3：把本次扫描已 readdir 的目录清单（dirSnapshot/dirRawNames）
+          // 传给装饰层，sidecar 候选探测按目录剪枝，避免对每个模型盲 stat
+          // 全部 9 个候选，也避免装饰层对同一目录再补一次 readdir；
+          // O-3b：dirRawNames 为含被可见性过滤条目目录的全量清单，剪枝
+          // 优先使用（符号链接 sidecar 保留检出）
           const decorated = await decorateModels(models, signal, {
             adaptCacheSize: true,
             dirSnapshot,
+            dirRawNames,
           })
           // 原始扫描数组的元素壳随装饰完成立即释放（O8）：装饰结果为字段浅拷贝的
           // 新对象，原始元素不再被引用；大库扫描期间原始数组、装饰数组与 IPC
@@ -435,6 +439,8 @@ export function registerScanHandlers() {
             forceRefresh: true,
             // O-3：复用本次局部扫描的目录清单剪枝 sidecar 候选探测
             dirSnapshot: scanResult.dirSnapshot,
+            // O-3b：含被可见性过滤条目目录的全量清单（符号链接 sidecar 检出）
+            dirRawNames: scanResult.dirRawNames,
           })
           models.length = 0 // 同全量扫描：装饰后立即释放原始数组（O8）
 

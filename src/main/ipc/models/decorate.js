@@ -408,7 +408,8 @@ function pruneDecorateCache(validIds) {
  * @param {Array<object>} models 扫描出的模型列表
  * @param {AbortSignal} [signal] 取消信号（每任务开始前检查）
  * @param {{pruneThumbs?: boolean, forceRefresh?: boolean, adaptCacheSize?: boolean,
- *   dirSnapshot?: Map<string, string[]>|null}} [opts]
+ *   dirSnapshot?: Map<string, string[]>|null,
+ *   dirRawNames?: Map<string, string[]>|null}} [opts]
  *   pruneThumbs=false 跳过末尾的失效缩略图清理（局部增量扫描必传）：
  *   局部装饰仅覆盖变更子树，usedThumbs 不含子树外模型的缩略图，此时按名单
  *   清理会把子树外有效缩略图全部误删——且装饰缓存命中路径不会重新生成，
@@ -425,6 +426,10 @@ function pruneDecorateCache(validIds) {
  *  （scanModels 返回的 dirSnapshot）：装饰阶段按目录复用它剪枝 sidecar
  *  候选探测，避免同一批次对同一目录再次 readdir；缺省时装饰层按目录
  *  懒 readdir 一次，失败则回退逐个 stat。
+ *   dirRawNames（O-3b）= 含被可见性过滤条目（符号链接/隐藏项）目录的
+ *  全量条目名清单（scanModels 返回的 dirRawNames）：剪枝命中该目录时
+ *  优先使用，保留基线「符号链接 sidecar 直接 stat 可命中」的检出能力；
+ *  未登记的目录回落 dirSnapshot（两者等价）。
  */
 export async function decorateModels(models, signal, opts = {}) {
   const usedThumbs = new Set()
@@ -447,7 +452,12 @@ export async function decorateModels(models, signal, opts = {}) {
   // O-3：sidecar 候选探测按目录复用清单。优先用扫描阶段已 readdir 过的
   // dirSnapshot（scan.js 随扫描结果传入），同一目录在整批中只构建一份
   // 小写名 Set；未提供快照时该目录懒 readdir 一次，失败回退逐个 stat。
-  const sidecarListings = createSidecarDirListings(opts.dirSnapshot)
+  // O-3b：dirRawNames（含符号链接/隐藏条目的全量清单）命中目录时优先，
+  // 使剪枝口径与懒 readdir 回退一致，符号链接 sidecar 不再漏检。
+  const sidecarListings = createSidecarDirListings(
+    opts.dirSnapshot,
+    opts.dirRawNames,
+  )
   // 流式固定并发池（与 scanner/watcher 共用 utils.runWithConcurrency，O-5）：
   // 完成一个补位一个，消除「批内并发、批间串行」的整批等待尾延迟——每批
   // 最慢的模型（多封面逐张 stat + safetensors 头解析）不再拖住同批其余任务。
