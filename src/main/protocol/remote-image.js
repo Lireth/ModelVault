@@ -86,6 +86,17 @@ const CIVIMG_FAIL_TTL_MS = 60_000
 const CIVIMG_FAIL_MAX_ENTRIES = 2048
 const civimgFailures = new Map()
 
+/** 失败 TTL（测试可注入小值验证到期重试） */
+let civimgFailTtlMs = CIVIMG_FAIL_TTL_MS
+
+/**
+ * 注入 civimg 失败负缓存 TTL（仅供单元测试使用；生产代码严禁调用）
+ * @param {number} ms 毫秒数
+ */
+export function setCivimgFailTtlForTests(ms) {
+  civimgFailTtlMs = Number.isFinite(ms) && ms > 0 ? ms : CIVIMG_FAIL_TTL_MS
+}
+
 /**
  * 静默期内同 URL 的缓存失败状态（无记录/已到期返回 0）。
  * 到期即惰性删除，下一次请求正常回源。
@@ -114,7 +125,7 @@ function recordCivimgFailure(target) {
     const oldest = civimgFailures.keys().next().value
     if (oldest !== undefined) civimgFailures.delete(oldest)
   }
-  civimgFailures.set(target, Date.now() + CIVIMG_FAIL_TTL_MS)
+  civimgFailures.set(target, Date.now() + civimgFailTtlMs)
 }
 
 /**
