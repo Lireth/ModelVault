@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { nextTick } from 'vue'
 import {
   effectiveModelHash,
   setMetaOverride,
 } from '../src/renderer/src/store/state'
 import { ensurePinyinEngine } from '../src/renderer/src/store/pinyin'
+import { prebuildPinyinSearchIndex } from '../src/renderer/src/store/filter'
 import {
   makeApiMock,
   resetStoreTestState,
@@ -40,6 +42,10 @@ let api
 beforeEach(() => {
   api = makeApiMock()
   resetStoreTestState(api)
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe('formatSize', () => {
@@ -500,6 +506,47 @@ describe('拼音/模糊搜索（FEAT-07）', () => {
     state.search = 'diff xl'
     expect(filteredModels.value.map((m) => m.id)).toEqual(['sdxl'])
     state.search = ''
+  })
+
+  it('拼音域分片预构建（O2）：按 start/max 推进，已缓存条目跳过', async () => {
+    await ensurePinyinEngine()
+    const models = [
+      makeModel('moon', { name: '月光宝盒' }),
+      makeModel('sdxl', { name: 'Stable Diffusion XL' }),
+    ]
+    const first = prebuildPinyinSearchIndex(models, { start: 0, max: 1 })
+    expect(first).toMatchObject({ built: 1, next: 1, done: false })
+
+    const second = prebuildPinyinSearchIndex(models, {
+      start: first.next,
+      max: 1,
+    })
+    expect(second).toMatchObject({ built: 1, next: 2, done: true })
+
+    // 已缓存条目不再重复生成（WeakMap 按模型对象引用命中）
+    const again = prebuildPinyinSearchIndex(models)
+    expect(again).toMatchObject({ built: 0, next: 2, done: true })
+  })
+
+  it('引擎就绪后模型列表替换触发空闲预构建（O2）', async () => {
+    await ensurePinyinEngine()
+    const idleCallbacks = []
+    vi.stubGlobal('requestIdleCallback', (cb) => {
+      idleCallbacks.push(cb)
+      return idleCallbacks.length
+    })
+    vi.stubGlobal('cancelIdleCallback', vi.fn())
+
+    replaceModels([makeModel('moon', { name: '月光宝盒' })])
+    await nextTick()
+    expect(idleCallbacks).toHaveLength(1)
+
+    idleCallbacks.shift()()
+    // 空闲回调已填充缓存：再次预构建应全部命中，无新建条目
+    expect(prebuildPinyinSearchIndex(state.models)).toMatchObject({
+      built: 0,
+      done: true,
+    })
   })
 })
 

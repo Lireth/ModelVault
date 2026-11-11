@@ -54,8 +54,16 @@ function addedMsOf(m) {
  * 纳入搜索域——数据在扫描装饰阶段已随模型对象携带，此前解析了却搜不到。
  */
 const searchHaystackCache = new WeakMap()
-/** 拼音搜索域缓存（FEAT-07）：按模型对象引用记忆化，与普通搜索域同一失效约定 */
+/**
+ * 拼音搜索域缓存（FEAT-07）：按模型对象引用记忆化，与普通搜索域同一失效约定。
+ * O2：引擎就绪后由空闲预构建（prebuildPinyinSearchIndex）提前填充，查询
+ * 热路径优先命中缓存；预构建未完成时仍按原有懒计算兜底，结果不受进度影响。
+ */
 const pinyinHaystackCache = new WeakMap()
+/** 拼音域预构建单次最多处理的模型数（与时间预算共同限幅） */
+const PINYIN_PREBUILD_BATCH_MAX = 100
+/** 拼音域预构建单次时间预算（ms）：空闲回调内不长时间占用主线程 */
+const PINYIN_PREBUILD_BUDGET_MS = 6
 
 /**
  * 模型的可搜索文本片段（普通搜索域与拼音域共用同一来源，顺序/字段一致）。
@@ -111,6 +119,116 @@ function pinyinHaystack(m) {
   hay = getPinyinSearchText(searchParts(m).filter(Boolean).join('\n'))
   pinyinHaystackCache.set(m, hay)
   return hay
+}
+
+/**
+ * 增量预构建拼音搜索域（O2）：从 start 起最多处理 max 个未缓存模型，
+ * 或达到时间预算后返回下一次起点。已缓存对象直接跳过（WeakMap 按对象
+ * 引用失效，模型对象整体替换后自然视为未缓存）。
+ *
+ * 分片而非一次性遍历：pinyin-pro 对每个模型要生成全拼与首字母两段文本，
+ * 万级库一次跑完会在渲染线程形成数十毫秒级长任务。调用方（空闲调度器）
+ * 在 requestIdleCallback 内逐片推进，搜索过滤热路径只读缓存；若用户在
+ * 预构建完成前发起查询，pinyinHaystack 仍按原有懒计算兜底，结果正确性
+ * 不依赖预构建进度。
+ * @param {Array<Record<string, any>>} models 模型列表
+ * @param {{start?: number, max?: number, budgetMs?: number}} [options]
+ *   start 起始下标；max 本次最多新建数；budgetMs 单次时间预算
+ * @returns {{next: number, built: number, done: boolean}}
+ *   next 下一次起点；built 本次新建条目数；done 是否已处理完
+ */
+export function prebuildPinyinSearchIndex(models, options = {}) {
+  if (!pinyinReady.value) return { next: 0, built: 0, done: true }
+  const list = Array.isArray(models) ? models : []
+  const start =
+    Number.isInteger(options.start) && options.start > 0
+      ? Math.min(options.start, list.length)
+      : 0
+  const max =
+    Number.isFinite(options.max) && options.max > 0
+      ? Math.max(1, Math.floor(options.max))
+      : PINYIN_PREBUILD_BATCH_MAX
+  const budgetMs =
+    Number.isFinite(options.budgetMs) && options.budgetMs >= 0
+      ? options.budgetMs
+      : PINYIN_PREBUILD_BUDGET_MS
+  const startedAt = Date.now()
+  let cursor = start
+  let built = 0
+  while (cursor < list.length && built < max) {
+    const m = list[cursor]
+    cursor += 1
+    if (!m || pinyinHaystackCache.has(m)) continue
+    pinyinHaystack(m)
+    built += 1
+    if (Date.now() - startedAt >= budgetMs) break
+  }
+  return { next: cursor, built, done: cursor >= list.length }
+}
+
+/**
+ * 空闲预构建调度状态（O2）：同一时刻只推进一个模型列表。
+ * - generation：列表替换/引擎重置时递增，旧空闲回调据此作废；
+ * - list/cursor：当前预构建列表与下一次起点；
+ * - idle：已排队的 requestIdleCallback 句柄（null 表示未排队）。
+ */
+let pinyinPrebuildIdle = null
+let pinyinPrebuildGeneration = 0
+let pinyinPrebuildList = null
+let pinyinPrebuildCursor = 0
+
+/** 取消已排队的空闲预构建并作废旧代际 */
+function cancelPinyinPrebuild() {
+  pinyinPrebuildGeneration += 1
+  if (pinyinPrebuildIdle !== null && typeof cancelIdleCallback === 'function') {
+    cancelIdleCallback(pinyinPrebuildIdle)
+  }
+  pinyinPrebuildIdle = null
+  pinyinPrebuildList = null
+  pinyinPrebuildCursor = 0
+}
+
+/**
+ * 安排拼音域空闲预构建（O2）：
+ * - 引擎未就绪或环境不支持 requestIdleCallback（node 测试）时直接跳过，
+ *   过滤链路仍有懒计算兜底；
+ * - 列表整体替换（扫描完成/切库）或引擎首次就绪时重置进度，从新列表
+ *   头部开始（WeakMap 缓存命中的模型会被快速跳过）；
+ * - 每次空闲回调推进一个分片，未完成则以 timeout 续排，保证窗口隐藏/
+ *   空闲时间碎片化时仍能最终完成。
+ * @param {Array<Record<string, any>>} [list] 模型列表（默认当前全局列表）
+ */
+function schedulePinyinPrebuild(list = state.models) {
+  // 引擎未就绪/空库：作废可能残留的旧列表进度（切库、离线清空）
+  if (!pinyinReady.value || !Array.isArray(list) || list.length === 0) {
+    cancelPinyinPrebuild()
+    return
+  }
+  if (typeof requestIdleCallback !== 'function') {
+    cancelPinyinPrebuild()
+    return
+  }
+  // 同一列表已排队：不重复调度（进度由已排队回调继续推进）
+  if (pinyinPrebuildList === list && pinyinPrebuildIdle !== null) return
+  cancelPinyinPrebuild()
+  pinyinPrebuildList = list
+  pinyinPrebuildCursor = 0
+  const generation = pinyinPrebuildGeneration
+  const run = () => {
+    pinyinPrebuildIdle = null
+    if (generation !== pinyinPrebuildGeneration || !pinyinReady.value) return
+    if (pinyinPrebuildList !== list) return
+    const result = prebuildPinyinSearchIndex(list, {
+      start: pinyinPrebuildCursor,
+      max: PINYIN_PREBUILD_BATCH_MAX,
+      budgetMs: PINYIN_PREBUILD_BUDGET_MS,
+    })
+    pinyinPrebuildCursor = result.next
+    if (!result.done) {
+      pinyinPrebuildIdle = requestIdleCallback(run, { timeout: 1000 })
+    }
+  }
+  pinyinPrebuildIdle = requestIdleCallback(run, { timeout: 1000 })
 }
 
 /** 含拉丁字母的查询才尝试拼音域（纯中文查询走普通子串即可） */
@@ -594,3 +712,19 @@ watch(
     state.baseFilter = ''
   },
 )
+
+/**
+ * O2：拼音引擎就绪后启动全库空闲预构建；模型列表整体替换（扫描完成/
+ * 切库）后重新推进新列表。元素级替换（标注/封面/详情补全）不整体重排——
+ * 新对象在下一次过滤时按原有懒计算补齐，避免高频写入触发全库重扫。
+ */
+watch(pinyinReady, (ready) => {
+  if (ready) schedulePinyinPrebuild(state.models)
+  else cancelPinyinPrebuild()
+})
+watch(
+  () => state.models,
+  (list) => schedulePinyinPrebuild(list),
+)
+// HMR/测试等场景下引擎可能先于本模块就绪：补一次初始调度
+if (pinyinReady.value) schedulePinyinPrebuild(state.models)
