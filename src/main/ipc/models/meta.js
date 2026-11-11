@@ -245,6 +245,47 @@ export function registerMetaHandlers() {
     { errorPrefix: '批量标签保存失败' },
   )
 
+  // F5 批量推荐参数：逐项把 params 补丁合并进已有参数后整条落盘。
+  // 只更新请求中出现的字段——留空字段保持各模型原值，绝不整包覆写。
+  wrapHandler(
+    'models:setModelParamsBulk',
+    (event, { items } = {}) => {
+      if (!Array.isArray(items) || items.length === 0) {
+        return { error: '缺少待更新的模型' }
+      }
+      /** @type {Map<string, Record<string, any>>} id → 参数补丁（重复项后者覆盖） */
+      const patches = new Map()
+      for (const item of items) {
+        if (!item || typeof item.id !== 'string' || !item.id) continue
+        if (!item.params || typeof item.params !== 'object') continue
+        if (Object.keys(item.params).length === 0) continue
+        patches.set(item.id, item.params)
+      }
+      const entries = []
+      for (const [id, patch] of patches) {
+        const existing = getModelMeta(id) || {}
+        const current =
+          existing.params && typeof existing.params === 'object'
+            ? existing.params
+            : {}
+        entries.push({
+          id,
+          meta: { ...existing, params: { ...current, ...patch } },
+        })
+      }
+      if (entries.length === 0) return { error: '缺少有效的推荐参数' }
+      const result = setModelMetaMany(entries)
+      return {
+        updated: result.updated.map(({ id, meta }) => ({
+          id,
+          params: meta.params,
+        })),
+        failed: result.failed,
+      }
+    },
+    { errorPrefix: '批量推荐参数保存失败' },
+  )
+
   // 全库重命名自由标签（F4）：把当前库所有模型上的 from 替换为 to；
   // 目标名已存在（或仅大小写不同）时自然合并——normalizeTags 的大小写
   // 不敏感去重会收敛变体。仅在确有改动时等待落盘，避免无谓的磁盘写入

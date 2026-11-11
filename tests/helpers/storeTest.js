@@ -33,6 +33,10 @@ export function makeApiMock() {
       setMetaFlagsBulk: vi.fn(() =>
         Promise.resolve({ updated: [], failed: [] }),
       ),
+      // F5 批量推荐参数
+      setModelParamsBulk: vi.fn(() =>
+        Promise.resolve({ updated: [], failed: [] }),
+      ),
       setModelTags: vi.fn(),
       setModelTagsBulk: vi.fn(() =>
         Promise.resolve({ updated: [], failed: [] }),

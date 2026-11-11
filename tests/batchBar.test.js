@@ -125,6 +125,7 @@ describe('BatchBar「更多」下拉', () => {
     expect(items).toContain('填触发词')
     expect(items).toContain('识别 Civitai')
     expect(items).toContain('获取示例图')
+    expect(items).toContain('批量编辑推荐参数…')
     expect(items).toContain('批量编辑标签…')
     expect(items).toContain('禁用')
     wrapper.unmount()
@@ -141,6 +142,20 @@ describe('BatchBar「更多」下拉', () => {
     await item.trigger('click')
     expect(wrapper.find('.bb-menu').exists()).toBe(false)
     expect(document.body.querySelector('.bte-dialog')).not.toBeNull()
+    wrapper.unmount()
+  })
+
+  it('点击「批量编辑推荐参数…」收起菜单并打开参数弹层', async () => {
+    const wrapper = await mountBar()
+    state.multiSelect.ids = ['D:\\models\\a.safetensors']
+    await wrapper.vm.$nextTick()
+    await wrapper.find('.bb-more .btn').trigger('click')
+    const item = wrapper
+      .findAll('.bb-menu-item')
+      .find((w) => w.text() === '批量编辑推荐参数…')
+    await item.trigger('click')
+    expect(wrapper.find('.bb-menu').exists()).toBe(false)
+    expect(document.body.querySelector('.bpe-dialog')).not.toBeNull()
     wrapper.unmount()
   })
 

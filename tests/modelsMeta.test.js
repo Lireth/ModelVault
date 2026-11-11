@@ -405,6 +405,46 @@ describe('models:saveModelData / models:setMetaFlags 集成（D1）', () => {
     return { a, b }
   }
 
+  it('setModelParamsBulk 合并补丁并保留未传字段（F5）', async () => {
+    const { a, b } = await setupBulkModels()
+    const handler = getRegisteredHandler('models:setModelParamsBulk')
+    const res = await handler(makeEvent(), {
+      items: [
+        { id: a, params: { steps: 30, sampler: 'euler' } },
+        { id: b, params: { cfgMin: 4, cfgMax: 8 } },
+      ],
+    })
+    expect(res.error).toBeUndefined()
+    expect(res.updated).toHaveLength(2)
+    // a 原有 params.steps=20 被补丁覆盖，未传字段保留
+    expect(getModelMeta(a).params).toMatchObject({
+      steps: 30,
+      sampler: 'euler',
+    })
+    // b 原无 params：补丁字段写入，其余字段由规范化补 null
+    expect(getModelMeta(b).params).toMatchObject({
+      cfgMin: 4,
+      cfgMax: 8,
+      steps: null,
+    })
+  })
+
+  it('setModelParamsBulk 拒绝空 items 与无有效补丁（F5）', async () => {
+    const handler = getRegisteredHandler('models:setModelParamsBulk')
+    // 缺 items 由 O-2 schema 前置拦截；空数组进入 handler 后返回业务文案
+    expect(await handler(makeEvent(), {})).toEqual({
+      error: 'items 缺失',
+    })
+    expect(await handler(makeEvent(), { items: [] })).toEqual({
+      error: '缺少待更新的模型',
+    })
+    expect(
+      await handler(makeEvent(), {
+        items: [{ id: '', params: { steps: 20 } }],
+      }),
+    ).toEqual({ error: '缺少有效的推荐参数' })
+  })
+
   it('setMetaFlagsBulk 单次更新多条并保留未传字段（C1）', async () => {
     const { a, b } = await setupBulkModels()
     const handler = getRegisteredHandler('models:setMetaFlagsBulk')

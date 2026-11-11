@@ -369,6 +369,20 @@ describe('IPC payload 通道校验（validateIpcPayload）', () => {
     )
   })
 
+  it('models:setModelParamsBulk：items 结构门禁（F5）', () => {
+    expect(
+      validateIpcPayload('models:setModelParamsBulk', {
+        items: [{ id: 'x', params: { steps: 20 } }],
+      }),
+    ).toBe('')
+    expect(validateIpcPayload('models:setModelParamsBulk', {})).toContain(
+      'items 缺失',
+    )
+    expect(
+      validateIpcPayload('models:setModelParamsBulk', { items: 'x' }),
+    ).toContain('items 须为数组')
+  })
+
   it('models:setMetaFlagsBulk / setModelTagsBulk：批量结构与上限门禁（C1）', () => {
     expect(
       validateIpcPayload('models:setMetaFlagsBulk', {

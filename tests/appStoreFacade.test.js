@@ -154,6 +154,8 @@ const EXPECTED_EXPORTS = [
   'batchRating',
   'batchEditTags',
   'normalizeBatchTags',
+  'batchEditParams',
+  'normalizeBatchParamsPatch',
   'batchAssignCivitaiTags',
   'batchOrganizeByTags',
   'batchApplyTriggers',

@@ -218,6 +218,13 @@ const api = {
      */
     setModelTagsBulk: (items) =>
       invokeValidated('models:setModelTagsBulk', { items }),
+    /**
+     * 批量推荐参数（F5）：items 为 [{ id, params }]，params 只含需更新的
+     * 字段，主进程与各模型已有参数合并；返回 { updated: [{ id, params }],
+     * failed: [{ id, error }] }。
+     */
+    setModelParamsBulk: (items) =>
+      invokeValidated('models:setModelParamsBulk', { items }),
     /** 全库重命名自由标签（F4，to 已存在时合并），返回 { changed } 或 { error } */
     renameTag: (from, to) => invokeValidated('models:renameTag', { from, to }),
     /** 全库移除自由标签（F4），返回 { changed } 或 { error } */

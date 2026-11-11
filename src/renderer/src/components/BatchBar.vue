@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import BatchParamsEditor from './BatchParamsEditor.vue'
 import BatchTagEditor from './BatchTagEditor.vue'
 import {
   allFilteredSelected,
@@ -8,6 +9,7 @@ import {
   batchCivitaiIdentify,
   batchCivitaiImages,
   batchDeleteModels,
+  batchEditParams,
   batchEditTags,
   batchFavorite,
   batchNsfw,
@@ -79,6 +81,27 @@ function closeTagEditor() {
 function applyTagEditor(payload) {
   tagEditorOpen.value = false
   void batchEditTags(payload)
+}
+
+/* ---------------- 批量推荐参数编辑（F5） ---------------- */
+
+const paramsEditorOpen = ref(false)
+
+/** 打开参数编辑层并收起「更多」菜单 */
+function openParamsEditor() {
+  moreOpen.value = false
+  paramsEditorOpen.value = true
+}
+
+/** 关闭参数编辑层 */
+function closeParamsEditor() {
+  paramsEditorOpen.value = false
+}
+
+/** 提交参数补丁：先关闭弹层，再执行批量更新（进度在批量栏展示） */
+function applyParamsEditor(patch) {
+  paramsEditorOpen.value = false
+  void batchEditParams(patch)
 }
 
 /** 点击菜单外部关闭（挂 document，点击在「更多」锚点外时收起） */
@@ -247,6 +270,16 @@ onUnmounted(() => {
             获取示例图
           </button>
         </template>
+        <div class="bb-menu-label">参数</div>
+        <button
+          class="bb-menu-item"
+          role="menuitem"
+          :disabled="!batchReady"
+          title="为选中模型批量更新推荐参数；只填写需要修改的字段，留空字段保持各模型原值不变"
+          @click="openParamsEditor"
+        >
+          批量编辑推荐参数…
+        </button>
         <div class="bb-menu-label">标签</div>
         <button
           class="bb-menu-item"
@@ -316,6 +349,11 @@ onUnmounted(() => {
       v-if="tagEditorOpen"
       @close="closeTagEditor"
       @apply="applyTagEditor"
+    />
+    <BatchParamsEditor
+      v-if="paramsEditorOpen"
+      @close="closeParamsEditor"
+      @apply="applyParamsEditor"
     />
   </div>
 </template>

@@ -90,6 +90,24 @@ export const META_SCHEMAS = {
       }),
     },
   }),
+  // F5 批量推荐参数：items 逐项为 { id, params }，params 只含需更新的字段，
+  // 主进程与已有参数合并后整条落盘（空字段语义由渲染层预检拦截）
+  'models:setModelParamsBulk': vObj({
+    max: 4,
+    fields: {
+      items: vArr({
+        required: true,
+        max: MAX_BATCH_META_IDS,
+        items: vObj({
+          max: 4,
+          fields: {
+            id: ID,
+            params: vObj({ max: 30 }),
+          },
+        }),
+      }),
+    },
+  }),
   // 全库标签管理（F4）：重命名/合并与移除；长度上限与 normalizeTags 截断一致
   'models:renameTag': vObj({
     fields: {

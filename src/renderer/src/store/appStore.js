@@ -194,6 +194,8 @@ export {
   batchRating,
   batchEditTags,
   normalizeBatchTags,
+  batchEditParams,
+  normalizeBatchParamsPatch,
   batchAssignCivitaiTags,
   batchOrganizeByTags,
   batchApplyTriggers,
