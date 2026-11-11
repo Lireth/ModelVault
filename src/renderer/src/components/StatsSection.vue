@@ -160,15 +160,19 @@ const stats = computed(() => {
   }
 })
 
-/** 推荐参数「有内容」判定：核心字段任一有值 */
+/** 推荐参数「有内容」判定：与 search-query 的 params: 语法同口径 */
 function hasAnyParams(m) {
   const p = m.params
   if (!p) return false
   return (
     Number.isFinite(p.steps) ||
     Number.isFinite(p.cfgMin) ||
+    Number.isFinite(p.cfgMax) ||
+    Number.isFinite(p.resMin) ||
+    Number.isFinite(p.resMax) ||
     Boolean(p.sampler) ||
-    Number.isFinite(p.resMin)
+    Boolean(p.scheduler) ||
+    Boolean(p.precision)
   )
 }
 

@@ -136,6 +136,30 @@ describe('parseSearchQuery 解析器', () => {
     expect(parseSearchQuery('uses:x').filters).toEqual([])
   })
 
+  it('整理类语法：cover/note/params/ext/path/dup（F4）', () => {
+    expect(parseSearchQuery('cover:no').filters).toEqual([
+      { kind: 'cover', value: false },
+    ])
+    expect(parseSearchQuery('NOTE:yes').filters).toEqual([
+      { kind: 'note', value: true },
+    ])
+    expect(parseSearchQuery('params:1').filters).toEqual([
+      { kind: 'params', value: true },
+    ])
+    expect(parseSearchQuery('ext:.SAFETENSORS').filters).toEqual([
+      { kind: 'ext', text: 'safetensors' },
+    ])
+    expect(parseSearchQuery('path:"D:\\Models\\LoRA"').filters).toEqual([
+      { kind: 'path', text: 'd:\\models\\lora' },
+    ])
+    expect(parseSearchQuery('dup:no').filters).toEqual([
+      { kind: 'dup', value: false },
+    ])
+    // 非法布尔/空扩展名整段回退自由文本
+    expect(parseSearchQuery('cover:maybe').filters).toEqual([])
+    expect(parseSearchQuery('ext:.').filters).toEqual([])
+  })
+
   it('broken 布尔语法：主前缀与 suspect 别名（FEAT-01）', () => {
     expect(parseSearchQuery('broken:yes').filters).toEqual([
       { kind: 'broken', value: true },
@@ -285,6 +309,68 @@ describe('matchSearchFilters 匹配器', () => {
     expect(matchSearchFilters(model({ hash: '1234abcd' }), hash)).toBe(false)
   })
 
+  it('cover/note/params/ext/path/dup 命中语义（F4）', () => {
+    const coverNo = parseSearchQuery('cover:no').filters
+    const coverYes = parseSearchQuery('cover:yes').filters
+    expect(matchSearchFilters(model({}), coverNo)).toBe(true)
+    expect(matchSearchFilters(model({ cover: 'D:/x.png' }), coverNo)).toBe(
+      false,
+    )
+    expect(
+      matchSearchFilters(model({ covers: [{ rel: 'covers/x.png' }] }), coverNo),
+    ).toBe(false)
+    expect(matchSearchFilters(model({ coverUrl: 'mvimg://x' }), coverYes)).toBe(
+      true,
+    )
+
+    const noteYes = parseSearchQuery('note:yes').filters
+    const noteNo = parseSearchQuery('note:no').filters
+    expect(matchSearchFilters(model({ note: '备注' }), noteYes)).toBe(true)
+    expect(matchSearchFilters(model({ note: '   ' }), noteNo)).toBe(true)
+    expect(matchSearchFilters(model({ note: '备注' }), noteNo)).toBe(false)
+
+    const paramsYes = parseSearchQuery('params:yes').filters
+    const paramsNo = parseSearchQuery('params:no').filters
+    expect(
+      matchSearchFilters(model({ params: { sampler: 'euler' } }), paramsYes),
+    ).toBe(true)
+    expect(
+      matchSearchFilters(model({ params: { steps: 20 } }), paramsYes),
+    ).toBe(true)
+    expect(
+      matchSearchFilters(
+        model({ params: { steps: null, sampler: '', resMin: null } }),
+        paramsNo,
+      ),
+    ).toBe(true)
+
+    const ext = parseSearchQuery('ext:safetensors').filters
+    expect(matchSearchFilters(model({ ext: '.SAFETENSORS' }), ext)).toBe(true)
+    expect(
+      matchSearchFilters(model({ id: 'D:/x/a.safetensors.disabled' }), ext),
+    ).toBe(true)
+    expect(matchSearchFilters(model({ id: 'D:/x/a.ckpt' }), ext)).toBe(false)
+
+    const path = parseSearchQuery('path:LoRA').filters
+    expect(
+      matchSearchFilters(model({ id: 'D:/Models/LoRA/a.safetensors' }), path),
+    ).toBe(true)
+    expect(
+      matchSearchFilters(model({ id: 'D:/Models/VAE/a.safetensors' }), path),
+    ).toBe(false)
+
+    const dupYes = parseSearchQuery('dup:yes').filters
+    const isDup = (m) => m.id === 'a'
+    expect(
+      matchSearchFilters(model({ id: 'a' }), dupYes, undefined, null, isDup),
+    ).toBe(true)
+    expect(
+      matchSearchFilters(model({ id: 'b' }), dupYes, undefined, null, isDup),
+    ).toBe(false)
+    // 未注入重复解析器：dup:yes 恒不命中
+    expect(matchSearchFilters(model({ id: 'a' }), dupYes)).toBe(false)
+  })
+
   it('opened/uses 命中语义（F3）：从未打开按无穷大年龄参与比较', () => {
     const DAY = 24 * 3600 * 1000
     const old = parseSearchQuery('opened:>30d').filters
@@ -415,6 +501,28 @@ describe('filteredModels 集成（F3 与自由关键词/侧栏筛选叠加）', 
     expect(ids()).toEqual(['a'])
     state.search = ''
     expect(ids()).toEqual(['a', 'b'])
+  })
+
+  it('整理类 token 与重复组解析器接线（F4）', () => {
+    replaceModels([
+      model({
+        id: 'd1',
+        name: 'a.safetensors',
+        hash: 'h'.repeat(64),
+        cover: 'D:/covers/a.png',
+      }),
+      model({ id: 'd2', name: 'b.safetensors', hash: 'h'.repeat(64) }),
+      model({ id: 'd3', name: 'c.safetensors', hash: '' }),
+    ])
+    const ids = () => filteredModels.value.map((m) => m.id).sort()
+    state.search = 'dup:yes'
+    expect(ids()).toEqual(['d1', 'd2'])
+    state.search = 'dup:no'
+    expect(ids()).toEqual(['d3'])
+    // 多条件 AND：无封面 + 无备注 + 无推荐参数
+    state.search = 'cover:no note:no params:no'
+    expect(ids()).toEqual(['d2', 'd3'])
+    state.search = ''
   })
 
   it('无语法时行为与既有子串搜索一致（回归锚点）', () => {

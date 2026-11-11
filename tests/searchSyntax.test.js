@@ -35,6 +35,12 @@ describe('SEARCH_SYNTAX 目录与 search-query 对账', () => {
       'fav',
       'nsfw',
       'broken',
+      'cover',
+      'note',
+      'params',
+      'ext',
+      'path',
+      'dup',
       'mtime',
       'author',
       'trigger',
@@ -102,6 +108,18 @@ describe('suggestSearchSyntax 值建议', () => {
   it('opened: 给出 never 值建议（F3）', () => {
     const s = suggestSearchSyntax('opened:', 7)
     expect(s.items.map((i) => i.insert.trim())).toEqual(['never'])
+  })
+
+  it('cover:/dup: 给出 yes/no；ext: 给出支持的格式（F4）', () => {
+    expect(
+      suggestSearchSyntax('cover:', 6).items.map((i) => i.insert.trim()),
+    ).toEqual(['yes', 'no'])
+    expect(
+      suggestSearchSyntax('dup:', 4).items.map((i) => i.insert.trim()),
+    ).toEqual(['yes', 'no'])
+    expect(
+      suggestSearchSyntax('ext:', 4).items.map((i) => i.insert.trim()),
+    ).toEqual(['safetensors', 'ckpt', 'pt', 'pth', 'bin'])
   })
 
   it('broken: 给出 yes/no（FEAT-01）', () => {

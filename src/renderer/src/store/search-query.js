@@ -18,6 +18,12 @@ import { normalizeBaseModel } from '../../../shared/model-categories'
  * - nsfw:yes|no               NSFW 标记
  * - broken:yes|no             疑似损坏（装饰阶段标记 0 字节/头部不可解析/
  *                             数据区截断；`suspect:` 为等价别名）
+ * - cover:yes|no              是否已有封面（含 sidecar 预览图）
+ * - note:yes|no               是否已有备注（去空白后非空）
+ * - params:yes|no             是否填写过推荐参数（任一步数/CFG/采样器/分辨率等）
+ * - ext:<扩展名>              按文件格式精确匹配（可省略前导点，大小写不敏感）
+ * - path:<文本>               模型绝对路径包含匹配（不区分大小写）
+ * - dup:yes|no                是否属于当前可见重复组（与「重复」筛选同口径）
  * - mtime:<|<=|>|>=<数值><单位> 文件年龄（距今时长，单位 m/h/d/w/y，缺省 d）：
  *                             `mtime:<7d` 近 7 天更新；`mtime:>30d` 超过 30 天未更新
  * - opened:<|<=|>|>=<数值><单位> 最近打开距今时长（单位 m/h/d/w/y，缺省 d）：
@@ -133,6 +139,24 @@ function parseFilter(prefix, value) {
         ms: parseFloat(m[2]) * TIME_UNITS[unit],
       }
     }
+    // F4 整理类布尔语法：封面/备注/推荐参数/重复项
+    case 'cover':
+    case 'note':
+    case 'params':
+    case 'dup': {
+      if (!BOOL_VALUES.has(value.toLowerCase())) return null
+      return { kind: prefix, value: /^(yes|true|1)$/i.test(value) }
+    }
+    case 'ext': {
+      const text = value.toLowerCase().replace(/^\./, '')
+      if (!text) return null
+      return { kind: 'ext', text }
+    }
+    case 'path': {
+      const text = value.trim().toLowerCase()
+      if (!text) return null
+      return { kind: 'path', text }
+    }
     case 'opened': {
       // F3 使用轨迹：支持 opened:never 与距今时长比较
       const text = value.toLowerCase()
@@ -173,9 +197,49 @@ function parseFilter(prefix, value) {
   }
 }
 
+/**
+ * 推荐参数是否有任意有效内容（F4）：与统计页「有推荐参数」口径一致，
+ * 覆盖步数/CFG/采样器/调度器/精度/分辨率区间；params 缺失或全空为 false。
+ * @param {Record<string, any>} m 模型对象
+ * @returns {boolean}
+ */
+function hasAnyParams(m) {
+  const p = m.params
+  if (!p || typeof p !== 'object') return false
+  return (
+    Number.isFinite(p.steps) ||
+    Number.isFinite(p.cfgMin) ||
+    Number.isFinite(p.cfgMax) ||
+    Number.isFinite(p.resMin) ||
+    Number.isFinite(p.resMax) ||
+    Boolean(p.sampler) ||
+    Boolean(p.scheduler) ||
+    Boolean(p.precision)
+  )
+}
+
+/**
+ * 模型扩展名（F4，小写、无前导点）：优先读取扫描结果的 ext 字段，
+ * 旧索引/手工对象回退路径末段；`.disabled` 双后缀先剥离。
+ * @param {Record<string, any>} m 模型对象
+ * @returns {string} 扩展名（如 safetensors）；无扩展名返回空串
+ */
+function modelExtOf(m) {
+  if (typeof m.ext === 'string' && m.ext) {
+    return m.ext.toLowerCase().replace(/^\./, '')
+  }
+  let id = typeof m.id === 'string' ? m.id : ''
+  if (id.toLowerCase().endsWith('.disabled')) {
+    id = id.slice(0, -'.disabled'.length)
+  }
+  const dot = id.lastIndexOf('.')
+  return dot >= 0 ? id.slice(dot + 1).toLowerCase() : ''
+}
+
 /** 单条件命中判定（与 parseFilter 的 kind 一一对应；resolveHash/resolveFlags
- * 为 O7 覆盖解析器——哈希走预热回填覆盖，标注三元组走快捷标注覆盖） */
-function matchFilter(m, f, resolveHash, resolveFlags) {
+ * 为 O7 覆盖解析器——哈希走预热回填覆盖，标注三元组走快捷标注覆盖；
+ * resolveDuplicate 为「重复组」解析器，dup: 语法经它读取当前可见重复集合） */
+function matchFilter(m, f, resolveHash, resolveFlags, resolveDuplicate) {
   switch (f.kind) {
     case 'base': {
       const base = m.baseModel || m.autoInfo?.baseModel || ''
@@ -205,6 +269,24 @@ function matchFilter(m, f, resolveHash, resolveFlags) {
       return (resolveFlags ? resolveFlags.nsfw(m) : m.nsfw === true) === f.value
     case 'broken':
       return (m.suspect === true) === f.value
+    case 'cover': {
+      const hasCover =
+        Boolean(m.cover || m.coverUrl) ||
+        (Array.isArray(m.covers) && m.covers.length > 0)
+      return hasCover === f.value
+    }
+    case 'note':
+      return Boolean(String(m.note || '').trim()) === f.value
+    case 'params':
+      return hasAnyParams(m) === f.value
+    case 'ext':
+      return modelExtOf(m) === f.text
+    case 'path':
+      return String(m.id || '')
+        .toLowerCase()
+        .includes(f.text)
+    case 'dup':
+      return Boolean(resolveDuplicate ? resolveDuplicate(m) : false) === f.value
     case 'mtime': {
       // mtime 为文件修改时间；年龄 = 当前时间 - mtime（缺失值不命中）
       const t = Number(m.mtimeMs)
@@ -280,6 +362,9 @@ export function parseSearchQuery(raw) {
  * @param {any[]} filters parseSearchQuery 产出的条件列表
  * @param {(model: any) => string} [resolveHash] 有效哈希解析器
  *   （默认读取模型自带 hash；渲染层传入覆盖映射解析器，O7）
+ * @param {Record<string, (model: any) => any>|null} [resolveFlags] 快捷标注解析器
+ * @param {((model: any) => boolean)|null} [resolveDuplicate] 重复组解析器
+ *   （渲染层传入当前可见重复集合查询；未注入时 dup: 恒不命中）
  * @returns {boolean}
  */
 export function matchSearchFilters(
@@ -287,9 +372,11 @@ export function matchSearchFilters(
   filters,
   resolveHash = (model) => model.hash || '',
   resolveFlags = null,
+  resolveDuplicate = null,
 ) {
   for (const f of filters) {
-    if (!matchFilter(m, f, resolveHash, resolveFlags)) return false
+    if (!matchFilter(m, f, resolveHash, resolveFlags, resolveDuplicate))
+      return false
   }
   return true
 }

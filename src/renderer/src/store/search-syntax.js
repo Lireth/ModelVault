@@ -1,4 +1,5 @@
 import { BASE_FAMILIES } from '../../../shared/model-categories'
+import { MODEL_EXTENSIONS } from '../../../shared/model-extensions'
 import { MODEL_TYPES } from './state'
 
 /**
@@ -60,6 +61,42 @@ export const SEARCH_SYNTAX = [
     desc: 'yes/no：0 字节、头部不可解析或数据区截断的模型（suspect 为等价别名）',
   },
   {
+    prefix: 'cover',
+    label: '封面',
+    example: 'cover:no',
+    desc: '是否已有封面（含 sidecar 预览图）；yes/no 等价写法',
+  },
+  {
+    prefix: 'note',
+    label: '备注',
+    example: 'note:no',
+    desc: '是否已有备注（去空白后非空）；yes/no 等价写法',
+  },
+  {
+    prefix: 'params',
+    label: '推荐参数',
+    example: 'params:no',
+    desc: '是否填写过推荐参数；yes/no 等价写法',
+  },
+  {
+    prefix: 'ext',
+    label: '文件格式',
+    example: 'ext:safetensors',
+    desc: '按扩展名精确匹配，可省略前导点，大小写不敏感',
+  },
+  {
+    prefix: 'path',
+    label: '路径',
+    example: 'path:LoRA',
+    desc: '模型绝对路径包含匹配（不区分大小写），含空格时用引号',
+  },
+  {
+    prefix: 'dup',
+    label: '重复模型',
+    example: 'dup:yes',
+    desc: '是否属于当前可见重复组；yes/no 等价写法',
+  },
+  {
     prefix: 'mtime',
     label: '文件年龄',
     example: 'mtime:<7d',
@@ -105,7 +142,7 @@ const PREFIX_ITEMS = SEARCH_SYNTAX.map((s) => ({
   desc: s.desc,
 }))
 
-/** 有界值域操作符的值建议（freeform 的 tag/size/score/mtime/author/trigger/hash/uses 不提示） */
+/** 有界值域操作符的值建议（freeform 的 tag/size/score/mtime/author/trigger/hash/path/uses 不提示） */
 const VALUE_ITEMS = {
   base: BASE_FAMILIES.map((f) => ({
     key: `value:base:${f.key}`,
@@ -120,6 +157,15 @@ const VALUE_ITEMS = {
   fav: boolItems('fav'),
   nsfw: boolItems('nsfw'),
   broken: boolItems('broken'),
+  cover: boolItems('cover'),
+  note: boolItems('note'),
+  params: boolItems('params'),
+  dup: boolItems('dup'),
+  ext: MODEL_EXTENSIONS.map((item) => ({
+    key: `value:ext:${item.label}`,
+    insert: `${item.label} `,
+    label: item.label,
+  })),
   opened: [{ key: 'value:opened:never', insert: 'never ', label: '从未打开' }],
 }
 

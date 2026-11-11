@@ -431,6 +431,9 @@ const filteredUnsorted = computed(() => {
   const checkTags = Array.isArray(tagFilters) ? tagFilters : []
   // 重复筛选仅在开启时读取命中集合（关闭路径零额外开销）
   const dupes = showDuplicatesOnly ? duplicateIdSet.value : null
+  // F4 dup: 解析器：仅当查询含 dup token 时才读取重复集合；闭包在循环外
+  // 复用，避免结构化搜索时逐模型分配函数
+  const isDuplicate = (model) => duplicateIdSet.value.has(model.id)
   const list = []
   // 隐藏 NSFW 模型（设置开关）：统一从 visibleModels 取数（标注覆盖层与
   // 模型自带标记均经 effectiveNsfw 计入）；关闭路径直接复用 state.models
@@ -454,7 +457,13 @@ const filteredUnsorted = computed(() => {
     if (keyword && !keywordHit(m, keyword)) continue
     if (
       hasFilters &&
-      !matchSearchFilters(m, filters, effectiveModelHash, META_FLAG_RESOLVERS)
+      !matchSearchFilters(
+        m,
+        filters,
+        effectiveModelHash,
+        META_FLAG_RESOLVERS,
+        isDuplicate,
+      )
     )
       continue
     list.push(m)
