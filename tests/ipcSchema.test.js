@@ -359,6 +359,16 @@ describe('IPC payload 通道校验（validateIpcPayload）', () => {
     )
   })
 
+  it('models:recordModelOpen：id 必填且须为字符串（F3）', () => {
+    expect(validateIpcPayload('models:recordModelOpen', { id: 'x' })).toBe('')
+    expect(validateIpcPayload('models:recordModelOpen', {})).toContain(
+      'id 缺失',
+    )
+    expect(validateIpcPayload('models:recordModelOpen', { id: 1 })).toContain(
+      'id 须为字符串',
+    )
+  })
+
   it('models:setMetaFlagsBulk / setModelTagsBulk：批量结构与上限门禁（C1）', () => {
     expect(
       validateIpcPayload('models:setMetaFlagsBulk', {

@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import LibraryToolbar from '../src/renderer/src/components/LibraryToolbar.vue'
 import { state } from '../src/renderer/src/store/appStore'
+import { SEARCH_SYNTAX } from '../src/renderer/src/store/search-syntax'
 import { setupComponentTest } from './helpers/componentTest'
 
 /**
@@ -28,7 +29,7 @@ describe('搜索语法帮助面板（FEAT-1）', () => {
     expect(wrapper.find('.search-help-panel').exists()).toBe(false)
     await wrapper.find('.search-help').trigger('click')
     expect(wrapper.find('.search-help-panel').exists()).toBe(true)
-    expect(wrapper.findAll('.help-row')).toHaveLength(12)
+    expect(wrapper.findAll('.help-row')).toHaveLength(SEARCH_SYNTAX.length)
     await wrapper.find('.search-help').trigger('click')
     expect(wrapper.find('.search-help-panel').exists()).toBe(false)
     wrapper.unmount()

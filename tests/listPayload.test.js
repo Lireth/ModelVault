@@ -232,6 +232,8 @@ describe('models:getDetail（详情按需补全通道）', () => {
       cover: '.modelvault/covers/2.png',
       favorite: true,
       rating: 4,
+      lastOpenedAt: 1700000000000,
+      openCount: 7,
     })
 
     const handler = getRegisteredHandler('models:getDetail')
@@ -252,6 +254,9 @@ describe('models:getDetail（详情按需补全通道）', () => {
     expect(m.cover).toBe(m.covers[1].path)
     expect(m.favorite).toBe(true)
     expect(m.rating).toBe(4)
+    // F3 使用轨迹随 meta 覆盖进入详情模型（列表/排序/详情共用 metaDisplayFields）
+    expect(m.lastOpenedAt).toBe(1700000000000)
+    expect(m.openCount).toBe(7)
     // 原索引对象不被修改（瘦身/覆盖发生在响应构造层）
     expect(m.autoInfo).not.toBe(full.autoInfo)
   })

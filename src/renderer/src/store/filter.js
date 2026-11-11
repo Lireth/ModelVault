@@ -44,6 +44,18 @@ function addedMsOf(m) {
   return Number.isFinite(m.ctimeMs) && m.ctimeMs > 0 ? m.ctimeMs : m.mtimeMs
 }
 
+/** 最近打开时间（epoch ms）：缺失/非法/从未打开统一为 0 */
+function lastOpenedAtOf(m) {
+  return Number.isFinite(m.lastOpenedAt) && m.lastOpenedAt > 0
+    ? m.lastOpenedAt
+    : 0
+}
+
+/** 累计打开次数：缺失/非法/负数统一为 0 */
+function openCountOf(m) {
+  return Number.isInteger(m.openCount) && m.openCount > 0 ? m.openCount : 0
+}
+
 /**
  * 搜索域小写缓存（O3）：按模型对象引用记忆化的小写搜索域，覆盖文件名、
  * 备注名、备注、触发词、分类标签（含中文标签），以换行连接防止跨字段
@@ -466,6 +478,16 @@ function comparatorFor(sortBy) {
       // 按添加时间（OPT-1）：与 mtime 同一约定——比较器恒为「新在前」，
       // sortAsc=true 默认即最新入库在前，sortAsc=false 翻转为最早在前
       return (a, b) => addedMsOf(b) - addedMsOf(a)
+    case 'lastOpened':
+      // 最近使用（F3）：最近打开的在前，从未打开（0）沉底并按名称排序；
+      // sortAsc=false 翻转为最早使用/从未打开在前，便于清理长期未用模型
+      return (a, b) =>
+        lastOpenedAtOf(b) - lastOpenedAtOf(a) ||
+        zhCollator.compare(a.name, b.name)
+    case 'openCount':
+      // 使用次数（F3）：次数高者在前，同次数按名称；方向翻转后低次数在前
+      return (a, b) =>
+        openCountOf(b) - openCountOf(a) || zhCollator.compare(a.name, b.name)
     case 'favorite':
       // 收藏优先，同组内按名称（U2）；固定语义排序，不响应方向翻转（O1）。
       // P1-1：收藏态经标注覆盖层读取（即时标注后排序立即生效）
@@ -506,6 +528,10 @@ function sortKeyOf(m, sortBy) {
       return m.mtimeMs
     case 'added':
       return addedMsOf(m)
+    case 'lastOpened':
+      return `${lastOpenedAtOf(m)}\u0000${m.name}`
+    case 'openCount':
+      return `${openCountOf(m)}\u0000${m.name}`
     case 'favorite':
       return `${effectiveFavorite(m) ? 1 : 0}\u0000${m.name}`
     case 'rating':

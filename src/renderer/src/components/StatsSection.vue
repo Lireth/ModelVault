@@ -72,6 +72,8 @@ const stats = computed(() => {
   let suspect = 0
   let nsfwCount = 0
   let recent = 0
+  let usedRecent = 0
+  let neverOpened = 0
   const ratingBuckets = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }
   let unrated = 0
   const now = Date.now()
@@ -123,6 +125,13 @@ const stats = computed(() => {
     // 近 30 天有文件变动的模型（mtimeMs 为文件修改时间）
     if (Number.isFinite(m.mtimeMs) && now - m.mtimeMs < 30 * 24 * 3600 * 1000)
       recent += 1
+    // F3 使用轨迹：近 30 天打开过的模型与从未打开的模型
+    const openedAt = Number.isFinite(m.lastOpenedAt) ? m.lastOpenedAt : 0
+    if (openedAt > 0) {
+      if (now - openedAt < 30 * 24 * 3600 * 1000) usedRecent += 1
+    } else {
+      neverOpened += 1
+    }
     const rating = effectiveRating(m)
     if (rating >= 1 && rating <= 5) ratingBuckets[rating] += 1
     else unrated += 1
@@ -144,6 +153,8 @@ const stats = computed(() => {
     suspect,
     nsfw: nsfwCount,
     recent,
+    usedRecent,
+    neverOpened,
     ratingBuckets,
     unrated,
   }

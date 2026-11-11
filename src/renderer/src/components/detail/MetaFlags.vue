@@ -1,8 +1,10 @@
 <script setup>
+import { computed } from 'vue'
 import {
   effectiveFavorite,
   effectiveNsfw,
   effectiveRating,
+  formatDate,
   selectedModel,
   setNsfw,
   setRating,
@@ -39,6 +41,21 @@ async function onToggleNsfw() {
     toast('error', `NSFW 标记操作失败: ${err.message}`)
   }
 }
+
+/**
+ * 使用轨迹摘要（F3）：最近打开日期 + 累计次数；从未打开时显式提示，
+ * 让「清理长期未用模型」在详情页有直接依据。
+ */
+const usageText = computed(() => {
+  const m = selectedModel.value
+  if (!m) return ''
+  const openedAt =
+    Number.isFinite(m.lastOpenedAt) && m.lastOpenedAt > 0 ? m.lastOpenedAt : 0
+  const count =
+    Number.isInteger(m.openCount) && m.openCount > 0 ? m.openCount : 0
+  if (!openedAt) return '尚未打开'
+  return `最近打开 ${formatDate(openedAt)}${count > 0 ? ` · 共 ${count} 次` : ''}`
+})
 
 /** 点击星标设置评分（点击当前评分则清零） */
 async function onSetRating(value) {
@@ -117,6 +134,7 @@ async function onSetRating(value) {
         </svg>
       </button>
     </div>
+    <span class="usage-info">{{ usageText }}</span>
   </div>
 </template>
 
@@ -187,6 +205,14 @@ async function onSetRating(value) {
   display: flex;
   align-items: center;
   gap: 2px;
+}
+
+.usage-info {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .rating-label {

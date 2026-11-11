@@ -39,6 +39,8 @@ describe('SEARCH_SYNTAX 目录与 search-query 对账', () => {
       'author',
       'trigger',
       'hash',
+      'opened',
+      'uses',
     ])
   })
 })
@@ -95,6 +97,11 @@ describe('suggestSearchSyntax 值建议', () => {
   it('fav: 给出 yes/no', () => {
     const s = suggestSearchSyntax('fav:', 4)
     expect(s.items.map((i) => i.insert.trim())).toEqual(['yes', 'no'])
+  })
+
+  it('opened: 给出 never 值建议（F3）', () => {
+    const s = suggestSearchSyntax('opened:', 7)
+    expect(s.items.map((i) => i.insert.trim())).toEqual(['never'])
   })
 
   it('broken: 给出 yes/no（FEAT-01）', () => {

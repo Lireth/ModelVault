@@ -2,6 +2,7 @@ import { computed, watch } from 'vue'
 import { state, modelIndexOf } from './state'
 import { modelById } from './selectors'
 import { filteredModels } from './filter'
+import { applyMetaUpdates } from './meta-apply'
 import { confirmDialog } from './toast'
 
 /**
@@ -109,10 +110,39 @@ export async function openDetail(id) {
     if (!(await confirmDialog('当前模型有未保存的修改，放弃修改并切换？')))
       return
   }
+  // 重复点击已打开的卡片不算一次新的使用；切换/首次打开才记录
+  const isNewOpen = state.selectedId !== id
   state.selectedId = id
+  if (isNewOpen) recordModelOpen(id)
   // 后台预热该模型的 SHA256（Civitai 识别加速）：主进程优先入队并立即
   // 计算，用户随后点击识别时哈希多半已缓存。火后不管，失败静默
   window.api.models.warmupHash(id).catch(() => {})
+}
+
+/**
+ * 记录一次使用轨迹（F3）：主进程累加打开次数并写最近打开时间，成功后
+ * 单趟回填当前模型对象；失败静默（统计属锦上添花，不阻断详情打开）。
+ * 回填取本地值与返回值较大者——连续快速切换时 IPC 响应可能乱序，避免
+ * 较旧响应把次数/时间覆盖回退。
+ * @param {string} id 模型绝对路径
+ */
+function recordModelOpen(id) {
+  window.api.models
+    .recordModelOpen(id)
+    .then((res) => {
+      if (!res?.meta) return
+      applyMetaUpdates(new Map([[id, res.meta]]), (meta, current) => ({
+        lastOpenedAt: Math.max(
+          Number.isFinite(current.lastOpenedAt) ? current.lastOpenedAt : 0,
+          Number.isFinite(meta.lastOpenedAt) ? meta.lastOpenedAt : 0,
+        ),
+        openCount: Math.max(
+          Number.isInteger(current.openCount) ? current.openCount : 0,
+          Number.isInteger(meta.openCount) ? meta.openCount : 0,
+        ),
+      }))
+    })
+    .catch(() => {})
 }
 
 /**

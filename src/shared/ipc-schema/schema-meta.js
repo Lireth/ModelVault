@@ -43,6 +43,8 @@ export const META_SCHEMAS = {
       rating: vInt(),
     },
   }),
+  // F3 使用轨迹：打开详情时记录最近打开时间与累计打开次数
+  'models:recordModelOpen': vObj({ fields: { id: ID } }),
   'models:popupMenu': vObj({ fields: { id: ID } }),
   // F-3 跨库传输：ids 为当前库内模型路径；targetRoot 必须是已保存的其他
   // 模型库（handler 校验 ∈ settings.modelsFolders 且 ≠ 当前根）；mode 枚举

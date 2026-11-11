@@ -433,6 +433,24 @@ describe('库统计页（F7，自设置页独立为 StatsPage）', () => {
     state.statsOpen = false
   })
 
+  it('统计概览展示近 30 天使用与从未打开（F3）', async () => {
+    const now = Date.now()
+    state.models = [
+      statModel('used', { lastOpenedAt: now, openCount: 2 }),
+      statModel('never', { lastOpenedAt: 0, openCount: 0 }),
+    ]
+    const wrapper = await mountStats()
+    const items = wrapper.findAll('.stat-item').map((w) => w.text())
+    expect(
+      items.some((t) => t.includes('近 30 天使用') && t.includes('1')),
+    ).toBe(true)
+    expect(items.some((t) => t.includes('从未打开') && t.includes('1'))).toBe(
+      true,
+    )
+    wrapper.unmount()
+    state.statsOpen = false
+  })
+
   it('展示跨库存储总览区块（FN-01）', async () => {
     const wrapper = await mountStats()
     const cross = wrapper.find('.cross-overview')

@@ -21,6 +21,10 @@ export function makeApiMock() {
     models: {
       loadStore: vi.fn(),
       openLibrary: vi.fn(),
+      // F3 使用轨迹：详情打开时记录；默认返回零值，避免覆盖用例种子数据
+      recordModelOpen: vi.fn(() =>
+        Promise.resolve({ meta: { lastOpenedAt: 0, openCount: 0 } }),
+      ),
       importModels: vi.fn(),
       scan: vi.fn(),
       cancelScan: vi.fn(() => Promise.resolve({ ok: false })),

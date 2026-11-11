@@ -32,6 +32,10 @@ function makeComponentApiMock() {
       openLibrary: vi.fn(),
       // 详情按需补全（OPT-PAYLOAD）：默认返回空模型，避免覆盖用例种子数据
       getDetail: vi.fn(() => Promise.resolve({ model: null })),
+      // F3 使用轨迹：默认返回零值，避免覆盖用例种子数据
+      recordModelOpen: vi.fn(() =>
+        Promise.resolve({ meta: { lastOpenedAt: 0, openCount: 0 } }),
+      ),
       scan: vi.fn(),
       cancelScan: vi.fn(() => Promise.resolve({ ok: false })),
       chooseFolder: vi.fn(),

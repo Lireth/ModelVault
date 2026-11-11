@@ -49,6 +49,8 @@ const CSV_EOL = '\r\n'
  * @property {Record<string, any>|null} params
  * @property {string} path
  * @property {string} civitaiUrl
+ * @property {number} lastOpenedAt
+ * @property {number} openCount
  */
 
 /**
@@ -81,6 +83,9 @@ export function buildExportRows(models) {
       params: m.params || null,
       path: m.id || '',
       civitaiUrl: m.civitaiUrl || '',
+      // F3 使用轨迹：仅 JSON 导出保留（CSV/Markdown 列序为既有契约，不扩展）
+      lastOpenedAt: Number.isFinite(m.lastOpenedAt) ? m.lastOpenedAt : 0,
+      openCount: Number.isInteger(m.openCount) ? m.openCount : 0,
     }
   })
 }

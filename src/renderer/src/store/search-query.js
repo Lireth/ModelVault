@@ -20,6 +20,10 @@ import { normalizeBaseModel } from '../../../shared/model-categories'
  *                             数据区截断；`suspect:` 为等价别名）
  * - mtime:<|<=|>|>=<数值><单位> 文件年龄（距今时长，单位 m/h/d/w/y，缺省 d）：
  *                             `mtime:<7d` 近 7 天更新；`mtime:>30d` 超过 30 天未更新
+ * - opened:<|<=|>|>=<数值><单位> 最近打开距今时长（单位 m/h/d/w/y，缺省 d）：
+ *                             `opened:>30d` 超过 30 天未打开（含从未打开）；
+ *                             `opened:never` 仅从未打开
+ * - uses:<|<=|>|>=<次数>      累计打开次数（裸值为精确匹配）
  * - author:<文本>             safetensors 头部解析/Civitai 回填的作者包含命中
  * - trigger:<文本>            触发词或训练标签候选包含命中
  * - hash:<前缀>               SHA256 前缀匹配（4~64 位十六进制，大小写不敏感）
@@ -129,6 +133,31 @@ function parseFilter(prefix, value) {
         ms: parseFloat(m[2]) * TIME_UNITS[unit],
       }
     }
+    case 'opened': {
+      // F3 使用轨迹：支持 opened:never 与距今时长比较
+      const text = value.toLowerCase()
+      if (text === 'never' || text === 'none') {
+        return { kind: 'opened', never: true }
+      }
+      const m = /^(>=|<=|>|<)?\s*([\d.]+)\s*(m|h|d|w|y)?$/i.exec(value)
+      if (!m || !Number.isFinite(parseFloat(m[2]))) return null
+      const unit = (m[3] || 'd').toLowerCase()
+      return {
+        kind: 'opened',
+        never: false,
+        op: m[1] || '=',
+        ms: parseFloat(m[2]) * TIME_UNITS[unit],
+      }
+    }
+    case 'uses': {
+      const m = /^(>=|<=|>|<)?\s*=?\s*(\d+)$/.exec(value)
+      if (!m) return null
+      return {
+        kind: 'uses',
+        op: m[1] || '=',
+        value: parseInt(m[2], 10),
+      }
+    }
     case 'author':
       return { kind: 'author', text: value.toLowerCase() }
     case 'trigger':
@@ -181,6 +210,21 @@ function matchFilter(m, f, resolveHash, resolveFlags) {
       const t = Number(m.mtimeMs)
       if (!Number.isFinite(t) || t <= 0) return false
       return compareOp(Date.now() - t, f.op, f.ms)
+    }
+    case 'opened': {
+      // F3 使用轨迹：最近打开时间缺失视为从未打开（年龄无穷大）
+      const openedAt =
+        Number.isFinite(m.lastOpenedAt) && m.lastOpenedAt > 0
+          ? m.lastOpenedAt
+          : 0
+      if (f.never) return openedAt === 0
+      if (!openedAt) return f.op === '>' || f.op === '>='
+      return compareOp(Date.now() - openedAt, f.op, f.ms)
+    }
+    case 'uses': {
+      const count =
+        Number.isInteger(m.openCount) && m.openCount > 0 ? m.openCount : 0
+      return compareOp(count, f.op, f.value)
     }
     case 'author':
       return String(m.autoInfo?.author || '')

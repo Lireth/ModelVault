@@ -215,6 +215,8 @@ describe('筛选与排序（filteredModels）', () => {
     expect(sortDirectional('size')).toBe(true)
     expect(sortDirectional('mtime')).toBe(true)
     expect(sortDirectional('added')).toBe(true)
+    expect(sortDirectional('lastOpened')).toBe(true)
+    expect(sortDirectional('openCount')).toBe(true)
     expect(sortDirectional('favorite')).toBe(false)
     expect(sortDirectional('rating')).toBe(false)
   })
@@ -241,6 +243,41 @@ describe('筛选与排序（filteredModels）', () => {
     expect(filteredModels.value.map((m) => m.id)).toEqual(['c', 'b', 'a'])
     state.sortAsc = false
     expect(filteredModels.value.map((m) => m.id)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('按最近使用/使用次数排序（F3）：新/多在前，缺失值沉底，方向可翻转', () => {
+    replaceModels([
+      makeModel('old', { name: 'a', lastOpenedAt: 1000, openCount: 1 }),
+      makeModel('never', { name: 'b', lastOpenedAt: 0, openCount: 0 }),
+      makeModel('new', { name: 'c', lastOpenedAt: 3000, openCount: 5 }),
+    ])
+    state.sortBy = 'lastOpened'
+    state.sortAsc = true
+    expect(filteredModels.value.map((m) => m.id)).toEqual([
+      'new',
+      'old',
+      'never',
+    ])
+    state.sortAsc = false
+    expect(filteredModels.value.map((m) => m.id)).toEqual([
+      'never',
+      'old',
+      'new',
+    ])
+
+    state.sortBy = 'openCount'
+    state.sortAsc = true
+    expect(filteredModels.value.map((m) => m.id)).toEqual([
+      'new',
+      'old',
+      'never',
+    ])
+    state.sortAsc = false
+    expect(filteredModels.value.map((m) => m.id)).toEqual([
+      'never',
+      'old',
+      'new',
+    ])
   })
 
   it('排序结果复用（PERF-SORT）：排序键不变时返回新对象且顺序不变；键变化才重排', () => {

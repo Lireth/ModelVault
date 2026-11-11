@@ -10,8 +10,8 @@
 /**
  * 合成元数据驱动的展示字段（纯函数，不可信输入容错）。
  * @param {{type?: string, folderSubCategory?: string, hash?: string,
- *   baseModel?: string}} model 扫描模型条目（或索引快照条目；hash/baseModel
- *   作为兜底值参与合成）
+ *   baseModel?: string, lastOpenedAt?: number, openCount?: number}} model
+ *   扫描模型条目（或索引快照条目；hash/baseModel/使用轨迹作为兜底值参与合成）
  * @param {Record<string, any>|null} meta 当前元数据
  * @param {{baseModel?: string}} [overrides] 高优先级覆盖值：装饰路径传
  *   safetensors 头部解析的 baseModel，索引覆盖路径传索引快照的 baseModel
@@ -19,7 +19,8 @@
  * @returns {{alias: string, note: string, noteSource: string, favorite: boolean,
  *   nsfw: boolean, rating: number, params: object|null, tags: string[],
  *   triggerWords: string, triggerWordsSource: string, subCategory: string,
- *   hash: string, civitaiUrl: string, baseModel: string}}
+ *   hash: string, civitaiUrl: string, baseModel: string,
+ *   lastOpenedAt: number, openCount: number}}
  */
 export function metaDisplayFields(model, meta, overrides = {}) {
   const m = meta || {}
@@ -48,5 +49,17 @@ export function metaDisplayFields(model, meta, overrides = {}) {
     // 优先，Civitai 识别回填值兜底（.ckpt/.pt 等无头部元信息的模型经识别
     // 补全后同样可筛）
     baseModel: overrides.baseModel || m.baseModel || model.baseModel || '',
+    // F3 使用轨迹：meta 为权威值；旧元数据缺失字段时回退索引快照值
+    // （秒开列表不因一次版本升级丢失既有统计）
+    lastOpenedAt: Number.isFinite(m.lastOpenedAt)
+      ? m.lastOpenedAt
+      : Number.isFinite(model.lastOpenedAt)
+        ? model.lastOpenedAt
+        : 0,
+    openCount: Number.isInteger(m.openCount)
+      ? m.openCount
+      : Number.isInteger(model.openCount)
+        ? model.openCount
+        : 0,
   }
 }

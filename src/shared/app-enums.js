@@ -14,6 +14,8 @@ export const SORT_OPTION_DEFS = [
   { key: 'size', label: '按大小' },
   { key: 'mtime', label: '按修改时间' },
   { key: 'added', label: '按添加时间' },
+  { key: 'lastOpened', label: '最近使用' },
+  { key: 'openCount', label: '按使用次数' },
   { key: 'favorite', label: '收藏优先', directional: false },
   { key: 'rating', label: '按评分', directional: false },
 ]

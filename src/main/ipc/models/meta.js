@@ -130,6 +130,36 @@ export function registerMetaHandlers() {
     { errorPrefix: '标记保存失败' },
   )
 
+  // F3 使用轨迹：打开详情时累加打开次数并记录最近打开时间。
+  // 只回传两个轨迹字段，避免把完整 meta（备注/封面列表）随高频打开回传。
+  wrapHandler(
+    'models:recordModelOpen',
+    (event, { id } = {}) => {
+      const invalid = checkModelIdInRoot(id)
+      if (invalid) return { error: invalid }
+      const existing = getModelMeta(id) || {}
+      const prevCount =
+        Number.isInteger(existing.openCount) && existing.openCount > 0
+          ? existing.openCount
+          : 0
+      const meta = setModelMeta(id, {
+        ...existing,
+        lastOpenedAt: Date.now(),
+        openCount: prevCount + 1,
+      })
+      if (!meta) {
+        return { error: '使用记录保存失败（模型需位于当前模型根目录内）' }
+      }
+      return {
+        meta: {
+          lastOpenedAt: meta.lastOpenedAt,
+          openCount: meta.openCount,
+        },
+      }
+    },
+    { errorPrefix: '使用记录保存失败' },
+  )
+
   // C1：批量快捷标记（单次 IPC、单次落盘调度）
   // 逐项合并已有元数据后交给 setModelMetaMany；返回成功项的有效三元组与
   // 逐项失败原因（渲染层据此写标注覆盖层并填充失败明细面板）。

@@ -119,6 +119,12 @@ const api = {
      * @returns {Promise<{model: object} | {error: string}>}
      */
     getDetail: (id) => invokeValidated('models:getDetail', { id }),
+    /**
+     * 记录一次模型打开（F3 使用轨迹）：主进程累加打开次数并写入最近打开
+     * 时间，返回 { meta: { lastOpenedAt, openCount } } 或 { error }。
+     * @param {string} id 模型绝对路径
+     */
+    recordModelOpen: (id) => invokeValidated('models:recordModelOpen', { id }),
     /** 弹出目录选择框，返回所选目录或 null */
     chooseFolder: () => invokeValidated('models:chooseFolder'),
     /**

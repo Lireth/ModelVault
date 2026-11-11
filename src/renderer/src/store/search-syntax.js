@@ -83,6 +83,18 @@ export const SEARCH_SYNTAX = [
     example: 'hash:9a8b',
     desc: '4~64 位十六进制前缀匹配，大小写不敏感',
   },
+  {
+    prefix: 'opened',
+    label: '最近打开',
+    example: 'opened:>30d',
+    desc: '距今时长（单位 m/h/d/w/y，缺省 d）：opened:never 仅从未打开',
+  },
+  {
+    prefix: 'uses',
+    label: '使用次数',
+    example: 'uses:>=5',
+    desc: '累计打开次数比较，裸值为精确匹配',
+  },
 ]
 
 /** 操作符示例 → 补全插入文本（前缀补全为 `prefix:`） */
@@ -93,7 +105,7 @@ const PREFIX_ITEMS = SEARCH_SYNTAX.map((s) => ({
   desc: s.desc,
 }))
 
-/** 有界值域操作符的值建议（freeform 的 tag/size/score/mtime/author/trigger/hash 不提示） */
+/** 有界值域操作符的值建议（freeform 的 tag/size/score/mtime/author/trigger/hash/uses 不提示） */
 const VALUE_ITEMS = {
   base: BASE_FAMILIES.map((f) => ({
     key: `value:base:${f.key}`,
@@ -108,6 +120,7 @@ const VALUE_ITEMS = {
   fav: boolItems('fav'),
   nsfw: boolItems('nsfw'),
   broken: boolItems('broken'),
+  opened: [{ key: 'value:opened:never', insert: 'never ', label: '从未打开' }],
 }
 
 function boolItems(prefix) {

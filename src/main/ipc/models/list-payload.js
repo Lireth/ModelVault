@@ -23,7 +23,9 @@ import logger from '../../logger'
  *   TAG_CANDIDATES_LIMIT 上限，体量有界；
  * - covers[].rel/path/thumbPath：rel 供详情页封面操作（设默认/删除），
  *   path/thumbPath 供渲染侧 URL 派生；
- * - hash/civitaiUrl/baseModel/subCategory/…：筛选/统计/重复组/导出消费。
+ * - hash/civitaiUrl/baseModel/subCategory/…：筛选/统计/重复组/导出消费；
+ * - lastOpenedAt/openCount（F3 使用轨迹）：排序（最近使用/使用次数）、
+ *   统计页（近 30 天使用/从未打开）与详情页使用摘要消费，随对象透传。
  *
  * 被剔除的详情字段由 models:getDetail 按需拉取（打开详情时元素级回填，
  * 见渲染层 store/detail.js 的 detailFull 补全机制），语义不变。

@@ -157,6 +157,30 @@ describe('元数据规范化', () => {
     expect(bad.noteSource).toBe('')
     expect(bad.triggerWordsSource).toBe('')
   })
+
+  it('使用轨迹字段规范化：时间取整、非法值/负数回退 0', async () => {
+    const abs = await touchModel('usage.safetensors')
+    const meta = setModelMeta(abs, {
+      lastOpenedAt: 1700000000000.7,
+      openCount: 3,
+    })
+    expect(meta.lastOpenedAt).toBe(1700000000001)
+    expect(meta.openCount).toBe(3)
+
+    const bad = setModelMeta(abs, {
+      lastOpenedAt: -5,
+      openCount: -2,
+    })
+    expect(bad.lastOpenedAt).toBe(0)
+    expect(bad.openCount).toBe(0)
+
+    const invalid = setModelMeta(abs, {
+      lastOpenedAt: 'x',
+      openCount: 2.5,
+    })
+    expect(invalid.lastOpenedAt).toBe(0)
+    expect(invalid.openCount).toBe(0)
+  })
 })
 
 describe('不可信 store.json 清洗（B-04）', () => {

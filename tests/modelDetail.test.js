@@ -504,6 +504,51 @@ describe('ModelDetail 文件重命名（N1）', () => {
   })
 })
 
+describe('详情使用轨迹（F3）', () => {
+  it('首次/切换打开记录一次并回填最近打开与次数', async () => {
+    const now = Date.now()
+    replaceModels([makeDetailModel('m1'), makeDetailModel('m2')])
+    state.selectedId = null
+    window.api.models.recordModelOpen.mockResolvedValueOnce({
+      meta: { lastOpenedAt: now, openCount: 1 },
+    })
+
+    await openDetail('m1')
+    await flushPromises()
+    expect(window.api.models.recordModelOpen).toHaveBeenCalledWith('m1')
+    expect(state.models[0]).toMatchObject({
+      lastOpenedAt: now,
+      openCount: 1,
+    })
+  })
+
+  it('重复打开当前模型不重复计数', async () => {
+    replaceModels([makeDetailModel('m1')])
+    state.selectedId = 'm1'
+
+    await openDetail('m1')
+    await flushPromises()
+    expect(window.api.models.recordModelOpen).not.toHaveBeenCalled()
+  })
+
+  it('详情展示使用摘要：从未打开 / 最近打开与次数', async () => {
+    selectModel()
+    const wrapper = mountDetail()
+    await flushPromises()
+    expect(wrapper.find('.usage-info').text()).toBe('尚未打开')
+    wrapper.unmount()
+
+    const now = Date.now()
+    replaceModels([makeDetailModel('m1', { lastOpenedAt: now, openCount: 3 })])
+    state.selectedId = 'm1'
+    const wrapper2 = mountDetail()
+    await flushPromises()
+    expect(wrapper2.find('.usage-info').text()).toContain('最近打开')
+    expect(wrapper2.find('.usage-info').text()).toContain('共 3 次')
+    wrapper2.unmount()
+  })
+})
+
 describe('详情页序列导航（FEA-01）', () => {
   /** 预置 3 个模型并打开首个详情 */
   function setupThree() {

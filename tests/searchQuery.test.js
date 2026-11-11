@@ -106,6 +106,36 @@ describe('parseSearchQuery 解析器', () => {
     expect(parseSearchQuery('hash:xyz').filters).toEqual([])
   })
 
+  it('使用轨迹语法：opened 年龄/never 与 uses 次数（F3）', () => {
+    expect(parseSearchQuery('opened:>30d').filters).toEqual([
+      {
+        kind: 'opened',
+        never: false,
+        op: '>',
+        ms: 30 * 24 * 3600 * 1000,
+      },
+    ])
+    expect(parseSearchQuery('opened:never').filters).toEqual([
+      { kind: 'opened', never: true },
+    ])
+    // 缺省单位 d
+    expect(parseSearchQuery('opened:7').filters[0]).toMatchObject({
+      kind: 'opened',
+      never: false,
+      op: '=',
+      ms: 7 * 24 * 3600 * 1000,
+    })
+    expect(parseSearchQuery('uses:>=5').filters).toEqual([
+      { kind: 'uses', op: '>=', value: 5 },
+    ])
+    expect(parseSearchQuery('uses:0').filters).toEqual([
+      { kind: 'uses', op: '=', value: 0 },
+    ])
+    // 非法值整段回退自由文本
+    expect(parseSearchQuery('opened:soon').filters).toEqual([])
+    expect(parseSearchQuery('uses:x').filters).toEqual([])
+  })
+
   it('broken 布尔语法：主前缀与 suspect 别名（FEAT-01）', () => {
     expect(parseSearchQuery('broken:yes').filters).toEqual([
       { kind: 'broken', value: true },
@@ -253,6 +283,34 @@ describe('matchSearchFilters 匹配器', () => {
       matchSearchFilters(model({ hash: 'ABCDEF12' + '0'.repeat(56) }), hash),
     ).toBe(true)
     expect(matchSearchFilters(model({ hash: '1234abcd' }), hash)).toBe(false)
+  })
+
+  it('opened/uses 命中语义（F3）：从未打开按无穷大年龄参与比较', () => {
+    const DAY = 24 * 3600 * 1000
+    const old = parseSearchQuery('opened:>30d').filters
+    const recent = parseSearchQuery('opened:<7d').filters
+    const never = parseSearchQuery('opened:never').filters
+    expect(
+      matchSearchFilters(model({ lastOpenedAt: Date.now() - 40 * DAY }), old),
+    ).toBe(true)
+    expect(
+      matchSearchFilters(model({ lastOpenedAt: Date.now() - 1 * DAY }), old),
+    ).toBe(false)
+    // 从未打开：> / >= 命中（年龄无穷大），< 不命中
+    expect(matchSearchFilters(model({ lastOpenedAt: 0 }), old)).toBe(true)
+    expect(
+      matchSearchFilters(model({ lastOpenedAt: Date.now() - 1 * DAY }), recent),
+    ).toBe(true)
+    expect(matchSearchFilters(model({ lastOpenedAt: 0 }), recent)).toBe(false)
+    expect(matchSearchFilters(model({ lastOpenedAt: 0 }), never)).toBe(true)
+    expect(matchSearchFilters(model({ lastOpenedAt: Date.now() }), never)).toBe(
+      false,
+    )
+
+    const uses = parseSearchQuery('uses:>=3').filters
+    expect(matchSearchFilters(model({ openCount: 3 }), uses)).toBe(true)
+    expect(matchSearchFilters(model({ openCount: 2 }), uses)).toBe(false)
+    expect(matchSearchFilters(model({}), uses)).toBe(false)
   })
 
   it('多条件 AND', () => {

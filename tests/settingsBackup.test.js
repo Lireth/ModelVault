@@ -12,6 +12,7 @@ import {
 import {
   buildCsv,
   buildExportRows,
+  buildJson,
   buildMarkdown,
 } from '../src/renderer/src/store/model-export'
 import { setupComponentTest } from './helpers/componentTest'
@@ -448,6 +449,15 @@ function csvRow(overrides = {}) {
   ])
   return row
 }
+
+describe('JSON 导出使用轨迹（F3）', () => {
+  it('buildExportRows/buildJson 保留 lastOpenedAt/openCount', () => {
+    const row = csvRow({ lastOpenedAt: 1700000000000, openCount: 4 })
+    const parsed = JSON.parse(buildJson([row]))
+    expect(parsed[0].lastOpenedAt).toBe(1700000000000)
+    expect(parsed[0].openCount).toBe(4)
+  })
+})
 
 describe('CSV 导出公式注入中和（O-4）', () => {
   it('自由文本危险前缀被前置单引号中和（= + - @ Tab CR）', () => {

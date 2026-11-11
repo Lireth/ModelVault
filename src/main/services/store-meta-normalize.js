@@ -162,6 +162,16 @@ export function normalizeModelMeta(raw) {
         ? raw.hash.toLowerCase()
         : '',
     hashMtime: Number.isFinite(raw.hashMtime) ? raw.hashMtime : 0,
+    // F3 使用轨迹：最近打开时间（epoch ms）与累计打开次数。
+    // 负数/非数值回退 0（从未打开）；次数封顶防御病态输入。
+    lastOpenedAt:
+      Number.isFinite(raw.lastOpenedAt) && raw.lastOpenedAt > 0
+        ? Math.round(raw.lastOpenedAt)
+        : 0,
+    openCount:
+      Number.isInteger(raw.openCount) && raw.openCount > 0
+        ? Math.min(raw.openCount, 1_000_000_000)
+        : 0,
     // Civitai 在线识别结果（识别成功时由 models:civitaiIdentify 写入）：
     // 模型页面 URL（放行 civitai.{com,red} 页面链接，渲染层经外链白名单打开）
     civitaiUrl:

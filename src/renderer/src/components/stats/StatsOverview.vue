@@ -3,7 +3,8 @@ import { formatSize } from '../../store/appStore'
 
 /**
  * 库统计总览数字区（OPT-01 自 StatsSection.vue 按域拆出）：
- * 数量/容量/平均/收藏/评分/损坏/NSFW/近 30 天更新八项概览。
+ * 数量/容量/平均/收藏/评分/损坏/NSFW/近 30 天更新/近 30 天使用/从未打开
+ * 十项概览。
  */
 
 defineProps({
@@ -47,6 +48,14 @@ defineProps({
     <div class="stat-item">
       <span class="stat-num">{{ stats.recent }}</span>
       <span class="stat-label">近 30 天更新</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-num">{{ stats.usedRecent }}</span>
+      <span class="stat-label">近 30 天使用</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-num">{{ stats.neverOpened }}</span>
+      <span class="stat-label">从未打开</span>
     </div>
   </div>
 </template>

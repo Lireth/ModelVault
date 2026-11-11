@@ -309,6 +309,37 @@ describe('models:saveModelData / models:setMetaFlags 集成（D1）', () => {
     })
   })
 
+  it('recordModelOpen 累加打开次数并写最近打开时间（F3）', async () => {
+    const abs = await setupModel()
+    const handler = getRegisteredHandler('models:recordModelOpen')
+    const before = Date.now()
+    const first = await handler(makeEvent(), { id: abs })
+    expect(first.error).toBeUndefined()
+    expect(first.meta.openCount).toBe(1)
+    expect(first.meta.lastOpenedAt).toBeGreaterThanOrEqual(before)
+
+    const second = await handler(makeEvent(), { id: abs })
+    expect(second.meta.openCount).toBe(2)
+    expect(second.meta.lastOpenedAt).toBeGreaterThanOrEqual(
+      first.meta.lastOpenedAt,
+    )
+    const persisted = getModelMeta(abs)
+    expect(persisted.openCount).toBe(2)
+    expect(persisted.lastOpenedAt).toBe(second.meta.lastOpenedAt)
+  })
+
+  it('recordModelOpen 拒绝无效与越界标识（F3）', async () => {
+    const handler = getRegisteredHandler('models:recordModelOpen')
+    expect(await handler(makeEvent(), { id: '' })).toEqual({
+      error: '无效的模型标识',
+    })
+    expect(
+      await handler(makeEvent(), {
+        id: path.join(root, '..', 'outside.safetensors'),
+      }),
+    ).toEqual({ error: '模型不在当前根目录内' })
+  })
+
   it('setModelTags 整体覆写标签并即时落盘（F-5）', async () => {
     const abs = await setupModel()
     const handler = getRegisteredHandler('models:setModelTags')
