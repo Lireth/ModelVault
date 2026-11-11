@@ -123,18 +123,19 @@ npm start
 
 ## 常用脚本
 
-| 命令                        | 说明                                                                         |
-| --------------------------- | ---------------------------------------------------------------------------- |
-| `npm start` / `npm run dev` | 启动开发模式（主进程/渲染进程热重载）                                        |
-| `npm run build`             | 编译主进程、preload、渲染进程到 `out/`                                       |
-| `npm run lint`              | ESLint 代码检查（flat config，错误级规则）                                   |
-| `npm run typecheck`         | TypeScript checkJs 纯类型检查（shared/preload/main/renderer JS，严格度棘轮） |
-| `npm test`                  | 运行单元测试（vitest，`test:watch` 为监视模式）                              |
-| `npm run test:coverage`     | 运行单元测试并生成覆盖率报告（含防退化阈值门禁）                             |
-| `npm run smoke`             | 启动 `out/` 编译产物冒烟检查（主窗口/页面加载/preload+IPC 往返/图片协议）    |
-| `npm run preview`           | 以生产构建产物启动应用预览                                                   |
-| `npm run dist`              | 编译并打包单文件便携版 EXE 到 `dist/{version}/`                              |
-| `npm run dist:dir`          | 编译并生成免安装目录（快速验证打包结果）                                     |
+| 命令                        | 说明                                                                                            |
+| --------------------------- | ----------------------------------------------------------------------------------------------- |
+| `npm start` / `npm run dev` | 启动开发模式（主进程/渲染进程热重载）                                                           |
+| `npm run build`             | 编译主进程、preload、渲染进程到 `out/`                                                          |
+| `npm run lint`              | ESLint 代码检查（flat config，错误级规则）                                                      |
+| `npm run typecheck`         | TypeScript checkJs 纯类型检查（shared/preload/main/renderer JS，严格度棘轮）                    |
+| `npm test`                  | 运行单元测试（vitest，`test:watch` 为监视模式）                                                 |
+| `npm run test:coverage`     | 运行单元测试并生成覆盖率报告（含防退化阈值门禁）                                                |
+| `npm run smoke`             | 启动 `out/` 编译产物冒烟检查（主窗口/页面加载/preload+IPC 往返/图片协议）                       |
+| `npm run bench`             | 渲染层性能基准（默认 10k 合成模型：筛选/搜索/排序/拼音；`--models=50000`、`--check`、`--json`） |
+| `npm run preview`           | 以生产构建产物启动应用预览                                                                      |
+| `npm run dist`              | 编译并打包单文件便携版 EXE 到 `dist/{version}/`                                                 |
+| `npm run dist:dir`          | 编译并生成免安装目录（快速验证打包结果）                                                        |
 
 ## 打包说明
 

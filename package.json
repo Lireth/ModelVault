@@ -24,6 +24,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "smoke": "node scripts/smoke.mjs",
+    "bench": "node scripts/bench.mjs",
     "smoke:packaged": "npm run build && electron-builder --dir --publish never && node scripts/smoke.mjs --packaged",
     "preview": "electron-vite preview",
     "dist": "npm run build && electron-builder --win",
