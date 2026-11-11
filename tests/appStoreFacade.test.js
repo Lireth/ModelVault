@@ -135,6 +135,9 @@ const EXPECTED_EXPORTS = [
   'openAdjacentDetail',
   'openDetail',
   'closeDetail',
+  // 基底兼容性（F6）
+  'compatibilityInfo',
+  'filterCompatibleModels',
   // 局部扫描
   'partialScanModels',
   // 多选

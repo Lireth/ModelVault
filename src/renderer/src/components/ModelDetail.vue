@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AutoInfoPanel from './detail/AutoInfoPanel.vue'
 import CivitaiPanel from './detail/CivitaiPanel.vue'
+import CompatibilityPanel from './detail/CompatibilityPanel.vue'
 import CoverPanel from './detail/CoverPanel.vue'
 import MetaForm from './detail/MetaForm.vue'
 import { useDialogFocus } from '../composables/useDialogFocus'
@@ -264,6 +265,7 @@ watch(
                 (words) => metaFormRef?.onAutoApplyTriggers(words)
               "
             />
+            <CompatibilityPanel />
           </div>
         </div>
       </section>

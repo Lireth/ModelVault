@@ -173,6 +173,9 @@ export {
   openAdjacentDetail,
 } from './detail'
 
+// 基底兼容性视图（F6：LoRA ↔ Checkpoint）
+export { compatibilityInfo, filterCompatibleModels } from './compatibility'
+
 // 局部增量扫描
 export { partialScanModels } from './partial-scan'
 
