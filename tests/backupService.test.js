@@ -1254,6 +1254,205 @@ describe('importBackup', () => {
     expect(res.error).toBeUndefined()
     expect(res.settingsRestored).toBe(false)
   })
+
+  it('清单未声明库设置时仅恢复库数据，不写 settings.json', async () => {
+    const zipPath = path.join(mkTmp('modelvault-out-'), 'no-settings.zip')
+    fs.writeFileSync(
+      zipPath,
+      zipSync({
+        'manifest.json': strToU8(
+          JSON.stringify({
+            app: BACKUP_FORMAT,
+            version: BACKUP_VERSION,
+            // 无 settings 字段：库数据恢复但设置保持目标现状
+            library: { root: 'D:\\old-lib', models: 1, covers: 0 },
+          }),
+        ),
+        'library/store.json': strToU8(
+          JSON.stringify({ version: 1, models: { 'x.safetensors': {} } }),
+        ),
+      }),
+    )
+    const target = mkTmp('modelvault-target-')
+    dialogMock.showOpenDialog
+      .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
+      .mockResolvedValueOnce({ canceled: false, filePaths: [target] })
+
+    const res = await importBackup(null)
+
+    expect(res.error).toBeUndefined()
+    expect(res.settingsRestored).toBe(false)
+    expect(res.libraryRestored.models).toBe(1)
+    const disk = JSON.parse(
+      fs.readFileSync(path.join(target, DATA_DIR, 'store.json'), 'utf8'),
+    )
+    expect(disk.models['x.safetensors']).toBeDefined()
+    expect(fs.existsSync(path.join(target, DATA_DIR, 'settings.json'))).toBe(
+      false,
+    )
+  })
+
+  it('恢复前快照超过 10 份时仅保留最新 10 份，最旧的自动清理', async () => {
+    const root = makeLibrary()
+    setDataRoot(root)
+    await loadData()
+    const backupsDir = path.join(root, DATA_DIR, 'backups')
+    fs.mkdirSync(backupsDir, { recursive: true })
+    // 预置 10 份历史快照（时间戳字面量小于当前真实时钟，排序在最前）
+    for (let i = 0; i < 10; i++) {
+      fs.writeFileSync(
+        path.join(backupsDir, `store-selective-${1700000000000 + i}.json`),
+        `历史快照-${i}`,
+      )
+    }
+    const zipPath = makePartialZip(
+      path.join(mkTmp('modelvault-out-'), 'selected.zip'),
+      {
+        mode: 'selected',
+        models: { 'a.safetensors': { note: '新备注' } },
+      },
+    )
+    dialogMock.showOpenDialog.mockReset()
+    dialogMock.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: [zipPath],
+    })
+    dialogMock.showMessageBox.mockResolvedValue({ response: 1 })
+
+    const res = await importBackup(null)
+
+    expect(res.error).toBeUndefined()
+    const snaps = fs
+      .readdirSync(backupsDir)
+      .filter((n) => n.startsWith('store-selective-'))
+    expect(snaps).toHaveLength(10)
+    // 最旧的一份被清理，本次快照与较新的历史快照保留
+    expect(snaps).not.toContain('store-selective-1700000000000.json')
+    expect(snaps).toContain('store-selective-1700000000009.json')
+    // 快照治理不阻断合并本身
+    expect(getModelMeta(path.join(root, 'a.safetensors'))?.note).toBe('新备注')
+  })
+
+  it('恢复前快照失败时继续合并：backupPath 为空，标注照常生效', async () => {
+    const root = makeLibrary()
+    // backups 为同名文件：快照的 mkdir 必然失败（快照属尽力而为，不阻断恢复）
+    fs.writeFileSync(path.join(root, DATA_DIR, 'backups'), '占位文件')
+    setDataRoot(root)
+    await loadData()
+    const zipPath = makePartialZip(
+      path.join(mkTmp('modelvault-out-'), 'selected.zip'),
+      {
+        mode: 'selected',
+        models: { 'a.safetensors': { note: '合并备注' } },
+      },
+    )
+    dialogMock.showOpenDialog.mockReset()
+    dialogMock.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: [zipPath],
+    })
+    dialogMock.showMessageBox.mockResolvedValue({ response: 1 })
+
+    const res = await importBackup(null)
+
+    expect(res.error).toBeUndefined()
+    expect(res.libraryRestored.backupPath).toBe('')
+    expect(getModelMeta(path.join(root, 'a.safetensors'))?.note).toBe(
+      '合并备注',
+    )
+  })
+
+  it('合并恢复同名封面不覆盖：既有封面字节原样保留（FN-08）', async () => {
+    const root = makeLibrary()
+    setDataRoot(root)
+    await loadData()
+    const zipPath = makePartialZip(
+      path.join(mkTmp('modelvault-out-'), 'same-cover.zip'),
+      {
+        mode: 'selected',
+        models: { 'a.safetensors': { note: '新备注' } },
+        covers: { 'c1.png': '不应覆盖的新字节' },
+      },
+    )
+    dialogMock.showOpenDialog.mockReset()
+    dialogMock.showOpenDialog.mockResolvedValue({
+      canceled: false,
+      filePaths: [zipPath],
+    })
+    dialogMock.showMessageBox.mockResolvedValue({ response: 1 })
+
+    const res = await importBackup(null)
+
+    expect(res.error).toBeUndefined()
+    // 已存在的同名封面跳过：不写入也不计入恢复数
+    expect(res.libraryRestored.covers).toBe(0)
+    expect(
+      fs.readFileSync(path.join(root, DATA_DIR, 'covers', 'c1.png'), 'utf8'),
+    ).toBe('img1')
+    // 标注合并照常生效
+    expect(getModelMeta(path.join(root, 'a.safetensors'))?.note).toBe('新备注')
+  })
+
+  it('维护操作进行中时拒绝合并恢复（EBUSY，与全量恢复同一互斥）', async () => {
+    const root = makeLibrary()
+    setDataRoot(root)
+    await loadData()
+    const zipPath = makePartialZip(
+      path.join(mkTmp('modelvault-out-'), 'selected.zip'),
+      {
+        mode: 'selected',
+        models: { 'a.safetensors': { note: '不应写入' } },
+      },
+    )
+    dialogMock.showOpenDialog.mockReset()
+    dialogMock.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [zipPath],
+    })
+    dialogMock.showMessageBox.mockResolvedValue({ response: 1 })
+    // 模拟扫描正在持有全局维护锁
+    const token = tryAcquireMaintenance('scan', 'D:\\scanning-root')
+    expect(token).toBeTruthy()
+    try {
+      const res = await importBackup(null)
+
+      expect(res.error).toContain('正在')
+      expect(res.partial).toBe(true)
+      expect(res.settingsRestored).toBe(false)
+      expect(getModelMeta(path.join(root, 'a.safetensors'))?.note).not.toBe(
+        '不应写入',
+      )
+    } finally {
+      releaseMaintenance(token)
+    }
+  })
+
+  it('备份文件超过 2GB 上限时停止恢复（O5 大小预检先于读取）', async () => {
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+    )
+    dialogMock.showOpenDialog.mockReset()
+    dialogMock.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [zipPath],
+    })
+    // 不真正落盘 2GB 文件：注入 stat 结果触发预检分支
+    const realStat = fsp.stat.bind(fsp)
+    const spy = vi.spyOn(fsp, 'stat').mockImplementation(async (p, ...rest) => {
+      if (String(p) === zipPath) {
+        return { size: 2 * 1024 ** 3 + 1 }
+      }
+      return realStat(p, ...rest)
+    })
+    try {
+      const res = await importBackup(null)
+
+      expect(res.error).toContain('备份文件超过 2GB')
+      expect(res.libraryRestored).toBeUndefined()
+    } finally {
+      spy.mockRestore()
+    }
+  })
 })
 
 describe('flush 超时防线（B3：挂起磁盘不永久卡死）', () => {
@@ -1366,6 +1565,44 @@ describe('flush 超时防线（B3：挂起磁盘不永久卡死）', () => {
     )
     expect(saveErrorListener).toHaveBeenCalled()
     expect(saveErrorListener.mock.calls[0][0].message).toContain('暂未落盘')
+    // 维护锁已释放
+    const token = tryAcquireMaintenance('restore', root)
+    expect(token).not.toBeNull()
+    releaseMaintenance(token)
+  })
+
+  it('合并恢复：前置 flush 挂起超时后取消恢复，标注保持原值', async () => {
+    const root = makeLibrary()
+    setDataRoot(root)
+    await loadData()
+    // 在途修改未落盘：前置 flush 必须真实等待（挂起即超时取消）
+    setModelMeta(path.join(root, 'a.safetensors'), { note: '在途修改' })
+    hangWritesUnder(root)
+    setFlushAwaitTimeoutForTests(50)
+    setSettingsFlushAwaitTimeoutForTests(50)
+    const zipPath = makePartialZip(
+      path.join(mkTmp('modelvault-out-'), 'selected.zip'),
+      {
+        mode: 'selected',
+        models: { 'a.safetensors': { note: '合并备注' } },
+      },
+    )
+    dialogMock.showOpenDialog.mockReset()
+    dialogMock.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [zipPath],
+    })
+    dialogMock.showMessageBox.mockResolvedValue({ response: 1 })
+
+    const started = Date.now()
+    const res = await importBackup(null)
+
+    // 与全量恢复同一底线：按注入上限返回，取消合并不让迟到写入覆盖结果
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(res.error).toContain('磁盘无响应')
+    expect(getModelMeta(path.join(root, 'a.safetensors'))?.note).toBe(
+      '在途修改',
+    )
     // 维护锁已释放
     const token = tryAcquireMaintenance('restore', root)
     expect(token).not.toBeNull()
