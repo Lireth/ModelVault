@@ -90,10 +90,13 @@ async function ensureHash(id, meta, mtimeMs) {
 
 /** 注册 Civitai 识别链路的 IPC 处理器 */
 export function registerCivitaiHandlers() {
-  // 在线识别：哈希反查 Civitai，成功时保存模型页 URL
+  // 在线识别：哈希反查 Civitai，成功时保存模型页 URL。
+  // FEAT-9：fillMissing=true 时顺带补全空缺触发词/备注（复用同一次反查
+  // 结果生成补丁，与「一键补全」同一「绝不覆盖用户标注」原则；详情页
+  // 单模型链路不传该字段，行为不变）
   wrapHandler(
     'models:civitaiIdentify',
-    async (event, { id } = {}) => {
+    async (event, { id, fillMissing } = {}) => {
       const disabled = rejectIfCivitaiDisabled()
       if (disabled) return disabled
       const invalid = checkModelIdInRoot(id)
@@ -113,12 +116,26 @@ export function registerCivitaiHandlers() {
       // URL 写盘前重读最新元数据，避免覆盖哈希计算期间的用户并发保存。
       // baseModel 一并回填（F-2 筛选数据源）：已有值不覆盖（宁留旧不覆盖）
       const latest = getModelMeta(id) || meta
+      let patch = null
+      let applied = []
+      if (fillMissing === true) {
+        const complete = civitaiCompletePatch(latest, res.info)
+        patch = complete.patch || null
+        applied = Array.isArray(complete.applied) ? complete.applied : []
+      }
       const saved = setModelMeta(id, {
         ...latest,
         civitaiUrl: res.info.url,
         baseModel: latest.baseModel || res.info.baseModel || '',
+        ...(patch || {}),
       })
-      logger.info(`Civitai 识别成功: ${id} -> ${res.info.url}`)
+      logger.info(
+        `Civitai 识别成功: ${id} -> ${res.info.url}${
+          patch
+            ? `（补全 ${applied.length ? applied.join('/') : '无空缺字段'}）`
+            : ''
+        }`,
+      )
       return {
         found: true,
         url: res.info.url,
@@ -130,6 +147,7 @@ export function registerCivitaiHandlers() {
           description: res.info.description,
           images: res.info.images,
         },
+        ...(patch ? { applied } : null),
         meta: saved || null,
       }
     },

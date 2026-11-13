@@ -264,6 +264,40 @@ describe('models:civitaiIdentify', () => {
       error: '触发限流',
     })
   })
+
+  it('fillMissing=true 复用同一次反查生成补丁落盘并透传 applied（FEAT-9）', async () => {
+    const id = await touchModel('queue-fill.safetensors')
+    computeAndCacheHash.mockResolvedValue('h-fill')
+    fetchCivitaiVersionByHash.mockResolvedValue({
+      found: true,
+      info: versionInfo(),
+    })
+    civitaiCompletePatch.mockReturnValue({
+      patch: { triggerWords: 'my trigger' },
+      applied: ['triggerWords'],
+    })
+
+    const res = await getRegisteredHandler('models:civitaiIdentify')(
+      makeEvent(),
+      { id, fillMissing: true },
+    )
+
+    expect(res.found).toBe(true)
+    expect(res.applied).toEqual(['triggerWords'])
+    expect(getModelMeta(id).triggerWords).toBe('my trigger')
+    expect(getModelMeta(id).civitaiUrl).toBe(versionInfo().url)
+    // 补丁复用同一次反查结果：不额外请求 Civitai
+    expect(fetchCivitaiVersionByHash).toHaveBeenCalledTimes(1)
+
+    // 不传 fillMissing：不调补丁构造器、响应无 applied（详情页链路行为不变）
+    civitaiCompletePatch.mockClear()
+    const res2 = await getRegisteredHandler('models:civitaiIdentify')(
+      makeEvent(),
+      { id },
+    )
+    expect(civitaiCompletePatch).not.toHaveBeenCalled()
+    expect(res2.applied).toBeUndefined()
+  })
 })
 
 describe('models:civitaiComplete', () => {

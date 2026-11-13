@@ -182,6 +182,10 @@ const EXPECTED_EXPORTS = [
   'civitaiIdentify',
   'civitaiComplete',
   'civitaiImportImages',
+  // 全库 Civitai 批量识别队列（FEAT-9）
+  'unidentifiedCivitaiCount',
+  'startCivitaiQueue',
+  'cancelCivitaiQueue',
   // 单模型操作
   'revealModel',
   'deleteModel',

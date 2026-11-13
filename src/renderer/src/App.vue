@@ -25,6 +25,7 @@ import { useMainProcessEvents } from './composables/useMainProcessEvents'
 import { MAX_IMPORT_PATHS } from '../../shared/app-enums'
 import { MODEL_EXTENSION_SET } from '../../shared/model-extensions'
 import {
+  cancelCivitaiQueue,
   cancelImport,
   filteredModels,
   importModels,
@@ -103,6 +104,11 @@ const importPercent = computed(() => {
 const importCancelPending = computed(() =>
   Boolean(state.importProgress?.canceled || state.importProgress?.canceling),
 )
+/** FEAT-9：Civitai 队列进度百分比（按条目） */
+const civitaiQueuePercent = computed(() => {
+  const q = state.civitaiQueue
+  return q.total > 0 ? Math.min(100, Math.round((q.done / q.total) * 100)) : 0
+})
 
 function clearSearch() {
   toolbarRef.value?.clearSearch()
@@ -449,6 +455,46 @@ onUnmounted(() => {
       </button>
     </div>
 
+    <!-- FEAT-9：Civitai 队列识别浮条（全局可见）：进度 + 当前模型 + 取消；
+         与导入浮条同屏时上移避让（两者均为底部居中 fixed 条） -->
+    <div
+      v-if="state.civitaiQueue.running"
+      class="import-progress civitai-queue-bar"
+      :class="{
+        'civitai-queue-raised':
+          state.importing &&
+          state.importProgress &&
+          state.importProgress.total > 0,
+      }"
+      role="status"
+      aria-live="polite"
+    >
+      <div class="import-progress-main">
+        <span class="import-progress-title">
+          Civitai 队列识别 {{ state.civitaiQueue.done }}/{{
+            state.civitaiQueue.total
+          }}
+          （命中 {{ state.civitaiQueue.ok }}）
+          <template v-if="state.civitaiQueue.current">
+            · {{ state.civitaiQueue.current }}</template
+          >
+        </span>
+        <div class="import-progress-track">
+          <div
+            class="import-progress-fill"
+            :style="{ width: `${civitaiQueuePercent}%` }"
+          ></div>
+        </div>
+      </div>
+      <button
+        class="btn import-progress-cancel"
+        :disabled="state.civitaiQueue.cancelRequested"
+        @click="cancelCivitaiQueue"
+      >
+        {{ state.civitaiQueue.cancelRequested ? '取消中…' : '取消队列' }}
+      </button>
+    </div>
+
     <!-- F-4 拖拽模型导入：整窗提示层（不拦截指针，drop 仍落到底层并由
          窗口级监听接管）；松开后由主进程弹出目标文件夹选择 -->
     <div v-if="dropActive" class="drop-import-mask" aria-hidden="true">
@@ -644,6 +690,11 @@ onUnmounted(() => {
   flex-shrink: 0;
   font-size: var(--font-xs);
   padding: 3px 12px;
+}
+
+/* FEAT-9：Civitai 队列浮条与导入浮条同屏时上移避让 */
+.civitai-queue-raised {
+  bottom: 88px;
 }
 
 /* ---------- 拖拽导入提示层（F-4）：整窗虚线区域 + 中央提示卡 ---------- */

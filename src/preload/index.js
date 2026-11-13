@@ -296,9 +296,16 @@ const api = {
     /**
      * Civitai 在线识别（按文件 SHA256 反查），返回
      * { found: true, url, info, meta } / { found: false } / { error }。
-     * 大文件哈希计算可能耗时数十秒，调用方需提供忙碌提示
+     * 大文件哈希计算可能耗时数十秒，调用方需提供忙碌提示。
+     * FEAT-9：fillMissing=true 时识别成功后顺带补全空缺触发词/备注
+     * （复用同一次反查结果，响应附带 applied 字段列表；批量队列专用，
+     * 单模型链路不传保持原行为）
      */
-    civitaiIdentify: (id) => invokeValidated('models:civitaiIdentify', { id }),
+    civitaiIdentify: (id, fillMissing = false) =>
+      invokeValidated('models:civitaiIdentify', {
+        id,
+        ...(fillMissing ? { fillMissing: true } : null),
+      }),
     /**
      * Civitai 一键分配标签（仅 LoRA 模型；按已保存链接查询模型分类并映射
      * 分类标签），返回 { found: true, subCategory, meta }

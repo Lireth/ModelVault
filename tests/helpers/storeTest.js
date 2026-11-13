@@ -123,6 +123,18 @@ export function resetStoreTestState(api) {
     cancelRequested: false,
     failures: null,
   })
+  // FEAT-9：Civitai 队列同为内嵌深响应集合，就地表合并复位
+  Object.assign(state.civitaiQueue, {
+    running: false,
+    total: 0,
+    done: 0,
+    ok: 0,
+    notFound: 0,
+    filled: 0,
+    failed: 0,
+    current: '',
+    cancelRequested: false,
+  })
   state.toasts.splice(0, state.toasts.length)
   if (state.confirm.resolve) state.confirm.resolve(false)
   // O3：state 为 shallowReactive，confirm 是内嵌深响应集合，就地表合并复位

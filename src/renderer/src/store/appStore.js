@@ -230,6 +230,13 @@ export {
   civitaiImportImages,
 } from './civitai-store'
 
+// 全库 Civitai 批量识别队列（FEAT-9）
+export {
+  unidentifiedCivitaiCount,
+  startCivitaiQueue,
+  cancelCivitaiQueue,
+} from './civitai-queue'
+
 // 单模型操作/即时标注/右键菜单/文件操作（批次 4）/自由标签（F-5）
 export {
   revealModel,

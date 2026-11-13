@@ -3,6 +3,7 @@ import {
   allFilteredSelected,
   batchDeleteModels,
   batchFavorite,
+  cancelCivitaiQueue,
   exitMultiSelect,
   openAdjacentDetail,
   requestBatchCancel,
@@ -64,7 +65,8 @@ export function useGlobalShortcuts(searchFieldEl, clearSearch) {
   }
 
   /**
-   * Esc：多选模式优先退出；再次 Esc 才清空搜索词。
+   * Esc：FEAT-9 队列在途优先请求取消（跨视图存续的全局后台任务）；
+   * 其次多选模式优先退出；再次 Esc 才清空搜索词。
    * 详情打开时 Esc 由 ModelDetail 处理（可能涉及脏表单确认）。
    * @param {KeyboardEvent} e 键盘事件
    * @returns {boolean} 是否已消费
@@ -72,7 +74,11 @@ export function useGlobalShortcuts(searchFieldEl, clearSearch) {
   function handleEscape(e) {
     if (e.key !== 'Escape') return false
     if (state.selectedId === null) {
-      if (state.multiSelect.active) {
+      if (state.civitaiQueue.running) {
+        cancelCivitaiQueue()
+        toast('info', '已请求取消 Civitai 识别队列，完成当前模型后收尾')
+        e.preventDefault()
+      } else if (state.multiSelect.active) {
         // 长耗时批量进行中：Esc 先请求取消而非直接退出多选（防误退丢上下文），
         // 批量收尾后再次 Esc 才退出
         if (state.multiSelect.busy) {

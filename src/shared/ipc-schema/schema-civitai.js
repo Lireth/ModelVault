@@ -1,11 +1,15 @@
 /** Civitai 域通道 schema（识别/补全/示例图导入/哈希预热） */
 
-import { vArr, vObj, vStr } from './rules'
+import { vArr, vBool, vObj, vStr } from './rules'
 import { ID } from './constants'
 import { MAX_IMPORT_IMAGES } from '../app-enums'
 
 export const CIVITAI_SCHEMAS = {
-  'models:civitaiIdentify': vObj({ fields: { id: ID } }),
+  // FEAT-9：fillMissing=true 时识别成功后顺带补全空缺触发词/备注
+  // （复用同一次反查结果，不再二次请求 Civitai）
+  'models:civitaiIdentify': vObj({
+    fields: { id: ID, fillMissing: vBool() },
+  }),
   'models:civitaiCategory': vObj({ fields: { id: ID } }),
   'models:civitaiComplete': vObj({ fields: { id: ID } }),
   'models:civitaiImportImages': vObj({

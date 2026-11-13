@@ -232,6 +232,22 @@ export const state = shallowReactive({
     // 无失败为 null；整体替换语义（下一次批量结果覆盖，不叠加旧错误）
     failures: null,
   }),
+  // FEAT-9：全库 Civitai 批量识别队列（后台串行，跨视图存续，浮条全局可见）。
+  // running 期间按钮禁用/浮条显示；total/done 为队列进度；ok 识别命中数、
+  // notFound 未被 Civitai 收录数、filled 实际补全空缺标注数、failed 请求失败数；
+  // current 为正在识别的模型名；cancelRequested 由 Esc/浮条按钮置位，
+  // 串行循环每轮检查后提前收尾（已完成部分保留）
+  civitaiQueue: reactive({
+    running: false,
+    total: 0,
+    done: 0,
+    ok: 0,
+    notFound: 0,
+    filled: 0,
+    failed: 0,
+    current: '',
+    cancelRequested: false,
+  }),
   // 设置（深响应：主题/卡片尺寸实时预览等就地改深层字段）
   settings: reactive(defaultSettings()),
   settingsOpen: false,

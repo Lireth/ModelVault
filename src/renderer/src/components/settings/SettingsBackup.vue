@@ -5,8 +5,10 @@ import {
   confirmDialog,
   exportModelList,
   filteredModels,
+  startCivitaiQueue,
   state,
   toast,
+  unidentifiedCivitaiCount,
 } from '../../store/appStore'
 import { useBackupTransfer } from '../../composables/useBackupTransfer'
 import { useLibraryHealth } from '../../composables/useLibraryHealth'
@@ -265,6 +267,41 @@ async function onClearAllCovers() {
           @click="onClearAllCovers"
         >
           {{ clearingCovers ? '清理中…' : '移除全部' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- FEAT-9：全库 Civitai 批量识别队列（后台串行，进度见全局浮条，Esc 可取消） -->
+    <div class="setting-row">
+      <div class="setting-info">
+        <span class="setting-title">Civitai 批量识别队列</span>
+        <span class="setting-desc">
+          对当前库中
+          {{ unidentifiedCivitaiCount }} 个未识别模型按文件哈希逐个反查
+          Civitai：命中即保存模型页链接，并补全空缺的触发词与备注
+          （已有标注不会被覆盖；未被收录的模型不改动，下次运行仍会重试）。
+          受站点限速约 1.2 秒/请求，队列在后台串行执行，可关闭本页继续浏览，
+          随时按 Esc 或浮条按钮取消，已识别部分保留。
+        </span>
+      </div>
+      <div class="setting-actions">
+        <button
+          class="btn"
+          :disabled="
+            state.civitaiQueue.running ||
+            unidentifiedCivitaiCount === 0 ||
+            state.settings.civitaiEnabled === false
+          "
+          :title="
+            state.settings.civitaiEnabled === false
+              ? 'Civitai 功能已关闭，请先在「通用」设置中开启'
+              : unidentifiedCivitaiCount === 0
+                ? '当前库所有模型均已识别'
+                : '开始全库 Civitai 识别队列'
+          "
+          @click="startCivitaiQueue"
+        >
+          {{ state.civitaiQueue.running ? '队列进行中…' : '开始识别' }}
         </button>
       </div>
     </div>
