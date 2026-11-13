@@ -1,12 +1,15 @@
 # ModelVault 持续集成工作流（CI）
 #
-# 触发条件：推送到 main 分支、针对 main 的 PR、手动触发
+# 触发条件：推送到 main 分支、针对 main 的 PR、每周一定时依赖审计巡检、手动触发
 # 职责：Node 24 单腿全量门禁——依赖安装 → 运行时依赖漏洞审计 → ESLint →
 #   Prettier 格式检查 → 类型检查（shared 契约层 + preload + main + renderer）
 #   → 单元测试（含覆盖率）→ 三端编译 → 编译产物完整性校验 → 启动冒烟
 #   （out/ 与 win-unpacked）→ 覆盖率报告归档。PR 另做依赖差分审查
 #   （dependency-review，含 license 白名单）。CodeQL 静态扫描见独立的
 #   codeql.yml。
+# 定时巡检（scheduled-dependency-audit）：门内审计只在 push/PR 时执行，
+#   main 长期无推送时 lockfile 新增披露 CVE 无检测入口——每周一仅跑
+#   lockfile 依赖审计（免安装依赖），不拉起完整门禁。
 # Node 版本说明：engines 声明 >=22.22.2（jsdom 30 强制要求，Node 20 已
 #   EOL）。CI 仅以 Node 24（当前 LTS）执行门禁：此前的 22/24 双腿矩阵中
 #   22 承担全量门禁、24 仅复跑测试，而静态检查/测试/编译产物只依赖源码
@@ -26,6 +29,10 @@ on:
   pull_request:
     branches:
       - main
+  schedule:
+    # 每周一 04:00 UTC（北京时间 12:00）依赖审计巡检，与 CodeQL（03:00）
+    # 错峰；覆盖两次推送之间新披露的 CVE
+    - cron: '0 4 * * 1'
   workflow_dispatch: # 允许手动触发
 
 permissions:
@@ -63,8 +70,55 @@ jobs:
             GPL-3.0-or-later, LGPL-2.1-only, LGPL-2.1-or-later, LGPL-3.0-only,
             LGPL-3.0-or-later
 
+  # 定时依赖审计巡检：--package-lock-only 直接读 lockfile（免安装依赖、
+  # 免拉 Electron 二进制），口径与门内审计一致——运行时依赖 high 及以上
+  # 阻断并注解告警；全树（含 devDependencies）仅输出到 Job Summary 供
+  # 人工评估，不阻断，避免与门内「只审运行时依赖」的降噪口径冲突。
+  # .npmrc 指向的镜像不提供 audit 端点，显式使用官方 registry。
+  scheduled-dependency-audit:
+    name: Scheduled Dependency Audit
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 安装 Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: 运行时依赖审计（high 及以上阻断）
+        run: |
+          if npm audit --omit=dev --audit-level=high \
+              --registry=https://registry.npmjs.org --package-lock-only; then
+            echo "✅ 运行时依赖（package-lock）无 high 及以上漏洞" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::运行时依赖存在新披露的 high 及以上漏洞，请通过 Dependabot PR 或手动升级处理后验证"
+            exit 1
+          fi
+
+      - name: 全树审计提示（含 devDependencies，不阻断）
+        run: |
+          npm audit --audit-level=moderate \
+            --registry=https://registry.npmjs.org --package-lock-only \
+            > audit-full.txt 2>&1 || true
+          {
+            echo ''
+            echo '## 全树依赖审计提示（含 devDependencies，仅提示）'
+            echo '```text'
+            cat audit-full.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f audit-full.txt
+
   test-and-build:
     name: Test & Build (Node 24)
+    # 定时触发只做依赖审计巡检，不拉起完整门禁（Windows 全量构建无需为例行
+    # 审计重复执行；push/PR/dispatch 仍走全量）
+    if: github.event_name != 'schedule'
     runs-on: windows-latest
     timeout-minutes: 20
 
