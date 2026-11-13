@@ -29,6 +29,7 @@ export const LIB_SETTINGS_FILE = 'settings.json'
 export const COVERS_DIR = 'covers'
 
 /** 当前生效的模型根目录 */
+/** @type {string|null} */
 let currentRoot = null
 /**
  * 当前根的规范化后缀（root + 分隔符，PERF-PATH）：扫描/索引产出的模型 id
@@ -58,6 +59,9 @@ export function getCurrentRoot() {
 
 /** 根目录下的关联存储目录 */
 export function getDataDir(root = currentRoot) {
+  // 与 getCoversDir 同一防线：根未设置时显式抛错（path.join 对 null 同样
+  // 抛 TypeError，仅错误形态更明确），调用方均已在持根前提下进入
+  if (!root) throw new Error('尚未设置模型根目录')
   return path.join(root, DATA_DIR)
 }
 

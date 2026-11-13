@@ -56,7 +56,8 @@ export async function installUpdatePackage() {
   const signature = await verifyUpdateSignature(resolved)
   if (!signature.ok) {
     logger.warn(`拒绝启动验签失败的更新包: ${signature.error}`)
-    return { error: signature.error }
+    // verifyUpdateSignature 契约：ok=false 时 error 必有值
+    return { error: /** @type {string} */ (signature.error) }
   }
   try {
     const child = spawn(resolved, [`--wait-for-pid=${process.pid}`], {

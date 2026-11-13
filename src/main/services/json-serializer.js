@@ -63,6 +63,7 @@ parentPort.on('message', (msg) => {
 `
 
 /** 单例 worker 与任务表 */
+/** @type {import('node:worker_threads').Worker|null} */
 let worker = null
 let nextTaskId = 0
 const pending = new Map()
@@ -136,7 +137,9 @@ export async function serializeJsonOffThread(value, options = {}) {
   const hashPrefix =
     typeof options.hashPrefix === 'string' ? options.hashPrefix : ''
   const timeoutMs =
-    Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+    typeof options.timeoutMs === 'number' &&
+    Number.isFinite(options.timeoutMs) &&
+    options.timeoutMs > 0
       ? options.timeoutMs
       : SERIALIZE_TIMEOUT_MS
   try {

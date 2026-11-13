@@ -19,18 +19,31 @@ import {
  * 在其后注册，保证订阅先于应用初始化就位（与拆分前时序一致）。
  */
 export function useMainProcessEvents() {
+  /** @type {(() => void) | null} */
   let unsubscribeProgress = null
+  /** @type {(() => void) | null} */
   let unsubscribeMenu = null
+  /** @type {(() => void) | null} */
   let unsubscribeThumbs = null
+  /** @type {(() => void) | null} */
   let unsubscribeStoreError = null
+  /** @type {(() => void) | null} */
   let unsubscribeFsChanged = null
+  /** @type {(() => void) | null} */
   let unsubscribeWarmup = null
+  /** @type {(() => void) | null} */
   let unsubscribeUpdateAvailable = null
+  /** @type {(() => void) | null} */
   let unsubscribeWatcherStopped = null
+  /** @type {(() => void) | null} */
   let unsubscribeTransferProgress = null
+  /** @type {(() => void) | null} */
   let unsubscribeImportProgress = null
 
-  /** 目录变更自动重扫的二级防抖（主进程 3s 静默期后此处再缓冲 1s，E8） */
+  /**
+   * 目录变更自动重扫的二级防抖（主进程 3s 静默期后此处再缓冲 1s，E8）
+   * @type {ReturnType<typeof setTimeout> | null}
+   */
   let fsChangedTimer = null
 
   /**
@@ -38,6 +51,7 @@ export function useMainProcessEvents() {
    * 扫描进行中到达的 fsChanged 不丢弃，其变更子树累积到集合（多次合并），
    * 由 state.scanning 侦听器在扫描结束后补一次防抖的局部扫描。
    * null 表示无待处理
+   * @type {Set<string> | null}
    */
   let fsChangedPendingDirs = null
 
@@ -54,7 +68,7 @@ export function useMainProcessEvents() {
    * 旧根子树必须丢弃，不能用于新库。
    */
   function scheduleFsRescan(dirs, root) {
-    clearTimeout(fsChangedTimer)
+    if (fsChangedTimer) clearTimeout(fsChangedTimer)
     fsChangedTimer = setTimeout(() => {
       fsChangedTimer = null
       if (root !== state.folder || !state.settings.autoRescan) return
@@ -151,18 +165,20 @@ export function useMainProcessEvents() {
       (progress) => {
         if (!state.importing) return
         // 保留本地「取消中」标记：主进程事件到达前取消按钮不得回弹为可点击
+        const prevProgress = /** @type {{ canceling?: boolean } | null} */ (
+          state.importProgress
+        )
         state.importProgress = {
           ...progress,
           canceling:
-            state.importProgress?.canceling === true ||
-            progress.canceled === true,
+            prevProgress?.canceling === true || progress.canceled === true,
         }
       },
     )
   }
 
   function unsubscribeAll() {
-    clearTimeout(fsChangedTimer)
+    if (fsChangedTimer) clearTimeout(fsChangedTimer)
     unsubscribeProgress?.()
     unsubscribeMenu?.()
     unsubscribeThumbs?.()

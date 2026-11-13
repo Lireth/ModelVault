@@ -14,16 +14,19 @@ export const transferState = reactive({
   /** 选择浮层可见性 */
   visible: false,
   /** 待传输的当前库模型绝对路径 */
-  ids: [],
+  ids: /** @type {string[]} */ ([]),
   /** 传输模式：'copy' 复制（源不动）/ 'move' 移动（成功后清理源） */
   mode: 'copy',
   /** 传输进行中（浮层确认按钮防连点） */
   busy: false,
   /** 传输进度（OPT-18：主进程 transferProgress 事件快照；null = 无进行中传输） */
-  progress: null,
+  progress:
+    /** @type {{ done: number, total: number, bytes: number, totalBytes: number, canceled?: boolean } | null} */
+    (null),
 })
 
 /** 在途传输的取消令牌（OPT-18：models:cancelOp 据此中止，浮层取消按钮触发） */
+/** @type {string|null} */
 let activeTransferOpId = null
 
 /**

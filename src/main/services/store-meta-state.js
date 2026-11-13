@@ -9,22 +9,34 @@
  * 字段语义与重置时序的权威说明见 store-meta.js / store-meta-persist.js
  * 中各操作函数的注释。
  */
+
+/**
+ * 关联存储内存数据（store.json 快照的规范化形态，与
+ * store-meta-normalize.normalizeStoreData 返回值一致）
+ * @typedef {object} StoreData
+ * @property {number} version
+ * @property {Record<string, any>} models 元数据表（键为模型相对路径）
+ */
+
 export const metaState = {
   /**
    * 根目录可用性探测缓存（O5）：只缓存「可用」结果，避免正常落盘前每次都 stat；
    * 离线时不缓存负结果，库恢复后下一次保存立即生效。
    */
-  rootProbe: { root: null, at: 0 },
+  rootProbe: {
+    root: /** @type {string | null} */ (null),
+    at: 0,
+  },
   /** 离线跳过后自动重试落盘的定时器（库恢复可用时无需用户再次编辑即可补写） */
-  offlineRetryTimer: null,
+  offlineRetryTimer: /** @type {ReturnType<typeof setTimeout> | null} */ (null),
   /**
    * 写盘异常（EPERM/EBUSY 等瞬时占用）后的连续失败次数（OPT-15）：
    * 驱动重试的指数退避与上限暂停；成功落盘或切库/加载重置时归零。
    */
   saveRetryFailures: 0,
   /** 当前根目录的元数据，键为相对路径（'/' 分隔） */
-  data: null,
-  saveTimer: null,
+  data: /** @type {StoreData | null} */ (null),
+  saveTimer: /** @type {ReturnType<typeof setTimeout> | null} */ (null),
   saving: false,
   /** 写盘进行期间收到的新保存请求（落盘完成后需补写一次，避免丢失） */
   pendingSave: false,

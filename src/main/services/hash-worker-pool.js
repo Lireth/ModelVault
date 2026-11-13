@@ -180,6 +180,7 @@ export function isRetryableHashPoolError(err) {
  */
 
 /** 槽位数组（惰性创建 worker；缩容后尾部空闲槽位被回收） */
+/** @type {HashPoolSlot[]} */
 const slots = []
 
 /** 当前允许的并行任务数（1 = 串行；setHashPoolConcurrency 调整） */
@@ -189,6 +190,7 @@ let poolConcurrency = MIN_POOL_CONCURRENCY
 let nextTaskId = 0
 
 /** 崩溃重启定时器与连续崩溃计数（OPT-05；池级全局共享） */
+/** @type {ReturnType<typeof setTimeout>|null} */
 let restartTimer = null
 let crashStreak = 0
 
@@ -371,7 +373,8 @@ function nextTask() {
  */
 function trimSlots() {
   for (let i = slots.length - 1; i >= poolConcurrency; i--) {
-    const slot = slots[i]
+    // 循环边界保证 i < slots.length，索引必命中
+    const slot = /** @type {HashPoolSlot} */ (slots[i])
     if (slot.currentTask) continue
     slots.splice(i, 1)
     if (slot.worker) {
@@ -441,7 +444,8 @@ function pump() {
   trimSlots()
   for (let i = 0; i < poolConcurrency; i++) {
     if (i >= slots.length) slots.push({ worker: null, currentTask: null })
-    const slot = slots[i]
+    // 上方补齐保证 i < slots.length，索引必命中
+    const slot = /** @type {HashPoolSlot} */ (slots[i])
     if (slot.currentTask) continue
     const task = nextTask()
     if (!task) return
@@ -529,6 +533,7 @@ export function computeFileHashOffThread(
       reject(abortError())
       return
     }
+    /** @type {HashPoolTask} */
     const task = {
       id: nextTaskId++,
       filePath,
@@ -563,7 +568,11 @@ export function computeFileHashOffThread(
         task.reject(abortError())
       }
     }
-    signal?.addEventListener('abort', task.abortListener, { once: true })
+    signal?.addEventListener(
+      'abort',
+      /** @type {EventListener} */ (task.abortListener),
+      { once: true },
+    )
     enqueueTask(task)
   })
 }

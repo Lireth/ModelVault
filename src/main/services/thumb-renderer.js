@@ -30,18 +30,22 @@ const RENDER_TIMEOUT_MS = 20000
 const IDLE_DESTROY_MS = 60000
 
 /** 隐藏窗口单例（惰性创建；异常退出/超时/空闲回收后销毁，下次任务重建） */
+/** @type {BrowserWindow|null} */
 let win = null
 
 /** 窗口就绪 promise（loadURL 完成，preload 已由 Electron 在页面加载前执行） */
+/** @type {Promise<void>|null} */
 let readyPromise = null
 
 /** 任务派发序号 */
 let nextTaskId = 0
 
 /** 在途任务表：id -> { resolve, reject, timer, payload, requeued } */
+/** @type {Map<number, {resolve: (value: any) => void, reject: (err: Error) => void, timer: ReturnType<typeof setTimeout>|null, payload: object, requeued: boolean}>} */
 const pending = new Map()
 
 /** 空闲回收定时器（无在途任务时启动） */
+/** @type {ReturnType<typeof setTimeout>|null} */
 let idleTimer = null
 
 /** 空闲回收时长（测试可注入小值） */
@@ -114,7 +118,7 @@ export function setThumbRendererIdleTimeoutForTests(ms) {
  */
 function failAll(err) {
   for (const task of pending.values()) {
-    clearTimeout(task.timer)
+    if (task.timer) clearTimeout(task.timer)
     task.reject(err)
   }
   pending.clear()
@@ -142,7 +146,7 @@ function settleTask(id, outcome) {
   const task = pending.get(id)
   if (!task) return
   pending.delete(id)
-  clearTimeout(task.timer)
+  if (task.timer) clearTimeout(task.timer)
   if (outcome.error) task.reject(outcome.error)
   else task.resolve(outcome.value)
   scheduleIdleDestroy()
@@ -177,7 +181,7 @@ function handleTaskTimeout(id) {
   destroyWindow()
   for (const [otherId, other] of [...pending]) {
     pending.delete(otherId)
-    clearTimeout(other.timer)
+    if (other.timer) clearTimeout(other.timer)
     if (other.requeued) {
       other.reject(
         new Error(`缩略图渲染超时（重排后仍未完成，${renderTimeoutMs}ms）`),
@@ -281,7 +285,7 @@ function ensureWindowReady() {
     logger.warn(`缩略图渲染窗口初始化失败: ${err.message}`)
     if (readyPromise === current) destroyWindow()
   })
-  return readyPromise
+  return current
 }
 
 /**
@@ -324,6 +328,7 @@ function dispatchThumbTask(payload) {
   // 低于 2s 完全不写日志；超过阈值的慢任务（超大源图/GPU 卡顿）以 warn 显形
   const done = startPerf('缩略图渲染任务', { warnMs: 2000, quiet: true })
   return new Promise((resolve, reject) => {
+    /** @type {{resolve: (value: any) => void, reject: (err: Error) => void, timer: ReturnType<typeof setTimeout>|null, payload: object, requeued: boolean}} */
     const task = {
       resolve: (value) => {
         done()

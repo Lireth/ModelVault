@@ -203,7 +203,7 @@ export async function pickAndSaveCover(parentWin) {
   if (result.canceled || result.filePaths.length === 0) {
     return { canceled: true }
   }
-  return importCoverFromPath(result.filePaths[0])
+  return importCoverFromPath(/** @type {string} */ (result.filePaths[0]))
 }
 
 /**
@@ -217,6 +217,7 @@ export async function pickAndSaveCover(parentWin) {
 export async function isValidImageFile(p) {
   if (typeof p !== 'string' || !p) return false
   if (!IMAGE_EXTENSIONS.has(path.extname(p).toLowerCase())) return false
+  /** @type {import('node:fs/promises').FileHandle|null} */
   let fh = null
   try {
     fh = await fs.open(p, 'r')
@@ -250,8 +251,11 @@ export async function saveClipboardImage() {
       return { error: '剪贴板中没有图片内容' }
     }
     const mime = item.types.find((t) => t in MIME_EXT)
-    // ClipboardItem.getType 返回 Blob（运行时保证），显式收窄类型供类型检查
-    const blob = /** @type {Blob} */ (await item.getType(mime))
+    // Electron 类型声明与运行时不符（getType 实际返回 Blob），经 unknown 显式
+    // 收窄；mime 由上方 find 同源保证存在（item 命中即 types 必含白名单类型）
+    const blob = /** @type {Blob} */ (
+      /** @type {unknown} */ (await item.getType(/** @type {string} */ (mime)))
+    )
     // 大小预检（B5，与 importCoverFromPath 同一阈值）：剪贴板是唯一不经文件
     // 对话框的图片入口，合法的超大位图无上限落盘会占满磁盘并连锁导致原子写失败。
     // 先判 arrayBuffer 字节数，超限零写入（不创建封面目录）

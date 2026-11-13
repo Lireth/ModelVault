@@ -238,7 +238,9 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
       ? timing.errorRetryLadder
       : undefined,
     maxErrorRetries:
-      Number.isFinite(timing.maxErrorRetries) && timing.maxErrorRetries > 0
+      typeof timing.maxErrorRetries === 'number' &&
+      Number.isFinite(timing.maxErrorRetries) &&
+      timing.maxErrorRetries > 0
         ? timing.maxErrorRetries
         : undefined,
   })

@@ -60,6 +60,7 @@ function formatByteLimit(bytes) {
  * @returns {Promise<T>}
  */
 export function raceIdleTimeout(promise, ms, message, onCancel) {
+  /** @type {ReturnType<typeof setTimeout>|null} */
   let timer = null
   return Promise.race([
     promise,

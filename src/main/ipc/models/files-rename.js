@@ -32,7 +32,8 @@ const INVALID_FILE_NAME_RE = /[\\/:*?"<>|]/
  * - 禁用中的模型（.disabled）拒绝：sidecar 基名规则不同，先启用再改名。
  * @param {string} id 当前模型绝对路径
  * @param {string} name 新文件名（不含扩展名）
- * @returns {{path?: string, error?: string}}
+ * @returns {{path: string, error?: undefined} | {error: string, path?: undefined}}
+ *   两属性互斥：成功仅 path，失败仅 error
  */
 export function planRenameTarget(id, name) {
   if (typeof id !== 'string' || !id) return { error: '无效的模型标识' }
@@ -112,23 +113,25 @@ export function registerRenameHandlers() {
       if (invalid) return { error: invalid }
       const plan = planRenameTarget(id, name)
       if (plan.error) return { error: plan.error }
-      if (plan.path === id) {
+      // 两态互斥契约：error 为空即成功分支，path 必存在
+      const targetPath = /** @type {string} */ (plan.path)
+      if (targetPath === id) {
         return { path: id, renamedSidecars: 0, sidecarWarnings: [] }
       }
       // 维护锁（OPT-14）：改名 + sidecar 迁移 + 元数据键迁移与扫描 relink、
       // 备份恢复互斥——恢复中途改路径会让恢复结果与元数据指向错位
       return withMaintenanceLock('file-op', getCurrentRoot(), async () => {
         // 目标存在则拒绝；仅大小写变化的改名（Windows 大小写不敏感）跳过存在性检查
-        if (plan.path.toLowerCase() !== id.toLowerCase()) {
+        if (targetPath.toLowerCase() !== id.toLowerCase()) {
           try {
-            await fs.access(plan.path)
+            await fs.access(targetPath)
             return { error: '目标文件名已存在' }
           } catch {
             /* 不存在，可改名 */
           }
         }
         try {
-          await fs.rename(id, plan.path)
+          await fs.rename(id, targetPath)
         } catch (err) {
           if (errorCode(err) === 'EXDEV') {
             return { error: '不支持跨磁盘重命名（目标须与模型在同一磁盘）' }
@@ -138,7 +141,7 @@ export function registerRenameHandlers() {
         }
         const dir = path.dirname(id)
         const oldBase = path.basename(id, path.extname(id))
-        const newBase = path.basename(plan.path, path.extname(plan.path))
+        const newBase = path.basename(targetPath, path.extname(targetPath))
         let renamedSidecars = 0
         const sidecarWarnings = []
         for (const f of sidecarFilesFor(id)) {
@@ -163,11 +166,11 @@ export function registerRenameHandlers() {
             }
           }
         }
-        renameModelMeta(id, plan.path)
+        renameModelMeta(id, targetPath)
         logger.info(
-          `模型已重命名: ${path.basename(id)} -> ${path.basename(plan.path)}`,
+          `模型已重命名: ${path.basename(id)} -> ${path.basename(targetPath)}`,
         )
-        return { path: plan.path, renamedSidecars, sidecarWarnings }
+        return { path: targetPath, renamedSidecars, sidecarWarnings }
       })
     },
     { errorPrefix: '重命名失败' },

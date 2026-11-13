@@ -170,11 +170,17 @@ export function findUpdateAssets(data, latest) {
   }
 }
 
-/** 最近一次检查到的可用更新资产（含版本号）；渲染层不可注入 */
+/**
+ * 最近一次检查到的可用更新资产（含版本号）；渲染层不可注入
+ * @type {{downloadUrl: string, checksumUrl: string, size: number, latest: string}|null}
+ */
 let pendingAssets = null
 /** 已完成校验的更新包路径（安装入口的唯一合法来源） */
 let downloadedFile = ''
-/** 进行中下载的取消控制器（null 表示空闲） */
+/**
+ * 进行中下载的取消控制器（null 表示空闲）
+ * @type {AbortController|null}
+ */
 let downloadAbort = null
 
 /**
@@ -232,7 +238,8 @@ export async function downloadUpdatePackage(onProgress) {
   // 版本号已通过白名单校验，不同版本互不冲突
   const partPath = `${target}.download.part`
   // 并发闸同步置位（见函数注释）
-  downloadAbort = new AbortController()
+  const controller = new AbortController()
+  downloadAbort = controller
   try {
     try {
       await fsp.mkdir(dir, { recursive: true })
@@ -312,7 +319,7 @@ export async function downloadUpdatePackage(onProgress) {
     }
     let writeFlag = resumeFrom > 0 ? 'a' : 'w'
     const response = await fetchUpdateUrlReliably(downloadUrl, () => ({
-      signal: downloadAbort.signal,
+      signal: controller.signal,
       ...(resumeFrom > 0 ? { headers: { Range: `bytes=${resumeFrom}-` } } : {}),
     }))
     if (resumeFrom > 0 && response.status === 416) {
@@ -392,7 +399,8 @@ export async function downloadUpdatePackage(onProgress) {
     if (!signature.ok) {
       await fsp.rm(partPath, { force: true }).catch(() => {})
       logger.warn(`更新包验签失败: ${signature.error}`)
-      return { error: signature.error }
+      // verifyUpdateSignature 契约：ok=false 时 error 必有值
+      return { error: /** @type {string} */ (signature.error) }
     }
     if (signature.required) {
       logger.info(`更新包验签通过（${signature.thumbprint}）`)

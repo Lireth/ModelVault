@@ -112,6 +112,7 @@ export const WATCHER_MAX_ERROR_RETRIES = 5
  */
 
 /** 当前监控状态（root/excludeNames/snapshot/定时器链） */
+/** @type {WatcherState|null} */
 let watcher = null
 
 /** 读取当前监控状态（子模块的代际防护统一入口：`w !== getWatcher()`） */
@@ -119,7 +120,10 @@ export function getWatcher() {
   return watcher
 }
 
-/** 设置当前监控状态（syncWatcher 构造新状态对象后调用） */
+/**
+ * 设置当前监控状态（syncWatcher 构造新状态对象后调用）
+ * @param {WatcherState|null} next
+ */
 export function setWatcher(next) {
   watcher = next
 }
@@ -151,6 +155,7 @@ export function stopWatcher() {
 /* ---------------- 停止通知（OPT-16 状态可见化） ---------------- */
 
 /** 监控停止监听器（IPC 层注册，向渲染进程广播；纯 Node 模块不引 electron） */
+/** @type {((info: {root: string, reason: string}) => void) | null} */
 let stoppedListener = null
 
 /**

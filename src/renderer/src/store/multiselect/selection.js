@@ -15,7 +15,9 @@ import { cancelOrganizeByTags } from './batch-files'
  * 选中 id 集合（O4）：卡片选中态与全选判断 O(1) 命中，替代对 ids 数组的
  * includes 线性扫描（全选后每张可见卡片渲染均为 O(n)，整体 O(n²)）。
  */
-export const multiSelectIdSet = computed(() => new Set(state.multiSelect.ids))
+export const multiSelectIdSet = computed(
+  () => new Set(/** @type {string[]} */ (state.multiSelect.ids)),
+)
 
 /** 多选模式下选中的模型对象列表（经 modelById O(k) 命中） */
 export const multiSelectedModels = computed(() => {
@@ -70,10 +72,15 @@ export const allFilteredSelected = computed(() => {
 
 /** 全选/取消全选（作用范围为当前筛选结果） */
 export function toggleSelectAllFiltered() {
+  // O-4 棘轮过渡：ids 声明在 state.js（strictNullChecks 下推断为 never[]），
+  // 类型别名仅收窄赋值目标，运行时仍写回同一 reactive 对象；state.js 补
+  // 声明标注后可移除
+  /** @type {{ ids: string[] }} */
+  const ms = state.multiSelect
   if (allFilteredSelected.value) {
-    state.multiSelect.ids = []
+    ms.ids = []
   } else {
-    state.multiSelect.ids = filteredModels.value.map((m) => m.id)
+    ms.ids = filteredModels.value.map((m) => m.id)
   }
   clearSelectionAnchor()
 }
@@ -110,7 +117,9 @@ export function selectRangeTo(id) {
     anchorIdx <= targetIdx ? [anchorIdx, targetIdx] : [targetIdx, anchorIdx]
   const range = []
   for (let i = from; i <= to; i++) range.push(filtered[i].id)
-  state.multiSelect.ids = range
+  /** @type {{ ids: string[] }} */
+  const ms = state.multiSelect
+  ms.ids = range
 }
 
 /** 当前筛选结果 id 集合（反选保留判断用，随 filteredModels 缓存） */
@@ -132,7 +141,9 @@ export function invertSelectionFiltered() {
   for (const id of state.multiSelect.ids) {
     if (!filteredSet.value.has(id)) inverted.push(id)
   }
-  state.multiSelect.ids = inverted
+  /** @type {{ ids: string[] }} */
+  const ms = state.multiSelect
+  ms.ids = inverted
 }
 
 /* ---------------- 重复清理辅助（FEAT-1） ---------------- */
@@ -179,7 +190,9 @@ export function selectRedundantDuplicates() {
   }
   if (redundant.length === 0) return 0
   if (!state.multiSelect.active) state.multiSelect.active = true
-  state.multiSelect.ids = redundant
+  /** @type {{ ids: string[] }} */
+  const ms = state.multiSelect
+  ms.ids = redundant
   clearSelectionAnchor()
   return redundant.length
 }

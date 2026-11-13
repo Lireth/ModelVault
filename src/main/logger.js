@@ -61,7 +61,7 @@ function cleanExpiredLogs(logDir) {
         const match = name.match(
           /^modelvault-(\d{4}-\d{2}-\d{2})(?:\.\d+)?\.log$/,
         )
-        return match && match[1] < cutoffStr
+        return match && /** @type {string} */ (match[1]) < cutoffStr
       })
       return Promise.all(
         stale.map((name) =>

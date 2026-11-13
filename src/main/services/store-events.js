@@ -8,6 +8,7 @@ import { errorMessage } from '../../shared/error-text'
  */
 
 /** 元数据落盘失败监听器（IPC 层注册） */
+/** @type {((err: unknown) => void) | null} */
 let storeSaveErrorListener = null
 
 /**

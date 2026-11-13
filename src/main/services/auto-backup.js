@@ -53,7 +53,10 @@ const STARTUP_DELAY_MS = 60 * 1000
 /** 周期检查间隔（ms）：实际备份仍由 24h 门槛约束 */
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
-/** 周期检查定时器（全局唯一，unref） */
+/**
+ * 周期检查定时器（全局唯一，unref）
+ * @type {ReturnType<typeof setTimeout>|null}
+ */
 let checkTimer = null
 /** 备份在途标记（防重入） */
 let running = false
@@ -89,6 +92,7 @@ export function scheduleAutoBackupCheck() {
  *   不作判定，避免误删有效备份）
  */
 async function checkZipComplete(filePath) {
+  /** @type {import('node:fs/promises').FileHandle|null} */
   let fh = null
   try {
     fh = await fs.open(filePath, 'r')
@@ -251,6 +255,7 @@ export async function runAutoBackupIfDue(now = Date.now()) {
     const tmp = `${target}${AUTO_BACKUP_TMP_SUFFIX}`
     try {
       await writeBackupZipToFile(tmp, built.parts)
+      /** @type {import('node:fs/promises').FileHandle|null} */
       let fh = null
       try {
         fh = await fs.open(tmp, 'r+')

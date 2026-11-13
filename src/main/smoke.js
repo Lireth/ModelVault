@@ -77,6 +77,11 @@ export async function runStartupSmoke(win) {
   const checks = []
   let finished = false
 
+  /**
+   * 结算冒烟结果并退出进程。
+   * @param {Error|null} [error] 冒烟期间的异常（无异常为 null）
+   * @returns {Promise<void>}
+   */
   const finish = async (error = null) => {
     if (finished) return
     finished = true
@@ -201,6 +206,6 @@ export async function runStartupSmoke(win) {
     await finish()
   } catch (err) {
     clearTimeout(failsafe)
-    await finish(err)
+    await finish(/** @type {Error|null} */ (err))
   }
 }

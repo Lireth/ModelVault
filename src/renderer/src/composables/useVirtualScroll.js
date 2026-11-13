@@ -31,6 +31,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
  * @returns 虚拟滚动内核句柄
  */
 export function useVirtualScroll(opts) {
+  /** @type {import('vue').Ref<HTMLElement | null>} */
   const rootEl = ref(null)
   const viewportHeight = ref(600)
   const scrollTop = ref(0)
@@ -45,6 +46,7 @@ export function useVirtualScroll(opts) {
    * Map 全量重建（哈希+分配约为比较成本的数倍）；id 序列真正变化才重建。
    * 映射语义不变：id 顺序即下标顺序。
    */
+  /** @type {any[] | null} */
   let indexedModels = null
   let cachedIndexById = new Map()
   const indexById = computed(() => {
@@ -82,7 +84,9 @@ export function useVirtualScroll(opts) {
 
   /* ---------------- 滚动与尺寸测量 ---------------- */
 
+  /** @type {HTMLElement | null} */
   let scroller = null
+  /** @type {ResizeObserver | null} */
   let resizeObserver = null
 
   /** 向上查找最近的滚动容器（.content-scroll，App 布局的唯一滚动区） */
@@ -214,9 +218,10 @@ export function useVirtualScroll(opts) {
    */
   function focusModel(id) {
     nextTick(() => {
-      rootEl.value
-        ?.querySelector(`[data-model-id="${CSS.escape(id)}"]`)
-        ?.focus()
+      const target = /** @type {HTMLElement | null | undefined} */ (
+        rootEl.value?.querySelector(`[data-model-id="${CSS.escape(id)}"]`)
+      )
+      target?.focus()
     })
   }
 
@@ -229,7 +234,7 @@ export function useVirtualScroll(opts) {
     measure()
     scroller?.addEventListener('scroll', onScroll, { passive: true })
     resizeObserver = new ResizeObserver(measure)
-    resizeObserver.observe(rootEl.value)
+    if (rootEl.value) resizeObserver.observe(rootEl.value)
     // U5：rootEl 高度恒等于内容总高，窗口纵向缩放不会触发其回调；须同时
     // 观察滚动容器，使 viewportHeight 随窗口缩放即时刷新（此前仅滚动时同步）
     if (scroller) resizeObserver.observe(scroller)

@@ -37,7 +37,8 @@ async function writeModelTags(id, tags, opts = {}) {
   // O2：走 state 的 id→下标索引（O(1)），不再全表 findIndex
   const idx = modelIndexOf(id)
   if (idx !== undefined) {
-    state.models[idx] = { ...state.models[idx], tags: next }
+    const prev = /** @type {Record<string, any>} */ (state.models[idx])
+    state.models[idx] = { ...prev, tags: next }
   }
   return { meta: res?.meta || null }
 }
@@ -46,7 +47,8 @@ async function writeModelTags(id, tags, opts = {}) {
 function currentTagsOf(id) {
   const idx = modelIndexOf(id)
   if (idx === undefined) return []
-  const tags = state.models[idx].tags
+  const prev = /** @type {Record<string, any>} */ (state.models[idx])
+  const tags = prev.tags
   return Array.isArray(tags) ? tags : []
 }
 
@@ -203,6 +205,7 @@ export async function deleteModel(id, opts = {}) {
 const modelOpChains = new Map()
 
 /** 批量标签写入锁（C1）：非 null 时新入队的单模型操作需等其落定 */
+/** @type {Promise<void>|null} */
 let bulkTagWritePromise = null
 
 function enqueueModelOp(id, task) {
@@ -324,7 +327,7 @@ export async function handleMenuAction(id, action) {
     case 'deleteModel': {
       const idx = modelIndexOf(id)
       if (idx === undefined) break
-      const m = state.models[idx]
+      const m = /** @type {Record<string, any>} */ (state.models[idx])
       if (
         !(await confirmDialog(
           `确定将「${m.alias || m.name}」移入系统回收站吗？`,
@@ -456,6 +459,7 @@ export async function moveModelTo(id) {
 }
 
 /** OPT-02：在途导入取消令牌（models:cancelOp 据此中止分块复制/文件间隙） */
+/** @type {string|null} */
 let activeImportOpId = null
 
 /**

@@ -190,9 +190,11 @@ export function suggestSearchSyntax(raw, caret) {
   const pos = Math.min(Math.max(caret ?? src.length, 0), src.length)
   // 当前词：向两侧扩展到空白边界（引号内值按同规则简化处理）
   let start = pos
-  while (start > 0 && !/\s/.test(src[start - 1])) start -= 1
+  // 循环边界已保证下标有效；?? '' 仅为收窄类型（test('') 与对越界值
+  // 隐式转换后的结果同为 false，判定不变）
+  while (start > 0 && !/\s/.test(src[start - 1] ?? '')) start -= 1
   let end = pos
-  while (end < src.length && !/\s/.test(src[end])) end += 1
+  while (end < src.length && !/\s/.test(src[end] ?? '')) end += 1
   const chunk = src.slice(start, end)
   const colon = chunk.indexOf(':')
   const typed = chunk.slice(0, colon === -1 ? chunk.length : colon)

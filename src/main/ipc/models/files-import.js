@@ -217,7 +217,8 @@ async function getTargetFreeBytes(targetDir) {
 /**
  * 选择导入来源：显式拖拽路径优先，否则打开原生多选对话框。
  * @param {{mode: 'copy'|'move', win: any, paths?: string[]}} options
- * @returns {Promise<{sourcePaths?: string[], canceled?: true, error?: string}>}
+ * @returns {Promise<{sourcePaths: string[], canceled?: undefined, error?: undefined} | {canceled: true, sourcePaths?: undefined, error?: undefined} | {error: string, sourcePaths?: undefined, canceled?: undefined}>}
+ *   三属性互斥：成功仅 sourcePaths，取消仅 canceled，失败仅 error
  */
 async function pickImportSources({ mode, win, paths }) {
   if (Array.isArray(paths)) {
@@ -266,8 +267,11 @@ function normalizeImportSources(sourcePaths) {
 /**
  * 选择导入目标目录并校验归属（库内 + 非关联存储 + realpath 非越界）。
  * @param {{win: any, root: string}} options 窗口与当前库根
- * @returns {Promise<{targetDir?: string, targetRelDir?: string,
- *   canceled?: true, error?: string}>}
+ * @returns {Promise<{targetDir: string, targetRelDir: string, canceled?: undefined,
+ *   error?: undefined} | {canceled: true, targetDir?: undefined, targetRelDir?: undefined,
+ *   error?: undefined} | {error: string, targetDir?: undefined, targetRelDir?: undefined,
+ *   canceled?: undefined}>}
+ *   互斥三态：成功 targetDir+targetRelDir，取消 canceled，失败 error
  */
 async function resolveImportTarget({ win, root }) {
   const targetPick = await dialog.showOpenDialog(win, {
@@ -574,31 +578,37 @@ async function importModels({ mode, win, signal, paths } = {}) {
   const picked = await pickImportSources({ mode, win, paths })
   if (picked.canceled) return { canceled: true }
   if (picked.error) return { error: picked.error }
-  const uniqueSources = normalizeImportSources(picked.sourcePaths)
+  // 三态互斥契约：canceled/error 均已提前返回，余下必为成功分支
+  const uniqueSources = normalizeImportSources(
+    /** @type {string[]} */ (picked.sourcePaths),
+  )
   if (!uniqueSources) return { error: '未选择有效的模型文件' }
 
   const target = await resolveImportTarget({ win, root })
   if (target.canceled) return { canceled: true }
   if (target.error) return { error: target.error }
+  // 同上：成功分支必有 targetDir + targetRelDir
+  const targetDir = /** @type {string} */ (target.targetDir)
+  const targetRelDir = /** @type {string} */ (target.targetRelDir)
 
   if (signal?.aborted) return { canceled: true }
   return withMaintenanceLock('import', root, async () => {
     try {
-      await fs.mkdir(target.targetDir, { recursive: true })
+      await fs.mkdir(targetDir, { recursive: true })
       const aborted = () => signal?.aborted === true
       const budget = await preflightImportBudget({
         uniqueSources,
         mode,
         root,
-        targetDir: target.targetDir,
+        targetDir,
         aborted,
       })
       if (budget.canceled) {
-        logger.info(`模型导入已取消（预检阶段） → ${target.targetDir}`)
+        logger.info(`模型导入已取消（预检阶段） → ${targetDir}`)
         return {
           root,
-          targetDir: target.targetDir,
-          targetRelDir: target.targetRelDir,
+          targetDir,
+          targetRelDir,
           imported: 0,
           renamed: 0,
           failed: [],
@@ -607,7 +617,7 @@ async function importModels({ mode, win, signal, paths } = {}) {
         }
       }
       const capacityError = await checkImportCapacity(
-        target.targetDir,
+        targetDir,
         budget.copyBytes,
       )
       if (capacityError) return capacityError
@@ -616,18 +626,18 @@ async function importModels({ mode, win, signal, paths } = {}) {
         uniqueSources,
         mode,
         root,
-        targetDir: target.targetDir,
+        targetDir,
         win,
         signal,
         totalBytes: budget.totalBytes,
       })
       logger.info(
-        `模型导入${result.canceled ? '已取消' : '完成'}（${mode}）：成功 ${result.imported}，重命名 ${result.renamed}，失败 ${result.failed.length} → ${target.targetDir}`,
+        `模型导入${result.canceled ? '已取消' : '完成'}（${mode}）：成功 ${result.imported}，重命名 ${result.renamed}，失败 ${result.failed.length} → ${targetDir}`,
       )
       return {
         root,
-        targetDir: target.targetDir,
-        targetRelDir: target.targetRelDir,
+        targetDir,
+        targetRelDir,
         imported: result.imported,
         renamed: result.renamed,
         failed: result.failed,

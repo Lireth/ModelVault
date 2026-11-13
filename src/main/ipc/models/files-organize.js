@@ -93,10 +93,15 @@ export function registerMoveHandlers() {
       const invalid = await checkModelIdInRootReal(id)
       if (invalid) return { error: invalid }
       const win = BrowserWindow.fromWebContents(event.sender)
-      const pick = await dialog.showOpenDialog(win, {
-        title: '选择目标文件夹（须在当前模型库内）',
-        properties: ['openDirectory'],
-      })
+      // win 为 null 仅当发起方 webContents 已销毁；Electron 对 null 按无父窗
+      // 对话框处理，cast 仅收窄类型、运行时行为不变
+      const pick = await dialog.showOpenDialog(
+        /** @type {import('electron').BrowserWindow} */ (win),
+        {
+          title: '选择目标文件夹（须在当前模型库内）',
+          properties: ['openDirectory'],
+        },
+      )
       if (pick.canceled || !pick.filePaths[0]) return { canceled: true }
       const targetDir = pick.filePaths[0]
       // 目标目录必须在当前库内（以构造文件路径换算相对键判定）

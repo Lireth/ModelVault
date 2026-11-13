@@ -19,6 +19,7 @@ const BROKEN_REASON_LABELS = {
 export function useLibraryHealth() {
   const healthBusy = ref(false)
   const healthRepairing = ref(false)
+  /** @type {import('vue').Ref<import('../../../main/services/library-health.js').HealthReport | null>} */
   const healthReport = ref(null)
 
   /** 体检报告摘要（无报告时为 null） */

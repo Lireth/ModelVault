@@ -113,7 +113,10 @@ export function planMetaRelinks(orphans, newcomers) {
   // 同 mtime 分组各恰好 1 个时关联，覆盖「移动目录 + 改名」复合场景
   matchOneToOne(
     ctx,
-    (o) => (o.hash && o.hashMtime > 0 ? `mtime:${o.hashMtime}` : null),
+    (o) =>
+      o.hash && typeof o.hashMtime === 'number' && o.hashMtime > 0
+        ? `mtime:${o.hashMtime}`
+        : null,
     (n) => `mtime:${n.mtimeMs}`,
   )
 

@@ -42,7 +42,7 @@ export async function runWithConcurrency(tasks, worker, concurrency) {
   async function runner() {
     while (next < tasks.length) {
       const index = next++
-      await worker(tasks[index], index)
+      await worker(/** @type {T} */ (tasks[index]), index)
     }
   }
   const count = Math.max(0, Math.min(concurrency, tasks.length))
@@ -61,6 +61,7 @@ export async function runWithConcurrency(tasks, worker, concurrency) {
  * @returns {Promise<boolean>} true=已在时限内 settle（含 reject）；false=超时
  */
 export function isSettledWithin(promise, ms) {
+  /** @type {ReturnType<typeof setTimeout>|null} */
   let timer = null
   return Promise.race([
     promise.then(

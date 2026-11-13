@@ -24,6 +24,12 @@ import { errorMessage } from '../../../shared/error-text'
  *   不能在 partialScanning 仍为 true 时直接调用全量扫描。
  */
 
+/**
+ * state.lastScan 的写入形状（O-4 棘轮过渡：lastScan 声明在 state.js，
+ * strictNullChecks 下推断为 null；state.js 补声明标注后可移除）。
+ * @typedef {{ count: number, durationMs: number }} LastScanSnapshot
+ */
+
 /** 局部扫描代际：每次真正发起请求自增，用于丢弃过期响应 */
 let scanToken = 0
 /** 在途期间累积的后续变更（同一根目录） */
@@ -275,7 +281,9 @@ export async function partialScanModels(dirs) {
     if (failedDirs.length > 0) notifyFailedDirs(failedDirs)
 
     // 未受影响子树与读取失败子树的旧模型原样保留；受影响的模型以局部扫描结果为准
-    const untouched = state.models.filter((m) => {
+    /** @type {Array<Record<string, any>>} */
+    const models = state.models
+    const untouched = models.filter((m) => {
       if (!isRelDirAffected(m.relDir || '', appliedDirs)) return true
       if (isRelDirAffected(m.relDir || '', failedDirs)) return true
       if (incomingIds.has(m.id)) return false
@@ -289,7 +297,11 @@ export async function partialScanModels(dirs) {
     // O7：局部扫描返回的新对象自带最新哈希，清理这些 id 的预热覆盖
     clearHashOverrides(incomingIds)
     replaceModels(untouched.concat(incoming))
-    state.lastScan = {
+    // 类型别名仅收窄赋值目标，运行时仍写回同一 shallowReactive 对象
+    // （形状见 LastScanSnapshot）
+    /** @type {{ lastScan: LastScanSnapshot | null }} */
+    const st = state
+    st.lastScan = {
       count: state.models.length,
       durationMs: res.durationMs,
     }

@@ -97,6 +97,7 @@ async function listFiles(dir, maxFiles, maxDepth) {
   const queue = [{ dir, depth: 0 }]
   while (queue.length > 0 && files.length < maxFiles) {
     const current = queue.shift()
+    if (!current) break
     let entries
     try {
       entries = await fs.readdir(current.dir, { withFileTypes: true })
@@ -280,11 +281,16 @@ export async function exportDiagnostics(win) {
   }
 
   const date = new Date().toISOString().slice(0, 10)
-  const result = await dialog.showSaveDialog(win, {
-    title: '导出诊断包',
-    defaultPath: `modelvault-diagnostics-${date}.zip`,
-    filters: [{ name: '诊断包', extensions: ['zip'] }],
-  })
+  // win 可为 null（fromWebContents 无对应窗口）：Electron 运行期将 null 视为
+  // 无父窗口弹出对话框，类型声明仅接受 BaseWindow，此处按运行期契约断言
+  const result = await dialog.showSaveDialog(
+    /** @type {import('electron').BrowserWindow} */ (win),
+    {
+      title: '导出诊断包',
+      defaultPath: `modelvault-diagnostics-${date}.zip`,
+      filters: [{ name: '诊断包', extensions: ['zip'] }],
+    },
+  )
   if (result.canceled || !result.filePath) return { canceled: true }
 
   const files = {

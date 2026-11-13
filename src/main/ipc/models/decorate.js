@@ -80,11 +80,15 @@ export function computeDecorateCacheLimit(modelCount) {
  */
 export function setDecorateCachePolicyForTests(policy = {}) {
   cachePolicyMin =
-    Number.isFinite(policy.min) && policy.min >= 1
+    typeof policy.min === 'number' &&
+    Number.isFinite(policy.min) &&
+    policy.min >= 1
       ? Math.floor(policy.min)
       : DECORATE_CACHE_DEFAULT_LIMIT
   cachePolicyHardMax =
-    Number.isFinite(policy.max) && policy.max >= cachePolicyMin
+    typeof policy.max === 'number' &&
+    Number.isFinite(policy.max) &&
+    policy.max >= cachePolicyMin
       ? Math.floor(policy.max)
       : DECORATE_CACHE_HARD_MAX
 }
@@ -320,6 +324,7 @@ async function decorateOne(
   // OPT-02）同样判损坏——下载中断的典型形态：头部完好、数据区缺尾巴，
   // 此前仅有此形态漏检。结果标记 suspect 随装饰缓存复用——坏模型在
   // 使用时才暴雷，提前可见
+  /** @type {Awaited<ReturnType<typeof readSafetensorsInfo>>} */
   let autoInfo = null
   let suspect = false
   if (model.size <= 0) {
@@ -333,7 +338,8 @@ async function decorateOne(
       suspect =
         snapshot.suspect ||
         Boolean(
-          Number.isFinite(autoInfo?.expectedMinBytes) &&
+          typeof autoInfo?.expectedMinBytes === 'number' &&
+          Number.isFinite(autoInfo.expectedMinBytes) &&
           autoInfo.expectedMinBytes > model.size,
         )
     } else {
@@ -341,6 +347,7 @@ async function decorateOne(
       if (!autoInfo) {
         suspect = !(await checkSafetensorsHealthy(model.id))
       } else if (
+        typeof autoInfo.expectedMinBytes === 'number' &&
         Number.isFinite(autoInfo.expectedMinBytes) &&
         autoInfo.expectedMinBytes > model.size
       ) {

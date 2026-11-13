@@ -43,12 +43,16 @@ function isProcessAlive(pid) {
  * @returns {Promise<boolean>} 已退出返回 true；超时仍存活返回 false
  */
 export async function waitForProcessExit(pid, options = {}) {
-  const timeoutMs = Number.isFinite(options.timeoutMs)
-    ? options.timeoutMs
-    : 15000
-  const intervalMs = Number.isFinite(options.intervalMs)
-    ? options.intervalMs
-    : 200
+  // typeof 判定仅用于收窄，Number.isFinite 结论与原逻辑逐点一致（NaN 两侧同判）
+  const timeoutMs =
+    typeof options.timeoutMs === 'number' && Number.isFinite(options.timeoutMs)
+      ? options.timeoutMs
+      : 15000
+  const intervalMs =
+    typeof options.intervalMs === 'number' &&
+    Number.isFinite(options.intervalMs)
+      ? options.intervalMs
+      : 200
   const alive =
     typeof options.isAlive === 'function' ? options.isAlive : isProcessAlive
   const deadline = Date.now() + Math.max(0, timeoutMs)

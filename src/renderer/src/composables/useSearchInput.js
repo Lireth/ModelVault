@@ -18,6 +18,7 @@ export function useSearchInput() {
   const searchInput = ref(state.search)
   /** 搜索框 DOM 引用（Ctrl+F 聚焦用） */
   const searchFieldEl = ref(null)
+  /** @type {ReturnType<typeof setTimeout> | null} */
   let searchTimer = null
 
   /**
@@ -34,7 +35,7 @@ export function useSearchInput() {
 
   watch(searchInput, (value) => {
     maybeEnsurePinyin(value)
-    clearTimeout(searchTimer)
+    if (searchTimer) clearTimeout(searchTimer)
     searchTimer = setTimeout(() => {
       state.search = value
     }, 200)
@@ -45,19 +46,21 @@ export function useSearchInput() {
     (value) => {
       maybeEnsurePinyin(value)
       if (value !== searchInput.value) {
-        clearTimeout(searchTimer)
+        if (searchTimer) clearTimeout(searchTimer)
         searchInput.value = value
       }
     },
   )
 
   function clearSearch() {
-    clearTimeout(searchTimer)
+    if (searchTimer) clearTimeout(searchTimer)
     searchInput.value = ''
     state.search = ''
   }
 
-  onUnmounted(() => clearTimeout(searchTimer))
+  onUnmounted(() => {
+    if (searchTimer) clearTimeout(searchTimer)
+  })
 
   return { searchInput, searchFieldEl, clearSearch }
 }

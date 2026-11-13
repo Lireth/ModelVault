@@ -62,8 +62,10 @@ export function setSettingsSaveDelayForTests(ms) {
  * - 库层按序保留且 root 随条目走——防切库窗口内跨库丢写，同库多条目
  *   由写盘链串行自然「后写覆盖」。
  */
+/** @type {string | null} */
 let pendingBootstrapSnapshot = null
 const pendingLibrarySaves = []
+/** @type {ReturnType<typeof setTimeout> | null} */
 let settingsSaveTimer = null
 let firstPendingAt = 0
 

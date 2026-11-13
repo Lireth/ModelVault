@@ -102,18 +102,26 @@ function parseFilter(prefix, value) {
       return { kind: 'type', text: value.toLowerCase() }
     case 'size': {
       const m = /^(>=|<=|>|<)?\s*([\d.]+)\s*(b|kb|mb|gb|tb)?$/i.exec(value)
-      if (!m || !Number.isFinite(parseFloat(m[2]))) return null
+      if (!m) return null
+      // 必选捕获组实际总有值；?? '' 仅为收窄类型（parseFloat('') 与
+      // parseFloat(undefined) 同为 NaN，判定结果不变）
+      const amount = parseFloat(m[2] ?? '')
+      if (!Number.isFinite(amount)) return null
       const unit = (m[3] || 'mb').toLowerCase()
       return {
         kind: 'size',
         op: m[1] || '=',
-        bytes: parseFloat(m[2]) * SIZE_UNITS[unit],
+        bytes: amount * SIZE_UNITS[unit],
       }
     }
     case 'score': {
       const m = /^(>=|<=|>|<)?\s*=?\s*(\d+)$/.exec(value)
       if (!m) return null
-      return { kind: 'score', op: m[1] || '=', value: parseInt(m[2], 10) }
+      return {
+        kind: 'score',
+        op: m[1] || '=',
+        value: parseInt(m[2] ?? '', 10),
+      }
     }
     case 'fav': {
       if (!BOOL_VALUES.has(value.toLowerCase())) return null
@@ -131,12 +139,14 @@ function parseFilter(prefix, value) {
     }
     case 'mtime': {
       const m = /^(>=|<=|>|<)?\s*([\d.]+)\s*(m|h|d|w|y)?$/i.exec(value)
-      if (!m || !Number.isFinite(parseFloat(m[2]))) return null
+      if (!m) return null
+      const amount = parseFloat(m[2] ?? '')
+      if (!Number.isFinite(amount)) return null
       const unit = (m[3] || 'd').toLowerCase()
       return {
         kind: 'mtime',
         op: m[1] || '=',
-        ms: parseFloat(m[2]) * TIME_UNITS[unit],
+        ms: amount * TIME_UNITS[unit],
       }
     }
     // F4 整理类布尔语法：封面/备注/推荐参数/重复项
@@ -164,13 +174,15 @@ function parseFilter(prefix, value) {
         return { kind: 'opened', never: true }
       }
       const m = /^(>=|<=|>|<)?\s*([\d.]+)\s*(m|h|d|w|y)?$/i.exec(value)
-      if (!m || !Number.isFinite(parseFloat(m[2]))) return null
+      if (!m) return null
+      const amount = parseFloat(m[2] ?? '')
+      if (!Number.isFinite(amount)) return null
       const unit = (m[3] || 'd').toLowerCase()
       return {
         kind: 'opened',
         never: false,
         op: m[1] || '=',
-        ms: parseFloat(m[2]) * TIME_UNITS[unit],
+        ms: amount * TIME_UNITS[unit],
       }
     }
     case 'uses': {
@@ -179,7 +191,7 @@ function parseFilter(prefix, value) {
       return {
         kind: 'uses',
         op: m[1] || '=',
-        value: parseInt(m[2], 10),
+        value: parseInt(m[2] ?? '', 10),
       }
     }
     case 'author':
@@ -347,7 +359,9 @@ export function parseSearchQuery(raw) {
     textParts.push(src.slice(last, m.index))
     last = m.index + m[0].length
     const value = (m[3] !== undefined ? m[3] : m[2] || '').trim()
-    const filter = value ? parseFilter(m[1].toLowerCase(), value) : null
+    // 必选捕获组实际总有值；?? '' 仅为收窄类型（空前缀走未知前缀回退路径）
+    const prefix = m[1] ?? ''
+    const filter = value ? parseFilter(prefix.toLowerCase(), value) : null
     if (filter) filters.push(filter)
     else textParts.push(m[0]) // 未知前缀/空值/不合法值：整段回退自由文本
   }

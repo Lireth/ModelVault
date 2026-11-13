@@ -57,6 +57,7 @@ export async function atomicWriteFile(
   // 扫描完成回写）各自使用不同临时文件，避免后写方截断前写方内容、
   // 或先行方 rename 移走临时文件致后行方 ENOENT
   const tmp = `${file}.${process.pid}.${++tmpSeq}.tmp`
+  /** @type {import('node:fs/promises').FileHandle|null} */
   let fh = null
   try {
     // O5：关联存储写入由调用方先确保目录存在并传 createDirs=false，

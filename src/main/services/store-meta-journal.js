@@ -80,6 +80,8 @@ export async function removeJournalDir() {
  * @param {number} snapshotSeq 快照已合并到的日志代际
  */
 export async function loadJournal(snapshotSeq) {
+  // 调用方 loadData 已先置入内存数据；防御性早退，无基线时不回放
+  if (!metaState.data) return
   let files
   try {
     files = await fs.readdir(getJournalDir())

@@ -22,24 +22,30 @@ import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
  *   onContainerKeydown: (e: KeyboardEvent) => void,
  * }} containerRef 绑定到容器元素；onContainerKeydown 绑定容器 @keydown
  */
-export function useDialogFocus({ isOpen = null, trap = true } = {}) {
+export function useDialogFocus({ isOpen, trap = true } = {}) {
+  /** @type {import('vue').Ref<HTMLElement | null>} */
   const containerRef = ref(null)
-  /** 打开前的焦点元素（关闭/卸载时归还） */
+  /**
+   * 打开前的焦点元素（关闭/卸载时归还）
+   * @type {HTMLElement | null}
+   */
   let restoreFocusEl = null
 
   /** 容器内 Tab 序列中的可聚焦元素 */
   function focusablesInContainer() {
     if (!containerRef.value) return []
-    return [
+    const nodes = /** @type {(HTMLElement & { disabled?: boolean })[]} */ ([
       ...containerRef.value.querySelectorAll(
         'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
       ),
-    ].filter((el) => !el.disabled && el.offsetParent !== null)
+    ])
+    return nodes.filter((el) => !el.disabled && el.offsetParent !== null)
   }
 
   /** 焦点移入容器：先记录当前触发元素再移交焦点 */
   function focusIn() {
-    restoreFocusEl = document.activeElement
+    // activeElement 静态类型为 Element，运行时可聚焦元素均为 HTMLElement 系
+    restoreFocusEl = /** @type {HTMLElement | null} */ (document.activeElement)
     nextTick(() => containerRef.value?.focus())
   }
 
@@ -57,6 +63,8 @@ export function useDialogFocus({ isOpen = null, trap = true } = {}) {
     if (items.length === 0) return
     const first = items[0]
     const last = items[items.length - 1]
+    // items 非空时首末元素必然存在（noUncheckedIndexedAccess 显式化）
+    if (!first || !last) return
     const active = document.activeElement
     if (e.shiftKey && (active === first || active === containerRef.value)) {
       e.preventDefault()

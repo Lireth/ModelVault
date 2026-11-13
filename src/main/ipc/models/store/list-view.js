@@ -58,6 +58,7 @@ export function overlayCurrentMeta(models) {
  * 本缓存自然不再被查询（陈旧无害）。切库（rootLower 变化）时重建。
  * 仅在兜底路径真正触发时占用主进程内存（数十 MB 级，单库一份）。
  */
+/** @type {{rootLower: string, map: Map<string, any>|null}} */
 let detailIndexFallback = { rootLower: '', map: null }
 
 /**
@@ -78,7 +79,7 @@ export async function readFullModelFromIndex(id) {
     }
     detailIndexFallback = { rootLower, map }
   }
-  return detailIndexFallback.map.get(id) || null
+  return detailIndexFallback.map?.get(id) || null
 }
 
 /**

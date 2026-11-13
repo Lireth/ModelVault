@@ -115,7 +115,10 @@ export function tagsForType(type) {
 
 /** 获取类型显示信息 */
 export function typeInfo(key) {
-  return TYPE_MAP[key] || TYPE_MAP.other
+  // TYPE_MAP 恒含 other 兜底键（MODEL_TYPES 固定排列），返回必为非空对象
+  return /** @type {{ key: string, label: string, color: string }} */ (
+    TYPE_MAP[key] || TYPE_MAP.other
+  )
 }
 
 /** 获取二级分类标签显示信息 */
@@ -165,7 +168,9 @@ export const state = shallowReactive({
   importing: false,
   // OPT-02：导入任务进度快照（{done,total,bytes,totalBytes,fileName,canceled}），
   // 由主进程 models:importProgress 事件整体替换；null = 无进行中导入
-  importProgress: null,
+  importProgress:
+    /** @type {{ done: number, total: number, bytes: number, totalBytes: number, fileName?: string, canceled?: boolean, canceling?: boolean } | null} */
+    (null),
   // 局部增量扫描在途（B-01）：与全量 scanning 分离，不显示全屏扫描遮罩，
   // 但同样参与「切库/再次扫描」的互斥判断，避免旧根结果合并进新库。
   partialScanning: false,
@@ -178,10 +183,11 @@ export const state = shallowReactive({
   // 失效库根目录清单（小写路径数组，整体替换赋值）：
   // 启动时由 loadStore 的 rootStatuses 回填，扫描成功/切换失效库时增删；
   // 侧栏库列表据此对失效条目灰显标记
-  missingRoots: [],
+  missingRoots: /** @type {string[]} */ ([]),
   progress: { dirs: 0, found: 0, current: '' }, // 每次整体替换，无需深响应
-  lastScan: null, // { count, durationMs }
-  models: shallowReactive([]),
+  // { count, durationMs }
+  lastScan: /** @type {{ count: number, durationMs: number } | null} */ (null),
+  models: /** @type {Array<Record<string, any>>} */ (shallowReactive([])),
   // 筛选 / 排序（平铺字段始终为活动视图的镜像，B-02）
   viewMode: 'grid', // 首页视图模式：grid（网格卡片）/ list（紧凑列表）
   typeFilter: 'all',
@@ -191,7 +197,7 @@ export const state = shallowReactive({
   baseFilter: '',
   // 自由标签筛选（F-5/FEAT-01）：命中 m.tags 同时包含数组内全部标签（AND）；
   // 空数组为全部。标签跨类型存在，不随主分类切换清空
-  tagFilters: [],
+  tagFilters: /** @type {string[]} */ ([]),
   showFavoritesOnly: false, // 仅显示收藏的模型
   // 仅显示重复模型（FEAT-1）：文件 SHA256 完全一致（与其他模型互为副本）。
   // 哈希由后台预热渐进就绪，开启前以「重复」筛选入口上的计数为准
@@ -203,7 +209,7 @@ export const state = shallowReactive({
   sortBy: 'name', // name | type | size | mtime | favorite | rating
   sortAsc: true, // 排序方向：true 升序 / false 降序（收藏优先/按评分为固定语义排序，忽略方向，O1）
   // 详情
-  selectedId: null,
+  selectedId: /** @type {string | null} */ (null),
   detailDirty: false, // 详情页表单有未保存的修改（由 ModelDetail 同步，切换/关闭前确认）
   // 后台哈希预热进度（Civitai 识别加速）：事件推送整体替换快照，无需深响应。
   // 形状与主进程 hash-warmup 的进度事件一致
@@ -224,13 +230,15 @@ export const state = shallowReactive({
   // 保证标志位生命周期与批量执行严格重合（A3：防跨批量泄漏）
   multiSelect: reactive({
     active: false,
-    ids: [],
+    ids: /** @type {string[]} */ ([]),
     busy: false,
     progress: '',
     cancelRequested: false,
     // 最近一次批量操作的逐项失败明细（B20/F3）：{ op, at, items: [{id, name, error}] }，
     // 无失败为 null；整体替换语义（下一次批量结果覆盖，不叠加旧错误）
-    failures: null,
+    failures:
+      /** @type {{ op: string, at: number, items: Array<{ id: string, name: string, error: string }> } | null} */
+      (null),
   }),
   // FEAT-9：全库 Civitai 批量识别队列（后台串行，跨视图存续，浮条全局可见）。
   // running 期间按钮禁用/浮条显示；total/done 为队列进度；ok 识别命中数、
@@ -254,9 +262,17 @@ export const state = shallowReactive({
   // 库统计页（自设置页独立）：与设置页互斥，同占内容区
   statsOpen: false,
   // Toast
-  toasts: reactive([]),
+  toasts: /** @type {Array<{ id: number, type: string, text: string }>} */ (
+    reactive([])
+  ),
   // 自定义确认层（U4：confirmDialog 逐字段赋值，需深响应）
-  confirm: reactive({ visible: false, text: '', resolve: null }),
+  confirm: reactive({
+    visible: false,
+    text: '',
+    resolve:
+      /** @type {((value: boolean | PromiseLike<boolean>) => void) | null} */
+      (null),
+  }),
 })
 
 /**
@@ -358,6 +374,7 @@ export function clearMetaOverrides(ids = null) {
  * 模型 id → 数组下标索引（O2）：批量事件回填时避免每次 O(n) findIndex/重建 Map。
  * 仅在 models 数组引用变化时重建；元素级替换不改变 id 与下标，索引保持有效。
  */
+/** @type {Array<Record<string, any>> | null} */
 let indexedModelsRef = null
 let modelIndexById = new Map()
 
@@ -366,7 +383,8 @@ function rebuildModelIndex() {
   indexedModelsRef = state.models
   modelIndexById = new Map()
   for (let i = 0; i < state.models.length; i++) {
-    modelIndexById.set(state.models[i].id, i)
+    const m = /** @type {Record<string, any>} */ (state.models[i])
+    modelIndexById.set(m.id, i)
   }
 }
 

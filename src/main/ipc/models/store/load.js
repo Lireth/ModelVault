@@ -53,6 +53,7 @@ export function registerLoadHandlers() {
         // 提前并行发起——未挂载盘符的单次 stat 可能阻塞数秒，不再串行
         // 追加在激活库链之后拖慢首帧返回
         const rootStatusesPromise = collectRootStatuses(settings.modelsFolders)
+        /** @type {Record<string, any>|null} */
         let cachedIndex = null
         // F1-offline：激活库路径失效标志（目录被移动/重命名/盘符未挂载）——
         // 渲染层据此进入明确的离线态，而非笼统的扫描失败 toast

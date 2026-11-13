@@ -50,7 +50,7 @@ function getCacheDir() {
 function cacheFileName(url) {
   const hash = createHash('sha256').update(url).digest('hex')
   const m = /\.([a-z0-9]{2,5})(?:$|[?#])/i.exec(url)
-  return `${hash}${m ? `.${m[1].toLowerCase()}` : '.img'}`
+  return `${hash}${m ? `.${/** @type {string} */ (m[1]).toLowerCase()}` : '.img'}`
 }
 
 /** 由缓存文件扩展名映射响应 Content-Type（渲染层 <img> 实际按内容嗅探） */

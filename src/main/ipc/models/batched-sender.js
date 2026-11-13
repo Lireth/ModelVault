@@ -16,7 +16,7 @@
  *   flushMs 时间窗（ms）；maxBatch 单批上限（达到即立即发送）；deliver
  *   底层投递（不做批次刷新，避免 flush 递归；自行校验窗口存活与空批）
  * @returns {{
- *   push: (itemOrItems: T | T[], ctx?: C) => void,
+ *   push: (itemOrItems: T | T[], ctx?: C|null) => void,
  *   flush: () => void,
  *   drop: () => void,
  *   size: () => number,
@@ -30,6 +30,7 @@ export function createBatchedSender({ flushMs, maxBatch, deliver }) {
   let items = []
   /** @type {C|null} */
   let ctx = null
+  /** @type {ReturnType<typeof setTimeout>|null} */
   let timer = null
 
   function clearTimer() {
@@ -47,6 +48,10 @@ export function createBatchedSender({ flushMs, maxBatch, deliver }) {
     deliver(batch, ctx)
   }
 
+  /**
+   * @param {T|T[]} itemOrItems 单条或一批
+   * @param {C|null} [nextCtx] 推送上下文
+   */
   function push(itemOrItems, nextCtx = null) {
     // 多上下文场景：切换目标前先送达既有批次，避免更新错投/丢失
     if (items.length > 0 && ctx !== nextCtx) flush()

@@ -11,6 +11,12 @@ import { modelById } from '../selectors'
  */
 
 /**
+ * state.multiSelect.failures 的写入形状（O-4 棘轮过渡：failures 声明在
+ * state.js，strictNullChecks 下推断为 null；state.js 补声明标注后可移除）。
+ * @typedef {{ op: string, at: number, items: Array<{ id: string, name: string, error: string }> }} BatchFailures
+ */
+
+/**
  * 记录一次批量操作的逐项失败（整体替换，不叠加旧错误）。
  * @param {string} op 操作类型文案（如「批量评分」「批量删除」）
  * @param {Array<{id: string, error?: any}>} items 失败项（id + 主进程/IPC 真实原因）
@@ -32,8 +38,10 @@ export function reportBatchFailures(op, items) {
         error: raw || '未知错误',
       }
     })
-  state.multiSelect.failures =
-    list.length > 0 ? { op, at: Date.now(), items: list } : null
+  // 类型别名仅收窄赋值目标，运行时仍写回同一 reactive 对象（见 BatchFailures）
+  /** @type {{ failures: BatchFailures | null }} */
+  const ms = state.multiSelect
+  ms.failures = list.length > 0 ? { op, at: Date.now(), items: list } : null
   return list.length
 }
 
@@ -49,7 +57,10 @@ export function clearBatchFailures() {
  * @returns {boolean} 是否重建成功（失败项全部失效时 false 并提示）
  */
 export function reselectFailedItems() {
-  const items = state.multiSelect.failures?.items || []
+  // 类型别名仅收窄读写目标，运行时仍指向同一 reactive 对象（见 BatchFailures）
+  /** @type {{ ids: string[], failures: BatchFailures | null }} */
+  const ms = state.multiSelect
+  const items = ms.failures?.items || []
   if (items.length === 0) return false
   const byId = modelById.value
   const ids = items.filter((it) => byId.get(it.id)).map((it) => it.id)
@@ -59,7 +70,7 @@ export function reselectFailedItems() {
     return false
   }
   state.multiSelect.active = true
-  state.multiSelect.ids = ids
+  ms.ids = ids
   toast(
     'info',
     `已选中 ${ids.length} 个失败项，可在批量栏重试刚才的操作` +

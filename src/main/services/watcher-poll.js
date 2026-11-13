@@ -84,7 +84,9 @@ function handleWalkError(w, err) {
     ? w.errorRetryLadder
     : WATCHER_ERROR_RETRY_LADDER
   const maxRetries =
-    Number.isFinite(w.maxErrorRetries) && w.maxErrorRetries > 0
+    typeof w.maxErrorRetries === 'number' &&
+    Number.isFinite(w.maxErrorRetries) &&
+    w.maxErrorRetries > 0
       ? w.maxErrorRetries
       : WATCHER_MAX_ERROR_RETRIES
   w.errorRetries = (w.errorRetries || 0) + 1
@@ -94,7 +96,10 @@ function handleWalkError(w, err) {
     notifyWatcherStopped({ root: w.root, reason: err.message })
     return false
   }
-  const delay = ladder[Math.min(w.errorRetries - 1, ladder.length - 1)]
+  // 下标已钳制在 [0, length-1]，断言仅满足 strictNullChecks，运行时无变化
+  const delay = /** @type {number} */ (
+    ladder[Math.min(w.errorRetries - 1, ladder.length - 1)]
+  )
   logger.warn(
     `目录监控异常（第 ${w.errorRetries}/${maxRetries} 次，${Math.round(delay / 1000)}s 后重探）: ${err.message}`,
   )
@@ -357,6 +362,9 @@ async function applyContentCheckResult(w, nameSnapshot, selected) {
   // 未选中目录沿用旧条目（其名称事实未变——名称变化的目录已在必检集合内；
   // size/mtime 陈旧由轮转保证有限窗口内刷新）
   const fresh = await statSelectedDirEntries(nameSnapshot, selected)
+  // 调用方（runContentCheck）已保证进入本函数时内容基线存在；await 之后
+  // 同步读取一次，后续无异步间隙，断言不改变任何运行时时序
+  const oldStats = /** @type {Map<string, SnapshotEntry[]>} */ (w.statSnapshot)
   const merged = new Map()
   const checkedAt = Date.now()
   for (const dir of nameSnapshot.keys()) {
@@ -366,7 +374,7 @@ async function applyContentCheckResult(w, nameSnapshot, selected) {
       w.contentCheckedAt.set(dir, checkedAt)
       continue
     }
-    const oldEntries = w.statSnapshot.get(dir)
+    const oldEntries = oldStats.get(dir)
     if (oldEntries) merged.set(dir, oldEntries)
   }
   for (const dir of [...w.contentCheckedAt.keys()]) {
@@ -375,7 +383,7 @@ async function applyContentCheckResult(w, nameSnapshot, selected) {
 
   // 内容差异（选中目录内的条目增删与同名覆盖一并显形；未选中目录
   // 新旧条目相同不产生差异）
-  const changedDirs = computeStatSnapshotDiff(w.root, w.statSnapshot, merged)
+  const changedDirs = computeStatSnapshotDiff(w.root, oldStats, merged)
   w.statSnapshot = merged
   w.snapshot = nameSnapshot
   w.snapshotRevision += 1

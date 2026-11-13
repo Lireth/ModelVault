@@ -48,7 +48,7 @@ async function mapLimit(items, limit, task) {
   const worker = async () => {
     while (cursor < items.length) {
       const i = cursor++
-      results[i] = await task(items[i], i)
+      results[i] = await task(/** @type {T} */ (items[i]), i)
     }
   }
   await Promise.all(
@@ -110,6 +110,8 @@ export async function buildBackupParts(options = {}) {
   if (root) {
     const storeFile = path.join(root, DATA_DIR, DATA_FILE)
     const coversDir = path.join(root, DATA_DIR, COVERS_DIR)
+    /** store.json 解析结果（不可信 JSON，逐字段运行时校验） */
+    /** @type {Record<string, any>|null} */
     let parsedStore = null
     try {
       storeText = await fs.readFile(storeFile, 'utf-8')
@@ -128,6 +130,7 @@ export async function buildBackupParts(options = {}) {
     }
 
     // FN-08：选择性/元数据模式在内存中裁剪 store.json（不修改磁盘数据）
+    /** @type {string[]|null} */
     let keepModels = null
     if (storeText && mode !== 'full') {
       const modelMap =
@@ -150,7 +153,11 @@ export async function buildBackupParts(options = {}) {
       const filtered = {}
       for (const key of keepModels) filtered[key] = modelMap[key]
       // metadata 模式同样不携带封面
-      storeText = JSON.stringify({ ...parsedStore, models: filtered }, null, 2)
+      storeText = JSON.stringify(
+        { ...(parsedStore || {}), models: filtered },
+        null,
+        2,
+      )
       models = keepModels.length
     }
 
@@ -177,14 +184,11 @@ export async function buildBackupParts(options = {}) {
         fs.stat(path.join(coversDir, name)).catch(() => null),
       )
       let totalBytes = 0
-      for (let i = 0; i < coverNames.length; i++) {
+      for (const [i, name] of coverNames.entries()) {
         const stat = stats[i]
         if (!stat?.isFile()) continue
         totalBytes += stat.size
-        coverFiles.push({
-          name: coverNames[i],
-          path: path.join(coversDir, coverNames[i]),
-        })
+        coverFiles.push({ name, path: path.join(coversDir, name) })
       }
       if (totalBytes > MAX_COVERS_BYTES) {
         return {
@@ -240,6 +244,7 @@ export async function exportBackup(win, options = {}) {
     // OPT-10：封面逐个读入压缩流，不再把所有封面缓冲进内存。
     // 压缩期间主进程仅保留当前读块，内存峰值与封面总量解耦。
     await writeBackupZipToFile(tmp, parts)
+    /** @type {import('node:fs/promises').FileHandle|null} */
     let fh = null
     try {
       fh = await fs.open(tmp, 'r+')

@@ -29,7 +29,11 @@ export function registerBackupHandlers() {
   wrapHandler(
     'models:exportBackup',
     async (event, payload = {}) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
+      // win 可为 null（fromWebContents 无对应窗口）：导出对话框运行期视为
+      // 无父窗口弹出，类型声明仅接受 BrowserWindow，此处按运行期契约断言
+      const win = /** @type {import('electron').BrowserWindow} */ (
+        BrowserWindow.fromWebContents(event.sender)
+      )
       const res = await exportBackup(win, payload)
       if (res.error) {
         logger.warn(`备份导出失败: ${res.error}`)
@@ -47,7 +51,10 @@ export function registerBackupHandlers() {
   wrapHandler(
     'models:importBackup',
     async (event) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
+      // 同导出链路：null 父窗口按运行期契约断言
+      const win = /** @type {import('electron').BrowserWindow} */ (
+        BrowserWindow.fromWebContents(event.sender)
+      )
       const res = await importBackup(win)
       // 恢复目标为当前激活根时的善后（B1）：磁盘 store.json 已被整目录替换，
       // 内存元数据、装饰缓存与延迟缩略图任务仍基于恢复前的数据——

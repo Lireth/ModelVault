@@ -33,13 +33,19 @@ const bigHeaderWaiters = []
  * @param {{threshold?: number, concurrency?: number}} [policy]
  */
 export function setHeaderGateForTests(policy = {}) {
+  const threshold = policy.threshold
   bigHeaderThreshold =
-    Number.isFinite(policy.threshold) && policy.threshold >= 0
-      ? policy.threshold
+    typeof threshold === 'number' &&
+    Number.isFinite(threshold) &&
+    threshold >= 0
+      ? threshold
       : BIG_HEADER_THRESHOLD
+  const concurrency = policy.concurrency
   bigHeaderConcurrency =
-    Number.isFinite(policy.concurrency) && policy.concurrency >= 1
-      ? Math.floor(policy.concurrency)
+    typeof concurrency === 'number' &&
+    Number.isFinite(concurrency) &&
+    concurrency >= 1
+      ? Math.floor(concurrency)
       : BIG_HEADER_CONCURRENCY
 }
 
@@ -117,8 +123,9 @@ export function parseResolution(text) {
   if (typeof text !== 'string') return null
   const m = /(\d+(?:\.\d+)?)\s*[xX×]\s*(\d+(?:\.\d+)?)/.exec(text)
   if (!m) return null
-  const w = Math.round(parseFloat(m[1]))
-  const h = Math.round(parseFloat(m[2]))
+  // 两个捕获组在正则匹配成功时必然存在（noUncheckedIndexedAccess 显式收窄）
+  const w = Math.round(parseFloat(m[1] ?? ''))
+  const h = Math.round(parseFloat(m[2] ?? ''))
   if (!w || !h) return null
   return { min: Math.min(w, h), max: Math.max(w, h) }
 }
@@ -366,7 +373,7 @@ export function analyzeTensorIndex(header) {
   return {
     tensorCount,
     paramCount,
-    dtypeMain: dtypes.length > 0 ? dtypes[0].dtype : '',
+    dtypeMain: dtypes[0]?.dtype ?? '',
     dtypes,
     architecture: inferArchitecture(keys),
     componentRatios,
@@ -436,14 +443,17 @@ export function parseHeaderBuffer(headerBuf) {
  * headerLen + 数据区末尾 = 文件最小合法体积，OPT-02）：调用方与实际
  * 文件体积比对即可识别「头部完好但数据区截断」的下载中断文件，零额外 IO。
  * @param {string} absPath .safetensors 文件绝对路径
- * @returns {Promise<object|null>} 解析信息；文件异常/头部不可信/无有效内容返回 null
+ * @returns {Promise<(SafetensorsInfo & {tensorStats?: TensorStats|null, expectedMinBytes?: number})|null>}
+ *   解析信息；文件异常/头部不可信/无有效内容返回 null
  */
 export async function readSafetensorsInfo(absPath) {
+  /** @type {import('node:fs/promises').FileHandle | null} */
   let fh = null
   try {
-    fh = await fs.open(absPath, 'r')
+    const handle = await fs.open(absPath, 'r')
+    fh = handle
     const lenBuf = Buffer.alloc(8)
-    const first = await fh.read(lenBuf, 0, 8, 0)
+    const first = await handle.read(lenBuf, 0, 8, 0)
     if (first.bytesRead < 8) return null
     const headerLen = readHeaderLength(lenBuf)
     if (!headerLen || headerLen > MAX_HEADER_BYTES) return null
@@ -451,7 +461,7 @@ export async function readSafetensorsInfo(absPath) {
     // 避免 64 路并发装饰的瞬时内存尖峰
     return await runWithHeaderGate(headerLen, async () => {
       const headerBuf = Buffer.alloc(headerLen)
-      const second = await fh.read(headerBuf, 0, headerLen, 8)
+      const second = await handle.read(headerBuf, 0, headerLen, 8)
       if (second.bytesRead < headerLen) return null
       // parseHeaderBuffer 的返回类型声明为宽泛 object（info 字段 + tensorStats），
       // 此处按结构访问须收窄类型供 checkJs 校验
@@ -459,9 +469,9 @@ export async function readSafetensorsInfo(absPath) {
         /** @type {SafetensorsInfo & {tensorStats?: TensorStats|null, expectedMinBytes?: number}|null} */ (
           parseHeaderBuffer(headerBuf)
         )
-      if (parsed?.tensorStats?.dataRegionEnd > 0) {
-        parsed.expectedMinBytes =
-          8 + headerLen + parsed.tensorStats.dataRegionEnd
+      const stats = parsed?.tensorStats
+      if (parsed && stats && stats.dataRegionEnd > 0) {
+        parsed.expectedMinBytes = 8 + headerLen + stats.dataRegionEnd
       }
       return parsed
     })
@@ -483,18 +493,20 @@ export async function readSafetensorsInfo(absPath) {
  * @returns {Promise<boolean>} 结构健康返回 true
  */
 export async function checkSafetensorsHealthy(absPath) {
+  /** @type {import('node:fs/promises').FileHandle | null} */
   let fh = null
   try {
-    fh = await fs.open(absPath, 'r')
+    const handle = await fs.open(absPath, 'r')
+    fh = handle
     const lenBuf = Buffer.alloc(8)
-    const first = await fh.read(lenBuf, 0, 8, 0)
+    const first = await handle.read(lenBuf, 0, 8, 0)
     if (first.bytesRead < 8) return false
     const headerLen = readHeaderLength(lenBuf)
     if (!headerLen || headerLen > MAX_HEADER_BYTES) return false
     // B3：与 readSafetensorsInfo 同一闸门（损坏大文件的补检同样持有整段头）
     return await runWithHeaderGate(headerLen, async () => {
       const headerBuf = Buffer.alloc(headerLen)
-      const second = await fh.read(headerBuf, 0, headerLen, 8)
+      const second = await handle.read(headerBuf, 0, headerLen, 8)
       if (second.bytesRead < headerLen) return false
       JSON.parse(headerBuf.toString('utf8'))
       return true

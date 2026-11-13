@@ -6,7 +6,7 @@ import { atomicWriteFile } from './atomic-write'
 import { parseJsonOffThread } from './json-serializer'
 import { runMaintenance } from './maintenance-lock'
 import { sidecarFilesFor } from './scanner'
-import { getCurrentRoot, isInRoot, toRelKey } from './store-paths'
+import { getCurrentRoot, toRelKey } from './store-paths'
 import {
   isPathRealWithin,
   resolveRealPath,
@@ -239,16 +239,19 @@ export async function transferModelsToLibrary({
     }
     for (const id of ids) {
       if (aborted()) break
+      // isInRoot 本质是 toRelKey 的布尔包装：提升 relKey 计算一次，
+      // 供归属判定、目标路径与元数据键共用同一值（判定结果与原先一致）
+      const relKey = toRelKey(id)
       if (
         typeof id !== 'string' ||
-        !isInRoot(id) ||
+        !relKey ||
         !(await isPathRealWithin(id, sourceReal))
       ) {
         failed.push({ id: String(id), error: '模型不在当前库内' })
         continue
       }
       const meta = getModelMeta(id)
-      const targetPath = path.join(targetRoot, toRelKey(id))
+      const targetPath = path.join(targetRoot, relKey)
       let plannedSize
       try {
         const stat = await fs.stat(id)
@@ -269,7 +272,7 @@ export async function transferModelsToLibrary({
         id,
         meta,
         targetPath,
-        relKey: toRelKey(id),
+        relKey,
         size: plannedSize,
       })
     }
@@ -354,7 +357,11 @@ export async function transferModelsToLibrary({
           } catch {
             continue // sidecar 不存在，跳过
           }
-          const dest = path.join(targetRoot, toRelKey(sidecar))
+          // sidecar 由库内 id 派生（同目录换扩展名），toRelKey 必为非空
+          const dest = path.join(
+            targetRoot,
+            /** @type {string} */ (toRelKey(sidecar)),
+          )
           try {
             if (transferMode === 'move') {
               await moveFile(sidecar, dest)

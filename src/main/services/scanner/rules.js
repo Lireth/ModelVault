@@ -194,7 +194,7 @@ export function classifyModel(relSegments, fileName) {
  */
 export function classifySubCategory(relSegments) {
   for (let i = relSegments.length - 1; i >= 0; i--) {
-    const tag = folderNameToTag(relSegments[i])
+    const tag = folderNameToTag(/** @type {string} */ (relSegments[i]))
     if (tag) return tag
   }
   return ''

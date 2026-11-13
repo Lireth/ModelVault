@@ -187,7 +187,10 @@ export function applyAccent(
     accent = accentColor
     accent2 = accentColor
   } else {
-    ;({ accent, accent2 } = ACCENT_PRESETS[0][variant])
+    const fallback = /** @type {(typeof ACCENT_PRESETS)[number]} */ (
+      ACCENT_PRESETS[0]
+    )
+    ;({ accent, accent2 } = fallback[variant])
   }
   const root = document.documentElement
   root.style.setProperty('--accent', accent)

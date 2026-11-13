@@ -189,11 +189,16 @@ async function submitParamChunks(items, metas, failedItems) {
  * @returns {Promise<boolean>} 是否至少成功更新一个模型
  */
 export async function batchEditParams(rawPatch) {
-  const { patch, error } = normalizeBatchParamsPatch(rawPatch)
-  if (error) {
-    toast('error', error)
+  const normalized = normalizeBatchParamsPatch(rawPatch)
+  if (normalized.error) {
+    toast('error', normalized.error)
     return false
   }
+  // normalizeBatchParamsPatch 保证 error/patch 二选一：无 error 即必有 patch，
+  // 断言仅收窄类型，不改变行为
+  const patch = /** @type {Record<string, number | string>} */ (
+    normalized.patch
+  )
   const ids = [...state.multiSelect.ids]
   if (ids.length === 0 || state.multiSelect.busy) return false
   if (state.multiSelect.cancelRequested) return false
@@ -211,6 +216,7 @@ export async function batchEditParams(rawPatch) {
   state.multiSelect.busy = true
   state.multiSelect.progress = ''
   clearBatchFailures()
+  /** @type {(() => void) | null} */
   let releaseBulkMeta = null
   try {
     // 复用批量元数据写入锁：等待选中模型在途标记/标签操作落定，锁生效

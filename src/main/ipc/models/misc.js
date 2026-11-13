@@ -101,7 +101,12 @@ export function registerMiscHandlers() {
         // 串行链让最后一路删除等待前面全部写盘）。删除的真实落盘以回收站
         // +元数据移除为准，索引仅展示缓存：退出经 flushIndexWrites 收尾，
         // 防抖窗口内的切库回放由切库流程既有的后台磁盘校验兜底
-        queueLibraryIndexUpdate(getCurrentRoot(), { removeIds: [id] })
+        // 上方 checkModelIdInRootReal 已保证根目录存在（空根即 error 返回），
+        // 此处取用仅为类型收窄，null 分支不可达
+        const indexRoot = getCurrentRoot()
+        if (indexRoot) {
+          queueLibraryIndexUpdate(indexRoot, { removeIds: [id] })
+        }
         logger.info(`模型已移入回收站: ${id}`)
         return { ok: true }
       })
@@ -161,7 +166,12 @@ export function registerMiscHandlers() {
         },
         { label: '移入回收站', click: () => send('deleteModel') },
       )
-      Menu.buildFromTemplate(items).popup({ window: win })
+      // win 为 null 仅当发起方 webContents 已销毁（invoke 处理中窗口关闭的
+      // 极窄竞态）；Electron 运行时对 null/缺省 window 同按「无父窗」弹出，
+      // 类型声明不收 null，cast 保持原运行时行为不变
+      Menu.buildFromTemplate(items).popup({
+        window: /** @type {import('electron').BrowserWindow} */ (win),
+      })
       return { ok: true }
     },
     { errorPrefix: '打开菜单失败' },
@@ -228,11 +238,15 @@ export function registerMiscHandlers() {
       }
       const win = BrowserWindow.fromWebContents(event.sender)
       const date = new Date().toISOString().slice(0, 10)
-      const result = await dialog.showSaveDialog(win, {
-        title: '导出模型清单',
-        defaultPath: `modelvault-models-${date}.${spec.ext}`,
-        filters: [{ name: spec.label, extensions: [spec.ext] }],
-      })
+      // 同 popupMenu：win 为 null 时 Electron 按无父窗对话框处理，cast 仅收窄类型
+      const result = await dialog.showSaveDialog(
+        /** @type {import('electron').BrowserWindow} */ (win),
+        {
+          title: '导出模型清单',
+          defaultPath: `modelvault-models-${date}.${spec.ext}`,
+          filters: [{ name: spec.label, extensions: [spec.ext] }],
+        },
+      )
       if (result.canceled || !result.filePath) return { canceled: true }
       try {
         await atomicWriteFile(result.filePath, content)

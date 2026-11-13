@@ -63,7 +63,7 @@ export function buildCoverResponse(absCover, meta) {
  * 若尚无默认封面，则将新图设为默认（首页第一张默认显示）。
  * @param {string} id 模型绝对路径
  * @param {string} absCover 封面绝对路径
- * @returns {{error?: string, coverRel?: string, meta?: Record<string, any>}}
+ * @returns {{error: string} | {coverRel: string, meta: Record<string, any>}}
  *   失败 {error}；成功 {coverRel, meta}
  */
 export function appendCoverMeta(id, absCover) {
@@ -120,13 +120,17 @@ export function registerCoverHandlers() {
     async (event, { id } = {}) => {
       const invalid = checkModelId(id)
       if (invalid) return { error: invalid }
-      const win = BrowserWindow.fromWebContents(event.sender)
+      // win 可为 null（fromWebContents 无对应窗口）：选择对话框运行期视为
+      // 无父窗口弹出，类型声明仅接受 BrowserWindow，此处按运行期契约断言
+      const win = /** @type {import('electron').BrowserWindow} */ (
+        BrowserWindow.fromWebContents(event.sender)
+      )
       const result = await pickAndSaveCover(win)
       if (result.canceled) return { canceled: true }
       if (result.error) return { error: result.error }
 
       const applied = appendCoverMeta(id, result.cover)
-      if (applied.error) return applied
+      if ('error' in applied) return applied
       logger.info(`模型封面已添加: ${id}`)
       await refreshCoverThumbnail(
         win,
@@ -148,7 +152,7 @@ export function registerCoverHandlers() {
       if (result.error) return result
 
       const applied = appendCoverMeta(id, result.cover)
-      if (applied.error) return applied
+      if ('error' in applied) return applied
       logger.info(`剪贴板封面已添加: ${id}`)
       await refreshCoverThumbnail(
         BrowserWindow.fromWebContents(event.sender),
@@ -288,7 +292,7 @@ export function registerCoverHandlers() {
       const result = await importCoverFromPath(source)
       if (result.error) return result
       const applied = appendCoverMeta(id, result.cover)
-      if (applied.error) return applied
+      if ('error' in applied) return applied
       logger.info(`拖拽封面已添加: ${id}`)
       await refreshCoverThumbnail(
         BrowserWindow.fromWebContents(event.sender),

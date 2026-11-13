@@ -42,19 +42,27 @@ const RENDERER_RECOVER_TOTAL_MAX = 20
  */
 function createRendererCrashRecovery(win, hooks = {}, timing = {}) {
   const maxAutoReloads =
-    Number.isFinite(timing.maxAutoReloads) && timing.maxAutoReloads > 0
+    typeof timing.maxAutoReloads === 'number' &&
+    Number.isFinite(timing.maxAutoReloads) &&
+    timing.maxAutoReloads > 0
       ? timing.maxAutoReloads
       : RENDERER_RELOAD_MAX
   const reloadDelayMs =
-    Number.isFinite(timing.reloadDelayMs) && timing.reloadDelayMs >= 0
+    typeof timing.reloadDelayMs === 'number' &&
+    Number.isFinite(timing.reloadDelayMs) &&
+    timing.reloadDelayMs >= 0
       ? timing.reloadDelayMs
       : RENDERER_RELOAD_DELAY_MS
   const survivalResetMs =
-    Number.isFinite(timing.survivalResetMs) && timing.survivalResetMs >= 0
+    typeof timing.survivalResetMs === 'number' &&
+    Number.isFinite(timing.survivalResetMs) &&
+    timing.survivalResetMs >= 0
       ? timing.survivalResetMs
       : RENDERER_SURVIVAL_RESET_MS
   const recoverTotalMax =
-    Number.isFinite(timing.recoverTotalMax) && timing.recoverTotalMax >= 0
+    typeof timing.recoverTotalMax === 'number' &&
+    Number.isFinite(timing.recoverTotalMax) &&
+    timing.recoverTotalMax >= 0
       ? timing.recoverTotalMax
       : RENDERER_RECOVER_TOTAL_MAX
 
@@ -62,7 +70,9 @@ function createRendererCrashRecovery(win, hooks = {}, timing = {}) {
   let consecutive = 0
   /** 会话累计自动恢复次数（防慢性循环的总闸） */
   let totalRecovered = 0
+  /** @type {ReturnType<typeof setTimeout>|null} */
   let reloadTimer = null
+  /** @type {ReturnType<typeof setTimeout>|null} */
   let survivalTimer = null
 
   const isDestroyed = () =>
@@ -142,9 +152,11 @@ const MAX_DIMENSION = 20000
 /** 窗口坐标绝对值上限（px）：多显示器拼接下合理坐标远小于此量级 */
 const MAX_COORDINATE = 100000
 
+/** @type {import('electron').BrowserWindow|null} */
 let mainWindow = null
 
 /** close 时发起的窗口状态保存 promise（退出路径等待其完成，防止原子写被中断） */
+/** @type {Promise<void>|null} */
 let pendingStateSave = null
 
 /**
@@ -216,6 +228,8 @@ async function saveWindowState(win) {
  * 创建应用主窗口，并根据运行环境加载渲染页面。
  * - 开发环境：加载 electron-vite 开发服务器（支持 HMR 热重载）
  * - 生产环境：加载打包后的本地文件
+ * @param {Awaited<ReturnType<typeof loadWindowState>>|null|undefined} [windowStateOverride]
+ *   调用方预读的窗口状态（缺省时自行读取；null 表示无已保存状态）
  */
 export async function createMainWindow(windowStateOverride = undefined) {
   // 窗口底色与标题栏叠加层颜色跟随已保存的主题设置
@@ -311,6 +325,9 @@ export async function createMainWindow(windowStateOverride = undefined) {
   // clean-exit 属窗口关闭链路不恢复（详见 createRendererCrashRecovery）
   const rendererRecovery = createRendererCrashRecovery(mainWindow, {
     showGiveUpDialog: (count, reload) => {
+      // 主窗口已关闭（mainWindow 置 null）时不再弹框：与旧实现中向
+      // showMessageBox 传 null 立即抛错相比，跳过同样不产生任何用户交互
+      if (!mainWindow) return
       dialog
         .showMessageBox(mainWindow, {
           type: 'error',

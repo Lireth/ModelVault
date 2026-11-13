@@ -13,6 +13,7 @@ import { reportBatchFailures, clearBatchFailures } from './batch-failures'
  */
 
 /** 在途一键整理的取消令牌（OPT-18：models:cancelOp 中止主进程移动循环） */
+/** @type {string | null} */
 let organizeOpId = null
 
 /**
@@ -265,7 +266,9 @@ export async function batchDeleteModels() {
     })
     if (deletedIds.size > 0) {
       // 单趟移除：整体替换数组（须经 replaceModels 保持数组代理），selectedId 与多选选区同步按 Set 清理
-      replaceModels(state.models.filter((m) => !deletedIds.has(m.id)))
+      /** @type {Array<Record<string, any>>} */
+      const models = state.models
+      replaceModels(models.filter((m) => !deletedIds.has(m.id)))
       if (deletedIds.has(state.selectedId)) clearSelectedModel()
       state.multiSelect.ids = state.multiSelect.ids.filter(
         (id) => !deletedIds.has(id),

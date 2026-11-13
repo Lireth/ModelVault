@@ -68,7 +68,9 @@ export async function collectDirSnapshot(
   const withStats = options.withStats === true
   const concurrency = normalizeConcurrency(options.concurrency)
   const startDepth =
-    Number.isFinite(options.startDepth) && options.startDepth > 0
+    typeof options.startDepth === 'number' &&
+    Number.isFinite(options.startDepth) &&
+    options.startDepth > 0
       ? Math.floor(options.startDepth)
       : 0
 
@@ -159,6 +161,7 @@ export async function collectDirSnapshot(
       }
       while (active < concurrency && queue.length > 0 && !settled) {
         const job = queue.shift()
+        if (!job) break // 队列非空时 shift 必有值，防御性钳制类型
         active += 1
         readOne(job)
           .catch((err) => {

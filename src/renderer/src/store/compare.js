@@ -11,7 +11,7 @@ export const COMPARE_MAX_MODELS = 6
 
 export const compareState = reactive({
   open: false,
-  ids: [],
+  ids: /** @type {string[]} */ ([]),
 })
 
 /**

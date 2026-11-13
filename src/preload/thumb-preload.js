@@ -20,15 +20,18 @@ import { errorMessage } from '../shared/error-text'
  */
 ipcRenderer.on('thumb:render', async (_event, task) => {
   const { id, url, buf, thumbWidth, minSourceWidth, quality } = task || {}
+  /** @type {ImageBitmap | null} */
   let bitmap = null
   try {
     // OP-03：优先按 URL 读取源图（读写都发生在渲染进程侧），避免主进程
     // 读入整图后经 IPC 结构化克隆再复制一份；buf 路径保留兼容直传字节。
+    /** @type {HTMLImageElement | ImageBitmap | null} */
     let source = null
     let width = 0
     let height = 0
     if (url) {
-      source = await new Promise((resolve, reject) => {
+      /** @type {Promise<HTMLImageElement>} */
+      const loaded = new Promise((resolve, reject) => {
         const img = new Image()
         img.onload = () => resolve(img)
         img.onerror = () => reject(new Error('读取源图失败'))
@@ -38,6 +41,7 @@ ipcRenderer.on('thumb:render', async (_event, task) => {
         img.crossOrigin = 'anonymous'
         img.src = url
       })
+      source = await loaded
       width = source.naturalWidth
       height = source.naturalHeight
     } else {

@@ -203,6 +203,8 @@ export async function statSidecarFacts(id, dirNames = null) {
  * 导入结果经 setModelMeta 落盘并标记来源，不覆盖任何用户已有标注。
  * @param {Record<string, any>} model 模型对象
  * @param {Record<string, any>} meta 当前元数据
+ * @param {{files: string[], stats: Array<import('node:fs').Stats|null>}|null} [snapshot]
+ *   statSidecarSet 快照（扫描/装饰路径传入以复用批量 stat 结果）
  * @returns {Promise<Record<string, any>>} 导入后的最新元数据（未导入时原样返回）
  */
 export async function importSidecarMeta(model, meta, snapshot = null) {

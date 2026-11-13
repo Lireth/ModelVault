@@ -88,7 +88,7 @@ const CIVITAI_TYPE_TO_TAG = new Map([
 /**
  * Civitai 模型类型 → 本地分类标签 key（纯函数，便于单测）：
  * trim + 忽略大小写查表；未命中返回空串。
- * @param {string} type Civitai 模型类型（如 'Character'）
+ * @param {string} [type] Civitai 模型类型（如 'Character'；缺省/非字符串返回空串）
  * @returns {string} 分类标签 key 或 ''
  */
 export function civitaiTypeToTag(type) {

@@ -220,6 +220,7 @@ export async function batchEditTags(options = {}) {
   state.multiSelect.busy = true
   state.multiSelect.progress = ''
   clearBatchFailures()
+  /** @type {(() => void) | null} */
   let releaseBulkTags = null
   try {
     // B2/C1：等待全部选中模型的在途操作落定并持有批量锁；锁生效期间新发起

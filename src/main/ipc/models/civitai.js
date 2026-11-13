@@ -116,7 +116,9 @@ export function registerCivitaiHandlers() {
       // URL 写盘前重读最新元数据，避免覆盖哈希计算期间的用户并发保存。
       // baseModel 一并回填（F-2 筛选数据源）：已有值不覆盖（宁留旧不覆盖）
       const latest = getModelMeta(id) || meta
+      /** @type {Record<string, any>|null} */
       let patch = null
+      /** @type {string[]} */
       let applied = []
       if (fillMissing === true) {
         const complete = civitaiCompletePatch(latest, res.info)
@@ -262,6 +264,7 @@ export function registerCivitaiHandlers() {
       const win = BrowserWindow.fromWebContents(event.sender)
       const failed = []
       let added = 0
+      /** @type {Record<string, any>|null} */
       let lastMeta = null
       for (const item of images) {
         const url = item && typeof item.url === 'string' ? item.url : ''
@@ -276,7 +279,7 @@ export function registerCivitaiHandlers() {
           continue
         }
         const applied = appendCoverMeta(id, saved.cover)
-        if (applied.error) {
+        if ('error' in applied) {
           failed.push({ url, error: applied.error })
           continue
         }
@@ -289,11 +292,13 @@ export function registerCivitaiHandlers() {
       logger.info(
         `Civitai 示例图导入完成: ${id}（成功 ${added} / 失败 ${failed.length}）`,
       )
-      await refreshCoverThumbnail(win, id, resolveCoverSafe(lastMeta.cover))
+      // added > 0  ⟹ 循环至少成功一次，lastMeta 必已赋值
+      const finalMeta = /** @type {Record<string, any>} */ (lastMeta)
+      await refreshCoverThumbnail(win, id, resolveCoverSafe(finalMeta.cover))
       return {
         added,
         failed,
-        ...buildCoverResponse(resolveCoverSafe(lastMeta.cover), lastMeta),
+        ...buildCoverResponse(resolveCoverSafe(finalMeta.cover), finalMeta),
       }
     },
     { errorPrefix: '示例图导入失败' },

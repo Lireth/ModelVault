@@ -261,7 +261,7 @@ export async function batchCivitaiImages() {
       const m = byId.get(id)
       state.multiSelect.progress = `获取示例图 ${i + 1}/${targets.length}：${m?.alias || m?.name || ''}`
       // 识别（主进程顺带保存 civitaiUrl），失败计入 failed
-      let res = null
+      let res
       try {
         res = await window.api.models.civitaiIdentify(id)
       } catch (err) {
@@ -288,7 +288,7 @@ export async function batchCivitaiImages() {
         notFound += 1
         continue
       }
-      let imp = null
+      let imp
       try {
         imp = await window.api.models.civitaiImportImages(id, picked)
       } catch (err) {
@@ -305,8 +305,10 @@ export async function batchCivitaiImages() {
       // O2：批量循环内走 id→下标索引，避免每个模型一次全表 findIndex（O(n×m)）
       const idx = modelIndexOf(id)
       if (idx !== undefined) {
-        state.models[idx] = {
-          ...state.models[idx],
+        /** @type {Array<Record<string, any>>} */
+        const models = state.models
+        models[idx] = {
+          ...models[idx],
           cover: imp.cover,
           coverUrl: imp.coverUrl,
           covers: imp.covers || [],

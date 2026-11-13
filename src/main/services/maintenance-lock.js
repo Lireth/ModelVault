@@ -33,7 +33,17 @@ const KIND_LABELS = {
   'file-op': '执行文件操作',
 }
 
+/**
+ * 维护锁令牌（tryAcquireMaintenance 返回值）
+ * @typedef {object} MaintenanceToken
+ * @property {number} id
+ * @property {string} kind
+ * @property {string|null} root
+ * @property {number} startedAt
+ */
+
 /** 当前持锁的大维护操作（null 表示无） */
+/** @type {MaintenanceToken|null} */
 let active = null
 /** 在途并发文件操作（id → 令牌快照；file-op 彼此兼容，与大维护操作互斥） */
 const activeFileOps = new Map()

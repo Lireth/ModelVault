@@ -10,7 +10,10 @@ import { toast } from './toast'
  */
 
 /** 启动自动检查的最新可用更新（null = 暂无），载荷见 preload onUpdateAvailable */
-export const updateAvailable = ref(null)
+export const updateAvailable = ref(
+  /** @type {{ hasUpdate?: boolean, current?: string, latest?: string, releaseUrl?: string } | null} */
+  (null),
+)
 
 /**
  * 应用启动自动检查结果（app:updateAvailable 事件回调）：

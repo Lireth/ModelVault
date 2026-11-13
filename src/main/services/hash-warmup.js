@@ -205,6 +205,7 @@ const knownInfo = new Map()
 const sizeIndex = new Map()
 
 /** 进度事件推送监听（由 IPC 层经 setWarmupProgressListener 注册并广播渲染进程） */
+/** @type {((progress: WarmupProgress) => void)|null} */
 let progressListener = null
 
 /**
@@ -287,6 +288,7 @@ const inflight = new Map()
  */
 const consumedIds = new Set()
 /** 延迟启动定时器（全局唯一，重复调度时保留更早的计划） */
+/** @type {ReturnType<typeof setTimeout>|null} */
 let drainTimer = null
 /** 定时器计划触发时间（ms 时间戳），用于比较保留更早计划 */
 let drainScheduledAt = 0

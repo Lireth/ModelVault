@@ -124,10 +124,11 @@ export async function startCivitaiQueue() {
       if (res.meta) {
         const cur = modelIndexOf(id)
         if (cur !== undefined) {
+          const prev = /** @type {Record<string, any>} */ (state.models[cur])
           state.models[cur] = {
-            ...state.models[cur],
+            ...prev,
             civitaiUrl: res.meta.civitaiUrl || '',
-            baseModel: state.models[cur].baseModel || res.meta.baseModel || '',
+            baseModel: prev.baseModel || res.meta.baseModel || '',
             triggerWords: res.meta.triggerWords || '',
             note: res.meta.note || '',
           }

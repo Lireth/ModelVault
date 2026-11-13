@@ -59,6 +59,7 @@ import { errorMessage } from '../../../shared/error-text'
 const PROGRESS_INTERVAL = 120
 
 /** 当前扫描的取消控制器（null 表示无进行中的扫描） */
+/** @type {AbortController|null} */
 let scanAbort = null
 
 /**
@@ -366,7 +367,8 @@ export function registerScanHandlers() {
             logger.warn('局部扫描子树过多，已要求渲染层改为完整扫描')
             return { fullScanRequired: true }
           }
-          const subDirs = normalized.subDirs
+          // error 为空即 subDirs 必已产出（normalizePartialScanDirs 契约）
+          const subDirs = /** @type {string[]} */ (normalized.subDirs)
           if (normalized.collapsed) {
             logger.info(
               `局部扫描子树过多，已收敛为 ${subDirs.length} 个一级目录`,

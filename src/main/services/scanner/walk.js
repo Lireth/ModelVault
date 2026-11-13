@@ -46,7 +46,7 @@ const PROGRESS_EMIT_INTERVAL_MS = 80
  * 顺序提交，输出的内容与顺序运行间确定（遍历次序为 BFS）。
  *
  * @param {string} root 模型根目录绝对路径
- * @param {(progress: {dirs: number, found: number, current: string}) => void} [onProgress] 进度回调
+ * @param {((progress: {dirs: number, found: number, current: string}) => void)|null} [onProgress] 进度回调（null/缺省均不推送）
  * @param {{excludeDirs?: string[]|Set<string>, extensions?: string[]|Set<string>,
  *   signal?: AbortSignal, subDirs?: string[]}} [options]
  *   额外排除的目录名（不区分大小写）、扫描的文件扩展名、取消信号；
@@ -122,7 +122,7 @@ export async function scanModels(root, onProgress, options = {}) {
   const isInsideRoot = (abs) =>
     relativeWithin(path.resolve(abs), rootResolved) !== null
   const initialDirs = scoped
-    ? options.subDirs
+    ? /** @type {string[]} */ (options.subDirs)
         .map((item) => {
           const normalized = typeof item === 'string' ? item.trim() : ''
           if (normalized === '')
@@ -284,6 +284,7 @@ export async function scanModels(root, onProgress, options = {}) {
     const fileEntries = []
     const visibleNames = []
     // O-3b：被可见性策略过滤的条目名（惰性分配，绝大多数目录恒为 null）
+    /** @type {string[]|null} */
     let skippedNames = null
     for (const entry of entries) {
       const name = entry.name

@@ -17,6 +17,7 @@ import { state } from './state'
  * 等原位变异（违反该约定时 modelIndexById 的下标错位更严重，非本缓存新增
  * 风险）；同引用下条目只会被替换、不会被移除，故增量同步不产生陈旧键。
  */
+/** @type {Array<Record<string, any>> | null} */
 let cachedModelsRef = null
 let cachedById = new Map()
 
@@ -36,11 +37,12 @@ export const modelById = computed(() => {
     cachedModelsRef = models
     cachedById = new Map()
     for (let i = 0; i < models.length; i++) {
-      cachedById.set(models[i].id, models[i])
+      const m = /** @type {Record<string, any>} */ (models[i])
+      cachedById.set(m.id, m)
     }
   } else {
     for (let i = 0; i < models.length; i++) {
-      const m = models[i]
+      const m = /** @type {Record<string, any>} */ (models[i])
       if (cachedById.get(m.id) !== m) cachedById.set(m.id, m)
     }
   }

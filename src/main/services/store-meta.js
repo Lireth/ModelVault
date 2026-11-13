@@ -170,6 +170,9 @@ export function getReferencedCovers() {
  * 属于当前根目录的记录，并复制其封面文件到 <根目录>/.modelvault/covers/。
  */
 async function migrateLegacyData() {
+  // 调用点（loadData 的 ENOENT 分支）已先置入空数据；防御性早退与
+  // getReferencedCovers 等入口同一「无内存数据即跳过」口径
+  if (!metaState.data) return
   const oldFile = path.join(app.getPath('userData'), LEGACY_STORE_FILE)
   try {
     const text = await fs.readFile(oldFile, 'utf-8')
@@ -236,9 +239,10 @@ export function getModelMeta(modelId) {
 /** 以绝对路径返回模型元数据表（供主进程内部消费，如库体检） */
 export function getMetaMapByAbsPath() {
   const result = {}
-  if (!metaState.data || !getCurrentRoot()) return result
+  const root = getCurrentRoot()
+  if (!metaState.data || !root) return result
   for (const [relKey, meta] of Object.entries(metaState.data.models)) {
-    result[path.join(getCurrentRoot(), relKey)] = meta
+    result[path.join(root, relKey)] = meta
   }
   return result
 }
@@ -481,7 +485,7 @@ export function relinkScannedMeta(scanned, options = {}) {
   /** 键的相对目录是否落在受影响集合内（OP-09 共享实现；null = 全量语义）；
       B5：读取失败的子树排除在外——扫描不到不等于已删除 */
   const keyInScope = (key) =>
-    isRelKeyInScope(key, affectedDirs) &&
+    (!affectedDirs || isRelKeyInScope(key, affectedDirs)) &&
     !(excludeDirs && isRelKeyInScope(key, excludeDirs))
 
   const currentKeys = new Set()

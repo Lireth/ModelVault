@@ -169,9 +169,11 @@ export async function writeLibraryIndex(root, payload) {
   // 全量扫描结果是完整快照，优先于此前排队的局部更新；清掉同根待合并项，
   // 避免旧局部 affectedDirs 在完整索引写入后又删除新记录
   clearQueuedIndexUpdates(root)
-  const durationMs = Number.isFinite(payload.durationMs)
-    ? payload.durationMs
-    : 0
+  const durationMs =
+    typeof payload.durationMs === 'number' &&
+    Number.isFinite(payload.durationMs)
+      ? payload.durationMs
+      : 0
   return serializeIndexTask(() => writeIndexBody(root, models, durationMs))
 }
 

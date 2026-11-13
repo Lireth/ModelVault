@@ -224,7 +224,8 @@ function validateObject(value, rule, label, depth) {
     }
     return ''
   }
-  for (const [name, child] of Object.entries(rule.fields)) {
+  const fields = rule.fields
+  for (const [name, child] of Object.entries(fields)) {
     // 顶层（label 为空串）错误信息用裸字段名；嵌套字段保留完整路径
     const err = validateValue(
       value[name],
@@ -235,7 +236,7 @@ function validateObject(value, rule, label, depth) {
     if (err) return err
   }
   if (!rule.loose) {
-    const unknown = keys.filter((k) => !(k in rule.fields))
+    const unknown = keys.filter((k) => !(k in fields))
     if (unknown.length > 0) {
       return `${label || '参数'} 包含未知字段: ${unknown.slice(0, 5).join(', ')}`
     }
@@ -243,7 +244,7 @@ function validateObject(value, rule, label, depth) {
   }
   // loose 对象的未知键：handler 不消费，但规模/深度仍须兜底
   for (const key of keys) {
-    if (key in rule.fields) continue
+    if (key in fields) continue
     const err = validateOpaque(
       value[key],
       label ? `${label}.${key}` : key,

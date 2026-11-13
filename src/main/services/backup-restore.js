@@ -393,7 +393,10 @@ export async function importBackup(win) {
   }
   const parsedManifest = parseBackupManifest(manifestBytes)
   if (!parsedManifest.ok) return { error: parsedManifest.error }
-  const manifest = parsedManifest.manifest
+  // ok=true 时 parseBackupManifest 恒携带 manifest（backup-format 内部不变式）
+  const manifest = /** @type {import('./backup-format').BackupManifest} */ (
+    parsedManifest.manifest
+  )
 
   // FN-08：选择性/元数据备份走合并恢复（不替换目录、不恢复设置）。
   // 仅支持当前激活库——合并基于当前根的相对路径关联。
@@ -524,6 +527,7 @@ export async function importBackup(win) {
   } catch (err) {
     return { error: `备份文件解压失败: ${errorMessage(err)}` }
   }
+  /** @type {ReturnType<typeof normalizeLibrarySettings>|null} */
   let settingsPayload = null
   if (manifest.settings && unpacked.files['settings.json']) {
     try {

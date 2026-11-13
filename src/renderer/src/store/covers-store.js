@@ -27,8 +27,9 @@ export async function saveModelData(id, payload, opts = {}) {
   }
   const idx = modelIndexOf(id)
   if (idx !== undefined && res.meta) {
+    const prev = /** @type {Record<string, any>} */ (state.models[idx])
     state.models[idx] = {
-      ...state.models[idx],
+      ...prev,
       params: res.meta.params,
       alias: res.meta.alias || '',
       note: res.meta.note,
@@ -44,8 +45,9 @@ export async function saveModelData(id, payload, opts = {}) {
 function applyCoverResult(id, res) {
   const idx = modelIndexOf(id)
   if (idx !== undefined) {
+    const prev = /** @type {Record<string, any>} */ (state.models[idx])
     state.models[idx] = {
-      ...state.models[idx],
+      ...prev,
       cover: res.cover,
       coverUrl: res.coverUrl,
       covers: res.covers || [],
@@ -152,7 +154,7 @@ export async function clearAllCovers() {
   // 才会触发依赖索引的派生状态；就地改字段在浅响应下不会更新任何界面。
   // 无封面字段的模型保持原引用，避免无谓的列表失效与重算。
   for (let i = 0; i < state.models.length; i++) {
-    const m = state.models[i]
+    const m = /** @type {Record<string, any>} */ (state.models[i])
     const hasCoverState =
       Boolean(m.cover || m.coverUrl || m.hasManualCover) ||
       (Array.isArray(m.covers) && m.covers.length > 0)

@@ -152,17 +152,24 @@ function pinyinHaystack(m) {
 export function prebuildPinyinSearchIndex(models, options = {}) {
   if (!pinyinReady.value) return { next: 0, built: 0, done: true }
   const list = Array.isArray(models) ? models : []
+  // Number.isInteger/isFinite 不是类型守卫：先取局部 const 并以 typeof 收窄
+  // （对非数值入参二者本就返回 false，判定结果与语义完全一致）
+  const rawStart = options.start
   const start =
-    Number.isInteger(options.start) && options.start > 0
-      ? Math.min(options.start, list.length)
+    typeof rawStart === 'number' && Number.isInteger(rawStart) && rawStart > 0
+      ? Math.min(rawStart, list.length)
       : 0
+  const rawMax = options.max
   const max =
-    Number.isFinite(options.max) && options.max > 0
-      ? Math.max(1, Math.floor(options.max))
+    typeof rawMax === 'number' && Number.isFinite(rawMax) && rawMax > 0
+      ? Math.max(1, Math.floor(rawMax))
       : PINYIN_PREBUILD_BATCH_MAX
+  const rawBudgetMs = options.budgetMs
   const budgetMs =
-    Number.isFinite(options.budgetMs) && options.budgetMs >= 0
-      ? options.budgetMs
+    typeof rawBudgetMs === 'number' &&
+    Number.isFinite(rawBudgetMs) &&
+    rawBudgetMs >= 0
+      ? rawBudgetMs
       : PINYIN_PREBUILD_BUDGET_MS
   const startedAt = Date.now()
   let cursor = start
@@ -184,8 +191,10 @@ export function prebuildPinyinSearchIndex(models, options = {}) {
  * - list/cursor：当前预构建列表与下一次起点；
  * - idle：已排队的 requestIdleCallback 句柄（null 表示未排队）。
  */
+/** @type {number|null} */
 let pinyinPrebuildIdle = null
 let pinyinPrebuildGeneration = 0
+/** @type {Array<Record<string, any>>|null} */
 let pinyinPrebuildList = null
 let pinyinPrebuildCursor = 0
 
@@ -324,8 +333,10 @@ export function isModelVisible(m) {
 
 /** 当前可见模型列表（隐藏 NSFW 时过滤；关闭时直接复用原数组，零额外分配） */
 export const visibleModels = computed(() => {
-  if (state.settings?.hideNsfwModels !== true) return state.models
-  return state.models.filter((m) => !effectiveNsfw(m))
+  /** @type {Array<Record<string, any>>} */
+  const models = state.models
+  if (state.settings?.hideNsfwModels !== true) return models
+  return models.filter((m) => !effectiveNsfw(m))
 })
 
 /**
@@ -511,8 +522,11 @@ function comparatorFor(sortBy) {
         zhCollator.compare(a.name, b.name)
     case 'type':
       // 按分类排序：遵循固定分类顺序（Checkpoint → TextEncoders → VAE → LoRA → 其他），同分类内按名称
+      // 未知分类不在 TYPE_ORDER 中：undefined 参与算术本就产生 NaN（该路
+      // 比较退化为 0）；?? NaN 仅显式化既有语义，不改变行为
       return (a, b) =>
-        TYPE_ORDER[a.type] - TYPE_ORDER[b.type] ||
+        (TYPE_ORDER[a.type] ?? Number.NaN) -
+          (TYPE_ORDER[b.type] ?? Number.NaN) ||
         zhCollator.compare(a.name, b.name)
     default:
       return (a, b) => zhCollator.compare(a.name, b.name)
@@ -574,13 +588,22 @@ function buildSortOrder(src, sortBy, sortAsc, showDuplicatesOnly) {
   const keys = new Array(src.length)
   const hashes = showDuplicatesOnly ? new Array(src.length) : null
   for (let i = 0; i < src.length; i++) {
+    const m = src[i]
     order[i] = i
-    ids[i] = src[i].id
-    keys[i] = sortKeyOf(src[i], sortBy)
-    if (hashes) hashes[i] = effectiveModelHash(src[i])
+    // src 为过滤层产出的密集数组（无空洞），!m 分支实际不可达，仅收窄类型
+    if (!m) continue
+    ids[i] = m.id
+    keys[i] = sortKeyOf(m, sortBy)
+    if (hashes) hashes[i] = effectiveModelHash(m)
   }
   const compare = comparatorFor(sortBy)
-  order.sort((ia, ib) => compare(src[ia], src[ib]))
+  // order 为 0..n-1 的排列，下标必然有效；!a/!b 分支不可达，仅收窄类型
+  order.sort((ia, ib) => {
+    const a = src[ia]
+    const b = src[ib]
+    if (!a || !b) return 0
+    return compare(a, b)
+  })
   // 排序方向（U2）：收藏优先/按评分为固定语义排序（收藏/高分恒在前），
   // 翻转会反转语义，故不响应（O1）
   if (!sortAsc && sortDirectional(sortBy)) order.reverse()
@@ -633,13 +656,16 @@ function canReuseSort(src, sortBy, sortAsc, showDuplicatesOnly) {
   }
   for (let i = 0; i < src.length; i++) {
     const cur = src[i]
+    // src 为密集数组且长度已与缓存比对一致，!cur 分支不可达，仅收窄类型
+    if (!cur) return false
     if (cached.ids[i] !== cur.id) return false
     // 与「排序当时的键快照」比较：favorite/rating/哈希经可变覆盖映射读取，
     // 对象引用不变也可能变化，不能在比较时重新读取两侧（会互相抵消）
     if (cached.keys[i] !== sortKeyOf(cur, sortBy)) return false
     if (showDuplicatesOnly) {
       const hash = effectiveModelHash(cur)
-      if (cached.hashes[i] !== hash) return false
+      // cached.duplicates === showDuplicatesOnly 已在上方校验：hashes 必非 null
+      if (cached.hashes?.[i] !== hash) return false
     }
   }
   return true
@@ -652,10 +678,13 @@ export const filteredModels = computed(() => {
   const sortAsc = Boolean(state.sortAsc)
   const showDuplicatesOnly = Boolean(state.showDuplicatesOnly)
   let order
-  if (canReuseSort(src, sortBy, sortAsc, showDuplicatesOnly)) {
+  // canReuseSort 内部要求缓存非 null 才可能返回 true：先取局部 const 供
+  // TS 跟踪收窄（同一同步帧内 sortCache 不会被改写，判定结果不变）
+  const cached = sortCache
+  if (cached && canReuseSort(src, sortBy, sortAsc, showDuplicatesOnly)) {
     // PERF-SORT：排序结果未变——按下标物化当前数组（元素可能已被整体替换），
     // 跳过 O(n log n) 的中文 Collator 比较
-    order = sortCache.order
+    order = cached.order
   } else {
     const built = buildSortOrder(src, sortBy, sortAsc, showDuplicatesOnly)
     order = built.order
@@ -679,8 +708,10 @@ export const filteredModels = computed(() => {
  * 全库自由标签使用计数（F4 标签管理面板数据源）：标签 -> 使用模型数。
  */
 export const tagCounts = computed(() => {
+  /** @type {Array<Record<string, any>>} */
+  const models = state.models
   const counts = new Map()
-  for (const m of state.models) {
+  for (const m of models) {
     for (const t of m.tags || []) {
       counts.set(t, (counts.get(t) || 0) + 1)
     }

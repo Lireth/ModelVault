@@ -81,7 +81,8 @@ export function modelCoverUrl(model) {
  */
 export function coverImageUrl(cover) {
   if (!cover) return ''
-  return cover.url || toImageUrl(cover.path)
+  // 两种条目形状必带其一：url（完整响应）或 path（列表瘦身派生），toImageUrl 空值兜底
+  return cover.url || toImageUrl(/** @type {string} */ (cover.path))
 }
 
 /**

@@ -262,7 +262,10 @@ function broadcastUpdateAvailable(payload) {
   }
 }
 
-/** 已安排的启动检查定时器（幂等：重复调用覆盖未触发的前次） */
+/**
+ * 已安排的启动检查定时器（幂等：重复调用覆盖未触发的前次）
+ * @type {ReturnType<typeof setTimeout>|null}
+ */
 let startupCheckTimer = null
 
 /**

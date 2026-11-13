@@ -1,0 +1,382 @@
+﻿node.exe : npm warn Unknown project config "electron_mirror". This will stop working in the next major version of npm. 
+See `npm help npmrc` for supported config options.
+所在位置 行:1 字符: 1
++ & "D:\Environment\nodejs/node.exe" "C:\Users\JasonShane\AppData\Roami ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+npm warn Unknown project config "electron_builder_binaries_mirror". This will stop working in the next major version of
+ npm. See `npm help npmrc` for supported config options.
+npm notice run modelvault@0.7.0 npx
+npm notice run tsc -p tsconfig.json --noEmit --strictNullChecks
+src/main/index.js(130,42): error TS2345: Argument of type '{ x: any; y: any; width: any; height: any; maximized: boolean; } | null' is not assignable to parameter of type 'undefined'.
+  Type 'null' is not assignable to type 'undefined'.
+src/main/ipc/models/backup.js(33,38): error TS2345: Argument of type 'BrowserWindow | null' is not assignable to parameter of type 'BrowserWindow'.
+  Type 'null' is not assignable to type 'BrowserWindow'.
+src/main/ipc/models/backup.js(51,38): error TS2345: Argument of type 'BrowserWindow | null' is not assignable to parameter of type 'BrowserWindow'.
+  Type 'null' is not assignable to type 'BrowserWindow'.
+src/main/ipc/models/batched-sender.js(61,5): error TS2322: Type 'Timeout' is not assignable to type 'null'.
+src/main/ipc/models/batched-sender.js(62,5): error TS18047: 'timer' is possibly 'null'.
+src/main/ipc/models/batched-sender.js(71,5): error TS2322: Type '(itemOrItems: any, nextCtx?: null) => void' is not assignable to type '(itemOrItems: T | T[], ctx?: C | undefined) => void'.
+  Types of parameters 'nextCtx' and 'ctx' are incompatible.
+    Type 'C | undefined' is not assignable to type 'null | undefined'.
+      Type 'C' is not assignable to type 'null | undefined'.
+src/main/ipc/models/civitai.js(123,9): error TS2322: Type 'Record<string, any>' is not assignable to type 'null'.
+src/main/ipc/models/civitai.js(228,36): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/main/ipc/models/civitai.js(284,9): error TS2322: Type 'Record<string, any> | undefined' is not assignable to type 'null'.
+  Type 'undefined' is not assignable to type 'null'.
+src/main/ipc/models/civitai.js(292,61): error TS18047: 'lastMeta' is possibly 'null'.
+src/main/ipc/models/civitai.js(296,48): error TS18047: 'lastMeta' is possibly 'null'.
+src/main/ipc/models/civitai.js(296,65): error TS2345: Argument of type 'null' is not assignable to parameter of type 'Record<string, any>'.
+src/main/ipc/models/covers.js(124,45): error TS2345: Argument of type 'BrowserWindow | null' is not assignable to parameter of type 'BrowserWindow'.
+  Type 'null' is not assignable to type 'BrowserWindow'.
+src/main/ipc/models/covers.js(134,9): error TS18048: 'applied.meta' is possibly 'undefined'.
+src/main/ipc/models/covers.js(134,47): error TS18048: 'applied.meta' is possibly 'undefined'.
+src/main/ipc/models/covers.js(136,47): error TS2345: Argument of type 'Record<string, any> | undefined' is not assignable to parameter of type 'Record<string, any>'.
+  Type 'undefined' is not assignable to type 'Record<string, any>'.
+src/main/ipc/models/covers.js(156,9): error TS18048: 'applied.meta' is possibly 'undefined'.
+src/main/ipc/models/covers.js(156,47): error TS18048: 'applied.meta' is possibly 'undefined'.
+src/main/ipc/models/covers.js(158,47): error TS2345: Argument of type 'Record<string, any> | undefined' is not assignable to parameter of type 'Record<string, any>'.
+  Type 'undefined' is not assignable to type 'Record<string, any>'.
+src/main/ipc/models/covers.js(296,9): error TS18048: 'applied.meta' is possibly 'undefined'.
+src/main/ipc/models/covers.js(296,47): error TS18048: 'applied.meta' is possibly 'undefined'.
+src/main/ipc/models/covers.js(298,47): error TS2345: Argument of type 'Record<string, any> | undefined' is not assignable to parameter of type 'Record<string, any>'.
+  Type 'undefined' is not assignable to type 'Record<string, any>'.
+src/main/ipc/models/decorate-thumbs.js(135,37): error TS2339: Property 'catch' does not exist on type 'never'.
+src/main/ipc/models/decorate.js(83,36): error TS18048: 'policy.min' is possibly 'undefined'.
+src/main/ipc/models/decorate.js(84,20): error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+src/main/ipc/models/decorate.js(87,36): error TS18048: 'policy.max' is possibly 'undefined'.
+src/main/ipc/models/decorate.js(88,20): error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+src/main/ipc/models/decorate.js(252,54): error TS2345: Argument of type '{ files: string[]; stats: (Stats | null)[]; }' is not assignable to parameter of type 'null | undefined'.
+src/main/ipc/models/decorate.js(336,37): error TS2339: Property 'expectedMinBytes' does not exist on type 'never'.
+src/main/ipc/models/decorate.js(337,11): error TS18047: 'autoInfo' is possibly 'null'.
+src/main/ipc/models/decorate.js(340,7): error TS2322: Type 'object | null' is not assignable to type 'null'.
+  Type 'object' is not assignable to type 'null'.
+src/main/ipc/models/decorate.js(344,34): error TS2339: Property 'expectedMinBytes' does not exist on type 'never'.
+src/main/ipc/models/decorate.js(345,18): error TS2339: Property 'expectedMinBytes' does not exist on type 'never'.
+src/main/ipc/models/decorate.js(361,62): error TS2339: Property 'baseModel' does not exist on type 'never'.
+src/main/ipc/models/files-import.js(577,48): error TS2345: Argument of type 'string[] | undefined' is not assignable to parameter of type 'string[]'.
+  Type 'undefined' is not assignable to type 'string[]'.
+src/main/ipc/models/files-import.js(587,22): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'string | undefined' is not assignable to parameter of type 'PathLike'.
+      Type 'undefined' is not assignable to type 'PathLike'.
+src/main/ipc/models/files-import.js(593,9): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/main/ipc/models/files-import.js(610,9): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/main/ipc/models/files-import.js(619,9): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/main/ipc/models/files-organize.js(96,48): error TS2345: Argument of type 'BrowserWindow | null' is not assignable to parameter of type 'BaseWindow'.
+  Type 'null' is not assignable to type 'BaseWindow'.
+src/main/ipc/models/files-rename.js(122,13): error TS18048: 'plan.path' is possibly 'undefined'.
+src/main/ipc/models/files-rename.js(124,29): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'PathLike'.
+  Type 'undefined' is not assignable to type 'PathLike'.
+src/main/ipc/models/files-rename.js(131,31): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'PathLike'.
+  Type 'undefined' is not assignable to type 'PathLike'.
+src/main/ipc/models/files-rename.js(141,39): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/main/ipc/models/files-rename.js(141,63): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/main/ipc/models/files-rename.js(166,29): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/main/ipc/models/files-rename.js(168,60): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/main/ipc/models/misc.js(104,33): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
+  Type 'null' is not assignable to type 'string'.
+src/main/ipc/models/misc.js(164,45): error TS2322: Type 'BrowserWindow | null' is not assignable to type 'BaseWindow | undefined'.
+  Type 'null' is not assignable to type 'BaseWindow | undefined'.
+src/main/ipc/models/misc.js(231,50): error TS2345: Argument of type 'BrowserWindow | null' is not assignable to parameter of type 'BaseWindow'.
+  Type 'null' is not assignable to type 'BaseWindow'.
+src/main/ipc/models/scan.js(118,9): error TS2322: Type 'AbortController' is not assignable to type 'null'.
+src/main/ipc/models/scan.js(119,24): error TS18047: 'scanAbort' is possibly 'null'.
+src/main/ipc/models/scan.js(331,17): error TS2339: Property 'abort' does not exist on type 'never'.
+src/main/ipc/models/scan.js(351,9): error TS2322: Type 'AbortController' is not assignable to type 'null'.
+src/main/ipc/models/scan.js(372,32): error TS18048: 'subDirs' is possibly 'undefined'.
+src/main/ipc/models/scan.js(402,53): error TS2345: Argument of type 'null' is not assignable to parameter of type '((progress: { dirs: number; found: number; current: string; }) => void) | undefined'.
+src/main/ipc/models/scan.js(475,15): error TS2345: Argument of type 'string[] | undefined' is not assignable to parameter of type 'string[]'.
+  Type 'undefined' is not assignable to type 'string[]'.
+src/main/ipc/models/scan.js(482,23): error TS18048: 'subDirs' is possibly 'undefined'.
+src/main/ipc/models/store/library.js(130,50): error TS2345: Argument of type 'BrowserWindow | null' is not assignable to parameter of type 'BaseWindow'.
+  Type 'null' is not assignable to type 'BaseWindow'.
+src/main/ipc/models/store/library.js(142,56): error TS18048: 'folder' is possibly 'undefined'.
+src/main/ipc/models/store/list-view.js(79,40): error TS2322: Type 'Map<any, any>' is not assignable to type 'null'.
+src/main/ipc/models/store/list-view.js(81,10): error TS18047: 'detailIndexFallback.map' is possibly 'null'.
+src/main/ipc/models/store/load.js(102,15): error TS2322: Type '{ savedAt: number; durationMs: number; models: any[]; }' is not assignable to type 'null'.
+src/main/ipc/models/store/load.js(116,51): error TS2339: Property 'models' does not exist on type 'never'.
+src/main/logger.js(64,25): error TS2532: Object is possibly 'undefined'.
+src/main/services/auto-backup.js(64,3): error TS2322: Type 'Timeout' is not assignable to type 'null'.
+src/main/services/auto-backup.js(70,3): error TS18047: 'checkTimer' is possibly 'null'.
+src/main/services/auto-backup.js(94,5): error TS2322: Type 'FileHandle' is not assignable to type 'null'.
+src/main/services/auto-backup.js(95,24): error TS18047: 'fh' is possibly 'null'.
+src/main/services/auto-backup.js(98,33): error TS18047: 'fh' is possibly 'null'.
+src/main/services/auto-backup.js(109,22): error TS2339: Property 'close' does not exist on type 'never'.
+src/main/services/auto-backup.js(256,9): error TS2322: Type 'FileHandle' is not assignable to type 'null'.
+src/main/services/auto-backup.js(257,15): error TS18047: 'fh' is possibly 'null'.
+src/main/services/auto-backup.js(259,26): error TS2339: Property 'close' does not exist on type 'never'.
+src/main/services/backup-export.js(51,31): error TS2345: Argument of type 'T | undefined' is not assignable to parameter of type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'T | undefined'.
+src/main/services/backup-export.js(117,41): error TS2339: Property 'models' does not exist on type 'never'.
+src/main/services/backup-export.js(134,22): error TS2339: Property 'models' does not exist on type 'never'.
+src/main/services/backup-export.js(134,51): error TS2339: Property 'models' does not exist on type 'never'.
+src/main/services/backup-export.js(135,25): error TS2339: Property 'models' does not exist on type 'never'.
+src/main/services/backup-export.js(143,9): error TS2322: Type 'string[]' is not assignable to type 'null'.
+src/main/services/backup-export.js(144,13): error TS18047: 'keepModels' is possibly 'null'.
+src/main/services/backup-export.js(148,9): error TS2322: Type 'string[]' is not assignable to type 'null'.
+src/main/services/backup-export.js(151,25): error TS18047: 'keepModels' is possibly 'null'.
+src/main/services/backup-export.js(153,36): error TS2698: Spread types may only be created from object types.
+src/main/services/backup-export.js(154,16): error TS18047: 'keepModels' is possibly 'null'.
+src/main/services/backup-export.js(162,47): error TS2339: Property 'models' does not exist on type 'never'.
+src/main/services/backup-export.js(166,36): error TS2339: Property 'models' does not exist on type 'never'.
+src/main/services/backup-export.js(186,38): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/main/services/backup-export.js(245,7): error TS2322: Type 'FileHandle' is not assignable to type 'null'.
+src/main/services/backup-export.js(246,13): error TS18047: 'fh' is possibly 'null'.
+src/main/services/backup-export.js(248,24): error TS2339: Property 'close' does not exist on type 'never'.
+src/main/services/backup-restore.js(400,7): error TS18048: 'manifest' is possibly 'undefined'.
+src/main/services/backup-restore.js(410,7): error TS18048: 'manifest' is possibly 'undefined'.
+src/main/services/backup-restore.js(410,43): error TS18048: 'manifest' is possibly 'undefined'.
+src/main/services/backup-restore.js(411,11): error TS18048: 'manifest' is possibly 'undefined'.
+src/main/services/backup-restore.js(432,9): error TS2345: Argument of type 'BackupManifest | undefined' is not assignable to parameter of type 'BackupManifest'.
+  Type 'undefined' is not assignable to type 'BackupManifest'.
+src/main/services/backup-restore.js(461,7): error TS18048: 'manifest' is possibly 'undefined'.
+src/main/services/backup-restore.js(498,9): error TS18048: 'manifest' is possibly 'undefined'.
+src/main/services/backup-restore.js(528,7): error TS18048: 'manifest' is possibly 'undefined'.
+src/main/services/backup-restore.js(533,7): error TS2322: Type '{}' is not assignable to type 'null'.
+src/main/services/backup-zip.js(280,5): error TS2322: Type 'null' is not assignable to type '{ skippedCovers: number; }'.
+src/main/services/civ-cache.js(53,28): error TS2532: Object is possibly 'undefined'.
+src/main/services/civitai.js(286,7): error TS18048: 'response' is possibly 'undefined'.
+src/main/services/civitai.js(290,8): error TS18048: 'response' is possibly 'undefined'.
+src/main/services/civitai.js(293,35): error TS18048: 'response' is possibly 'undefined'.
+src/main/services/civitai.js(300,9): error TS2345: Argument of type 'Response | undefined' is not assignable to parameter of type 'Response'.
+  Type 'undefined' is not assignable to type 'Response'.
+src/main/services/civitai.js(408,14): error TS2322: Type 'string | undefined' is not assignable to type 'string | null'.
+  Type 'undefined' is not assignable to type 'string | null'.
+src/main/services/civitai.js(435,7): error TS18048: 'response' is possibly 'undefined'.
+src/main/services/civitai.js(438,8): error TS18048: 'response' is possibly 'undefined'.
+src/main/services/civitai.js(441,35): error TS18048: 'response' is possibly 'undefined'.
+src/main/services/civitai.js(448,9): error TS2345: Argument of type 'Response | undefined' is not assignable to parameter of type 'Response'.
+  Type 'undefined' is not assignable to type 'Response'.
+src/main/services/civitai.js(690,16): error TS2532: Object is possibly 'undefined'.
+src/main/services/civitai.js(697,19): error TS2532: Object is possibly 'undefined'.
+src/main/services/covers.js(206,30): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/main/services/covers.js(222,5): error TS2322: Type 'FileHandle' is not assignable to type 'null'.
+src/main/services/covers.js(223,17): error TS18047: 'fh' is possibly 'null'.
+src/main/services/covers.js(224,33): error TS2345: Argument of type 'null' is not assignable to parameter of type 'FileHandle'.
+src/main/services/covers.js(228,22): error TS2339: Property 'close' does not exist on type 'never'.
+src/main/services/covers.js(254,29): error TS2352: Conversion of type 'ClipboardBookmark' to type 'Blob' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'ClipboardBookmark' is missing the following properties from type 'Blob': size, type, arrayBuffer, bytes, and 3 more.
+src/main/services/covers.js(254,58): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+src/main/services/decorate/facts.js(216,35): error TS2345: Argument of type 'null' is not assignable to parameter of type '{ files: string[]; stats: (Stats | null)[]; } | undefined'.
+src/main/services/decorate/facts.js(219,42): error TS2345: Argument of type 'null' is not assignable to parameter of type '{ files: string[]; stats: (Stats | null)[]; } | undefined'.
+src/main/services/decorate/facts.js(234,5): error TS2345: Argument of type 'object | null' is not assignable to parameter of type 'Record<string, any>'.
+  Type 'null' is not assignable to type 'Record<string, any>'.
+src/main/services/decorate/state.js(25,29): error TS2339: Property 'catch' does not exist on type 'never'.
+src/main/services/diagnostics.js(102,34): error TS18048: 'current' is possibly 'undefined'.
+src/main/services/diagnostics.js(108,34): error TS18048: 'current' is possibly 'undefined'.
+src/main/services/diagnostics.js(110,13): error TS18048: 'current' is possibly 'undefined'.
+src/main/services/diagnostics.js(111,46): error TS18048: 'current' is possibly 'undefined'.
+src/main/services/diagnostics.js(283,46): error TS2345: Argument of type 'BrowserWindow | null' is not assignable to parameter of type 'BaseWindow'.
+  Type 'null' is not assignable to type 'BaseWindow'.
+src/main/services/hash-warmup.js(232,3): error TS2322: Type '((progress: WarmupProgress) => void) | null' is not assignable to type 'null'.
+  Type '(progress: WarmupProgress) => void' is not assignable to type 'null'.
+src/main/services/hash-warmup.js(258,5): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+src/main/services/hash-warmup.js(665,3): error TS2322: Type 'Timeout' is not assignable to type 'null'.
+src/main/services/hash-worker-pool.js(319,3): error TS2322: Type 'Timeout' is not assignable to type 'null'.
+src/main/services/hash-worker-pool.js(323,3): error TS18047: 'restartTimer' is possibly 'null'.
+src/main/services/hash-worker-pool.js(551,5): error TS2322: Type '() => void' is not assignable to type 'null'.
+src/main/services/hash-worker-pool.js(553,34): error TS2339: Property 'currentTask' does not exist on type 'never'.
+src/main/services/hash-worker-pool.js(556,19): error TS2339: Property 'worker' does not exist on type 'never'.
+src/main/services/hash-worker-pool.js(566,39): error TS2769: No overload matches this call.
+  The last overload gave the following error.
+    Argument of type 'null' is not assignable to parameter of type 'EventListenerOrEventListenerObject'.
+src/main/services/safetensors.js(36,3): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+src/main/services/safetensors.js(37,42): error TS18048: 'policy.threshold' is possibly 'undefined'.
+src/main/services/safetensors.js(41,44): error TS18048: 'policy.concurrency' is possibly 'undefined'.
+src/main/services/safetensors.js(42,20): error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+src/main/services/safetensors.js(120,35): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/main/services/safetensors.js(121,35): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/main/services/safetensors.js(369,36): error TS2532: Object is possibly 'undefined'.
+src/main/services/safetensors.js(444,5): error TS2322: Type 'FileHandle' is not assignable to type 'null'.
+src/main/services/safetensors.js(446,25): error TS18047: 'fh' is possibly 'null'.
+src/main/services/safetensors.js(454,28): error TS18047: 'fh' is possibly 'null'.
+src/main/services/safetensors.js(462,11): error TS18048: 'parsed.tensorStats.dataRegionEnd' is possibly 'undefined'.
+src/main/services/safetensors.js(463,9): error TS18047: 'parsed' is possibly 'null'.
+src/main/services/safetensors.js(464,27): error TS18047: 'parsed' is possibly 'null'.
+src/main/services/safetensors.js(464,27): error TS18049: 'parsed.tensorStats' is possibly 'null' or 'undefined'.
+src/main/services/safetensors.js(471,15): error TS2339: Property 'close' does not exist on type 'never'.
+src/main/services/safetensors.js(488,5): error TS2322: Type 'FileHandle' is not assignable to type 'null'.
+src/main/services/safetensors.js(490,25): error TS18047: 'fh' is possibly 'null'.
+src/main/services/safetensors.js(497,28): error TS18047: 'fh' is possibly 'null'.
+src/main/services/safetensors.js(505,15): error TS2339: Property 'close' does not exist on type 'never'.
+src/main/services/scanner/rules.js(197,33): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/main/services/scanner/sidecar.js(105,53): error TS2322: Type 'null' is not assignable to type '{ files: string[]; stats: (Stats | null)[]; } | undefined'.
+src/main/services/scanner/sidecar.js(116,34): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/main/services/scanner/sidecar.js(146,50): error TS2322: Type 'null' is not assignable to type '{ files: string[]; stats: (Stats | null)[]; } | undefined'.
+src/main/services/scanner/sidecar.js(186,26): error TS2532: Object is possibly 'undefined'.
+src/main/services/scanner/sidecar.js(204,57): error TS2322: Type 'null' is not assignable to type '{ files: string[]; stats: (Stats | null)[]; } | undefined'.
+src/main/services/scanner/walk.js(125,7): error TS18048: 'options.subDirs' is possibly 'undefined'.
+src/main/services/scanner/walk.js(292,28): error TS2322: Type 'never[]' is not assignable to type 'null'.
+src/main/services/scanner/walk.js(293,9): error TS18047: 'skippedNames' is possibly 'null'.
+src/main/services/thumb-renderer.js(68,17): error TS2339: Property 'isDestroyed' does not exist on type 'never'.
+src/main/services/thumb-renderer.js(68,50): error TS2339: Property 'webContents' does not exist on type 'never'.
+src/main/services/thumb-renderer.js(82,3): error TS2322: Type 'Timeout' is not assignable to type 'null'.
+src/main/services/thumb-renderer.js(88,3): error TS18047: 'idleTimer' is possibly 'null'.
+src/main/services/thumb-renderer.js(132,15): error TS2339: Property 'isDestroyed' does not exist on type 'never'.
+src/main/services/thumb-renderer.js(132,32): error TS2339: Property 'destroy' does not exist on type 'never'.
+src/main/services/thumb-renderer.js(211,3): error TS2531: Object is possibly 'null'.
+src/main/services/thumb-renderer.js(214,19): error TS2339: Property 'isDestroyed' does not exist on type 'never'.
+src/main/services/thumb-renderer.js(216,9): error TS2339: Property 'webContents' does not exist on type 'never'.
+src/main/services/thumb-renderer.js(233,19): error TS2339: Property 'isDestroyed' does not exist on type 'never'.
+src/main/services/thumb-renderer.js(248,3): error TS2322: Type 'BrowserWindow' is not assignable to type 'null'.
+src/main/services/thumb-renderer.js(272,3): error TS2322: Type 'Promise<void>' is not assignable to type 'null'.
+src/main/services/thumb-renderer.js(280,3): error TS18047: 'readyPromise' is possibly 'null'.
+src/main/services/thumb-renderer.js(342,5): error TS2322: Type 'Timeout' is not assignable to type 'null'.
+src/main/services/thumbs.js(149,20): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
+  Type 'null' is not assignable to type 'string'.
+src/main/services/update-download.js(186,3): error TS2322: Type '{ downloadUrl: string; checksumUrl: string; size: number; latest: string; } | null' is not assignable to type 'null'.
+  Type '{ downloadUrl: string; checksumUrl: string; size: number; latest: string; }' is not assignable to type 'null'.
+src/main/services/update-download.js(235,3): error TS2322: Type 'AbortController' is not assignable to type 'null'.
+src/main/services/update-download.js(315,15): error TS18047: 'downloadAbort' is possibly 'null'.
+src/main/services/update-download.js(395,16): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/main/services/update-download.js(428,18): error TS2339: Property 'abort' does not exist on type 'never'.
+src/main/services/update-install.js(59,14): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/main/services/update-verify.js(37,14): error TS2532: Object is possibly 'undefined'.
+src/main/services/update-verify.js(131,7): error TS2322: Type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to type 'null'.
+src/main/services/update-verify.js(151,5): error TS2322: Type 'Timeout' is not assignable to type 'null'.
+src/main/services/update-verify.js(153,16): error TS2339: Property 'kill' does not exist on type 'never'.
+src/main/services/update-verify.js(159,5): error TS18047: 'timer' is possibly 'null'.
+src/main/services/update-verify.js(160,5): error TS18047: 'child' is possibly 'null'.
+src/main/services/update-verify.js(164,11): error TS18047: 'child' is possibly 'null'.
+src/main/services/update-verify.js(177,5): error TS18047: 'child' is possibly 'null'.
+src/main/services/update-verify.js(182,5): error TS18047: 'child' is possibly 'null'.
+src/main/services/update-verify.js(183,5): error TS18047: 'child' is possibly 'null'.
+src/main/services/updater.js(278,3): error TS2322: Type 'Timeout' is not assignable to type 'null'.
+src/main/services/updater.js(288,3): error TS18047: 'startupCheckTimer' is possibly 'null'.
+src/main/smoke.js(90,35): error TS2339: Property 'stack' does not exist on type 'never'.
+src/main/smoke.js(90,50): error TS2339: Property 'message' does not exist on type 'never'.
+src/main/smoke.js(110,18): error TS2339: Property 'message' does not exist on type 'never'.
+src/main/smoke.js(124,17): error TS2345: Argument of type 'Error' is not assignable to parameter of type 'null | undefined'.
+src/main/smoke.js(204,18): error TS2345: Argument of type 'unknown' is not assignable to parameter of type 'null | undefined'.
+src/main/utils/async.js(45,20): error TS2345: Argument of type 'T | undefined' is not assignable to parameter of type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'T | undefined'.
+src/main/utils/async.js(71,7): error TS2322: Type 'Timeout' is not assignable to type 'null'.
+src/main/utils/net.js(67,7): error TS2322: Type 'Timeout' is not assignable to type 'null'.
+src/main/utils/process.js(54,45): error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+src/main/utils/process.js(59,40): error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number'.
+  Type 'undefined' is not assignable to type 'number'.
+src/renderer/src/store/civitai-queue.js(39,39): error TS2339: Property 'civitaiUrl' does not exist on type 'never'.
+src/renderer/src/store/civitai-queue.js(67,49): error TS2339: Property 'civitaiUrl' does not exist on type 'never'.
+src/renderer/src/store/civitai-queue.js(67,74): error TS2339: Property 'id' does not exist on type 'never'.
+src/renderer/src/store/civitai-queue.js(99,19): error TS2339: Property 'civitaiUrl' does not exist on type 'never'.
+src/renderer/src/store/civitai-queue.js(103,21): error TS2339: Property 'alias' does not exist on type 'never'.
+src/renderer/src/store/civitai-queue.js(103,32): error TS2339: Property 'name' does not exist on type 'never'.
+src/renderer/src/store/civitai-queue.js(127,11): error TS2322: Type 'any' is not assignable to type 'never'.
+src/renderer/src/store/civitai-queue.js(128,13): error TS2698: Spread types may only be created from object types.
+src/renderer/src/store/civitai-queue.js(130,24): error TS2532: Object is possibly 'undefined'.
+src/renderer/src/store/civitai-store.js(23,5): error TS2322: Type 'any' is not assignable to type 'never'.
+src/renderer/src/store/civitai-store.js(24,7): error TS2698: Spread types may only be created from object types.
+src/renderer/src/store/civitai-store.js(28,18): error TS2532: Object is possibly 'undefined'.
+src/renderer/src/store/civitai-store.js(90,5): error TS2322: Type 'any' is not assignable to type 'never'.
+src/renderer/src/store/civitai-store.js(91,7): error TS2698: Spread types may only be created from object types.
+src/renderer/src/store/compare.js(34,3): error TS2322: Type 'string[]' is not assignable to type 'never[]'.
+  Type 'string' is not assignable to type 'never'.
+src/renderer/src/store/cover-overrides.js(84,34): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/renderer/src/store/covers-store.js(30,5): error TS2322: Type 'any' is not assignable to type 'never'.
+src/renderer/src/store/covers-store.js(31,7): error TS2698: Spread types may only be created from object types.
+src/renderer/src/store/covers-store.js(47,5): error TS2322: Type 'any' is not assignable to type 'never'.
+src/renderer/src/store/covers-store.js(48,7): error TS2698: Spread types may only be created from object types.
+src/renderer/src/store/covers-store.js(157,15): error TS18048: 'm' is possibly 'undefined'.
+src/renderer/src/store/covers-store.js(157,26): error TS18048: 'm' is possibly 'undefined'.
+src/renderer/src/store/covers-store.js(157,40): error TS18048: 'm' is possibly 'undefined'.
+src/renderer/src/store/covers-store.js(158,22): error TS18048: 'm' is possibly 'undefined'.
+src/renderer/src/store/covers-store.js(158,35): error TS18048: 'm' is possibly 'undefined'.
+src/renderer/src/store/covers-store.js(160,5): error TS2322: Type 'any' is not assignable to type 'never'.
+src/renderer/src/store/covers-store.js(161,7): error TS2698: Spread types may only be created from object types.
+src/renderer/src/store/covers-store.js(168,22): error TS18048: 'm' is possibly 'undefined'.
+src/renderer/src/store/detail.js(46,26): error TS2339: Property 'detailFull' does not exist on type 'never'.
+src/renderer/src/store/detail.js(54,28): error TS2339: Property 'detailFull' does not exist on type 'never'.
+src/renderer/src/store/detail.js(55,5): error TS2322: Type 'any' is not assignable to type 'never'.
+src/renderer/src/store/detail.js(115,3): error TS2322: Type 'string' is not assignable to type 'null'.
+src/renderer/src/store/detail.js(136,27): error TS18048: 'current' is possibly 'undefined'.
+src/renderer/src/store/detail.js(136,51): error TS18048: 'current' is possibly 'undefined'.
+src/renderer/src/store/detail.js(140,28): error TS18048: 'current' is possibly 'undefined'.
+src/renderer/src/store/detail.js(140,49): error TS18048: 'current' is possibly 'undefined'.
+src/renderer/src/store/library.js(79,35): error TS2345: Argument of type 'string' is not assignable to parameter of type 'never'.
+src/renderer/src/store/library.js(127,7): error TS2322: Type '{ count: any; durationMs: any; }' is not assignable to type 'null'.
+src/renderer/src/store/library.js(190,29): error TS2532: Object is possibly 'undefined'.
+src/renderer/src/store/library.js(288,42): error TS2345: Argument of type 'string' is not assignable to parameter of type 'never'.
+src/renderer/src/store/library.js(289,33): error TS2322: Type 'string' is not assignable to type 'never'.
+src/renderer/src/store/library.js(289,56): error TS2322: Type 'string' is not assignable to type 'never'.
+src/renderer/src/store/library.js(307,7): error TS2322: Type '{ count: any; durationMs: any; }' is not assignable to type 'null'.
+src/renderer/src/store/library.js(456,5): error TS2322: Type '{ count: any; durationMs: any; }' is not assignable to type 'null'.
+src/renderer/src/store/meta-apply.js(67,30): error TS2532: Object is possibly 'undefined'.
+src/renderer/src/store/meta-apply.js(69,5): error TS2322: Type 'any' is not assignable to type 'never'.
+src/renderer/src/store/meta-apply.js(69,25): error TS2698: Spread types may only be created from object types.
+src/renderer/src/store/meta-apply.js(99,31): error TS2345: Argument of type 'T | undefined' is not assignable to parameter of type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'T | undefined'.
+src/renderer/src/store/model-actions.js(40,5): error TS2322: Type 'any' is not assignable to type 'never'.
+src/renderer/src/store/model-actions.js(40,27): error TS2698: Spread types may only be created from object types.
+src/renderer/src/store/model-actions.js(49,16): error TS2532: Object is possibly 'undefined'.
+src/renderer/src/store/model-actions.js(144,3): error TS2322: Type 'Promise<void>' is not assignable to type 'null'.
+src/renderer/src/store/model-actions.js(187,48): error TS2339: Property 'id' does not exist on type 'never'.
+src/renderer/src/store/model-actions.js(213,34): error TS2339: Property 'catch' does not exist on type 'never'.
+src/renderer/src/store/model-actions.js(330,18): error TS18048: 'm' is possibly 'undefined'.
+src/renderer/src/store/model-actions.js(330,29): error TS18048: 'm' is possibly 'undefined'.
+src/renderer/src/store/model-actions.js(468,30): error TS2698: Spread types may only be created from object types.
+src/renderer/src/store/model-actions.js(495,3): error TS2322: Type 'string' is not assignable to type 'null'.
+src/renderer/src/store/model-actions.js(496,3): error TS2322: Type '{ done: number; total: number; bytes: number; totalBytes: number; fileName: string; canceled: boolean; canceling: boolean; }' is not assignable to type 'null'.
+src/renderer/src/store/model-export.js(69,18): error TS2532: Object is possibly 'undefined'.
+src/renderer/src/store/saved-views.js(94,16): error TS2532: Object is possibly 'undefined'.
+src/renderer/src/store/saved-views.js(177,3): error TS2322: Type 'string[]' is not assignable to type 'never[]'.
+  Type 'string' is not assignable to type 'never'.
+src/renderer/src/store/selectors.js(36,5): error TS2322: Type 'ShallowReactive<never[]>' is not assignable to type 'null'.
+src/renderer/src/store/selectors.js(39,22): error TS2532: Object is possibly 'undefined'.
+src/renderer/src/store/selectors.js(42,32): error TS2339: Property 'length' does not exist on type 'never'.
+src/renderer/src/store/selectors.js(44,28): error TS2339: Property 'id' does not exist on type 'never'.
+src/renderer/src/store/selectors.js(44,56): error TS2339: Property 'id' does not exist on type 'never'.
+src/renderer/src/store/state.js(366,3): error TS2322: Type 'ShallowReactive<never[]>' is not assignable to type 'null'.
+src/renderer/src/store/state.js(369,24): error TS2532: Object is possibly 'undefined'.
+src/renderer/src/store/state.js(417,3): error TS2322: Type 'ShallowReactive<any[]>' is not assignable to type 'ShallowReactive<never[]>'.
+  Type 'ShallowReactive<any[]>' is not assignable to type 'never[]'.
+    The types returned by 'concat(...)' are incompatible between these types.
+      Type 'any[]' is not assignable to type 'never[]'.
+        Type 'any' is not assignable to type 'never'.
+src/renderer/src/store/tag-admin.js(33,25): error TS2339: Property 'tags' does not exist on type 'never'.
+src/renderer/src/store/tag-admin.js(34,20): error TS2339: Property 'tags' does not exist on type 'never'.
+src/renderer/src/store/tag-admin.js(36,5): error TS2322: Type 'any' is not assignable to type 'never'.
+src/renderer/src/store/tag-admin.js(36,25): error TS2698: Spread types may only be created from object types.
+src/renderer/src/store/toast.js(13,21): error TS2345: Argument of type '{ id: number; type: any; text: any; }' is not assignable to parameter of type 'never'.
+src/renderer/src/store/toast.js(21,47): error TS2339: Property 'id' does not exist on type 'never'.
+src/renderer/src/store/toast.js(33,19): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+src/renderer/src/store/toast.js(36,5): error TS2322: Type '(value: boolean | PromiseLike<boolean>) => void' is not assignable to type 'null'.
+src/renderer/src/store/toast.js(49,3): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+src/renderer/src/store/toast.js(57,3): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+src/renderer/src/store/transfer.js(67,3): error TS2322: Type 'string[]' is not assignable to type 'never[]'.
+  Type 'string' is not assignable to type 'never'.
+src/renderer/src/store/transfer.js(93,3): error TS2322: Type 'string' is not assignable to type 'null'.
+src/renderer/src/store/transfer.js(94,3): error TS2322: Type '{ done: number; total: number; bytes: number; totalBytes: number; }' is not assignable to type 'null'.
+src/renderer/src/store/update.js(23,3): error TS2322: Type '{ hasUpdate?: boolean | undefined; current?: string | undefined; latest?: string | undefined; releaseUrl?: string | undefined; }' is not assignable to type 'null'.
+src/shared/ipc-schema/rules.js(238,47): error TS18048: 'rule.fields' is possibly 'undefined'.

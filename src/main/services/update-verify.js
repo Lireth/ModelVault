@@ -34,7 +34,7 @@ const BUILD_SIGNER_THUMBPRINT = /** @type {string} */ (
 export function parseChecksumHash(text) {
   if (typeof text !== 'string') return ''
   const m = /^\s*([0-9a-fA-F]{64})\b/im.exec(text)
-  return m ? m[1].toLowerCase() : ''
+  return m ? /** @type {string} */ (m[1]).toLowerCase() : ''
 }
 
 /** 证书指纹规范化：去分隔符并统一大写（Get-AuthenticodeSignature 输出带空格） */
@@ -119,7 +119,9 @@ function queryAuthenticode(filePath) {
   return new Promise((resolve) => {
     let settled = false
     let stdout = ''
+    /** @type {ReturnType<typeof setTimeout>|null} */
     let timer = null
+    /** @type {import('node:child_process').ChildProcess|null} */
     let child = null
     const finish = (value) => {
       if (settled) return
@@ -161,7 +163,7 @@ function queryAuthenticode(filePath) {
       stdout += chunk.toString()
       if (stdout.length > 256 * 1024) {
         try {
-          child.kill()
+          child?.kill()
         } catch {
           /* 进程已退出 */
         }

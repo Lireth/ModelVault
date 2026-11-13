@@ -98,7 +98,7 @@ export async function statSidecarSet(modelPath, dirNames = null) {
  * 查找模型文件的自动预览图（ComfyUI/WebUI 生成的同名 sidecar 图片）。
  * 命中顺序见 SIDECAR_PREVIEW_EXTS。
  * @param {string} modelPath 模型文件绝对路径
- * @param {{files: string[], stats: Array<import('node:fs').Stats|null>}} [snapshot]
+ * @param {{files: string[], stats: Array<import('node:fs').Stats|null>}|null} [snapshot]
  *   statSidecarSet 快照（装饰路径传入以复用批量 stat 结果，缺省自行逐个探测）
  * @returns {Promise<string>} 预览图绝对路径，未找到返回 ''
  */
@@ -113,7 +113,9 @@ export async function findSidecarPreview(modelPath, snapshot = null) {
       i++
     ) {
       const stat = snapshot.stats[i]
-      if (stat && stat.isFile()) return snapshot.files[i]
+      // files 与 stats 由 statSidecarSet 同序等长构造，命中项必有对应文件名
+      if (stat && stat.isFile())
+        return /** @type {string} */ (snapshot.files[i])
     }
     return ''
   }
@@ -138,7 +140,7 @@ const SIDECAR_TEXT_MAX_BYTES = 256 * 1024
  * 读取模型文件同名的 sidecar 说明文本（WebUI 惯例：name.txt，
  * 内容为训练说明或标签文本）。
  * @param {string} modelPath 模型文件绝对路径
- * @param {{files: string[], stats: Array<import('node:fs').Stats|null>}} [snapshot]
+ * @param {{files: string[], stats: Array<import('node:fs').Stats|null>}|null} [snapshot]
  *   statSidecarSet 快照（装饰路径传入以复用批量 stat 结果，[0] 为 txt 条目；
  *   快照内为 null 即文件不存在，不再重复 stat）
  * @returns {Promise<string>} 文本内容（已修剪首尾空白），未找到/过大/读取失败返回 ''
@@ -183,7 +185,9 @@ export function sidecarImportPatch(type, meta, text) {
     patch.noteSource = 'sidecar'
   }
   if (type === 'lora' && !meta.triggerWords) {
-    patch.triggerWords = trimmed.split(/\r?\n/)[0].trim()
+    patch.triggerWords = /** @type {string} */ (
+      trimmed.split(/\r?\n/)[0]
+    ).trim()
     patch.triggerWordsSource = 'sidecar'
   }
   return Object.keys(patch).length > 0 ? patch : null
@@ -196,7 +200,7 @@ const CIVITAI_INFO_MAX_BYTES = 1024 * 1024
  * 读取模型文件同名的 civitai.info 元数据（F8：Civitai 下载器随模型保存的
  * modelVersion JSON，社区下载的模型普遍携带），解析出 trainedWords/nsfw。
  * @param {string} modelPath 模型文件绝对路径
- * @param {{files: string[], stats: Array<import('node:fs').Stats|null>}} [snapshot]
+ * @param {{files: string[], stats: Array<import('node:fs').Stats|null>}|null} [snapshot]
  *   statSidecarSet 快照（装饰路径传入以复用批量 stat 结果，[1] 为 info 条目；
  *   快照内为 null 即文件不存在，不再重复 stat）
  * @returns {Promise<object|null>} 解析后的 JSON 对象；未找到/过大/损坏返回 null
@@ -230,7 +234,7 @@ export async function findSidecarCivitaiInfo(modelPath, snapshot = null) {
  * 均不满足时不产生补丁——绝不覆盖任何用户已有标注（与 .txt sidecar
  * 的「空字段才写入」同一原则）。
  * @param {Record<string, any>} meta 当前模型元数据（导入判空的基准）
- * @param {Record<string, any>} info findSidecarCivitaiInfo 解析出的 JSON（不可信输入）
+ * @param {Record<string, any>|null} info findSidecarCivitaiInfo 解析出的 JSON（不可信输入；null 即未命中，内部判空）
  * @returns {Record<string, any>|null} 可合并到元数据的补丁；无需导入返回 null
  */
 export function civitaiImportPatch(meta, info) {

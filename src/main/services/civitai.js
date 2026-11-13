@@ -160,7 +160,7 @@ function isAllowedCivitaiApiUrl(url) {
  * 已过期的 signal，使重试必然以 AbortError 失败。
  * @param {string} url API 地址
  * @param {object} [options] net.fetch 选项（signal 由本函数按 attempt 注入）
- * @returns {Promise<{response?: Response, networkError?: Error}>}
+ * @returns {Promise<{response: Response, networkError?: undefined} | {networkError: Error, response?: undefined}>}
  *   两属性互斥：成功时仅 response，网络/超时失败时仅 networkError
  */
 async function fetchCivitaiApi(url, options = {}) {
@@ -268,21 +268,25 @@ export async function computeFileHash(
  *   description, images, videos }
  */
 export async function fetchCivitaiVersionByHash(hash) {
-  const { response, networkError } = await fetchCivitaiApi(
+  const result = await fetchCivitaiApi(
     `${CIVITAI_API_BASE}/model-versions/by-hash/${hash}`,
     {
       headers: { 'User-Agent': 'ModelVault', Accept: 'application/json' },
     },
   )
-  if (networkError) {
+  if (result.networkError) {
     if (
-      networkError.name === 'TimeoutError' ||
-      networkError.name === 'AbortError'
+      result.networkError.name === 'TimeoutError' ||
+      result.networkError.name === 'AbortError'
     ) {
       return { found: false, error: '请求超时，请检查网络后重试' }
     }
-    return { found: false, error: `网络请求失败: ${networkError.message}` }
+    return {
+      found: false,
+      error: `网络请求失败: ${result.networkError.message}`,
+    }
   }
+  const response = result.response
   if (response.status === 404) {
     // 哈希未收录：Civitai 无此模型（自训/其他来源），不是错误
     return { found: false }
@@ -405,7 +409,7 @@ export function parseCivitaiModelId(url) {
   const m = url.match(
     /^https:\/\/civitai\.(?:com|red)\/models\/(\d+)(?:[/?#]|$)/,
   )
-  return m ? m[1] : null
+  return m ? /** @type {string} */ (m[1]) : null
 }
 
 /**
@@ -417,21 +421,25 @@ export function parseCivitaiModelId(url) {
  *   found=false 且无 error 表示 id 不存在或已下架（不是失败）
  */
 export async function fetchCivitaiModelType(modelId) {
-  const { response, networkError } = await fetchCivitaiApi(
+  const result = await fetchCivitaiApi(
     `${CIVITAI_API_BASE}/models/${modelId}`,
     {
       headers: { 'User-Agent': 'ModelVault', Accept: 'application/json' },
     },
   )
-  if (networkError) {
+  if (result.networkError) {
     if (
-      networkError.name === 'TimeoutError' ||
-      networkError.name === 'AbortError'
+      result.networkError.name === 'TimeoutError' ||
+      result.networkError.name === 'AbortError'
     ) {
       return { found: false, error: '请求超时，请检查网络后重试' }
     }
-    return { found: false, error: `网络请求失败: ${networkError.message}` }
+    return {
+      found: false,
+      error: `网络请求失败: ${result.networkError.message}`,
+    }
   }
+  const response = result.response
   if (response.status === 404) {
     return { found: false }
   }
@@ -660,6 +668,7 @@ export async function downloadCivitaiImage(url) {
   if (!isAllowedCivitaiImageUrl(url)) {
     return { error: '图片地址不在 Civitai CDN 白名单内，已拒绝下载' }
   }
+  /** @type {Response} */
   let response
   try {
     response = await fetchCivitaiImage(url)
@@ -687,14 +696,18 @@ export async function downloadCivitaiImage(url) {
     return { error: '图片内容为空' }
   }
   // 内容校验：按响应 Content-Type 推断扩展名，URL 路径扩展名兜底
-  const mime = String(response.headers.get('content-type') || '')
-    .split(';')[0]
+  // split 恒返回至少 1 项，?? '' 仅为索引访问的类型兜底（运行时不触发）
+  const mime = (
+    String(response.headers.get('content-type') || '').split(';')[0] ?? ''
+  )
     .trim()
     .toLowerCase()
   let ext = MIME_EXT[mime] || ''
   if (!ext) {
     const m = new URL(url).pathname.match(/\.(jpe?g|png|webp|gif|bmp)$/i)
-    ext = m ? `.${m[1].toLowerCase().replace('jpeg', 'jpg')}` : '.jpg'
+    ext = m
+      ? `.${/** @type {string} */ (m[1]).toLowerCase().replace('jpeg', 'jpg')}`
+      : '.jpg'
   }
   return { buf, ext }
 }

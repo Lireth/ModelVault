@@ -223,6 +223,8 @@ export function scheduleSave() {
  * @param {string} rootAtStart 发起本次保存时的根目录（OPT-19 同根守卫判据）
  */
 async function writeSnapshot(rootAtStart) {
+  // 调用方 runSave 已校验内存数据存在；防御性早退与 runSave 同一口径
+  if (!metaState.data) return false
   if (!(await ensureDataDir())) return false
   // OPT-19 同根守卫：切库 flush 超时放弃后，挂起的写入会在根目录切换后
   // 续跑——此时 getDataFilePath() 已指向新根而 metaState.data 仍是旧根
@@ -270,6 +272,8 @@ async function writeSnapshot(rootAtStart) {
  * @param {string} rootAtStart 发起本次保存时的根目录（OPT-19 同根守卫判据）
  */
 async function writeDeltaJournal(keys, rootAtStart) {
+  // 调用方 runSave 已校验内存数据存在；防御性早退与 runSave 同一口径
+  if (!metaState.data) return false
   if (!(await ensureDataDir())) return false
   const seq = metaState.journalSeq + 1
   const entries = []
@@ -331,7 +335,10 @@ async function writeDeltaJournal(keys, rootAtStart) {
  * @param {boolean} forceSnapshot 是否强制写全量快照
  */
 async function runSave(forceSnapshot) {
-  if (!metaState.data || !getCurrentRoot() || metaState.saveSuppressed) return
+  // 根目录在守卫前一并捕获（同根守卫判据 rootAtStart）：守卫与原先的
+  // getCurrentRoot() 调用之间无任何异步间隙，取值与切换时序完全一致
+  const rootAtStart = getCurrentRoot()
+  if (!metaState.data || !rootAtStart || metaState.saveSuppressed) return
   if (metaState.saving) {
     // 写盘进行中又有新修改：标记待补写；若其中有强制快照请求，补写也必须快照
     metaState.pendingSave = true
@@ -343,8 +350,7 @@ async function runSave(forceSnapshot) {
     // OPT-19 同根守卫判据：挂起磁盘上的 stat/fsync 可阻塞数十秒，期间
     // 切库 flush 可能超时放弃并切换根目录——迟到的续跑绝不能把本次捕获的
     // 内存数据写进切换后的根目录（跨库污染），由 writeSnapshot/
-    // writeDeltaJournal 按此判据丢弃
-    const rootAtStart = getCurrentRoot()
+    // writeDeltaJournal 按此判据丢弃（rootAtStart 已在守卫处捕获）
     // O5：库目录离线（被移动/盘符未挂载）时跳过序列化与写盘，
     // 脏数据保留在内存，并安排恢复后的自动补写——绝不重建模型根目录树
     if (!(await isCurrentRootAvailable())) {

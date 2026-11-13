@@ -265,7 +265,7 @@ function concatBytes(chunks, size) {
  * - 重复条目直接拒绝（避免同名条目覆盖产生歧义）。
  *
  * @param {string} filePath zip 文件路径
- * @param {{manifestOnly?: boolean, stats?: {skippedCovers: number},
+ * @param {{manifestOnly?: boolean, stats?: {skippedCovers: number} | null,
  *   coverWriter?: ((name: string, data: Uint8Array) => Promise<void>) | null,
  *   skipCovers?: boolean}} [options]
  *   manifestOnly 仅解出 manifest.json；stats 用于回传被跳过的非法封面条目数；

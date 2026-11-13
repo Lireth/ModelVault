@@ -146,7 +146,9 @@ function putThumbHitCache(key, entry, ttlMs) {
 
 /** 缩略图缓存目录（位于模型根目录内） */
 function getThumbsDir() {
-  return path.join(getCurrentRoot(), '.modelvault', THUMBS_DIR)
+  const root = getCurrentRoot()
+  if (!root) throw new Error('未选择模型库根目录')
+  return path.join(root, '.modelvault', THUMBS_DIR)
 }
 
 /** 缩略图文件名：源图路径哈希（小写化，兼容 Windows 大小写）+ mtime */

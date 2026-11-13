@@ -13,6 +13,7 @@
  */
 
 /** 后台缩略图生成任务（扫描响应返回后异步执行，新扫描/切换根目录前需等待其完成） */
+/** @type {Promise<unknown>|null} */
 let thumbDrainPromise = null
 
 /**

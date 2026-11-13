@@ -55,16 +55,18 @@ import { errorCode, errorMessage } from '../../shared/error-text'
 const BOOTSTRAP_KEYS = new Set(BOOTSTRAP_SETTING_KEYS)
 
 /** 内存中的引导设置（modelsFolder / modelsFolders） */
+/** @type {{ modelsFolder: string, modelsFolders: string[] } | null} */
 let bootstrap = null
 
 /** 内存中的当前库设置（除引导字段外的全部设置，随模型根目录切换） */
+/** @type {Record<string, any> | null} */
 let library = null
 
 /**
  * 加载指定根目录的库设置文件（.modelvault/settings.json）。
  * @param {string} root 模型根目录绝对路径
  * @param {object|null} [seedRaw] 首次初始化种子（旧版全局设置的遗留字段；空则用默认值）
- * @returns {Promise<object>} 规范化后的库设置（仅内存，不写引导层）
+ * @returns {Promise<Record<string, any>>} 规范化后的库设置（仅内存，不写引导层）
  */
 async function loadLibrarySettings(root, seedRaw = null) {
   const file = getLibSettingsFilePath(root)
@@ -181,7 +183,7 @@ export async function loadSettings() {
     }
   }
 
-  if (bootstrap.modelsFolder) {
+  if (bootstrap?.modelsFolder) {
     // 已设置目录不存在（磁盘离线/被移动）时库设置以默认值驻内存，不落盘、不迁移
     library = await loadLibrarySettings(bootstrap.modelsFolder, rawGlobal)
     // 旧版布局迁移收尾：激活库文件已生成后，将全局文件精简为仅引导字段
@@ -200,12 +202,15 @@ export async function loadSettings() {
         /* 库文件尚未生成，保留全局文件作为下次迁移种子 */
       }
     }
-  } else if (getCurrentRoot()) {
-    // 引导层尚无激活库但内存中已有生效根目录（loadStore 重入等场景）：
-    // 库设置跟随当前激活根加载，避免把已生效的库设置重置为默认值
-    library = await loadLibrarySettings(getCurrentRoot())
   } else {
-    library = defaultLibrarySettings()
+    const activeRoot = getCurrentRoot()
+    if (activeRoot) {
+      // 引导层尚无激活库但内存中已有生效根目录（loadStore 重入等场景）：
+      // 库设置跟随当前激活根加载，避免把已生效的库设置重置为默认值
+      library = await loadLibrarySettings(activeRoot)
+    } else {
+      library = defaultLibrarySettings()
+    }
   }
   return getSettings()
 }

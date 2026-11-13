@@ -167,7 +167,10 @@ export function buildLibraryOverview(libraries, now = Date.now()) {
     name: lib.name || libraryName(lib.root),
     exists: lib.exists !== false,
     source: lib.source || 'none',
-    savedAt: Number.isFinite(lib.savedAt) ? lib.savedAt : 0,
+    savedAt:
+      typeof lib.savedAt === 'number' && Number.isFinite(lib.savedAt)
+        ? lib.savedAt
+        : 0,
     models: Array.isArray(lib.models) ? lib.models.filter(Boolean) : [],
   }))
 
@@ -302,9 +305,10 @@ export function buildLibraryOverview(libraries, now = Date.now()) {
  */
 export async function collectLibraryOverview() {
   const settings = getSettings()
+  const activeRoot = getCurrentRoot()
   const roots = normalizeLibraryRoots([
     ...(Array.isArray(settings.modelsFolders) ? settings.modelsFolders : []),
-    ...(getCurrentRoot() ? [getCurrentRoot()] : []),
+    ...(activeRoot ? [activeRoot] : []),
   ])
   const warnings = []
   const libraries = []
