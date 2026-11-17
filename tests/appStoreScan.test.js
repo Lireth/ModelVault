@@ -387,4 +387,15 @@ describe('scanModels 重关联提示（A-02）', () => {
     expect(notice.text).toContain('1 个目录无法读取')
     expect(notice.text).toContain('自动重新关联 1 个')
   })
+
+  it('errorCount 携带真实错误总数：载荷裁剪后仍按总数提示', async () => {
+    api.models.scan.mockResolvedValue({
+      models: [makeModel('m1')],
+      errors: [],
+      errorCount: 25,
+    })
+    await scanModels()
+    const notice = state.toasts.find((t) => t.type === 'warn')
+    expect(notice.text).toContain('25 个目录无法读取')
+  })
 })

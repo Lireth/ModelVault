@@ -485,10 +485,12 @@ export async function scanModels(folder = state.folder, options = {}) {
         ? `（已自动重新关联 ${res.relinked} 个移动/重命名模型的标注）`
         : ''
     const prefix = background ? '后台校验完成' : '扫描完成'
-    if (res.errors?.length) {
+    // #62：errors 载荷经主进程裁剪，真实错误总数以 errorCount 下发
+    const errorCount = res.errorCount ?? res.errors?.length ?? 0
+    if (errorCount > 0) {
       toast(
         'warn',
-        `${prefix}，但有 ${res.errors.length} 个目录无法读取${relinkedSuffix}`,
+        `${prefix}，但有 ${errorCount} 个目录无法读取${relinkedSuffix}`,
       )
     } else {
       toast(
