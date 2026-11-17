@@ -4,7 +4,7 @@ import { app } from 'electron'
 import logger from '../logger'
 import { atomicWriteFile } from './atomic-write'
 import { notifyStoreSaveError } from './store-events'
-import { isSettledWithin } from '../utils'
+import { isSettledWithin, samePathIgnoreCase } from '../utils'
 import { SETTINGS_FILE, getLibSettingsFilePath } from './store-paths'
 import { errorCode } from '../../shared/error-text'
 
@@ -101,11 +101,40 @@ export function queueBootstrapSave(snapshot) {
 }
 
 /**
+ * 库设置写盘抑制（#47，与元数据侧 B-02 saveSuppressed 同口径）：
+ * 全量恢复的流式解压可达分钟级，目录交换（.modelvault → .bak → 临时目录上位）
+ * 期间防抖到期的库设置写入会在让位后用非递归 mkdir 把 .modelvault 重建为
+ * 只含 settings.json 的空目录，令交换与回滚双双失败。恢复窗口内对目标根
+ * 开启抑制：目标根的待写快照在入队与冲刷两处丢弃（修改保留在内存，恢复
+ * 目标为当前库时随重载对齐恢复结果），其他根的写入不受影响。
+ */
+/** @type {string} 抑制中的目标库根目录（空串=未抑制） */
+let librarySaveSuppressedRoot = ''
+
+/** 目标根是否处于恢复抑制窗口 */
+function isLibrarySaveSuppressed(root) {
+  return (
+    librarySaveSuppressedRoot !== '' &&
+    typeof root === 'string' &&
+    samePathIgnoreCase(root, librarySaveSuppressedRoot)
+  )
+}
+
+/**
+ * 开启/解除指定根的库设置写盘抑制（备份恢复目录交换窗口专用）。
+ * @param {string|null} root 抑制的目标库根目录；null 解除抑制
+ */
+export function suppressLibrarySettingsSave(root) {
+  librarySaveSuppressedRoot = typeof root === 'string' && root ? root : ''
+}
+
+/**
  * 登记一份待落盘的库层快照（root 随条目走，跨库保持先后顺序）。
  * @param {string} root 目标库根目录
  * @param {string} snapshot 已序列化的设置 JSON
  */
 export function queueLibrarySave(root, snapshot) {
+  if (isLibrarySaveSuppressed(root)) return
   pendingLibrarySaves.push({ root, snapshot })
   scheduleSettingsSaveFlush()
 }
@@ -128,6 +157,9 @@ function flushPendingSettingsSaves() {
     // 顺序（Map 插入序，原地更新 snapshot 不改变次序）
     const latestByRoot = new Map()
     for (const save of librarySaves) {
+      // 抑制开启前已排队、冲刷时机落入抑制窗口的残留快照同样丢弃
+      // （防抖到期与抑制开启的竞态；root 随条目走，按目标根判定）
+      if (isLibrarySaveSuppressed(save.root)) continue
       const key = save.root.toLowerCase()
       const prev = latestByRoot.get(key)
       if (prev) prev.snapshot = save.snapshot

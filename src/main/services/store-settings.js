@@ -341,4 +341,5 @@ export {
   flushSettingsSaveBounded,
   setSettingsFlushAwaitTimeoutForTests,
   setSettingsSaveDelayForTests,
+  suppressLibrarySettingsSave,
 } from './store-settings-persist'

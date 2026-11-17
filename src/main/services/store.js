@@ -63,6 +63,7 @@ export {
   flushSettingsSave,
   flushSettingsSaveBounded,
   setSettingsFlushAwaitTimeoutForTests,
+  suppressLibrarySettingsSave,
   isRegisteredLibrary,
 } from './store-settings'
 

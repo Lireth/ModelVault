@@ -18,6 +18,7 @@ import {
 } from '../src/main/services/backup'
 import {
   DATA_DIR,
+  flushSettingsSave,
   getModelMeta,
   loadData,
   setDataRoot,
@@ -25,6 +26,7 @@ import {
   setModelMeta,
   setSettingsFlushAwaitTimeoutForTests,
   setStoreSaveErrorListener,
+  updateSettings,
 } from '../src/main/services/store'
 import { metaState } from '../src/main/services/store-meta-state'
 import {
@@ -896,6 +898,84 @@ describe('importBackup', () => {
     // 清理内存态，避免影响后续用例（setDataRoot 指向已恢复的旧内存数据）
     setDataRoot(null)
     await loadData()
+  })
+
+  it('恢复交换窗口内的库设置防抖写入被抑制，不重建空 .modelvault 破坏交换（#47）', async () => {
+    const target = mkTmp('modelvault-target-')
+    const dataDir = path.join(target, DATA_DIR)
+    fs.mkdirSync(dataDir, { recursive: true })
+    fs.writeFileSync(path.join(dataDir, 'store.json'), 'OLD')
+    // 恢复目标即当前激活根：恢复期间用户改设置会经防抖写链写向该根
+    setDataRoot(target)
+
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+    )
+    dialogMock.showOpenDialog
+      .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
+      .mockResolvedValueOnce({ canceled: false, filePaths: [target] })
+    dialogMock.showMessageBox.mockResolvedValue({ response: 1 })
+
+    // 撑开目录交换窗口：既有数据让位（.modelvault → .bak）后挂起，
+    // 直到测试在窗口内完成设置写入的触发与冲刷再放行
+    const originalRename = fsp.rename.bind(fsp)
+    let releaseSwap = () => {}
+    const swapGate = new Promise((resolve) => {
+      releaseSwap = resolve
+    })
+    let onSwapGap = () => {}
+    const swapGapReached = new Promise((resolve) => {
+      onSwapGap = resolve
+    })
+    const spy = vi.spyOn(fsp, 'rename').mockImplementation(async (from, to) => {
+      if (
+        String(from) === dataDir &&
+        String(to).startsWith(`${dataDir}.bak-`)
+      ) {
+        await originalRename(from, to)
+        onSwapGap()
+        await swapGate
+        return
+      }
+      return originalRename(from, to)
+    })
+
+    try {
+      const pending = importBackup(null)
+      // 恢复提前失败时不悬挂：以先到者进入窗口断言（错误信息随后原样透出）
+      await Promise.race([swapGapReached, pending])
+      // 交换窗口内用户改设置并立即冲刷：此刻 .modelvault 已让位——
+      // 未抑制时防抖写会以非递归 mkdir 重建出只含 settings.json 的空目录，
+      // 令随后的上位与回滚双双失败
+      await updateSettings({ theme: 'dark' })
+      await flushSettingsSave()
+      // 抑制生效：待写被丢弃，让位后的 .modelvault 未被重建
+      expect(fs.existsSync(dataDir)).toBe(false)
+
+      releaseSwap()
+      const res = await pending
+      expect(res.error).toBeUndefined()
+      // 交换正常完成：恢复内容上位，既有数据留存 .bak
+      const store = JSON.parse(
+        fs.readFileSync(path.join(dataDir, 'store.json'), 'utf8'),
+      )
+      expect(store.models['x.safetensors']).toBeDefined()
+      expect(
+        fs.readdirSync(target).filter((n) => n.startsWith(`${DATA_DIR}.bak-`)),
+      ).toHaveLength(1)
+      // 被抑制的修改未落盘：恢复进来的库设置原样生效（恢复结果胜，B-02 同口径）
+      const saved = JSON.parse(
+        fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8'),
+      )
+      expect(saved.theme).toBe('light')
+    } finally {
+      // 异常路径放行防悬挂；恢复 spy 后清理内存态，防迟到写入污染其他用例
+      releaseSwap()
+      spy.mockRestore()
+      await flushSettingsSave().catch(() => {})
+      setDataRoot(null)
+      await loadData()
+    }
   })
 
   it('覆盖确认取消时保留现有数据（设置与库数据均未恢复）', async () => {

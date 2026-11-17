@@ -33,6 +33,7 @@ import {
   setDataRoot,
   setModelMeta,
   setStoreSaveErrorListener,
+  suppressLibrarySettingsSave,
   switchDataRoot,
   updateSettings,
 } from '../src/main/services/store'
@@ -1389,6 +1390,75 @@ describe('库设置并发落盘串行化（A1）', () => {
     expect(onA.theme).toBe('light')
     expect(onA.cardSize).toBe('normal')
     expect(onB.cardSize).toBe('large')
+  })
+
+  it('恢复抑制窗口内丢弃目标根的库设置待写快照，解除后同链路恢复落盘（#47）', async () => {
+    const libDir = path.join(root, '.modelvault')
+    const libSettingsFile = path.join(libDir, 'settings.json')
+    // 清出干净基线：抑制生效的判据是「不产生任何 mkdir/写盘」，
+    // 目录被重建出只含 settings.json 的空壳正是 #47 的故障形态
+    await fs.rm(libDir, { recursive: true, force: true })
+
+    suppressLibrarySettingsSave(root)
+    try {
+      await updateSettings({ theme: 'dark' })
+      await flushSettingsSave()
+
+      // 抑制窗口内零落盘：待写快照在入队时被丢弃（修改仅保留在内存）
+      await expect(fs.access(libSettingsFile)).rejects.toThrow()
+      await expect(fs.access(libDir)).rejects.toThrow()
+    } finally {
+      suppressLibrarySettingsSave(null)
+    }
+
+    // 解除后同一写盘链正常落盘；快照为全量，窗口内驻留内存的 dark 一并写入
+    // （取值须异于当前内存态——变更检测（OPT-4）下相同快照不入队）
+    await updateSettings({ cardSize: 'compact' })
+    await flushSettingsSave()
+    const onDisk = JSON.parse(await fs.readFile(libSettingsFile, 'utf-8'))
+    expect(onDisk.theme).toBe('dark')
+    expect(onDisk.cardSize).toBe('compact')
+  })
+
+  it('抑制开启前已排队、冲刷时机落入抑制窗口的残留快照同样丢弃（#47）', async () => {
+    const libSettingsFile = path.join(root, '.modelvault', 'settings.json')
+    await fs.rm(path.join(root, '.modelvault'), {
+      recursive: true,
+      force: true,
+    })
+
+    // 待写先入队（模拟防抖窗口内的存量），随后恢复开启抑制、防抖到期冲刷
+    await updateSettings({ theme: 'light' })
+    suppressLibrarySettingsSave(root)
+    try {
+      await flushSettingsSave()
+      await expect(fs.access(libSettingsFile)).rejects.toThrow()
+    } finally {
+      suppressLibrarySettingsSave(null)
+    }
+  })
+
+  it('抑制按目标根判定：窗口内其他根的库设置照常落盘（#47）', async () => {
+    const other = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-supp-'))
+    roots.push(other)
+    suppressLibrarySettingsSave(other)
+    try {
+      // 当前根未被抑制：待写照常入队并落盘（取值须异于前序用例遗留的
+      // 内存态——变更检测（OPT-4）下相同快照零落盘）
+      await updateSettings({ theme: 'dark' })
+      await flushSettingsSave()
+      const onDisk = JSON.parse(
+        await fs.readFile(
+          path.join(root, '.modelvault', 'settings.json'),
+          'utf-8',
+        ),
+      )
+      expect(onDisk.theme).toBe('dark')
+      // 被抑制的 other 根零写入（目录未重建）
+      await expect(fs.access(path.join(other, '.modelvault'))).rejects.toThrow()
+    } finally {
+      suppressLibrarySettingsSave(null)
+    }
   })
 
   it('flushSettingsSave 冲刷防抖待写并等待在途库设置写入完成后再返回（B-02）', async () => {
