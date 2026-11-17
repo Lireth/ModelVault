@@ -32,6 +32,7 @@ import {
   splitModelFileName,
 } from '../src/main/ipc/models/files'
 import { registerMiscHandlers } from '../src/main/ipc/models/misc'
+import logger from '../src/main/logger'
 import {
   getRegisteredHandler,
   makeEvent,
@@ -510,6 +511,77 @@ describe('F2 模型导入（复制/移动入台）', () => {
       fs.access(path.join(target, 'b.safetensors')),
     ).resolves.toBeUndefined()
     await expect(fs.access(path.join(target, 'b.txt'))).resolves.toBeUndefined()
+  })
+
+  it('跨卷移动：源删除失败记日志并进 warnings，不静默吞掉（#60）', async () => {
+    const source = await makeSource('mv-left.safetensors')
+    const target = path.join(root, 'checkpoints')
+    await fs.mkdir(target, { recursive: true })
+    mockDialogs([source], target)
+    // link 报 EXDEV 模拟跨卷：move 退化为复制后删除源
+    const linkSpy = vi.spyOn(fs, 'link').mockRejectedValue(
+      Object.assign(new Error('EXDEV: cross-device link not permitted'), {
+        code: 'EXDEV',
+      }),
+    )
+    const origUnlink = fs.unlink.bind(fs)
+    const unlinkSpy = vi.spyOn(fs, 'unlink').mockImplementation((p) => {
+      if (String(p) === source) {
+        return Promise.reject(
+          Object.assign(new Error('EPERM: operation not permitted'), {
+            code: 'EPERM',
+          }),
+        )
+      }
+      return origUnlink(p)
+    })
+    const warnSpy = vi.spyOn(logger, 'warn')
+    try {
+      const res = await handler(makeEvent(), { mode: 'move' })
+
+      expect(res.imported).toBe(1)
+      expect(res.warnings).toHaveLength(1)
+      expect(res.warnings[0]).toContain('mv-left.safetensors')
+      expect(res.warnings[0]).toContain('删除源文件失败')
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(String(warnSpy.mock.calls[0][0])).toContain('删除源文件失败')
+      // 失败可见：源文件仍在（源与目标各留一份），目标内容完整
+      await expect(fs.readFile(source, 'utf-8')).resolves.toBe('model-data')
+      await expect(
+        fs.readFile(path.join(target, 'mv-left.safetensors'), 'utf-8'),
+      ).resolves.toBe('model-data')
+    } finally {
+      linkSpy.mockRestore()
+      unlinkSpy.mockRestore()
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('移动导入：目标在规划后被外部创建时不覆盖且该文件导入失败（#60）', async () => {
+    const source = await makeSource('race.safetensors', 'moved-data')
+    const target = path.join(root, 'checkpoints')
+    await fs.mkdir(target, { recursive: true })
+    mockDialogs([source], target)
+    const dst = path.join(target, 'race.safetensors')
+    const origLink = fs.link.bind(fs)
+    const linkSpy = vi
+      .spyOn(fs, 'link')
+      .mockImplementation(async (src, dest) => {
+        // 模拟 planImportTarget 与搬运之间的事件循环间隙内被外部创建
+        await fs.writeFile(dst, 'external')
+        return origLink(src, dest)
+      })
+    try {
+      const res = await handler(makeEvent(), { mode: 'move' })
+
+      expect(res.imported).toBe(0)
+      expect(res.failed[0].error).toContain('EEXIST')
+      // 外部创建的目标内容不被覆盖，源文件保持原位
+      await expect(fs.readFile(dst, 'utf-8')).resolves.toBe('external')
+      await expect(fs.readFile(source, 'utf-8')).resolves.toBe('moved-data')
+    } finally {
+      linkSpy.mockRestore()
+    }
   })
 
   it('同名冲突自动追加编号，不覆盖库内已有文件', async () => {

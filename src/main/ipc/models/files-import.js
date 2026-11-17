@@ -168,26 +168,59 @@ async function copyFileWithProgress(src, dst, { signal, onProgress } = {}) {
 }
 
 /**
+ * move 收尾：删除源名。失败既不撤销已完成的搬运也不静默——记日志并进
+ * warnings，让用户知道源与目标各留了一份同内容文件（#60）。
+ * @param {string} src 源文件
+ * @param {string[]|undefined} warnings 警告收集数组
+ */
+async function unlinkMovedSource(src, warnings) {
+  try {
+    await fs.unlink(src)
+  } catch (err) {
+    logger.warn(`导入移动后删除源文件失败: ${src} - ${errorMessage(err)}`)
+    warnings?.push(
+      `${path.basename(src)}: 删除源文件失败: ${errorMessage(err)}`,
+    )
+  }
+}
+
+/**
  * 复制/移动单个文件；跨卷移动退化为复制后删除源。
- * 复制走分块流（进度/取消），同卷移动仍是瞬时 rename。
+ * 复制走分块流（进度/取消），同卷移动是 link + unlink 源的「排他 rename」：
+ * 目标已存在必 EEXIST，与复制路径 wx（COPYFILE_EXCL）承诺一致——规划后
+ * 被外部创建的目标绝不覆盖（rename 会静默替换已存在目标，#60）；
+ * link 的 EXDEV（跨卷）与其余不支持硬链接的错误统一退回复制回退。
  * @param {string} src
  * @param {string} dst
  * @param {'copy'|'move'} mode
  * @param {{size: number, signal?: AbortSignal|null,
- *   onProgress?: (bytes: number) => void}} options
+ *   onProgress?: (bytes: number) => void, warnings?: string[]}} options
  */
-async function transferFile(src, dst, mode, { size, signal, onProgress }) {
+async function transferFile(
+  src,
+  dst,
+  mode,
+  { size, signal, onProgress, warnings },
+) {
   if (mode === 'move') {
+    let linked = false
     try {
-      await fs.rename(src, dst)
-      onProgress?.(size)
-      return
+      await fs.link(src, dst)
+      linked = true
     } catch (err) {
-      if (errorCode(err) !== 'EXDEV') throw err
+      if (errorCode(err) === 'EEXIST') throw err
+      // EXDEV（跨卷）与其余错误退回下方复制回退，「不覆盖」承诺全路径一致
     }
+    if (linked) {
+      onProgress?.(size)
+      await unlinkMovedSource(src, warnings)
+      return
+    }
+    await copyFileWithProgress(src, dst, { signal, onProgress })
+    await unlinkMovedSource(src, warnings)
+    return
   }
   await copyFileWithProgress(src, dst, { signal, onProgress })
-  if (mode === 'move') await fs.unlink(src).catch(() => {})
 }
 
 /** 磁盘空间展示（仅用于预检失败文案） */
@@ -419,11 +452,13 @@ async function importOneSource(source, ctx) {
     return failed(errorMessage(err))
   }
   const targetModel = path.join(ctx.targetDir, plan.fileName)
+  const warnings = []
   try {
     await transferFile(source, targetModel, ctx.mode, {
       size: sourceStat.size,
       signal: ctx.signal,
       onProgress: ctx.onBytes,
+      warnings,
     })
   } catch (err) {
     if (errorName(err) === 'AbortError')
@@ -432,7 +467,6 @@ async function importOneSource(source, ctx) {
   }
 
   const renamed = plan.fileName !== sourceName
-  const warnings = []
   // sidecar 同批搬运（失败只告警，不撤销已成功导入的模型）
   const sourceBase = splitModelFileName(sourceName).base
   for (const suffix of IMPORT_SIDECAR_SUFFIXES) {
@@ -456,6 +490,7 @@ async function importOneSource(source, ctx) {
         size: sidecarStat.size,
         signal: ctx.signal,
         onProgress: ctx.onBytes,
+        warnings,
       })
     } catch (err) {
       if (errorName(err) === 'AbortError') {
