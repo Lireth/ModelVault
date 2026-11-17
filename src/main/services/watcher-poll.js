@@ -286,7 +286,7 @@ async function collectRoundSnapshot(w, { wantStats, isFullRound, hotRels }) {
  * 基线，全部目录记为本轮已校验。
  * @param {WatcherState} w 监控状态
  * @param {number} revisionAtStart 轮次开始时的快照修订号
- * @returns {Promise<void>}
+ * @returns {Promise<boolean>} 是否写入基线（false = 判陈旧丢弃，未写入）
  */
 async function rebuildStatBaseline(w, revisionAtStart) {
   const snapshot = await collectDirSnapshot(w.root, w.excludeNames, {
@@ -295,7 +295,7 @@ async function rebuildStatBaseline(w, revisionAtStart) {
   })
   if (isWalkStale(w, revisionAtStart)) {
     w.idleRounds = 0
-    return
+    return false
   }
   w.statSnapshot = /** @type {Map<string, SnapshotEntry[]>} */ (snapshot)
   w.snapshot = namesFromSnapshot(snapshot)
@@ -305,6 +305,7 @@ async function rebuildStatBaseline(w, revisionAtStart) {
   w.snapshotRevision += 1
   w.idleRounds += 1
   w.lastHotDirs = []
+  return true
 }
 
 /**
@@ -407,9 +408,12 @@ async function applyContentCheckResult(w, nameSnapshot, selected) {
  * @returns {Promise<void>}
  */
 async function runContentCheck(w, revisionAtStart) {
-  w.lastContentCheckAt = Date.now()
   if (!w.statSnapshot) {
-    await rebuildStatBaseline(w, revisionAtStart)
+    // 基线重建成功才算一次内容校验（#71：重建被判陈旧丢弃时未写入任何
+    // 基线，不推进 lastContentCheckAt，下一轮立即重试而非白扣一个周期）
+    if (await rebuildStatBaseline(w, revisionAtStart)) {
+      w.lastContentCheckAt = Date.now()
+    }
     return
   }
   const nameSnapshot = /** @type {Map<string, string[]>} */ (
@@ -421,6 +425,10 @@ async function runContentCheck(w, revisionAtStart) {
     w.idleRounds = 0
     return
   }
+  // #71：陈旧校验通过后才推进 lastContentCheckAt——被判陈旧丢弃的轮次
+  // 未写入基线，提前推进会让 walkOnce 的 wantStats 把下一次内容校验推后
+  // 整个 contentCheckInterval（口径同 runBaselineWalk：写入成功才记录）
+  w.lastContentCheckAt = Date.now()
   const selected = selectContentCheckDirs(w, nameSnapshot)
   const changedDirs = await applyContentCheckResult(w, nameSnapshot, selected)
   if (changedDirs.length === 0) {
