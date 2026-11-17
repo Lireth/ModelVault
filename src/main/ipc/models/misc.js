@@ -12,7 +12,7 @@ import {
   checkLibraryHealth,
   repairLibraryHealth,
 } from '../../services/library-health'
-import { sidecarFilesFor } from '../../services/scanner'
+import { sidecarFilesFor, statSidecarSet } from '../../services/scanner'
 import {
   cancelActiveOp,
   withMaintenanceLock,
@@ -88,8 +88,16 @@ export function registerMiscHandlers() {
           logger.warn(`模型删除失败: ${errorMessage(err)}`)
           return { error: `删除失败: ${errorMessage(err)}` }
         }
-        // 同步移除同名的 sidecar 预览图/说明文件（失败不阻塞）
-        for (const f of sidecarFilesFor(id)) {
+        // 同步移除同名的 sidecar 预览图/说明文件（失败不阻塞）：先经
+        // statSidecarSet 并行 stat 剪枝，仅对实际存在的候选发起回收站调用
+        // ——无 sidecar 的普通模型 9 个候选必然不存在，逐个 trashItem
+        // 徒增 Shell COM 调用，并刷出误导性的「清理失败」warn
+        const { files: sidecarCandidates, stats: sidecarStats } =
+          await statSidecarSet(id)
+        for (let i = 0; i < sidecarCandidates.length; i++) {
+          // files 与 stats 由 statSidecarSet 同序等长构造，命中项必有对应文件名
+          const f = /** @type {string} */ (sidecarCandidates[i])
+          if (!sidecarStats[i]) continue
           await shell.trashItem(f).catch((err) => {
             // 回收失败（权限/被占用）不应无声无息：标注/物理文件状态可能不一致
             logger.warn(`sidecar 清理失败（不影响删除）: ${f} ${err.message}`)
