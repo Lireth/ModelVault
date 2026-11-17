@@ -72,7 +72,7 @@ function viewMatchesCurrent(v) {
     // 旧视图缺省基底/标签筛选时按 ''/[] 参与（F-2/F-5/FEAT-01）
     (v.baseFilter || '') === state.baseFilter &&
     sameTagFilters(viewTagFilters(v), state.tagFilters) &&
-    v.showFavoritesOnly === state.showFavoritesOnly &&
+    (v.showFavoritesOnly === true) === state.showFavoritesOnly &&
     // 旧视图缺省该字段时按 false 参与（=== true 与 undefined 比较）
     (v.showDuplicatesOnly === true) === state.showDuplicatesOnly &&
     (v.showSuspectOnly === true) === state.showSuspectOnly &&
@@ -160,7 +160,7 @@ export async function applySavedView(id) {
   const v = savedViews.value.find((x) => x.id === id)
   if (!v) return
   state.search = v.search
-  state.showFavoritesOnly = v.showFavoritesOnly
+  state.showFavoritesOnly = v.showFavoritesOnly === true
   // 旧视图缺省该字段时回退 false（=== true 规避 undefined）
   state.showDuplicatesOnly = v.showDuplicatesOnly === true
   state.showSuspectOnly = v.showSuspectOnly === true

@@ -214,6 +214,23 @@ describe('智能视图：活动命中与删除', () => {
     expect(activeSavedViewId.value).toBe('')
   })
 
+  it('旧视图缺省 showFavoritesOnly 时按 false 命中，应用回写布尔值', async () => {
+    const legacy = seedView()
+    delete legacy.showFavoritesOnly
+    state.typeFilter = 'lora'
+
+    // 缺省字段（undefined）与 state 的 false 归一后命中高亮
+    expect(activeSavedViewId.value).toBe('v1')
+
+    // 应用后字段回写布尔值而非 undefined
+    await applySavedView('v1')
+    expect(state.showFavoritesOnly).toBe(false)
+
+    // state 为 true 时缺省字段不命中
+    state.showFavoritesOnly = true
+    expect(activeSavedViewId.value).toBe('')
+  })
+
   it('删除视图先确认（P0-8），接受后持久化剩余列表', async () => {
     seedView()
     const p = deleteSavedView('v1')
