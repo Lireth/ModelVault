@@ -321,6 +321,26 @@ describe('批量操作单次状态合并（O2）', () => {
     ).toBe(true)
   })
 
+  it('一键移动文件：sidecar 未迁移时计数进入提示并以 warn 呈现', async () => {
+    state.models = [makeModel('a', { type: 'lora', subCategory: 'role' })]
+    state.multiSelect.ids = ['a']
+    state.scanning = true
+    api.models.organizeByTags.mockResolvedValue({
+      moved: 1,
+      failed: [],
+      skipped: [],
+      sidecarWarnings: ['a.txt 的目标已存在，已跳过'],
+    })
+    const p = batchOrganizeByTags()
+    acceptConfirm()
+    await p
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'warn' && t.text.includes('sidecar 未迁移 1 个'),
+      ),
+    ).toBe(true)
+  })
+
   it('一键移动文件：选中模型均非 LoRA 时提示且不发起 IPC', async () => {
     state.models = [makeModel('a', { type: 'checkpoint', subCategory: '' })]
     state.multiSelect.ids = ['a']

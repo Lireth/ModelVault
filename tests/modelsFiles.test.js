@@ -202,6 +202,61 @@ describe('models:organizeByTags handler', () => {
       fs.readFile(path.join(root, 'LoRA', '风格', 'b.preview.png'), 'utf-8'),
     ).resolves.toBe('png')
     await expect(fs.access(newPath)).resolves.toBeUndefined()
+    expect(res.sidecarWarnings).toEqual([])
+  })
+
+  it('目标同名 sidecar 跳过不覆盖并回传警告', async () => {
+    const id = await makeModel('c.safetensors', 'style')
+    await fs.writeFile(path.join(root, 'c.txt'), '新说明')
+    await fs.mkdir(path.join(root, 'LoRA', '风格'), { recursive: true })
+    await fs.writeFile(path.join(root, 'LoRA', '风格', 'c.txt'), '旧说明')
+
+    const res = await handler(makeEvent(), {
+      moves: [{ id, subCategory: 'style' }],
+    })
+    expect(res.error).toBeUndefined()
+    expect(res.moved).toBe(1)
+    expect(res.sidecarWarnings).toEqual(['c.txt 的目标已存在，已跳过'])
+    // 目标同名 sidecar 内容不被覆盖，源 sidecar 保留
+    await expect(
+      fs.readFile(path.join(root, 'LoRA', '风格', 'c.txt'), 'utf-8'),
+    ).resolves.toBe('旧说明')
+    await expect(fs.readFile(path.join(root, 'c.txt'), 'utf-8')).resolves.toBe(
+      '新说明',
+    )
+  })
+
+  it('sidecar 移动失败回传警告而非静默吞掉', async () => {
+    const id = await makeModel('d.safetensors', 'concept')
+    await fs.writeFile(path.join(root, 'd.txt'), '说明文本')
+    const origRename = fs.rename.bind(fs)
+    const renameSpy = vi
+      .spyOn(fs, 'rename')
+      .mockImplementation((src, dest, opts) => {
+        if (String(src).endsWith('.txt')) {
+          return Promise.reject(
+            Object.assign(new Error('EPERM: operation not permitted'), {
+              code: 'EPERM',
+            }),
+          )
+        }
+        return origRename(src, dest, opts)
+      })
+    try {
+      const res = await handler(makeEvent(), {
+        moves: [{ id, subCategory: 'concept' }],
+      })
+      expect(res.error).toBeUndefined()
+      expect(res.moved).toBe(1)
+      expect(res.sidecarWarnings).toHaveLength(1)
+      expect(res.sidecarWarnings[0]).toContain('d.txt')
+      // 失败可见：源 sidecar 未被移动
+      await expect(
+        fs.readFile(path.join(root, 'd.txt'), 'utf-8'),
+      ).resolves.toBe('说明文本')
+    } finally {
+      renameSpy.mockRestore()
+    }
   })
 
   it('目标位置同名冲突计入 failed，其余模型不受影响', async () => {
@@ -917,6 +972,105 @@ describe('破坏性文件操作的 realpath 归属（O6）', () => {
     })
     expect(res2.path).toBe(source2)
     expect(res2.targetRelDir).toBe('')
+  })
+
+  it('库内移动：目标为 .modelvault 关联存储目录及其子目录时拒绝', async () => {
+    const source = path.join(root, 'mv.safetensors')
+    await fs.writeFile(source, 'model-data')
+    const storeDir = path.join(root, '.modelvault')
+    await fs.mkdir(storeDir, { recursive: true })
+    vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+      canceled: false,
+      filePaths: [storeDir],
+    })
+
+    const res = await getRegisteredHandler('models:moveModelTo')(makeEvent(), {
+      id: source,
+    })
+    expect(res.error).toBe('不能移动到关联存储目录')
+    await expect(fs.readFile(source, 'utf-8')).resolves.toBe('model-data')
+
+    // 子目录（如 covers）同样拒绝
+    const covers = path.join(storeDir, 'covers')
+    await fs.mkdir(covers, { recursive: true })
+    vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+      canceled: false,
+      filePaths: [covers],
+    })
+    const res2 = await getRegisteredHandler('models:moveModelTo')(makeEvent(), {
+      id: source,
+    })
+    expect(res2.error).toBe('不能移动到关联存储目录')
+    await expect(fs.readFile(source, 'utf-8')).resolves.toBe('model-data')
+  })
+
+  it('库内移动：目标同名 sidecar 跳过不覆盖并回传警告', async () => {
+    const source = path.join(root, 'mv.safetensors')
+    await fs.writeFile(source, 'model-data')
+    await fs.writeFile(path.join(root, 'mv.txt'), '新说明')
+    const sub = path.join(root, 'sub')
+    await fs.mkdir(sub, { recursive: true })
+    await fs.writeFile(path.join(sub, 'mv.txt'), '旧说明')
+    vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+      canceled: false,
+      filePaths: [sub],
+    })
+
+    const res = await getRegisteredHandler('models:moveModelTo')(makeEvent(), {
+      id: source,
+    })
+
+    expect(res.error).toBeUndefined()
+    expect(res.path).toBe(path.join(sub, 'mv.safetensors'))
+    expect(res.sidecarWarnings).toEqual(['mv.txt 的目标已存在，已跳过'])
+    await expect(fs.readFile(path.join(sub, 'mv.txt'), 'utf-8')).resolves.toBe(
+      '旧说明',
+    )
+    await expect(fs.readFile(path.join(root, 'mv.txt'), 'utf-8')).resolves.toBe(
+      '新说明',
+    )
+  })
+
+  it('库内移动：sidecar 移动失败回传警告而非静默吞掉', async () => {
+    const source = path.join(root, 'mv2.safetensors')
+    await fs.writeFile(source, 'model-data')
+    await fs.writeFile(path.join(root, 'mv2.txt'), '说明文本')
+    const sub = path.join(root, 'sub2')
+    await fs.mkdir(sub, { recursive: true })
+    vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+      canceled: false,
+      filePaths: [sub],
+    })
+    const origRename = fs.rename.bind(fs)
+    const renameSpy = vi
+      .spyOn(fs, 'rename')
+      .mockImplementation((src, dest, opts) => {
+        if (String(src).endsWith('.txt')) {
+          return Promise.reject(
+            Object.assign(new Error('EPERM: operation not permitted'), {
+              code: 'EPERM',
+            }),
+          )
+        }
+        return origRename(src, dest, opts)
+      })
+    try {
+      const res = await getRegisteredHandler('models:moveModelTo')(
+        makeEvent(),
+        { id: source },
+      )
+      expect(res.error).toBeUndefined()
+      expect(res.sidecarWarnings).toHaveLength(1)
+      expect(res.sidecarWarnings[0]).toContain('mv2.txt')
+      await expect(
+        fs.readFile(path.join(root, 'mv2.txt'), 'utf-8'),
+      ).resolves.toBe('说明文本')
+      await expect(
+        fs.readFile(path.join(sub, 'mv2.safetensors'), 'utf-8'),
+      ).resolves.toBe('model-data')
+    } finally {
+      renameSpy.mockRestore()
+    }
   })
 
   it('一键整理：源模型通过库内 junction 指向库外时跳过', async (ctx) => {
