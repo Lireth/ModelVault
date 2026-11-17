@@ -1650,6 +1650,103 @@ describe('OPT-9 渐进内容校验（冷区轮转 + 热区即时）', () => {
   }, 15_000) // 两次检出等待 + 基准轮等待在 CI 慢盘高负载下可超过默认 5s
 })
 
+describe('#71 内容校验轮被判陈旧丢弃后不推进 lastContentCheckAt', () => {
+  /** 激活采集门控：collectDirSnapshot 挂起直至 release，started 标记已进入采集 */
+  function armSnapshotGate() {
+    const gate = {
+      started: false,
+      blocked: null,
+      release: () => {},
+      markStarted: () => {},
+    }
+    gate.blocked = new Promise((resolve) => {
+      gate.release = resolve
+    })
+    gate.markStarted = () => {
+      gate.started = true
+    }
+    refreshGate.current = gate
+    return gate
+  }
+
+  /** 启动监控并等基准内容基线建立（轮次随后由测试手动驱动） */
+  async function setupWatcher() {
+    await fs.mkdir(path.join(root, 'lora'), { recursive: true })
+    await fs.writeFile(path.join(root, 'lora', 'a.safetensors'), 'x')
+    syncWatcher(root, true, [], {
+      pollInterval: 10_000_000,
+      broadcastDebounce: 10,
+      contentCheckInterval: 30,
+      isVisible: () => true,
+      onPollScheduled: () => {},
+    })
+    const w = getWatcher()
+    await waitFor(
+      () => w.statSnapshot && w.snapshotRevision > 0,
+      '基准基线建立',
+    )
+    return w
+  }
+
+  it('内容校验轮采集期间进入扫描期被丢弃：lastContentCheckAt 不推进，下一轮立即重试', async () => {
+    const w = await setupWatcher()
+    const revisionAtBaseline = w.snapshotRevision
+    // 强制下一轮为内容校验轮（wantStats 判据只看 lastContentCheckAt）
+    w.lastContentCheckAt = 0
+
+    // 门控把 setWatcherScanning(true) 精确插入名称快照采集窗口内
+    const gate = armSnapshotGate()
+    runWalk(w, false)
+    await waitFor(() => gate.started, '内容校验轮名称快照未开始', 3000)
+    // 修复后：采集进行中尚未推进 lastContentCheckAt（旧实现在轮首已推进）
+    expect(w.lastContentCheckAt).toBe(0)
+    setWatcherScanning(true)
+    gate.release()
+    refreshGate.current = null
+    await waitFor(() => !w.polling, '巡检轮结束')
+
+    // 陈旧丢弃：本轮未写入任何基线，lastContentCheckAt 保持原值不白扣周期
+    expect(w.lastContentCheckAt).toBe(0)
+    expect(w.statSnapshot).not.toBeNull()
+    expect(w.snapshotRevision).toBe(revisionAtBaseline)
+    setWatcherScanning(false)
+
+    // 下一轮立即再次成为内容校验轮并正常完成（不再等待整个间隔）
+    await runWalk(w, false)
+    await waitFor(() => !w.polling, '重试轮结束')
+    expect(w.lastContentCheckAt).toBeGreaterThan(0)
+  })
+
+  it('内容基线缺失的重建轮被判陈旧丢弃：lastContentCheckAt 不推进，下一轮立即重试', async () => {
+    const w = await setupWatcher()
+    // 局部扫描基线置空内容快照（生产路径），强制下一轮走重建分支
+    expect(applyPartialBaseline(w, ['lora'], new Map(), [])).toBe(true)
+    expect(w.statSnapshot).toBeNull()
+    w.lastContentCheckAt = 0
+    const revisionAfterPartial = w.snapshotRevision
+
+    const gate = armSnapshotGate()
+    runWalk(w, false)
+    await waitFor(() => gate.started, '重建轮采集未开始', 3000)
+    expect(w.lastContentCheckAt).toBe(0)
+    setWatcherScanning(true)
+    gate.release()
+    refreshGate.current = null
+    await waitFor(() => !w.polling, '巡检轮结束')
+
+    expect(w.lastContentCheckAt).toBe(0)
+    expect(w.statSnapshot).toBeNull()
+    expect(w.snapshotRevision).toBe(revisionAfterPartial)
+    setWatcherScanning(false)
+
+    // 下一轮立即重试重建：基线写回且 lastContentCheckAt 随写入推进
+    await runWalk(w, false)
+    await waitFor(() => !w.polling, '重试轮结束')
+    expect(w.statSnapshot).not.toBeNull()
+    expect(w.lastContentCheckAt).toBeGreaterThan(0)
+  })
+})
+
 describe('OPT-10 原生事件 filename 缺失降级', () => {
   it('unlocated 事件降级为仅名称回填：零 stat 且内容基线置空', async () => {
     await fs.writeFile(path.join(root, 'seed.png'), 'seed')
