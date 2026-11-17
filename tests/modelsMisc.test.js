@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { shell } from 'electron'
 import { fakeUserData } from './setup'
+import logger from '../src/main/logger'
 import { getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
 
 /**
@@ -89,6 +90,45 @@ describe('models:deleteModel', () => {
     expect(trashed).toContain(preview)
     expect(trashed).toContain(jpg)
     expect(getModelMeta(abs)).toBeNull()
+  })
+
+  it('无 sidecar 的模型不再对不存在的候选发起回收站调用（#45 剪枝）', async () => {
+    const abs = path.join(root, 'bare.safetensors')
+    await fs.writeFile(abs, 'x')
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    try {
+      const handler = getRegisteredHandler('models:deleteModel')
+      expect(await handler(makeEvent(), { id: abs })).toEqual({ ok: true })
+      // 9 个 sidecar 候选均不存在：剪枝后仅对模型本身发起一次回收站调用，
+      // 且不再刷出「sidecar 清理失败（不影响删除）」误导告警
+      expect(vi.mocked(shell.trashItem)).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(shell.trashItem)).toHaveBeenCalledWith(abs)
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('实际存在的 sidecar 回收失败仍告警一次且不阻塞删除', async () => {
+    const abs = path.join(root, 'busy-sidecar.safetensors')
+    await fs.writeFile(abs, 'x')
+    const txt = path.join(root, 'busy-sidecar.txt')
+    await fs.writeFile(txt, 'trigger words')
+    setModelMeta(abs, { alias: '占用' })
+    vi.mocked(shell.trashItem).mockImplementation(async (p) => {
+      if (p === txt) throw new Error('文件被占用')
+    })
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    try {
+      const handler = getRegisteredHandler('models:deleteModel')
+      expect(await handler(makeEvent(), { id: abs })).toEqual({ ok: true })
+      // 存在的候选回收失败必须留痕（权限/占用类真实故障），不存在的候选不告警
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(txt))
+      expect(getModelMeta(abs)).toBeNull()
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 
   it('删除后从本地索引移除（O8，经合并队列落定）', async () => {
