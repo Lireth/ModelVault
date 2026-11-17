@@ -438,6 +438,30 @@ export function parseHeaderBuffer(headerBuf) {
 }
 
 /**
+ * 循环读取直至填满缓冲或抵达文件末尾：POSIX/网络文件系统（SMB/OneDrive
+ * 占位文件）单次 read 不保证读满请求字节，2-16MB 大头部尤其易短读；
+ * 逐次续读直到填满，中途读到 0 字节（EOF）视为文件截断。
+ * @param {import('node:fs/promises').FileHandle} handle 文件句柄
+ * @param {Buffer} buffer 目标缓冲
+ * @param {number} position 起始读取位置
+ * @returns {Promise<boolean>} 缓冲填满返回 true；提前遇 EOF 返回 false
+ */
+async function readFull(handle, buffer, position) {
+  let offset = 0
+  while (offset < buffer.length) {
+    const { bytesRead } = await handle.read(
+      buffer,
+      offset,
+      buffer.length - offset,
+      position + offset,
+    )
+    if (bytesRead === 0) return false
+    offset += bytesRead
+  }
+  return true
+}
+
+/**
  * 读取并解析 safetensors 文件的头部元信息。
  * 张量表带有效 data_offsets 时附带 expectedMinBytes（8 字节长度区 +
  * headerLen + 数据区末尾 = 文件最小合法体积，OPT-02）：调用方与实际
@@ -461,8 +485,7 @@ export async function readSafetensorsInfo(absPath) {
     // 避免 64 路并发装饰的瞬时内存尖峰
     return await runWithHeaderGate(headerLen, async () => {
       const headerBuf = Buffer.alloc(headerLen)
-      const second = await handle.read(headerBuf, 0, headerLen, 8)
-      if (second.bytesRead < headerLen) return null
+      if (!(await readFull(handle, headerBuf, 8))) return null
       // parseHeaderBuffer 的返回类型声明为宽泛 object（info 字段 + tensorStats），
       // 此处按结构访问须收窄类型供 checkJs 校验
       const parsed =
@@ -506,8 +529,7 @@ export async function checkSafetensorsHealthy(absPath) {
     // B3：与 readSafetensorsInfo 同一闸门（损坏大文件的补检同样持有整段头）
     return await runWithHeaderGate(headerLen, async () => {
       const headerBuf = Buffer.alloc(headerLen)
-      const second = await handle.read(headerBuf, 0, headerLen, 8)
-      if (second.bytesRead < headerLen) return false
+      if (!(await readFull(handle, headerBuf, 8))) return false
       JSON.parse(headerBuf.toString('utf8'))
       return true
     })
