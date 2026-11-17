@@ -313,6 +313,49 @@ describe('downloadUpdatePackage（校验和阶段）', () => {
     expect(r.error).toContain('校验和下载超时')
   })
 
+  it('校验和阶段取消：立即中止校验和请求并返回 canceled（#65）', async () => {
+    armPending()
+    routeFetches({
+      checksum: (_url, options) =>
+        new Promise((_, rej) => {
+          options.signal.addEventListener('abort', () =>
+            rej(new DOMException('已终止', 'AbortError')),
+          )
+        }),
+    })
+    const p = downloadUpdatePackage()
+    await vi.waitFor(() => expect(net.fetch).toHaveBeenCalledTimes(1))
+    expect(cancelUpdateDownload()).toEqual({ ok: true })
+    expect(await p).toEqual({ canceled: true })
+    // 取消时下载阶段尚未开始：全程仅校验和一次请求
+    expect(net.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('校验和瞬时错误重试等待期取消：重试请求立即中止并返回 canceled（#65）', async () => {
+    armPending()
+    let calls = 0
+    routeFetches({
+      checksum: (_url, options) => {
+        calls += 1
+        if (calls === 1) {
+          throw Object.assign(new Error('connect ECONNRESET'), {
+            code: 'ECONNRESET',
+          })
+        }
+        // 真实 fetch 对已中止信号立即拒绝（重试工厂按次重建信号）
+        if (options.signal.aborted) {
+          throw new DOMException('已终止', 'AbortError')
+        }
+        return checksumRes('x')
+      },
+    })
+    const p = downloadUpdatePackage()
+    await vi.waitFor(() => expect(calls).toBe(1))
+    expect(cancelUpdateDownload()).toEqual({ ok: true })
+    expect(await p).toEqual({ canceled: true })
+    expect(calls).toBe(2)
+  })
+
   it('校验和内容无合法 64 位 hex：格式异常', async () => {
     armPending()
     routeFetches({ checksum: checksumRes('deadbeef  short') })

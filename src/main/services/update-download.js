@@ -252,8 +252,13 @@ export async function downloadUpdatePackage(onProgress) {
     // 重定向逐跳校验 + 文本大小上限（V-06）
     let expected
     try {
+      // 校验和请求并入下载取消控制器（AbortSignal.any）：用户在校验和阶段
+      // 取消可立即中止请求（含瞬时错误重试），不必等超时自然走完
       const res = await fetchUpdateUrlReliably(checksumUrl, () => ({
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.any([
+          controller.signal,
+          AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        ]),
       }))
       if (!res.ok) {
         cancelResponseBody(res)
@@ -263,6 +268,9 @@ export async function downloadUpdatePackage(onProgress) {
         await readResponseTextLimited(res, MAX_CHECKSUM_BYTES, '校验和文件'),
       )
     } catch (err) {
+      // 取消优先于超时文案：AbortError 也可能来自超时信号（环境差异），
+      // 以控制器是否已被 abort 区分用户取消与请求超时
+      if (controller.signal.aborted) return { canceled: true }
       if (
         err instanceof Error &&
         (err.name === 'TimeoutError' || err.name === 'AbortError')
