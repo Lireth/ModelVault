@@ -51,17 +51,14 @@ function isRootMissing(f) {
             :class="{ 'root-dot-offline': isRootMissing(f) }"
           ></span>
           <span class="root-name">{{ rootName(f) }}</span>
-          <span
-            class="root-remove"
-            role="button"
-            tabindex="0"
-            title="从模型库列表移除（磁盘数据不受影响）"
-            :aria-label="`将模型库 ${rootName(f)} 从列表移除`"
-            @click.stop="removeRoot(f)"
-            @keydown.enter.stop.prevent="removeRoot(f)"
-            @keydown.space.stop.prevent="removeRoot(f)"
-            >✕</span
-          >
+        </button>
+        <button
+          class="root-remove"
+          title="从模型库列表移除（磁盘数据不受影响）"
+          :aria-label="`将模型库 ${rootName(f)} 从列表移除`"
+          @click="removeRoot(f)"
+        >
+          ✕
         </button>
       </li>
     </ul>
@@ -76,8 +73,17 @@ function isRootMissing(f) {
   gap: 2px;
 }
 
+/* 条目行：切换按钮 + 移除按钮并列（移除不得嵌套于 button 内——非法
+   HTML 交互嵌套且后代 Tab 聚焦行为不可靠），hover 提升到 li 级保持整行联动 */
+.root-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .root-item {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -91,7 +97,7 @@ function isRootMissing(f) {
   text-align: left;
 }
 
-.root-item:hover {
+.root-list li:hover .root-item {
   background: var(--bg-hover);
 }
 
@@ -103,7 +109,7 @@ function isRootMissing(f) {
   flex-shrink: 0;
 }
 
-.root-item:hover .root-dot {
+.root-list li:hover .root-dot {
   border-color: var(--accent);
 }
 
@@ -114,7 +120,7 @@ function isRootMissing(f) {
 }
 
 .root-item .root-dot.root-dot-offline,
-.root-item:hover .root-dot.root-dot-offline {
+.root-list li:hover .root-dot.root-dot-offline {
   border-color: var(--favorite);
   background: color-mix(in srgb, var(--favorite) 40%, transparent);
 }
@@ -133,19 +139,22 @@ function isRootMissing(f) {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   font-size: 10px;
   cursor: pointer;
-  /* 键盘可达（OPT-2）：以透明度替代 display:none——后者会移出 Tab 序列；
-     隐藏态同时屏蔽指针事件，保持既有点击语义（隐藏时点击该区域仍作用于
-     父级「切换模型库」按钮）；悬停或键盘聚焦（:focus-visible）时显现并可交互 */
+  /* 键盘可达（OPT-2）：原生 button 自带 Tab 序列与 Enter/Space 激活；
+     以透明度替代 display:none——后者会移出 Tab 序列；隐藏态同时屏蔽指针
+     事件防误删，悬停或键盘聚焦（:focus-visible）时显现并可交互 */
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--dur-fast) var(--ease-out);
 }
 
-.root-item:hover .root-remove,
+.root-list li:hover .root-remove,
 .root-remove:focus-visible {
   opacity: 1;
   pointer-events: auto;
