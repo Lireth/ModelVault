@@ -187,6 +187,30 @@ describe('延迟生成队列（扫描装饰阶段专用）', () => {
     expect(kept).toHaveLength(1)
     expect(kept[0].absCover).toBe(source)
   })
+
+  it('drain 进行中切库：剩余任务跳过，不写新根 thumbs、不推送回调（#44）', async () => {
+    const sourceB = path.join(root, 'cover-b.png')
+    await fs.writeFile(sourceB, Buffer.from('png-bytes-b'))
+    // 渲染桩在首次渲染期间切换模型根：模拟 drain 在途时用户切库——
+    // 快照数组已取出，clearDeferredJobs 清不掉，worker 不得按当前根落盘
+    vi.mocked(renderThumbFromPath).mockImplementation(async () => {
+      setDataRoot(path.join(root, 'switched'))
+      return { jpeg: Buffer.from('fake-jpeg') }
+    })
+    expect(await getThumbPathDeferred(source)).toBe('')
+    expect(await getThumbPathDeferred(sourceB)).toBe('')
+    const generated = []
+    await drainDeferredThumbs(
+      (absCover, thumbPath) => generated.push({ absCover, thumbPath }),
+      1,
+    )
+    // 渲染等待期间已切库：本轮生成结果作废，不写跨根缓存、不经 onGenerated 推送
+    expect(generated).toHaveLength(0)
+    // 切库后剩余任务整体跳过：仅首个任务已进入渲染
+    expect(renderThumbFromPath).toHaveBeenCalledTimes(1)
+    // 新根目录树零写入（修复前旧根封面缩略图会落进新根 .modelvault/thumbs/）
+    await expect(fs.access(path.join(root, 'switched'))).rejects.toThrow()
+  })
 })
 
 describe('命中结果 TTL 缓存（PERF-5）', () => {
