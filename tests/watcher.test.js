@@ -356,6 +356,97 @@ describe('collectDirSnapshot / snapshotsEqual', () => {
     expect(snapshot.has(depth8)).toBe(true)
     expect(snapshot.has(depth9)).toBe(false)
   })
+
+  it('#41 Windows junction 不进快照也不递归（与扫描侧同口径）', async (ctx) => {
+    const outside = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-junction-out-'),
+    )
+    roots.push(outside)
+    await fs.writeFile(path.join(outside, 'outer.safetensors'), 'x')
+    await fs.mkdir(path.join(root, 'real'))
+    await fs.writeFile(path.join(root, 'real', 'inner.safetensors'), 'x')
+    try {
+      await fs.symlink(outside, path.join(root, 'link'), 'junction')
+      // junction 环：loop -> 监控根自身
+      await fs.symlink(root, path.join(root, 'loop'), 'junction')
+    } catch {
+      ctx.skip()
+    }
+
+    const snapshot = await collectDirSnapshot(root, new Set())
+
+    // junction 名不进根条目清单，目标子树无快照键（未递归）
+    expect(snapshot.get(root)).not.toContain('link')
+    expect(snapshot.get(root)).not.toContain('loop')
+    expect(snapshot.has(path.join(root, 'link'))).toBe(false)
+    expect(snapshot.has(path.join(root, 'loop'))).toBe(false)
+    // 普通子目录照常递归
+    expect(snapshot.has(path.join(root, 'real'))).toBe(true)
+    expect(snapshot.get(path.join(root, 'real'))).toContain('inner.safetensors')
+
+    // 内容快照同口径：junction 既不作为目录条目登记，也不入队
+    const statSnapshot = await collectDirSnapshot(root, new Set(), {
+      withStats: true,
+    })
+    expect(statSnapshot.get(root).map((e) => e.name)).not.toContain('link')
+    expect(statSnapshot.get(root).map((e) => e.name)).not.toContain('loop')
+    expect(statSnapshot.has(path.join(root, 'link'))).toBe(false)
+  })
+
+  it('readdir 把链接报告为普通目录时同样不进快照（lstat 复核，#41）', async (ctx) => {
+    const outside = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-junction-out-'),
+    )
+    roots.push(outside)
+    await fs.writeFile(path.join(outside, 'outer.safetensors'), 'x')
+    await fs.writeFile(path.join(root, 'a.safetensors'), 'x')
+    const link = path.join(root, 'link')
+    try {
+      if (process.platform === 'win32') {
+        await fs.symlink(outside, link, 'junction')
+      } else {
+        await fs.symlink(outside, link, 'dir')
+      }
+    } catch {
+      ctx.skip()
+    }
+
+    // 模拟 issue 前提（部分 libuv/文件系统组合）：Dirent 把 junction 报告
+    // 为普通目录（isDirectory=true、isSymbolicLink=false）
+    const originalReaddir = fs.readdir
+    const spy = vi.spyOn(fs, 'readdir').mockImplementation(async (p, opts) => {
+      const entries = await originalReaddir.call(fs, p, opts)
+      return entries.map((e) =>
+        e.name === 'link'
+          ? {
+              name: 'link',
+              isDirectory: () => true,
+              isFile: () => false,
+              isSymbolicLink: () => false,
+            }
+          : {
+              name: e.name,
+              isDirectory: () => e.isDirectory(),
+              isFile: () => e.isFile(),
+              isSymbolicLink: () => e.isSymbolicLink(),
+            },
+      )
+    })
+    try {
+      const snapshot = await collectDirSnapshot(root, new Set())
+      // lstat 复核兜底：junction 名不进快照，目标子树不被遍历
+      expect(snapshot.get(root)).not.toContain('link')
+      expect(
+        [...snapshot.keys()].some((dir) =>
+          dir.toLowerCase().startsWith(link.toLowerCase()),
+        ),
+      ).toBe(false)
+      // 普通条目不受影响
+      expect(snapshot.get(root)).toContain('a.safetensors')
+    } finally {
+      spy.mockRestore()
+    }
+  })
 })
 
 describe('computeSnapshotDiff（A-03 增量扫描的变更子树定位）', () => {

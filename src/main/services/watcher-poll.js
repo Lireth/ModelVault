@@ -1,7 +1,7 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import logger from '../logger'
-import { relativeWithin } from '../utils'
+import { isLinkLikePath, relativeWithin } from '../utils'
 import { dedupeAndPruneDescendants } from '../../shared/scan-dirs'
 import { isVisibleScanEntry } from './scanner'
 import { removeSnapshotSubtree } from './watcher-baseline'
@@ -141,13 +141,22 @@ function handleWalkError(w, err) {
 async function collectHotSnapshot(w, hotRels) {
   const partial = new Map()
   const entries = await fs.readdir(w.root, { withFileTypes: true })
-  partial.set(
-    w.root,
-    entries
-      .filter((entry) => isVisibleScanEntry(entry, w.excludeNames))
-      .map((entry) => entry.name)
-      .sort(),
-  )
+  // #41 防御：junction 复核与 collectDirSnapshot/扫描侧同口径——根直属
+  // junction（部分 libuv/文件系统组合下 readdir 报告为普通目录）不进根
+  // 清单，否则热点轮根清单与扫描基线口径不一致，会对扫描侧永远忽略的
+  // junction 反复触发局部重扫（自激励）
+  const rootNames = []
+  for (const entry of entries) {
+    if (!isVisibleScanEntry(entry, w.excludeNames)) continue
+    if (
+      entry.isDirectory() &&
+      (await isLinkLikePath(path.join(w.root, entry.name)))
+    ) {
+      continue
+    }
+    rootNames.push(entry.name)
+  }
+  partial.set(w.root, rootNames.sort())
   for (const rel of hotRels) {
     if (rel === '') continue // 根直属由上方 readdir 覆盖（防御：'' 不得整树递归）
     const abs = path.join(w.root, ...rel.split('/'))

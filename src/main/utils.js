@@ -17,6 +17,7 @@ export {
   sameResolvedPathIgnoreCase,
   resolveRealPath,
   isPathRealWithin,
+  isLinkLikePath,
 } from './utils/path'
 
 export {
