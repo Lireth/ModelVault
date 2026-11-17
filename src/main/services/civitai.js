@@ -28,8 +28,8 @@ export const CIVITAI_DISABLED_ERROR = 'Civitai 功能已关闭'
  * 假性超时，协议代理的大图流也会被拦腰截断。
  */
 const IMAGE_HEADER_TIMEOUT_MS = 30000
-/** 图片 body 读取的空闲超时（ms）：导入路径逐段计时，停滞即中止 */
-const IMAGE_BODY_IDLE_TIMEOUT_MS = 30000
+/** 图片 body 读取的空闲超时（ms）：导入与协议代理路径逐段计时，停滞即中止 */
+export const IMAGE_BODY_IDLE_TIMEOUT_MS = 30000
 /**
  * 示例视频「头部阶段」超时（ms）：与图片链路同级——上游响应头到达前
  * 挂起超过此时限即中止（协议层转 502，不再无限悬挂占住套接字）；
@@ -646,10 +646,10 @@ export async function fetchCivitaiVideo(url, range = '') {
  * 读取 Civitai 图片响应体并强制大小上限（V-06）。
  * 协议代理与图片导入共用，避免任意大小响应进入主进程堆。
  * OPT-17①：导入路径启用逐段空闲计时（每收到一段字节重置）——持续传输
- * 的慢速大图不再受总量限制，TCP 停滞超过 30s 判死中止。
+ * 的慢速大图不再受总量限制，TCP 停滞超过 30s 判死中止。协议代理的图片
+ * 整体读取同理（#46）：body 停滞的半开连接须及时中止让出并发槽。
  * @param {Response} response fetch 响应
- * @param {{idleTimeoutMs?: number}} [options] 空闲超时；协议代理的流式
- *   回传由 renderer 背压驱动（读取节奏取决于消费方），不启用
+ * @param {{idleTimeoutMs?: number}} [options] 空闲超时；不传则不启用
  * @returns {Promise<Buffer>} 图片字节
  */
 export function readCivitaiImageBody(response, { idleTimeoutMs = 0 } = {}) {
