@@ -58,6 +58,13 @@ import { errorMessage } from '../../../shared/error-text'
 /** 进度事件节流间隔（ms），避免大量小文件时 IPC 过载 */
 const PROGRESS_INTERVAL = 120
 
+/**
+ * models:scan 响应 errors 载荷条目上限（#62）：与日志截断同口径。
+ * 整树权限异常/离线盘场景下 errors 可达万级，裁剪只发生在 IPC 边界
+ * （errors 原始数组仍供日志统计真实总数），真实总数经 errorCount 下发。
+ */
+const MAX_SCAN_ERROR_ENTRIES = 20
+
 /** 当前扫描的取消控制器（null 表示无进行中的扫描） */
 /** @type {AbortController|null} */
 let scanAbort = null
@@ -230,7 +237,9 @@ export function registerScanHandlers() {
             `扫描完成：${decorated.length} 个模型 / ${dirCount} 个目录 / 耗时 ${Date.now() - startedAt}ms / ${errors.length} 个错误`,
           )
           if (errors.length > 0) {
-            logger.warn(`扫描错误详情: ${JSON.stringify(errors.slice(0, 20))}`)
+            logger.warn(
+              `扫描错误详情: ${JSON.stringify(errors.slice(0, MAX_SCAN_ERROR_ENTRIES))}`,
+            )
           }
 
           // F1：全量扫描完成后写入本地索引（秒切库/启动缓存）。
@@ -286,7 +295,9 @@ export function registerScanHandlers() {
             root,
             models: slimmed.models,
             byType,
-            errors,
+            // #62：errors 载荷按上限裁剪，真实总数随 errorCount 下发
+            errors: errors.slice(0, MAX_SCAN_ERROR_ENTRIES),
+            errorCount: errors.length,
             durationMs: Date.now() - startedAt,
             // 本次扫描自动重新关联的移动/重命名模型数（A-02，渲染层据此提示）
             relinked: relinkResult.relinked,

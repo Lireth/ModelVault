@@ -764,6 +764,63 @@ describe('models:scan 模型库白名单（B1）', () => {
   })
 })
 
+describe('models:scan 响应 errors 载荷裁剪（#62）', () => {
+  it('错误超限时响应仅携带前 20 条，errorCount 保留真实总数', async () => {
+    const scan = getRegisteredHandler('models:scan')
+    await registerLibrary(root)
+    const errors = Array.from({ length: 25 }, (_, i) => ({
+      dir: path.join(root, `locked-${i}`),
+      message: `EACCES-${i}`,
+    }))
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors,
+      dirCount: 1,
+    })
+
+    const res = await scan(makeEvent(), { folder: root })
+
+    expect(res.error).toBeUndefined()
+    expect(res.errors).toHaveLength(20)
+    expect(res.errors[0]).toEqual(errors[0])
+    expect(res.errors[19]).toEqual(errors[19])
+    expect(res.errorCount).toBe(25)
+  })
+
+  it('未超限时错误条目原样透传（成功路径语义不变）', async () => {
+    const scan = getRegisteredHandler('models:scan')
+    await registerLibrary(root)
+    const errors = [{ dir: path.join(root, 'locked'), message: 'EACCES' }]
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors,
+      dirCount: 1,
+    })
+
+    const res = await scan(makeEvent(), { folder: root })
+
+    expect(res.error).toBeUndefined()
+    expect(res.errors).toEqual(errors)
+    expect(res.errorCount).toBe(1)
+  })
+
+  it('无错误时响应 errors 为空数组且 errorCount 为 0', async () => {
+    const scan = getRegisteredHandler('models:scan')
+    await registerLibrary(root)
+    vi.mocked(scanModels).mockResolvedValue({
+      models: [],
+      errors: [],
+      dirCount: 1,
+    })
+
+    const res = await scan(makeEvent(), { folder: root })
+
+    expect(res.error).toBeUndefined()
+    expect(res.errors).toEqual([])
+    expect(res.errorCount).toBe(0)
+  })
+})
+
 describe('models:scan 目录校验与回写（C6）', () => {
   it('不存在的目录拒绝扫描并携带失效标志（F1-offline）', async () => {
     const scan = getRegisteredHandler('models:scan')
