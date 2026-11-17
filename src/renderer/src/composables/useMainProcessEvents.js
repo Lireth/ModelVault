@@ -72,7 +72,7 @@ export function useMainProcessEvents() {
     fsChangedTimer = setTimeout(() => {
       fsChangedTimer = null
       if (root !== state.folder || !state.settings.autoRescan) return
-      // 扫描/增量刷新/后台校验已占用主进程扫描锁：本轮子树转入待处理，
+      // 扫描/增量刷新/后台校验/批量操作已占用库：本轮子树转入待处理，
       // 由忙闲侦听器补扫
       if (isLibraryBusy()) {
         queuePendingDirs(dirs)
@@ -85,7 +85,7 @@ export function useMainProcessEvents() {
   function onFsChanged({ root, dirs }) {
     if (root !== state.folder || !state.settings.autoRescan) return
     const subDirs = Array.isArray(dirs) ? dirs : []
-    // 扫描/增量刷新/后台校验进行中：累积变更子树，结束后由侦听器补一次局部扫描
+    // 扫描/增量刷新/后台校验/批量操作进行中：累积变更子树，结束后由侦听器补一次局部扫描
     if (isLibraryBusy()) {
       queuePendingDirs(subDirs)
       return
@@ -93,14 +93,16 @@ export function useMainProcessEvents() {
     scheduleFsRescan(subDirs, root)
   }
 
-  // 扫描结束补决策（A-07a/B-01）：全量扫描或增量刷新结束后，
-  // 对期间累积的变更子树补一次防抖局部扫描
+  // 扫描结束补决策（A-07a/B-01）：全量扫描、增量刷新、后台校验、导入、
+  // 批量操作或识别队列结束后，对期间累积的变更子树补一次防抖局部扫描
   watch(
     () =>
       state.scanning ||
       state.partialScanning ||
       state.backgroundScanning ||
-      state.importing,
+      state.importing ||
+      state.multiSelect.busy ||
+      state.civitaiQueue.running,
     (busy, wasBusy) => {
       if (wasBusy && !busy && fsChangedPendingDirs) {
         const pending = [...fsChangedPendingDirs]
