@@ -87,6 +87,29 @@ vi.mock('../src/main/services/atomic-write', async (importOriginal) => {
   }
 })
 
+// #72 导出并发测试钩子：writeGates 依次拦截各路 zip 写入（对齐并发窗口），
+// failPrefix 命中时模拟写入中途故障；其余调用透传真实实现
+const { zipHook } = vi.hoisted(() => ({
+  zipHook: { failPrefix: null, writeGates: null },
+}))
+vi.mock('../src/main/services/backup-zip', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    writeBackupZipToFile: async (file, parts) => {
+      if (zipHook.failPrefix && String(file).startsWith(zipHook.failPrefix)) {
+        throw new Error('模拟写入故障')
+      }
+      const gate = zipHook.writeGates?.shift()
+      if (gate) {
+        gate.entered = true
+        await gate.promise
+      }
+      return actual.writeBackupZipToFile(file, parts)
+    },
+  }
+})
+
 /** 本文件产生的临时目录（测试结束后统一清理） */
 const tmpDirs = [userData]
 
@@ -347,7 +370,7 @@ describe('exportBackup', () => {
     const res = await exportBackup(null)
 
     expect(res.error).toBeUndefined()
-    expect(fs.existsSync(`${outZip}.tmp`)).toBe(false)
+    expect(fs.readdirSync(outDir).some((n) => n.endsWith('.tmp'))).toBe(false)
     const manifest = JSON.parse(readZip(outZip)['manifest.json'])
     expect(manifest.app).toBe(BACKUP_FORMAT)
   })
@@ -359,18 +382,98 @@ describe('exportBackup', () => {
     const outDir = mkTmp('modelvault-out-')
     const outZip = path.join(outDir, 'backup.zip')
     fs.writeFileSync(outZip, '旧备份内容')
-    // 用同名目录占位 .tmp 路径：写入必然失败，模拟导出中途故障
-    fs.mkdirSync(`${outZip}.tmp`)
+    // 注入 zip 写入中途故障
+    zipHook.failPrefix = outZip
     dialogMock.showSaveDialog.mockResolvedValue({
       canceled: false,
       filePath: outZip,
     })
+    try {
+      const res = await exportBackup(null)
 
-    const res = await exportBackup(null)
+      expect(res.error).toContain('备份写入失败')
+      // 既有文件原样保留（此前直写实现失败时 rm 会连旧文件一起毁掉）
+      expect(fs.readFileSync(outZip, 'utf8')).toBe('旧备份内容')
+      // 本次半成品 tmp 已清理，不残留
+      expect(fs.readdirSync(outDir).some((n) => n.endsWith('.tmp'))).toBe(false)
+    } finally {
+      zipHook.failPrefix = null
+    }
+  })
 
-    expect(res.error).toContain('备份写入失败')
-    // 既有文件原样保留（此前直写实现失败时 rm 会连旧文件一起毁掉）
-    expect(fs.readFileSync(outZip, 'utf8')).toBe('旧备份内容')
+  it('恢复等维护操作持锁时导出快速失败，不弹对话框不产出备份（#72）', async () => {
+    const root = makeLibrary()
+    setDataRoot(root)
+    await loadData()
+    const outZip = path.join(mkTmp('modelvault-out-'), 'backup.zip')
+    dialogMock.showSaveDialog.mockReset()
+    dialogMock.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: outZip,
+    })
+    // 模拟恢复正在持有全局维护锁（整目录交换窗口）
+    const token = tryAcquireMaintenance('restore', root)
+    expect(token).toBeTruthy()
+    try {
+      const res = await exportBackup(null)
+
+      // 与恢复互斥：拿不到锁按协议快速失败（否则交换窗口内 store.json
+      // 短暂 ENOENT 会静默产出缺 manifest.library 的 settings-only 备份）
+      expect(res.error).toContain('请稍候')
+      expect(dialogMock.showSaveDialog).not.toHaveBeenCalled()
+      expect(fs.existsSync(outZip)).toBe(false)
+    } finally {
+      releaseMaintenance(token)
+    }
+    // 导出不遗留锁：恢复锁释放后备份锁立即可获取
+    const next = tryAcquireMaintenance('backup', root)
+    expect(next).not.toBeNull()
+    releaseMaintenance(next)
+  })
+
+  it('并发导出同一目标各用独立 tmp：互不踩踏、产物完整、无残留（#72）', async () => {
+    const root = makeLibrary()
+    setDataRoot(root)
+    await loadData()
+    const outDir = mkTmp('modelvault-out-')
+    const outZip = path.join(outDir, 'backup.zip')
+    dialogMock.showSaveDialog.mockResolvedValue({
+      canceled: false,
+      filePath: outZip,
+    })
+    const makeGate = () => {
+      let resolve
+      const promise = new Promise((r) => {
+        resolve = r
+      })
+      return { promise, resolve, entered: false }
+    }
+    // 依次拦截两路 zip 写入并重叠其窗口（写入期间组装锁均已释放，
+    // 旧实现共享 <target>.tmp 会互相截断与清理踩踏）
+    const gateA = makeGate()
+    const gateB = makeGate()
+    zipHook.writeGates = [gateA, gateB]
+    try {
+      // 第一路进入 zip 写入后（组装锁已释放）发起第二路，重叠两个写入窗口
+      const first = exportBackup(null)
+      await vi.waitFor(() => expect(gateA.entered).toBe(true))
+      const second = exportBackup(null)
+      await vi.waitFor(() => expect(gateB.entered).toBe(true))
+      gateB.resolve()
+      gateA.resolve()
+      const [resA, resB] = await Promise.all([first, second])
+
+      expect(resA.error).toBeUndefined()
+      expect(resB.error).toBeUndefined()
+      // 最终产物为完整 zip（两路 rename 各自原子替换目标）
+      const manifest = JSON.parse(readZip(outZip)['manifest.json'])
+      expect(manifest.app).toBe(BACKUP_FORMAT)
+      expect(fs.readdirSync(outDir).some((n) => n.endsWith('.tmp'))).toBe(false)
+    } finally {
+      zipHook.writeGates = null
+      gateA.resolve()
+      gateB.resolve()
+    }
   })
 
   it('打包设置与当前库的 store.json/covers，thumbs 不纳入', async () => {
@@ -1614,6 +1717,30 @@ describe('flush 超时防线（B3：挂起磁盘不永久卡死）', () => {
     expect(Date.now() - started).toBeLessThan(2000)
     expect(res.error).toContain('磁盘无响应')
     expect(dialogMock.showSaveDialog).not.toHaveBeenCalled()
+  })
+
+  it('导出组装期间持有维护锁：并发维护被拒，结束（含失败）后释放（#72）', async () => {
+    const root = makeLibrary()
+    setDataRoot(root)
+    await loadData()
+    setModelMeta(path.join(root, 'a.safetensors'), { note: '在途修改' })
+    hangWritesUnder(root)
+    setFlushAwaitTimeoutForTests(50)
+    setSettingsFlushAwaitTimeoutForTests(50)
+    dialogMock.showSaveDialog.mockReset()
+
+    const pending = exportBackup(null)
+    // flush 挂起的组装窗口内：导出持有全局维护锁，其他维护操作快速失败
+    // （组装与恢复整目录交换/扫描 relink 互斥，#72）
+    const busy = tryAcquireMaintenance('scan', root)
+    expect(busy).toBeNull()
+
+    const res = await pending
+    expect(res.error).toContain('磁盘无响应')
+    // 组装结束（失败路径同样）锁已释放
+    const token = tryAcquireMaintenance('scan', root)
+    expect(token).not.toBeNull()
+    releaseMaintenance(token)
   })
 
   it('全量恢复：flush 挂起超时后取消恢复、释放维护锁、目标目录不动', async () => {

@@ -19,6 +19,7 @@ import {
 } from './backup-format'
 import { MAX_COVERS_BYTES, writeBackupZipToFile } from './backup-zip'
 import { renameReplacing } from './atomic-write'
+import { runMaintenance } from './maintenance-lock'
 import { parseJsonOffThread } from './json-serializer'
 import { errorCode, errorMessage } from '../../shared/error-text'
 
@@ -32,6 +33,9 @@ import { errorCode, errorMessage } from '../../shared/error-text'
 
 /** 封面读写的有限并发数：比串行快，同时避免数百个文件句柄一次性打开 */
 const COVER_IO_CONCURRENCY = 8
+
+/** 导出临时包进程内单调序号（A1）：并发导出各自独立 tmp，互不截断/互不清理踩踏 */
+let exportTmpSeq = 0
 
 /**
  * 有限并发映射（A-01）：固定数量的 worker 抢占式领取任务，
@@ -223,7 +227,19 @@ export async function buildBackupParts(options = {}) {
  *   取消 {canceled:true}；失败 {error}（handler 逐字段消费）
  */
 export async function exportBackup(win, options = {}) {
-  const built = await buildBackupParts(options)
+  // 维护锁协议（#72）：组装（flush + 读 store.json）与恢复整目录交换、扫描
+  // relink、自动备份互斥——否则交换窗口内 store.json 短暂 ENOENT 会命中
+  // 「尚未生成关联数据」分支，静默产出缺 manifest.library 的备份且返回成功；
+  // 拿不到锁按协议快速失败（EBUSY 转换口径与恢复链路一致）
+  let built
+  try {
+    built = await runMaintenance('backup', getCurrentRoot(), () =>
+      buildBackupParts(options),
+    )
+  } catch (err) {
+    if (errorCode(err) === 'EBUSY') return { error: errorMessage(err) }
+    throw err
+  }
   if (built.error) return { error: built.error }
   const { parts, models, covers, mode, partial } = built
 
@@ -238,8 +254,10 @@ export async function exportBackup(win, options = {}) {
   // A4 原子落点（与 auto-backup 同一断电安全标准）：先写 <final>.tmp 并
   // fsync 刷盘数据块，再经 renameReplacing 带退避更名——导出中途崩溃/断电
   // 不在用户选定位置留半截 zip；对话框选择覆盖已有文件时，失败路径也
-  // 完整保留用户既有文件（此前直写 + 失败 rm 会连旧文件一起毁掉）
-  const tmp = `${target}.tmp`
+  // 完整保留用户既有文件（此前直写 + 失败 rm 会连旧文件一起毁掉）。
+  // A1（#72）：手动导出没有 auto-backup 的 running 互斥，并发导出同一目标
+  // 共享 <target>.tmp 会互相截断与清理踩踏——临时名带进程内序号彼此独立
+  const tmp = `${target}.${process.pid}.${++exportTmpSeq}.tmp`
   try {
     // OPT-10：封面逐个读入压缩流，不再把所有封面缓冲进内存。
     // 压缩期间主进程仅保留当前读块，内存峰值与封面总量解耦。
