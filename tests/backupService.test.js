@@ -1815,4 +1815,31 @@ describe('importBackup 残留治理（OPT-18）', () => {
     expect(left.some((n) => n.startsWith(`${DATA_DIR}.restore-`))).toBe(false)
     expect(left).toContain(DATA_DIR)
   })
+
+  it('目标原本无 .modelvault 时，崩溃遗留的 .bak 不被残留治理清除（#48）', async () => {
+    const target = mkTmp('modelvault-target-')
+    // 模拟崩溃于两次 rename 之间的现场：旧数据仅存 .bak，库目录缺失
+    const bak = path.join(target, `${DATA_DIR}.bak-111`)
+    fs.mkdirSync(bak, { recursive: true })
+    fs.writeFileSync(path.join(bak, 'store.json'), 'OLD')
+    const staleTmp = path.join(target, `${DATA_DIR}.restore-222`)
+    fs.mkdirSync(staleTmp, { recursive: true })
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+    )
+    dialogMock.showOpenDialog
+      .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
+      .mockResolvedValueOnce({ canceled: false, filePaths: [target] })
+
+    const res = await importBackup(null)
+
+    expect(res.error).toBeUndefined()
+    // 无 .modelvault 时无法区分陈旧残留与崩溃现场：唯一旧数据副本保留
+    expect(fs.readFileSync(path.join(bak, 'store.json'), 'utf8')).toBe('OLD')
+    // .restore 临时目录仍属垃圾，照常清理；恢复内容正常上位
+    const left = fs.readdirSync(target)
+    expect(left.some((n) => n.startsWith(`${DATA_DIR}.restore-`))).toBe(false)
+    expect(left).toContain(DATA_DIR)
+    expect(left.some((n) => n.startsWith(`${DATA_DIR}.bak-`))).toBe(true)
+  })
 })

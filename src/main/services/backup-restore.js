@@ -72,10 +72,13 @@ async function pruneRestoreArtifacts(root, keepBakName) {
   } catch {
     return
   }
+  // #48：本次恢复目标原本无 .modelvault（keepBakName 为空串）时，现存
+  // .bak-* 可能是崩溃于两次 rename 之间遗留的唯一旧数据副本，不得清除
+  const canPruneBak = keepBakName !== ''
   for (const name of entries) {
     const isStaleTmp = name.startsWith(RESTORE_TMP_PREFIX)
     const isOldBackup =
-      name.startsWith(BACKUP_DIR_PREFIX) && name !== keepBakName
+      canPruneBak && name.startsWith(BACKUP_DIR_PREFIX) && name !== keepBakName
     if (!isStaleTmp && !isOldBackup) continue
     await fs
       .rm(path.join(root, name), { recursive: true, force: true })
