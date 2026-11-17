@@ -15,7 +15,7 @@ import {
   removeCivImageCache,
   saveCivImageCache,
 } from '../services/civ-cache'
-import { cancelResponseBody, isSettledWithin } from '../utils'
+import { cancelResponseBody, isSettledWithin, sanitizeLogText } from '../utils'
 import { isImageBuffer } from '../services/covers'
 import { proxyMediaHeaders, toBodyView } from './http-cache'
 import { errorMessage } from '../../shared/error-text'
@@ -180,7 +180,7 @@ function fetchCivImageShared(target) {
       const upstream = await fetchCivitaiImage(target)
       if (!upstream.ok) {
         logger.warn(
-          `civimg 上游响应异常（HTTP ${upstream.status}）: ${target.slice(0, 200)}`,
+          `civimg 上游响应异常（HTTP ${upstream.status}）: ${sanitizeLogText(target.slice(0, 200))}`,
         )
         cancelResponseBody(upstream)
         recordCivimgFailure(target)
@@ -257,7 +257,9 @@ export function registerCivimgHandler() {
         return new Response('Bad Request', { status: 400 })
       }
       if (!isAllowedCivitaiImageUrl(target)) {
-        logger.warn(`civimg 协议拒绝非白名单图片地址: ${target.slice(0, 200)}`)
+        logger.warn(
+          `civimg 协议拒绝非白名单图片地址: ${sanitizeLogText(target.slice(0, 200))}`,
+        )
         return new Response('Forbidden', { status: 403 })
       }
       // FN-02：示例视频走流式代理（Range 透传），不进入图片磁盘缓存

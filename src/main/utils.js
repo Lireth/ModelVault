@@ -7,6 +7,7 @@
  * - net.js     外链白名单、响应体读取上限与逐段空闲超时
  * - process.js 启动参数解析与进程退出等待（更新安装链路）
  * - fs.js      损坏文件滚动备份
+ * - log.js     日志文本净化（可控字符串单行转义，#66）
  *
  * 依赖方向约定：utils 为最底层原语，不得导入 main 下的 ipc/services 模块。
  */
@@ -36,5 +37,7 @@ export {
 } from './utils/net'
 
 export { parseWaitForPid, waitForProcessExit } from './utils/process'
+
+export { sanitizeLogText } from './utils/log'
 
 export { preserveCorruptedFile } from './utils/fs'

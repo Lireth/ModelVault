@@ -35,6 +35,7 @@ vi.mock('../src/main/services/civ-cache', async (importOriginal) => {
 })
 
 import { net, protocol } from 'electron'
+import logger from '../src/main/logger'
 import {
   isCivitaiVideoUrl,
   registerCivimgHandler,
@@ -135,6 +136,62 @@ describe('civimg 协议门禁（白名单与隐私开关）', () => {
   it('畸形编码的 target 返回 400', async () => {
     const res = await civHandler({ url: 'civimg://remote/%E0%A4%A' })
     expect(res.status).toBe(400)
+  })
+})
+
+describe('civimg 可控 target 日志净化（#66 日志伪造面）', () => {
+  it('非白名单地址携带 %0A 解码换行：403 且日志单行转义，不注入伪造行', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn')
+    try {
+      const res = await civHandler(
+        makeCivRequest('https://evil.com/a.jpeg\n[INFO] 伪造日志行'),
+      )
+      expect(res.status).toBe(403)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      const line = String(warnSpy.mock.calls[0][0])
+      // 换行已转义为字面量 \n：按行落盘的日志不会拆出伪造的 [INFO] 行
+      expect(line).toBe(
+        'civimg 协议拒绝非白名单图片地址: https://evil.com/a.jpeg\\n[INFO] 伪造日志行',
+      )
+      expect(line.includes('\n')).toBe(false)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('白名单地址携带 %0A 解码换行且上游失败：异常日志同样单行转义', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(new Response('', { status: 403 }))
+    const warnSpy = vi.spyOn(logger, 'warn')
+    try {
+      const res = await civHandler(
+        makeCivRequest('https://image.civitai.com/x/1.jpeg\n[WARN] 伪造行'),
+      )
+      expect(res.status).toBe(502)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      const line = String(warnSpy.mock.calls[0][0])
+      expect(line).toBe(
+        'civimg 上游响应异常（HTTP 403）: https://image.civitai.com/x/1.jpeg\\n[WARN] 伪造行',
+      )
+      expect(line.includes('\n')).toBe(false)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('不含控制字符的地址日志原样输出，白名单放行语义不变', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(new Response('', { status: 403 }))
+    const warnSpy = vi.spyOn(logger, 'warn')
+    try {
+      const target = 'https://image.civitai.com/plain/1.jpeg'
+      const res = await civHandler(makeCivRequest(target))
+      expect(res.status).toBe(502)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(String(warnSpy.mock.calls[0][0])).toBe(
+        `civimg 上游响应异常（HTTP 403）: ${target}`,
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })
 
