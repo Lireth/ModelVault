@@ -148,8 +148,10 @@ export function normalizeModelMeta(raw) {
         : '',
     // 收藏标记（false 为未收藏）
     favorite: raw.favorite === true,
-    // NSFW 标记：勾选后首页卡片预览图做模糊处理（详情页正常展示）
-    nsfw: raw.nsfw === true,
+    // NSFW 标记：勾选后首页卡片预览图做模糊处理（详情页正常展示）；
+    // true/false 为用户显式标注，undefined 为未标注——两者必须可区分，
+    // civitai.info 自动导入只补未标注，绝不覆盖用户显式取消（#69）
+    nsfw: raw.nsfw === true ? true : raw.nsfw === false ? false : undefined,
     // 评分（0-5 整数，0 为未评分）
     rating:
       Number.isInteger(raw.rating) && raw.rating >= 0 && raw.rating <= 5

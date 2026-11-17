@@ -18,6 +18,7 @@ import {
   sidecarFilesFor,
   sidecarImportPatch,
 } from '../src/main/services/scanner'
+import { normalizeModelMeta } from '../src/main/services/store-meta-normalize'
 
 /**
  * scanner.js 单元测试：
@@ -976,22 +977,30 @@ describe('civitaiImportPatch / findSidecarCivitaiInfo（F8）', () => {
     ).toBeNull()
   })
 
-  it('nsfw 仅在来源明确为 true 且当前未标记时导入，单向不可逆', () => {
-    const patch = civitaiImportPatch(
-      { triggerWords: 'x', nsfw: false },
-      { nsfw: true },
-    )
+  it('nsfw 仅在来源明确为 true 且当前未标注时导入，单向不可逆', () => {
+    const patch = civitaiImportPatch({ triggerWords: 'x' }, { nsfw: true })
     expect(patch).toEqual({ nsfw: true })
-    // 已标记：不重复；来源非 true：不导入（civitai.info 缺失该字段时不得清标记）
+    // 已标注：不重复；来源非 true：不导入（civitai.info 缺失该字段时不得清标记）
     expect(
       civitaiImportPatch({ triggerWords: 'x', nsfw: true }, { nsfw: true }),
     ).toBeNull()
     expect(
-      civitaiImportPatch({ triggerWords: 'x', nsfw: false }, { nsfw: false }),
+      civitaiImportPatch({ triggerWords: 'x' }, { nsfw: false }),
     ).toBeNull()
+    expect(civitaiImportPatch({ triggerWords: 'x' }, {})).toBeNull()
+  })
+
+  it('用户显式标注的非 NSFW（nsfw:false）绝不被 civitai.info 翻转为 true（#69）', () => {
     expect(
-      civitaiImportPatch({ triggerWords: 'x', nsfw: false }, {}),
+      civitaiImportPatch({ triggerWords: 'x', nsfw: false }, { nsfw: true }),
     ).toBeNull()
+  })
+
+  it('归一化区分「未标注」与「用户显式标注非 NSFW」（#69）', () => {
+    expect(normalizeModelMeta({}).nsfw).toBeUndefined()
+    expect(normalizeModelMeta({ nsfw: false }).nsfw).toBe(false)
+    expect(normalizeModelMeta({ nsfw: true }).nsfw).toBe(true)
+    expect(normalizeModelMeta({ nsfw: 'yes' }).nsfw).toBeUndefined()
   })
 
   it('真实文件读取：合法 JSON 解析、损坏/超大/缺失返回 null', async () => {

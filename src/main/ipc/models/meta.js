@@ -183,7 +183,7 @@ export function registerMetaHandlers() {
         updated: result.updated.map(({ id, meta }) => ({
           id,
           favorite: meta.favorite,
-          nsfw: meta.nsfw,
+          nsfw: meta.nsfw === true,
           rating: meta.rating,
         })),
         failed: result.failed,
