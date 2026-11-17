@@ -71,6 +71,24 @@ vi.mock('../src/main/services/atomic-write', async (importOriginal) => {
   }
 })
 
+// #61 openLibrary 回滚回归：updateSettings 可单次注入失败，模拟切根提交
+// 后激活库写盘抛错的部分成功场景；其余导出保持真实实现
+const { usHook } = vi.hoisted(() => ({ usHook: { rejectOnce: null } }))
+vi.mock('../src/main/services/store', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    updateSettings: (...args) => {
+      if (usHook.rejectOnce) {
+        const err = usHook.rejectOnce
+        usHook.rejectOnce = null
+        return Promise.reject(err)
+      }
+      return actual.updateSettings(...args)
+    },
+  }
+})
+
 import {
   paramSummaryFromMeta,
   sidecarFilesFor,
@@ -343,11 +361,51 @@ describe('models:openLibrary 秒切库（F1）', () => {
     vi.mocked(syncWatcher).mockClear()
     vi.mocked(computeFileHash).mockReset()
     resetHashWarmupForTests()
+    usHook.rejectOnce = null
     registerStoreHandlers()
   })
 
   afterAll(() => {
     for (const dir of tmpRoots) fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('openLibrary 切根提交后激活库写盘抛错仍回滚旧根（#61）', async () => {
+    const rootA = fs.mkdtempSync(path.join(os.tmpdir(), 'modelvault-open-ra-'))
+    const rootB = fs.mkdtempSync(path.join(os.tmpdir(), 'modelvault-open-rb-'))
+    tmpRoots.push(rootA, rootB)
+    fs.writeFileSync(
+      path.join(fakeUserData, 'settings.json'),
+      JSON.stringify({
+        modelsFolder: rootA,
+        modelsFolders: [rootA, rootB],
+        autoScan: false,
+      }),
+    )
+    await loadSettings()
+    // 库 A 激活为当前根（loadStore 的 ensureRootStore 路径）
+    await getRegisteredHandler('models:loadStore')(makeEvent())
+    expect(getCurrentRoot()).toBe(rootA)
+    writeIndex(rootB, [
+      {
+        id: path.join(rootB, 'b.safetensors'),
+        name: 'b',
+        type: 'lora',
+        ext: '.safetensors',
+        size: 1,
+        mtimeMs: 1,
+        relDir: '',
+      },
+    ])
+
+    // ensureRootStore 已提交切根后，激活库提交（updateSettings）抛错：
+    // 必须回滚到原根而非把主进程留在渲染层不可见的新库（#61）
+    usHook.rejectOnce = new Error('激活库提交失败')
+    const res = await getRegisteredHandler('models:openLibrary')(makeEvent(), {
+      folder: rootB,
+    })
+
+    expect(res.error).toContain('激活库提交失败')
+    expect(getCurrentRoot()).toBe(rootA)
   })
 
   it('切库后作废旧库的后台哈希预热队列并按新库索引重播种', async () => {

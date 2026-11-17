@@ -120,7 +120,6 @@ export function registerScanHandlers() {
         const signal = scanAbort.signal
         const startedAt = Date.now()
         const previousRoot = getCurrentRoot()
-        let rootSwitched = false
         let completed = false
 
         try {
@@ -157,8 +156,6 @@ export function registerScanHandlers() {
           // 切换/加载该根目录的关联存储，并清理孤儿封面文件。
           // 维护锁由本扫描持有，传入令牌避免 ensureRootStore 再次加锁
           await ensureRootStore(root, { maintenanceToken: token })
-          rootSwitched =
-            Boolean(previousRoot) && !samePathIgnoreCase(previousRoot, root)
           await pruneOrphanCovers()
           // 切换根目录后装饰缓存全部失效；延迟缩略图队列同步清空——
           // 残留的旧根条目会被下一轮 drain 以「新根」的 thumbs 目录生成（跨根写文件），
@@ -299,7 +296,13 @@ export function registerScanHandlers() {
           }
         } finally {
           // 扫描失败/取消且已经切到新根：回滚到原根，避免主进程根目录与
-          // 渲染层保留的旧列表不一致（V-02 切库状态机）
+          // 渲染层保留的旧列表不一致（V-02 切库状态机）。切换事实按主进程
+          // 实际当前根判定而非调用点返回后的赋值：ensureRootStore 内部
+          // switchDataRoot 已提交、后续 loadData/reloadLibrarySettings 抛错时
+          // 调用点以异常退出，后置开关恒为 false 会漏掉该回滚窗口（#61）
+          const rootSwitched =
+            Boolean(previousRoot) &&
+            !samePathIgnoreCase(previousRoot, getCurrentRoot() || '')
           if (!completed && rootSwitched && previousRoot) {
             try {
               await ensureRootStore(previousRoot, { maintenanceToken: token })
