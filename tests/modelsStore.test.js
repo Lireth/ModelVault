@@ -88,12 +88,15 @@ import {
   whenWarmupIdle,
 } from '../src/main/services/hash-warmup'
 import {
+  flushStoreSave,
   flushStoreSaveBounded,
   getCurrentRoot,
   getSwitchFlushTimeoutMs,
   loadSettings,
+  reloadCurrentRootData,
   setFlushAwaitTimeoutForTests,
   setModelMeta,
+  setReloadSaveWaitTimeoutForTests,
   setSwitchFlushTimeoutForTests,
 } from '../src/main/services/store'
 import { ensureRootStore } from '../src/main/ipc/models/store'
@@ -715,6 +718,7 @@ describe('切库链路超时保护与同根判定（OPT-19 切库防线）', () 
     await new Promise((resolve) => setImmediate(resolve))
     setSwitchFlushTimeoutForTests()
     setFlushAwaitTimeoutForTests()
+    setReloadSaveWaitTimeoutForTests()
     if (metaState.offlineRetryTimer) {
       clearTimeout(metaState.offlineRetryTimer)
       metaState.offlineRetryTimer = null
@@ -826,5 +830,27 @@ describe('切库链路超时保护与同根判定（OPT-19 切库防线）', () 
     await flushStoreSaveBounded()
     setFlushAwaitTimeoutForTests(50)
     await expect(flushStoreSaveBounded()).resolves.toBe(true)
+  })
+
+  it('reloadCurrentRootData：在途写盘挂起时按上限超时继续重载（B3）', async () => {
+    const { rootA } = await setupHangOnOldRoot()
+    setReloadSaveWaitTimeoutForTests(50)
+    // 触发一次落盘并令其挂起：runSave 置 saving=true 后阻塞在原子写上
+    const hungFlush = flushStoreSave()
+
+    const started = Date.now()
+    const data = await reloadCurrentRootData()
+    // 挂起磁盘场景下按注入上限返回，恢复链路不再被在途写盘永久卡死
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(data).toMatchObject({ version: 1 })
+    // 超时只是放弃等待：挂起的写入仍在途（未被取消/截断）
+    expect(awHook.pending.length).toBeGreaterThan(0)
+
+    // 磁盘恢复：reject 挂起残尾（错误降级为日志），写盘链静止后 flush 可返回
+    awHook.hangPrefix = null
+    for (const p of awHook.pending.splice(0)) p.reject(new Error('磁盘恢复'))
+    expect(await waitForIdle()).toBe(true)
+    await hungFlush
+    expect(getCurrentRoot()).toBe(rootA)
   })
 })

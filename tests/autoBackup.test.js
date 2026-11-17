@@ -38,9 +38,32 @@ vi.mock('../src/main/services/backup-export', async (importOriginal) => {
   return { ...actual, buildBackupParts: buildBackupPartsMock }
 })
 
+// B3（issue #40）：readdir 可按路径挂起（模拟挂起根盘上内核层阻塞的目录 IO），
+// 其余调用透传真实实现；挂起的读取在用例收尾统一 reject 释放
+const { fsHook } = vi.hoisted(() => ({
+  fsHook: { hangReaddir: null, pending: [] },
+}))
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal()
+  const wrapped = {
+    ...actual,
+    readdir: (p, opts) => {
+      if (fsHook.hangReaddir && String(p) === fsHook.hangReaddir) {
+        return new Promise((resolve, reject) => {
+          fsHook.pending.push({ resolve, reject })
+        })
+      }
+      return actual.readdir(p, opts)
+    },
+  }
+  wrapped.default = wrapped
+  return wrapped
+})
+
 import {
   resetAutoBackupForTests,
   runAutoBackupIfDue,
+  setAutoBackupDirIoTimeoutForTests,
 } from '../src/main/services/auto-backup'
 import { writeBackupZipToFile } from '../src/main/services/backup-zip'
 import {
@@ -103,6 +126,12 @@ beforeEach(async () => {
 
 afterEach(async () => {
   resetAutoBackupForTests()
+  // 释放挂起的目录读取（reject 落入 lastAutoBackupAt 的 catch，静默返回 0）
+  fsHook.hangReaddir = null
+  for (const p of fsHook.pending.splice(0)) {
+    p.reject(new Error('用例收尾：释放挂起读取'))
+  }
+  setAutoBackupDirIoTimeoutForTests()
   // 先静止元数据的防抖落盘链再切根：挂起的保存定时器若在根切换后触发，
   // 会把上一用例的数据写进下一用例的新根（正是 B-02 防的场景）
   await Promise.allSettled([flushStoreSave()])
@@ -144,6 +173,26 @@ describe('runAutoBackupIfDue（到期判定与跳过）', () => {
     const res = await runAutoBackupIfDue()
     expect(res.skipped).toBeUndefined()
     expect(getMaintenanceState()).toBeNull()
+  })
+
+  it('拿锁后首个目录 IO 挂起时按超时跳过本轮并释放维护锁（B3）', async () => {
+    setModelMeta(path.join(root, 'a.safetensors'), { alias: 'a' })
+    setAutoBackupDirIoTimeoutForTests(50)
+    fsHook.hangReaddir = backupsDir()
+
+    const started = Date.now()
+    const res = await runAutoBackupIfDue()
+    // 挂起根盘场景下按注入上限返回，不再永久持有 'backup' 维护锁
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(res).toEqual({ skipped: 'unavailable' })
+    expect(getMaintenanceState()).toBeNull()
+
+    // 锁已释放且无残留互斥：解除挂起后本轮未产出备份，下一轮可正常完成
+    fsHook.hangReaddir = null
+    expect(await listAutoBackups()).toEqual([])
+    const next = await runAutoBackupIfDue()
+    expect(next.skipped).toBeUndefined()
+    expect(await listAutoBackups()).toHaveLength(1)
   })
 
   it('库尚无标注时跳过（刚建库是正常状态，不产出空备份）', async () => {

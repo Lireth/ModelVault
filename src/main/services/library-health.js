@@ -16,7 +16,7 @@ import {
   toRelKey,
 } from './store-paths'
 import {
-  flushStoreSave,
+  flushStoreSaveBounded,
   getMetaMapByAbsPath,
   getModelMeta,
   getReferencedCovers,
@@ -445,7 +445,8 @@ export async function repairLibraryHealth() {
   try {
     return await runMaintenance('repair', root, async () => {
       // 先静止写盘链，确保备份与后续内存修改基于同一份磁盘状态
-      await flushStoreSave()
+      // （B3：有等待上限——挂起磁盘上超时按未静止降级继续，不卡死维护锁）
+      await flushStoreSaveBounded()
       const report = await collectHealth(root)
       if (report.summary.repairable === 0) {
         return {
@@ -489,7 +490,7 @@ export async function repairLibraryHealth() {
         logger.warn('元数据曾损坏重置，本次跳过孤儿封面清理')
       }
 
-      await flushStoreSave()
+      await flushStoreSaveBounded()
       const repaired = {
         removedMetadata,
         fixedCoverModels: coverResult.fixedModels,

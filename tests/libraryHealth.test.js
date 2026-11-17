@@ -3,19 +3,44 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import {
+  flushStoreSave,
   loadData,
   setDataRoot,
   setModelMeta,
   getModelMeta,
+  setFlushAwaitTimeoutForTests,
 } from '../src/main/services/store'
 import {
   checkLibraryHealth,
   repairLibraryHealth,
 } from '../src/main/services/library-health'
 import {
+  getMaintenanceState,
   releaseMaintenance,
   tryAcquireMaintenance,
 } from '../src/main/services/maintenance-lock'
+import { metaState } from '../src/main/services/store-meta-state'
+
+// B3（issue #40）：atomicWriteFile 可按目录前缀挂起（模拟挂起磁盘上内核层
+// 阻塞的原子写），其余调用透传真实实现；挂起的写入在用例收尾统一释放，
+// 绝不遗留永久 pending 阻塞后续用例的写盘链
+const { awHook } = vi.hoisted(() => ({
+  awHook: { hangPrefix: null, pending: [] },
+}))
+vi.mock('../src/main/services/atomic-write', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    atomicWriteFile: (file, content, opts) => {
+      if (awHook.hangPrefix && String(file).startsWith(awHook.hangPrefix)) {
+        return new Promise((resolve, reject) => {
+          awHook.pending.push({ resolve, reject })
+        })
+      }
+      return actual.atomicWriteFile(file, content, opts)
+    },
+  }
+})
 
 /**
  * 模型库体检与修复（V-07）测试：
@@ -299,5 +324,40 @@ describe('repairLibraryHealth（一键修复）', () => {
     } finally {
       releaseMaintenance(token)
     }
+  })
+
+  it('在途写盘挂起时按注入上限超时继续修复并释放维护锁（B3）', async () => {
+    await seedProblemLibrary()
+    setFlushAwaitTimeoutForTests(50)
+    // 修复入口的 flush 触发落盘并令其挂起：runSave 置 saving=true 后阻塞
+    awHook.hangPrefix = path.join(root, '.modelvault')
+
+    const started = Date.now()
+    const res = await repairLibraryHealth()
+    // 挂起磁盘场景下按注入上限返回，不再永久持有 'repair' 维护锁
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(res.error).toBeUndefined()
+    // 修复语义不受挂起影响（内存操作照常完成）
+    expect(res.repaired).toMatchObject({
+      removedMetadata: 1,
+      fixedCoverModels: 1,
+      removedCoverRefs: 1,
+      movedOrphanCovers: 1,
+    })
+    expect(getMaintenanceState()).toBeNull()
+
+    // 收尾：释放挂起写入（错误降级为日志），等待补写落定后清理重试定时器
+    awHook.hangPrefix = null
+    for (const p of awHook.pending.splice(0)) {
+      p.reject(new Error('用例收尾：释放挂起写入'))
+    }
+    setFlushAwaitTimeoutForTests()
+    await new Promise((resolve) => setImmediate(resolve))
+    await flushStoreSave()
+    if (metaState.offlineRetryTimer) {
+      clearTimeout(metaState.offlineRetryTimer)
+      metaState.offlineRetryTimer = null
+    }
+    metaState.saveRetryFailures = 0
   })
 })
