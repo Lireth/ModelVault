@@ -100,7 +100,7 @@ export const SEARCH_SYNTAX = [
     prefix: 'mtime',
     label: '文件年龄',
     example: 'mtime:<7d',
-    desc: '距今时长（单位 m/h/d/w/y，缺省 d）：<7d 近 7 天，>30d 超过 30 天未更新',
+    desc: '距今时长（单位 m/h/d/w/y，缺省 d）：<7d 近 7 天，>30d 超过 30 天未更新；裸值按单位粒度取整精确命中',
   },
   {
     prefix: 'author',
@@ -124,7 +124,7 @@ export const SEARCH_SYNTAX = [
     prefix: 'opened',
     label: '最近打开',
     example: 'opened:>30d',
-    desc: '距今时长（单位 m/h/d/w/y，缺省 d）：opened:never 仅从未打开',
+    desc: '距今时长（单位 m/h/d/w/y，缺省 d）：opened:never 仅从未打开；裸值按单位粒度取整精确命中',
   },
   {
     prefix: 'uses',
