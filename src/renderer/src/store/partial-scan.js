@@ -148,6 +148,11 @@ export async function partialScanModels(dirs) {
   const root = state.folder
   if (!root) return
 
+  // B-01：全量扫描/后台校验在途时不发起局部请求——主进程维护锁会直接
+  // 拒绝（EBUSY），迟到的错误响应还会在扫描结束后误触「降级全量」冗余重扫；
+  // 全量结果将整体覆盖列表，未被扫描覆盖的变更由主进程停扫补发承接
+  if (state.scanning || state.backgroundScanning) return
+
   // O3：发送前收敛（去后代 / 一级目录压缩）。超过上限且无法收敛时
   // 降级全量扫描——不允许把部分子树静默丢弃在陈旧状态。
   const prepared = prepareScanDirs(normalizedDirs)

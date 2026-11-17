@@ -205,6 +205,37 @@ describe('F1 本地索引：秒切库与后台校验', () => {
     expect(state.backgroundScanning).toBe(false)
     expect(api.models.scan).not.toHaveBeenCalled()
   })
+
+  it('switchRoot autoScan=false 时秒开缓存但跳过后台校验（#55）', async () => {
+    state.folder = 'D:\\models'
+    replaceModels([makeModel('D:\\models\\old.safetensors')])
+    api.models.openLibrary.mockResolvedValue({
+      root: 'D:\\other',
+      cached: true,
+      durationMs: 5,
+      models: [makeModel('D:\\other\\cached.safetensors')],
+      settings: { modelsFolder: 'D:\\other', autoScan: false },
+    })
+
+    await switchRoot('D:\\other')
+    await tick()
+
+    expect(state.folder).toBe('D:\\other')
+    expect(state.models.map((m) => m.id)).toEqual([
+      'D:\\other\\cached.safetensors',
+    ])
+    expect(state.backgroundScanning).toBe(false)
+    expect(api.models.scan).not.toHaveBeenCalled()
+    // 秒开提示保留，但不再宣称「正在后台校验」
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'success' && t.text.includes('秒开本地索引'),
+      ),
+    ).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('正在后台校验'))).toBe(
+      false,
+    )
+  })
 })
 
 describe('库路径失效闭环（F1-offline）', () => {
