@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import CoverGallery from '../src/renderer/src/components/detail/CoverGallery.vue'
 import { state } from '../src/renderer/src/store/appStore'
@@ -9,7 +10,10 @@ import { setupComponentTest, settle } from './helpers/componentTest'
  * CoverGallery 全屏画廊组件测试：
  * - 渲染与切换：initialIndex、方向键循环、索引展示
  * - 快捷键：Esc 关闭（捕获阶段阻断，不穿透详情页）、Delete 删除、D 设默认、
- *   +/-//0 缩放控制；确认层可见时整键让位（F1）
+ *   +/-//0 缩放控制；确认层可见时整键让位（F1）；Ctrl/Meta/Alt 组合键
+ *   让位浏览器与系统（issue #78）
+ * - 焦点管理：挂载焦点入容器、Tab 控件内首末循环、关闭归还触发元素
+ *   （issue #78，useDialogFocus 接入）
  * - 缩放/平移：按钮与滚轮缩放、双击切换、拖拽平移
  * - 封面集合变化：删空自动关闭、索引钳制
  */
@@ -41,15 +45,30 @@ function mountGallery(props = {}) {
   })
 }
 
-/** 在 window 派发 keydown（组件经捕获阶段监听） */
-function pressKey(key) {
+/** 在 window 派发 keydown（组件经捕获阶段监听）；init 注入修饰键等键位 */
+function pressKey(key, init = {}) {
   const event = new KeyboardEvent('keydown', {
     key,
     bubbles: true,
     cancelable: true,
+    ...init,
   })
   window.dispatchEvent(event)
   return event
+}
+
+/**
+ * 焦点用例装配：挂载并附加到 document（jsdom 中 focus 仅对在文档中的元素
+ * 生效），为全部按钮标记 offsetParent（无布局，useDialogFocus 过滤依赖）
+ */
+function mountGalleryAttached(props = {}) {
+  const wrapper = mountGallery(props)
+  document.body.appendChild(wrapper.element)
+  for (const b of wrapper.findAll('button'))
+    Object.defineProperty(b.element, 'offsetParent', {
+      value: document.body,
+    })
+  return wrapper
 }
 
 /**
@@ -146,6 +165,21 @@ describe('CoverGallery 快捷键', () => {
     wrapper.unmount()
   })
 
+  it('Ctrl+D / Alt+0 组合键不触发画廊快捷键（修饰键让位，不拦截）', async () => {
+    const wrapper = mountGallery({ initialIndex: 1 }) // c1 非默认图
+    const ctrlD = pressKey('d', { ctrlKey: true })
+    expect(wrapper.emitted('set-default')).toBeUndefined()
+    expect(ctrlD.defaultPrevented).toBe(false)
+
+    await wrapper.findAll('.gallery-toolbar .gallery-btn')[1].trigger('click') // 放大 ×1.25
+    expect(wrapper.find('.gallery-zoom').text()).toBe('125%')
+    const alt0 = pressKey('0', { altKey: true })
+    await settle()
+    expect(wrapper.find('.gallery-zoom').text()).toBe('125%')
+    expect(alt0.defaultPrevented).toBe(false)
+    wrapper.unmount()
+  })
+
   it('确认层可见时快捷键整键让位（删除确认期间 Esc 不关画廊）', () => {
     state.confirm.visible = true
     const wrapper = mountGallery()
@@ -154,6 +188,62 @@ describe('CoverGallery 快捷键', () => {
     expect(wrapper.emitted('close')).toBeUndefined()
     expect(wrapper.emitted('delete')).toBeUndefined()
     wrapper.unmount()
+  })
+})
+
+describe('CoverGallery 焦点管理（issue #78，useDialogFocus 接入）', () => {
+  it('挂载焦点移入画廊容器，Tab 在控件内首末循环不穿透遮罩', async () => {
+    const wrapper = mountGalleryAttached()
+    await nextTick()
+    const overlay = wrapper.find('.gallery-overlay').element
+    expect(document.activeElement).toBe(overlay)
+
+    const closeBtn = wrapper.find('.gallery-close').element
+    // 工具栏按钮序：缩小 / 放大 / 复位 / 设默认 / 删除——删除为 Tab 序列末位
+    const delBtn = wrapper.findAll('.gallery-toolbar .gallery-btn')[4].element
+
+    // 末元素 Tab → 循环回首元素（关闭按钮）
+    delBtn.focus()
+    overlay.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Tab',
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
+    expect(document.activeElement).toBe(closeBtn)
+
+    // 首元素 Shift+Tab → 循环回末元素（删除按钮）
+    closeBtn.focus()
+    overlay.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Tab',
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
+    expect(document.activeElement).toBe(delBtn)
+
+    wrapper.element.remove()
+    wrapper.unmount()
+  })
+
+  it('关闭（卸载）时焦点归还触发元素', async () => {
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    trigger.focus()
+
+    const wrapper = mountGalleryAttached()
+    await nextTick()
+    await nextTick()
+    expect(document.activeElement).toBe(
+      wrapper.find('.gallery-overlay').element,
+    )
+
+    wrapper.unmount()
+    expect(document.activeElement).toBe(trigger)
+    trigger.remove()
   })
 })
 
