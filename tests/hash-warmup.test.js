@@ -23,6 +23,7 @@ vi.mock('../src/main/services/civitai', () => ({
 
 import { computeFileHash } from '../src/main/services/civitai'
 import {
+  clearHashFailuresForLibrarySwitch,
   computeAndCacheHash,
   pauseHashWarmup,
   requestHashWarmup,
@@ -320,6 +321,20 @@ describe('requestHashWarmup（队列消费）', () => {
     const firstComputed = computeFileHash.mock.calls[0][0]
     expect(firstComputed).toBe(hot)
     expect(computeFileHash).toHaveBeenCalledTimes(4)
+  })
+
+  it('priority 请求对已在队的批量任务升级插队：排到整条后台队列之前并立即调度', async () => {
+    const batch = []
+    for (let i = 0; i < 3; i++)
+      batch.push(await makeModel(`jq-batch${i}.safetensors`))
+    const hot = batch[2] // 已被批量预热入队（队尾后台位）
+    computeFileHash.mockResolvedValue(fakeHash(9))
+    requestHashWarmup(batch, { delayMs: 3000 })
+    // 详情页预取同一模型：已排队任务升级为优先移至队首，且立即调度取队
+    requestHashWarmup([hot], { priority: true })
+    await whenWarmupIdle()
+    expect(computeFileHash.mock.calls[0][0]).toBe(hot)
+    expect(computeFileHash).toHaveBeenCalledTimes(3)
   })
 
   it('预热与识别链路共享进行中任务：不重复计算', async () => {
@@ -751,5 +766,48 @@ describe('哈希失败负缓存（OPT-6）', () => {
     await requestHashWarmup([id], { delayMs: 0, full: true })
     await whenWarmupIdle()
     expect(computeFileHash).toHaveBeenCalledTimes(2)
+  })
+
+  it('已在队任务被 priority 请求插队升级为 force，不受负缓存静默期限制', async () => {
+    setHashFailRetryBaseForTests(60000)
+    const id = await makeModel('neg-jq.safetensors')
+    computeFileHash.mockRejectedValueOnce(new Error('EACCES: 文件被占用'))
+    computeFileHash.mockResolvedValue(fakeHash(2))
+    await requestHashWarmup([id], { delayMs: 0 })
+    await whenWarmupIdle()
+    expect(computeFileHash).toHaveBeenCalledTimes(1)
+
+    // 失败记录已入负缓存；candidates 未知体积路径不做入队侧抑制判定，
+    // 暂停取队使任务停留在后台队列中，随后详情页预取同一模型
+    pauseHashWarmup()
+    const { mtimeMs } = await fs.stat(id)
+    requestHashWarmup([{ id, mtimeMs }], { mode: 'candidates', full: true })
+    requestHashWarmup([id], { priority: true })
+    resumeHashWarmup(0)
+    await whenWarmupIdle()
+
+    expect(computeFileHash).toHaveBeenCalledTimes(2)
+    expect(getModelMeta(id)?.hash).toBe(fakeHash(2))
+  })
+
+  it('切库清空负缓存：同版本文件恢复预热资格', async () => {
+    const id = await makeModel('bad-swap.safetensors')
+    computeFileHash.mockRejectedValue(new Error('EACCES: 文件被占用'))
+    await requestHashWarmup([id], { delayMs: 0 })
+    await whenWarmupIdle()
+    expect(computeFileHash).toHaveBeenCalledTimes(1)
+
+    // 未清理时同版本 full 快照静默期内不重试（既有 OPT-6 行为不受影响）
+    await requestHashWarmup([id], { delayMs: 0, full: true })
+    await whenWarmupIdle()
+    expect(computeFileHash).toHaveBeenCalledTimes(1)
+
+    // 切库清理后记录作废，同路径文件重新获得预热资格
+    clearHashFailuresForLibrarySwitch()
+    computeFileHash.mockResolvedValue(fakeHash(5))
+    await requestHashWarmup([id], { delayMs: 0, full: true })
+    await whenWarmupIdle()
+    expect(computeFileHash).toHaveBeenCalledTimes(2)
+    expect(getModelMeta(id)?.hash).toBe(fakeHash(5))
   })
 })

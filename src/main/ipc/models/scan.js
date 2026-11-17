@@ -17,6 +17,7 @@ import {
   syncWatcher,
 } from '../../services/watcher'
 import {
+  clearHashFailuresForLibrarySwitch,
   pauseHashWarmup,
   requestHashWarmup,
   resumeHashWarmup,
@@ -175,6 +176,9 @@ export function registerScanHandlers() {
             resetDecorateCache(root)
             clearDeferredOwners()
             clearDeferredJobs()
+            // 切根即作废旧库的哈希失败负缓存（路径复用且 mtime 一致时，
+            // 旧记录会抑制新库文件的预热资格）
+            clearHashFailuresForLibrarySwitch()
           }
           // IDX-REUSE：通过「选择文件夹/重新定位」首次进入某库时，若目标库
           // 已有本地索引，先播种上次扫描的头部解析结果，避免首扫对全库重复读盘
