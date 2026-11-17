@@ -445,7 +445,18 @@ export async function moveModelTo(id) {
     toast('error', res.error)
     return false
   }
-  toast('success', `已移动到 ${res.path}`)
+  // sidecar 目标同名跳过/移动失败不吞掉：计数提示与改名链路同一承诺
+  const warnings = Array.isArray(res?.sidecarWarnings)
+    ? res.sidecarWarnings
+    : []
+  if (warnings.length > 0) {
+    toast(
+      'warn',
+      `已移动到 ${res.path}，但 ${warnings.length} 个 sidecar 未迁移`,
+    )
+  } else {
+    toast('success', `已移动到 ${res.path}`)
+  }
   if (!state.scanning) {
     // 源/目标两个子树都刷新；targetRelDir 缺失（响应形状漂移防御）时
     // 无法确定目标子树——传空数组整体回退全量，绝不静默漏掉目标子树

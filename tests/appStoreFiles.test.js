@@ -260,6 +260,22 @@ describe('文件操作编排（F10/F11）', () => {
     )
   })
 
+  it('moveModelTo：sidecar 未迁移时以 warn 提示', async () => {
+    api.models.moveModelTo.mockResolvedValue({
+      path: 'D:\\models\\sub\\a.safetensors',
+      sidecarWarnings: ['a.txt 的目标已存在，已跳过'],
+    })
+    expect(await moveModelTo('a')).toBe(true)
+    expect(
+      state.toasts.some(
+        (t) =>
+          t.type === 'warn' &&
+          t.text.includes('已移动到') &&
+          t.text.includes('1 个 sidecar 未迁移'),
+      ),
+    ).toBe(true)
+  })
+
   it('showContextMenu 调用原生菜单；IPC 异常时提示错误', async () => {
     api.models.popupMenu.mockResolvedValue({ ok: true })
     await showContextMenu('m1')

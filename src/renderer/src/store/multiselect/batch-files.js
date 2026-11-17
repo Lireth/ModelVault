@@ -99,9 +99,15 @@ export async function batchOrganizeByTags() {
     )
     if (failCount > 0) parts.push(`失败 ${failCount} 个`)
     if (res.skipped?.length > 0) parts.push(`跳过 ${res.skipped.length} 个`)
+    // sidecar 目标同名跳过/移动失败不吞掉：计数进提示（与改名链路同一承诺）
+    const sidecarWarnCount = Array.isArray(res.sidecarWarnings)
+      ? res.sidecarWarnings.length
+      : 0
+    if (sidecarWarnCount > 0)
+      parts.push(`sidecar 未迁移 ${sidecarWarnCount} 个`)
     if (res.moved > 0)
       toast(
-        res.failed?.length > 0 ? 'warn' : 'success',
+        res.failed?.length > 0 || sidecarWarnCount > 0 ? 'warn' : 'success',
         `已移动 ${res.moved} 个 LoRA 模型到分类文件夹${parts.length ? `（${parts.join('，')}）` : ''}`,
       )
     else toast('info', `未移动任何模型：${parts.join('，') || '无需移动'}`)
