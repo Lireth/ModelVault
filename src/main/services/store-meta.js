@@ -125,6 +125,22 @@ export function wasDataReset() {
 }
 
 /**
+ * 恢复重载等待在途写盘的上限（ms，B3）：与 FLUSH_AWAIT_TIMEOUT_MS/
+ * SWITCH_FLUSH_TIMEOUT_MS 同一底线——挂起磁盘上的原子写可在内核层阻塞
+ * 数十秒，恢复路径持有的全局维护锁不能为此永久卡死。
+ */
+export const RELOAD_SAVE_WAIT_TIMEOUT_MS = 5000
+
+/** 恢复重载写盘等待上限（测试可注入；生产代码严禁调用注入器） */
+let reloadSaveWaitTimeoutMs = RELOAD_SAVE_WAIT_TIMEOUT_MS
+
+/** 注入恢复重载的写盘等待上限（仅供单元测试使用） */
+export function setReloadSaveWaitTimeoutForTests(ms) {
+  reloadSaveWaitTimeoutMs =
+    Number.isFinite(ms) && ms >= 0 ? ms : RELOAD_SAVE_WAIT_TIMEOUT_MS
+}
+
+/**
  * 从磁盘重载当前根目录的元数据，并丢弃在途的防抖保存（备份恢复到当前根后调用）。
  * 备份恢复直接替换磁盘上的 store.json，若不重载：内存中的旧数据会在下一次
  * setModelMeta → saveStoreNow 时原子覆盖刚恢复的文件，恢复结果被静默回滚。
@@ -139,16 +155,30 @@ export async function reloadCurrentRootData() {
   }
   // B-02 恢复屏障：
   // 1) 丢弃挂起的补写请求，恢复窗口内不再调度新落盘；
-  // 2) 等待已开始的原子写结束（其 rename 不可取消），避免读到交换中的文件；
+  // 2) 等待已开始的原子写结束（其 rename 不可取消），避免读到交换中的文件
+  //    （B3：等待有上限——超时按有界 flush 同一降级路径继续重载，绝不卡死
+  //    维护锁；写盘仍在后台续跑，迟到收尾由同根守卫与 saveSuppressed 拦截）；
   // 3) 之后才从磁盘重载，保证内存基线就是恢复后的内容。
   metaState.saveSuppressed = true
   metaState.pendingSave = false
   metaState.pendingSnapshot = false
+  let awaitingIdle = true
   try {
-    while (metaState.saving) {
-      await new Promise((resolve) => setImmediate(resolve))
+    const settled = await isSettledWithin(
+      (async () => {
+        while (awaitingIdle && metaState.saving) {
+          await new Promise((resolve) => setImmediate(resolve))
+        }
+      })(),
+      reloadSaveWaitTimeoutMs,
+    )
+    if (!settled) {
+      logger.warn(
+        '恢复重载等待写盘链静止超时（磁盘无响应），按未静止继续重载（在途写盘仍在后台续跑）',
+      )
     }
   } finally {
+    awaitingIdle = false
     metaState.saveSuppressed = false
   }
   return loadData()

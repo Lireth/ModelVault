@@ -72,6 +72,7 @@ export {
   loadData,
   wasDataReset,
   reloadCurrentRootData,
+  setReloadSaveWaitTimeoutForTests,
   normalizeStoreData,
   getModelMeta,
   getMetaMapByAbsPath,

@@ -15,7 +15,7 @@ import {
 } from '../utils'
 import { isDeltaBatchName } from './store-meta-journal'
 import {
-  flushStoreSave,
+  flushStoreSaveBounded,
   getModelMeta,
   normalizeStoreData,
   removeModelMeta,
@@ -441,7 +441,9 @@ export async function transferModelsToLibrary({
       }
       if (transferred.length > 0) {
         try {
-          await flushStoreSave()
+          // B3：有等待上限——挂起磁盘上超时按未静止降级（防抖链会重试补写），
+          // 不卡死 'import' 维护锁
+          await flushStoreSaveBounded()
         } catch (err) {
           logger.warn(
             `源库元数据落盘失败（防抖链会重试）: ${errorMessage(err)}`,

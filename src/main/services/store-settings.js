@@ -18,6 +18,7 @@ import {
 } from './store-settings-normalize'
 import {
   flushSettingsSave,
+  flushSettingsSaveBounded,
   getSettingsFilePath,
   isDirectoryAvailable,
   queueBootstrapSave,
@@ -304,8 +305,11 @@ export async function updateSettings(patch) {
  */
 export async function reloadLibrarySettings(root) {
   // 先静止旧库写盘链（B-02）：排队中的补丁都携带旧库快照，必须写完再切换内存视图，
-  // 避免重载后的新库设置立刻被旧任务覆盖
-  await flushSettingsSave()
+  // 避免重载后的新库设置立刻被旧任务覆盖。
+  // B3：调用方均持有全局维护锁（切库/恢复），flush 必须有等待上限——挂起磁盘上
+  // 的写链可能永不 settle；超时按未静止继续重载（写盘链以调度时固定的旧根为
+  // 目标在后台续跑，与切库链路的有界等待同一降级取舍）
+  await flushSettingsSaveBounded()
   library = root ? await loadLibrarySettings(root) : defaultLibrarySettings()
 }
 

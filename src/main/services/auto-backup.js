@@ -52,6 +52,47 @@ const AUTO_BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000
 const STARTUP_DELAY_MS = 60 * 1000
 /** 周期检查间隔（ms）：实际备份仍由 24h 门槛约束 */
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+/**
+ * 拿锁后首个目录 IO 的等待上限（ms，B3）：挂起磁盘（死亡网络盘/半挂载 USB）
+ * 上的 readdir/open 可在内核层阻塞数十秒——'backup' 维护锁一旦为此永久持有，
+ * 扫描/切库/恢复/传输全部快速失败 EBUSY，只能杀进程解除。
+ */
+const DIR_IO_TIMEOUT_MS = 5000
+
+/** 目录 IO 等待上限（测试可注入；生产代码严禁调用注入器） */
+let dirIoTimeoutMs = DIR_IO_TIMEOUT_MS
+
+/** 注入目录 IO 等待上限（仅供单元测试使用） */
+export function setAutoBackupDirIoTimeoutForTests(ms) {
+  dirIoTimeoutMs = Number.isFinite(ms) && ms >= 0 ? ms : DIR_IO_TIMEOUT_MS
+}
+
+/**
+ * 与超时赛跑的目录 IO 等待：原 promise 无法取消也不取消（迟到的 IO 结果
+ * 由调用方语义丢弃）；timer 在竞速落定后立即清理，不留悬挂句柄。
+ * @template T
+ * @param {Promise<T>} promise 目录 IO promise
+ * @param {number} ms 等待上限
+ * @returns {Promise<T>}
+ */
+function raceDirIoTimeout(promise, ms) {
+  /** @type {ReturnType<typeof setTimeout>|null} */
+  let timer = null
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const err = /** @type {Error & {code: string}} */ (
+          new Error(`备份目录读取超时（${ms}ms，磁盘无响应）`)
+        )
+        err.code = 'ETIMEDOUT'
+        reject(err)
+      }, ms)
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
+}
 
 /**
  * 周期检查定时器（全局唯一，unref）
@@ -223,7 +264,15 @@ export async function runAutoBackupIfDue(now = Date.now()) {
   running = true
   try {
     const dir = path.join(root, DATA_DIR, BACKUP_DIR_NAME)
-    const last = await lastAutoBackupAt(dir)
+    // B3：拿锁后的首个目录 IO 必须有等待上限——挂起根盘上 readdir/open
+    // 可能永不返回；超时/失败释放锁（finally）并跳过本轮，绝不抛未捕获异常
+    let last
+    try {
+      last = await raceDirIoTimeout(lastAutoBackupAt(dir), dirIoTimeoutMs)
+    } catch (err) {
+      logger.warn(`自动备份跳过：备份目录读取超时或失败: ${errorMessage(err)}`)
+      return { skipped: 'unavailable' }
+    }
     if (now - last < AUTO_BACKUP_INTERVAL_MS) return { skipped: 'recent', last }
 
     // metadata 模式：全库标注、不含封面（体积小）——复用手动备份的组装核心
