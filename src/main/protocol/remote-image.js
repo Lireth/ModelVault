@@ -15,7 +15,7 @@ import {
   removeCivImageCache,
   saveCivImageCache,
 } from '../services/civ-cache'
-import { isSettledWithin } from '../utils'
+import { cancelResponseBody, isSettledWithin } from '../utils'
 import { isImageBuffer } from '../services/covers'
 import { proxyMediaHeaders, toBodyView } from './http-cache'
 import { errorMessage } from '../../shared/error-text'
@@ -182,6 +182,7 @@ function fetchCivImageShared(target) {
         logger.warn(
           `civimg 上游响应异常（HTTP ${upstream.status}）: ${target.slice(0, 200)}`,
         )
+        cancelResponseBody(upstream)
         recordCivimgFailure(target)
         return { errorStatus: 502 }
       }
@@ -352,6 +353,7 @@ async function proxyCivitaiVideo(target, request, acquireSlot) {
       logger.warn(
         `civimg 视频上游响应异常（HTTP ${upstream.status}）: ${target.slice(0, 200)}`,
       )
+      cancelResponseBody(upstream)
       return new Response('Upstream Error', { status: 502 })
     }
     // 流式响应保留上游 Content-Length/Content-Range（拖动播放语义所需），

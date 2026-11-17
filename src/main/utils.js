@@ -29,6 +29,7 @@ export {
 
 export {
   isAllowedExternalUrl,
+  cancelResponseBody,
   raceIdleTimeout,
   readResponseBytesLimited,
   readResponseTextLimited,

@@ -1,4 +1,5 @@
 import { net } from 'electron'
+import { cancelResponseBody } from '../utils'
 
 /**
  * 跨服务共享的网络请求基元（V-06 逐跳白名单的单一实现）：
@@ -168,6 +169,7 @@ export async function fetchWithValidatedRedirects(
     const location = response.headers.get('location')
     if (!location) return response
     const next = new URL(location, current).toString()
+    cancelResponseBody(response)
     if (!isAllowed(next)) {
       throw new Error(`${label}重定向目标不在白名单内，已拒绝`)
     }

@@ -1,5 +1,9 @@
 import logger from '../logger'
-import { readResponseBytesLimited, readResponseTextLimited } from '../utils'
+import {
+  cancelResponseBody,
+  readResponseBytesLimited,
+  readResponseTextLimited,
+} from '../utils'
 import { computeFileHashOffThread } from './hash-worker-pool'
 import {
   REQUEST_TIMEOUT_MS,
@@ -193,6 +197,7 @@ async function fetchCivitaiApi(url, options = {}) {
       }
     }
     if (response.status === 429 && attempt < CIVITAI_429_MAX_RETRIES) {
+      cancelResponseBody(response)
       const ra = Number(response.headers.get('retry-after'))
       const waitSec =
         Number.isFinite(ra) && ra >= 0
@@ -682,6 +687,7 @@ export async function downloadCivitaiImage(url) {
     return { error: `图片下载失败: ${errorMessage(err)}` }
   }
   if (!response.ok) {
+    cancelResponseBody(response)
     return { error: `图片下载失败（HTTP ${response.status}）` }
   }
   let buf
