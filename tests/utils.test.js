@@ -8,6 +8,7 @@ import {
   runWithConcurrency,
   samePathIgnoreCase,
   sameResolvedPathIgnoreCase,
+  sanitizeLogText,
   waitForProcessExit,
 } from '../src/main/utils'
 
@@ -382,5 +383,32 @@ describe('路径大小写不敏感比较（C2 单一来源）', () => {
     ).toBe(true)
     expect(sameResolvedPathIgnoreCase(p, p.toUpperCase())).toBe(true)
     expect(sameResolvedPathIgnoreCase(p, path.resolve('mv-cmp-b'))).toBe(false)
+  })
+})
+
+describe('sanitizeLogText（#66 日志伪造面）', () => {
+  it('换行与回车替换为可见转义，日志保持单行', () => {
+    expect(sanitizeLogText('a\nb')).toBe('a\\nb')
+    expect(sanitizeLogText('a\r\nb')).toBe('a\\r\\nb')
+    expect(sanitizeLogText('a\rb')).toBe('a\\rb')
+    // %0A 解码后注入伪造 [INFO] 行的形态：换行被转义后无法拆行
+    expect(sanitizeLogText('x.jpeg\n[INFO] 伪造日志行')).toBe(
+      'x.jpeg\\n[INFO] 伪造日志行',
+    )
+  })
+
+  it('制表符与其余 C0/C1 控制字符转义，普通文本原样保留', () => {
+    expect(sanitizeLogText('a\tb')).toBe('a\\tb')
+    // ESC（终端转义序列前缀）与 DEL 按 \xHH 呈现
+    expect(sanitizeLogText('a\u001b[31mb')).toBe('a\\x1b[31mb')
+    expect(sanitizeLogText('a\u007fb')).toBe('a\\x7fb')
+    expect(sanitizeLogText('a\u009fb')).toBe('a\\x9fb')
+    expect(sanitizeLogText('D:\\lib\\model.preview.png')).toBe(
+      'D:\\lib\\model.preview.png',
+    )
+    expect(sanitizeLogText('https://image.civitai.com/a/b.jpeg')).toBe(
+      'https://image.civitai.com/a/b.jpeg',
+    )
+    expect(sanitizeLogText('')).toBe('')
   })
 })

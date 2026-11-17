@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import { Readable } from 'node:stream'
 import { protocol, app } from 'electron'
 import logger from '../logger'
-import { relativeWithin } from '../utils'
+import { relativeWithin, sanitizeLogText } from '../utils'
 import { isValidImageFile } from '../services/covers'
 import { getCurrentRoot } from '../services/store'
 import { IMAGE_URL_SCHEME as SCHEME } from '../../shared/image-url'
@@ -128,7 +128,7 @@ export function registerMvimgHandler() {
         }
       }
       if (!(await isAllowedPath(realPath))) {
-        logger.warn(`mvimg 协议拒绝访问路径: ${filePath}`)
+        logger.warn(`mvimg 协议拒绝访问路径: ${sanitizeLogText(filePath)}`)
         return new Response('Forbidden', { status: 403 })
       }
       if (!cacheHit && !(await isValidImageFile(realPath))) {
