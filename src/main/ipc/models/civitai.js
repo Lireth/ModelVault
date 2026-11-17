@@ -101,7 +101,12 @@ export function registerCivitaiHandlers() {
       if (disabled) return disabled
       const invalid = checkModelIdInRoot(id)
       if (invalid) return { error: invalid }
-      const stat = await fs.stat(id)
+      let stat
+      try {
+        stat = await fs.stat(id)
+      } catch {
+        return { error: '模型文件不存在' }
+      }
       const { hash, meta } = await ensureHash(
         id,
         getModelMeta(id) || {},
@@ -164,7 +169,12 @@ export function registerCivitaiHandlers() {
       if (disabled) return disabled
       const invalid = checkModelIdInRoot(id)
       if (invalid) return { error: invalid }
-      const stat = await fs.stat(id)
+      let stat
+      try {
+        stat = await fs.stat(id)
+      } catch {
+        return { error: '模型文件不存在' }
+      }
       const { hash, meta } = await ensureHash(
         id,
         getModelMeta(id) || {},

@@ -163,6 +163,17 @@ describe('models:civitaiIdentify', () => {
     expect(fetchCivitaiVersionByHash).not.toHaveBeenCalled()
   })
 
+  it('模型文件已被删除时返回整洁错误（不泄漏 ENOENT 原文与路径）', async () => {
+    const missing = path.join(root, 'missing.safetensors')
+    const res = await getRegisteredHandler('models:civitaiIdentify')(
+      makeEvent(),
+      { id: missing },
+    )
+    expect(res).toEqual({ error: '模型文件不存在' })
+    expect(computeAndCacheHash).not.toHaveBeenCalled()
+    expect(fetchCivitaiVersionByHash).not.toHaveBeenCalled()
+  })
+
   it('hashMtime 缓存命中：零哈希计算，直接反查并回填 URL/baseModel', async () => {
     const id = await touchModel('LoRA\\a.safetensors')
     const { mtimeMs } = await fs.stat(id)
@@ -340,6 +351,18 @@ describe('models:civitaiComplete', () => {
     ).toEqual({
       error: 'x',
     })
+    expect(civitaiCompletePatch).not.toHaveBeenCalled()
+  })
+
+  it('模型文件已被删除时返回整洁错误（不泄漏 ENOENT 原文与路径）', async () => {
+    const missing = path.join(root, 'missing-complete.safetensors')
+    const res = await getRegisteredHandler('models:civitaiComplete')(
+      makeEvent(),
+      { id: missing },
+    )
+    expect(res).toEqual({ error: '模型文件不存在' })
+    expect(computeAndCacheHash).not.toHaveBeenCalled()
+    expect(fetchCivitaiVersionByHash).not.toHaveBeenCalled()
     expect(civitaiCompletePatch).not.toHaveBeenCalled()
   })
 })
