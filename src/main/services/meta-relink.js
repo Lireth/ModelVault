@@ -131,7 +131,7 @@ export function planMetaRelinks(orphans, newcomers) {
 /**
  * 判断一条元数据是否不含任何用户价值数据（失效空条目）。
  * 这类条目可能由"标记后又取消""仅残留空骨架"等路径产生，孤儿化后可安全清理；
- * 任一标注、封面引用、参数或哈希存在时都必须保留。
+ * 任一标注、封面引用、自由标签、识别信息、使用轨迹、参数或哈希存在时都必须保留。
  * @param {Record<string, any>|null} meta 规范化后的模型元数据
  * @returns {boolean}
  */
@@ -154,9 +154,14 @@ export function isEmptyModelMeta(meta) {
     meta.note ||
     meta.subCategory ||
     meta.triggerWords ||
+    (Array.isArray(meta.tags) && meta.tags.length > 0) ||
+    meta.civitaiUrl ||
+    meta.baseModel ||
     meta.favorite === true ||
     meta.nsfw === true ||
     (Number.isFinite(meta.rating) && meta.rating > 0) ||
+    (Number.isFinite(meta.lastOpenedAt) && meta.lastOpenedAt > 0) ||
+    (Number.isFinite(meta.openCount) && meta.openCount > 0) ||
     meta.hash ||
     meta.noteSource ||
     meta.triggerWordsSource ||

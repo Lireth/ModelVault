@@ -142,6 +142,19 @@ describe('relinkScannedMeta 库内移动/重命名重关联', () => {
     )
   })
 
+  it('仅含自由标签的孤儿保守保留（用户手动标签属用户价值数据，不作空条目清理）', async () => {
+    setModelMeta(path.join(root, 'tagged.safetensors'), { tags: ['风格'] })
+
+    // 新模型位于不同目录且不同名，三层重关联规则均不命中，孤儿进入清理判定
+    const result = relinkScannedMeta([scanned('sub/unrelated.safetensors')])
+
+    expect(result.relinked).toBe(0)
+    expect(result.prunedEmpty).toBe(0)
+    expect(result.retainedOrphans).toBe(1)
+    const kept = getModelMeta(path.join(root, 'tagged.safetensors'))
+    expect(kept?.tags).toEqual(['风格'])
+  })
+
   it('键仍存在于扫描结果的模型既不算孤儿也不算新模型（保持原样）', async () => {
     const abs = path.join(root, 'stay.safetensors')
     setModelMeta(abs, { note: '原地不动' })
