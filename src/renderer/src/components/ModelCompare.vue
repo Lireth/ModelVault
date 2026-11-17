@@ -97,6 +97,10 @@ function openModel(id) {
 function onKeydown(e) {
   if (e.key !== 'Escape' || !compareState.open) return
   if (state.confirm.visible) return // 确认层优先
+  // 对比层独占消费本次 Esc（ConfirmOverlay 同款「独占消费」约定）：本监听器
+  // 先于全局快捷键注册（子组件 onMounted 先于父组件），放行会令全局处理器
+  // 读到已关闭的 compareState 而连带退出多选（一次 Esc 双重副作用）
+  e.stopImmediatePropagation()
   closeCompare()
 }
 
