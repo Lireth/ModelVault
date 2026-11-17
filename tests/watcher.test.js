@@ -64,6 +64,8 @@ import {
 import { applyPartialBaseline } from '../src/main/services/watcher-baseline'
 import { scheduleBroadcast } from '../src/main/services/watcher-broadcast'
 import { getWatcher } from '../src/main/services/watcher-state'
+// runWalk 为引擎内部 API（门面未再导出），#52 用例手动驱动轮次消除时序抖动
+import { runWalk } from '../src/main/services/watcher-poll'
 import logger from '../src/main/logger'
 
 /** 测试用小间隔时序（ms）：轮询快、防抖短，用例百毫秒级完成 */
@@ -1230,6 +1232,152 @@ describe('OPT-02 扫描/监控基线协同', () => {
     // 已覆盖的 'a' 清理；失败子树 'a/b' 的待广播保留（停扫后自动重试）
     expect(w.pendingDirs.has('a')).toBe(false)
     expect(w.pendingDirs.has('a/b')).toBe(true)
+  })
+
+  it('applyPartialBaseline：同一子树连续失败达到上限后不再保留基线与待广播项（#52）', () => {
+    const w = {
+      root,
+      snapshot: new Map([
+        [path.join(root, 'lora'), ['a.safetensors']],
+        [path.join(root, 'other'), ['b.safetensors']],
+      ]),
+      statSnapshot: null,
+      excludeNames: new Set(),
+      pendingDirs: new Set(['lora']),
+      pendingConfirmedDirs: new Set(),
+      debounceTimer: null,
+      snapshotRevision: 0,
+      idleRounds: 0,
+      failedDirRetries: new Map(),
+      maxFailedDirRetries: 2,
+    }
+    // 第 1 次失败：未达上限，B5 保护语义不变
+    expect(applyPartialBaseline(w, ['lora'], new Map(), ['lora'])).toBe(true)
+    expect(w.snapshot.get(path.join(root, 'lora'))).toEqual(['a.safetensors'])
+    expect(w.pendingDirs.has('lora')).toBe(true)
+    expect(w.failedDirRetries.get('lora')).toBe(1)
+    // 第 2 次失败（达到上限）：不再保留——基线按扫描结果收敛，待广播清理，
+    // 轮询差异不再把该子树当作「已消失」反复检出（#52 活循环根因）
+    expect(applyPartialBaseline(w, ['lora'], new Map(), ['lora'])).toBe(true)
+    expect(w.snapshot.has(path.join(root, 'lora'))).toBe(false)
+    expect(w.pendingDirs.has('lora')).toBe(false)
+    expect(w.failedDirRetries.get('lora')).toBe(2)
+    // 范围外条目不受影响
+    expect(w.snapshot.get(path.join(root, 'other'))).toEqual(['b.safetensors'])
+  })
+
+  it('applyPartialBaseline：失败子树被扫描成功覆盖后失败计数重置（#52）', () => {
+    const w = {
+      root,
+      snapshot: new Map([[path.join(root, 'lora'), ['a.safetensors']]]),
+      statSnapshot: null,
+      excludeNames: new Set(),
+      pendingDirs: new Set(),
+      pendingConfirmedDirs: new Set(),
+      debounceTimer: null,
+      snapshotRevision: 0,
+      idleRounds: 0,
+      failedDirRetries: new Map([['lora', 2]]),
+      maxFailedDirRetries: 2,
+    }
+    // 扫描成功读到 lora（无排除）：计数清零
+    const snapshot = new Map([[path.join(root, 'lora'), ['new.safetensors']]])
+    expect(applyPartialBaseline(w, ['lora'], snapshot, [])).toBe(true)
+    expect(w.failedDirRetries.size).toBe(0)
+    expect(w.snapshot.get(path.join(root, 'lora'))).toEqual(['new.safetensors'])
+    // 下次失败重新起算：仍在 B5 保护期内
+    expect(applyPartialBaseline(w, ['lora'], new Map(), ['lora'])).toBe(true)
+    expect(w.failedDirRetries.get('lora')).toBe(1)
+    expect(w.snapshot.get(path.join(root, 'lora'))).toEqual(['new.safetensors'])
+  })
+
+  it('applyPartialBaseline：达到上限的失败后代不再被父级回填保留（#52）', () => {
+    const abs = (rel) => path.join(root, ...rel.split('/'))
+    const w = {
+      root,
+      snapshot: new Map([
+        [abs('a'), ['x']],
+        [abs('a/b'), ['locked.safetensors']],
+        [abs('a/c'), ['old.safetensors']],
+      ]),
+      statSnapshot: null,
+      excludeNames: new Set(),
+      pendingDirs: new Set(['a/b']),
+      pendingConfirmedDirs: new Set(),
+      debounceTimer: null,
+      snapshotRevision: 0,
+      idleRounds: 0,
+      failedDirRetries: new Map([['a/b', 2]]),
+      maxFailedDirRetries: 2,
+    }
+    // 扫描子树 'a'，a/b 再次失败但已达到上限：不再按 B5 保留其基线与待广播
+    const snapshot = new Map([
+      [abs('a'), ['x']],
+      [abs('a/c'), ['new.safetensors']],
+    ])
+    applyPartialBaseline(w, ['a'], snapshot, ['a/b'])
+    expect(w.snapshot.get(abs('a'))).toEqual(['x'])
+    expect(w.snapshot.get(abs('a/c'))).toEqual(['new.safetensors'])
+    // 放弃保护的失败后代基线随父级回填移除，待广播项清理
+    expect(w.snapshot.has(abs('a/b'))).toBe(false)
+    expect(w.pendingDirs.has('a/b')).toBe(false)
+  })
+
+  it('曾可读目录转为不可读再恢复：失败期计数受保护，恢复后差异自动重新检出（#52）', async () => {
+    await fs.mkdir(path.join(root, 'lora'), { recursive: true })
+    await fs.writeFile(path.join(root, 'lora', 'a.safetensors'), 'x')
+    syncWatcher(root, true, [], {
+      // 超长轮询间隔：轮次由测试手动驱动，消除时序抖动
+      pollInterval: 10_000_000,
+      broadcastDebounce: 10,
+      contentCheckInterval: 0,
+      isVisible: () => true,
+      onPollScheduled: () => {},
+    })
+    const w = getWatcher()
+    await waitFor(() => w.snapshotRevision > 0, '基准基线建立')
+    sentEvents.length = 0
+
+    /** 手动驱动一轮巡检并等待在途遍历结束 */
+    async function driveWalk() {
+      await runWalk(w, false)
+      await waitFor(() => !w.polling, '巡检轮结束')
+      await sleep(30) // 广播防抖（10ms）到期
+    }
+
+    // 目录转为不可读：readdir 以 EACCES 失败（父层条目清单仍含该目录）
+    const originalReaddir = fs.readdir
+    const lockedAbs = path.join(root, 'lora')
+    const spy = vi.spyOn(fs, 'readdir').mockImplementation((p, opts) => {
+      if (String(p).toLowerCase() === lockedAbs.toLowerCase()) {
+        const err = new Error('EACCES: permission denied')
+        err.code = 'EACCES'
+        return Promise.reject(err)
+      }
+      return originalReaddir.call(fs, p, opts)
+    })
+    try {
+      // 轮 1（全量）：差异检出 lora 消失 → 广播
+      await driveWalk()
+      expect(sentEvents.some((e) => e.payload.dirs.includes('lora'))).toBe(true)
+      // 渲染层局部扫描失败（B5）：基线回填带排除语义，计数起算且受保护
+      setWatcherScanning(true)
+      refreshWatcherBaseline(root, ['lora'], new Map(), ['lora'])
+      setWatcherScanning(false)
+      expect(w.failedDirRetries.get('lora')).toBe(1)
+    } finally {
+      spy.mockRestore()
+    }
+
+    // 目录恢复可读：快照重新出现该目录，差异自动再次检出（B5 恢复语义）
+    sentEvents.length = 0
+    await driveWalk()
+    expect(sentEvents.some((e) => e.payload.dirs.includes('lora'))).toBe(true)
+    // 模拟恢复后的成功局部扫描：计数重置、基线回填
+    const snapshot = await collectDirSnapshot(lockedAbs)
+    expect(refreshWatcherBaseline(root, ['lora'], snapshot, [])).toBe(true)
+    expect(w.failedDirRetries.has('lora')).toBe(false)
+    expect(w.snapshot.get(lockedAbs)).toEqual(['a.safetensors'])
   })
 
   it('原生事件子树回填：噪声不广播，真实变更/删除按子树广播（含内容基线）', async () => {

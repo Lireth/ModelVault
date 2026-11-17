@@ -146,13 +146,16 @@ export function refreshWatcherBaseline(root, dirs, snapshot, excludeDirs = []) {
  *   nativeWatch?: boolean, baseline?: Map<string, string[]>,
  *   backoff?: number[], isVisible?: () => boolean,
  *   errorRetryLadder?: number[], maxErrorRetries?: number,
+ *   maxFailedDirRetries?: number,
  *   onPollScheduled?: (delay: number) => void}} [timing]
  *   轮询间隔/广播防抖/内容校验间隔（毫秒）与目录遍历并发；fullWalkInterval 为
  *   活跃期全量回扫周期（PERF-4，默认 5）；nativeWatch 开启
  *   原生事件监听；baseline 为全量扫描产出的目录名快照（OPT-02：直接作为
  *   监控基线，跳过扫描后的重复全树遍历）；backoff 空闲退避阶梯；
  *   errorRetryLadder/maxErrorRetries 为巡检异常的退避重探阶梯与失败上限
- *   （OPT-16，测试注入缩小）；isVisible/onPollScheduled 为测试注入钩子；
+ *   （OPT-16，测试注入缩小）；maxFailedDirRetries 为失败子树放弃 B5 保护的
+ *   连续扫描失败上限（#52，测试注入缩小）；
+ *   isVisible/onPollScheduled 为测试注入钩子；
  *   生产走默认值，测试注入小值（contentCheckInterval≤0 关闭内容校验）
  */
 export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
@@ -215,6 +218,8 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
     fullWalkInterval: timing.fullWalkInterval ?? DEFAULT_FULL_WALK_INTERVAL,
     pendingDirs: new Set(),
     pendingConfirmedDirs: new Set(),
+    // #52：失败子树连续局部扫描失败计数（达到上限后不再保留 B5 保护）
+    failedDirRetries: new Map(),
     pollInterval: pollMs,
     // OP-05 原生监听状态（未开启/启动失败为 null）
     nativeWatch,
@@ -248,6 +253,13 @@ export function syncWatcher(root, enabled, excludeDirs = [], timing = {}) {
       Number.isFinite(timing.maxErrorRetries) &&
       timing.maxErrorRetries > 0
         ? timing.maxErrorRetries
+        : undefined,
+    // #52：失败子树放弃 B5 保护的连续失败上限（测试可注入缩小）
+    maxFailedDirRetries:
+      typeof timing.maxFailedDirRetries === 'number' &&
+      Number.isFinite(timing.maxFailedDirRetries) &&
+      timing.maxFailedDirRetries > 0
+        ? timing.maxFailedDirRetries
         : undefined,
   })
   setWatcher(w)
