@@ -51,6 +51,12 @@ async function removeTag(tag) {
   if (!model) return
   await removeModelTag(model.id, tag)
 }
+
+/** 输入法组合中的 Enter 不提交（确认中文候选词不误触发添加） */
+function onTagEnter(e) {
+  if (e?.isComposing) return
+  addTag()
+}
 </script>
 
 <template>
@@ -100,7 +106,7 @@ async function removeTag(tag) {
       maxlength="32"
       placeholder="添加标签，回车确认"
       spellcheck="false"
-      @keydown.enter.prevent="addTag"
+      @keydown.enter.prevent="onTagEnter"
     />
   </div>
   <span

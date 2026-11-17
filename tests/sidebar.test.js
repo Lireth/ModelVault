@@ -213,4 +213,40 @@ describe('Sidebar 智能视图（组合筛选收藏）', () => {
     expect(wrapper.find('.view-save-btn').attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
+
+  it('输入法组合态回车不保存视图（isComposing 守卫，表单保持展开）', async () => {
+    state.folder = 'D:\\libA'
+    echoSettingsUpdate()
+    const wrapper = mount(Sidebar)
+    await wrapper.find('.view-save-btn').trigger('click')
+    const input = wrapper.find('.view-save-form input')
+    await input.setValue('我的视图')
+    input.element.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        isComposing: true,
+        bubbles: true,
+      }),
+    )
+    await flushPromises()
+    expect(wrapper.find('.view-save-form').exists()).toBe(true)
+    expect(window.api.settings.update).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('输入法组合态 Esc 不取消保存（isComposing 守卫，表单保持展开）', async () => {
+    state.folder = 'D:\\libA'
+    const wrapper = mount(Sidebar)
+    await wrapper.find('.view-save-btn').trigger('click')
+    wrapper.find('.view-save-form input').element.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Escape',
+        isComposing: true,
+        bubbles: true,
+      }),
+    )
+    await flushPromises()
+    expect(wrapper.find('.view-save-form').exists()).toBe(true)
+    wrapper.unmount()
+  })
 })

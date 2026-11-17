@@ -52,6 +52,7 @@ watch(
  *  确认层可见时整键让位（F1）：模态确认期间底层页面不得响应 ESC，
  *  否则会把刚被取消的确认层再次弹出 */
 function onKeydown(e) {
+  if (e.isComposing) return // 输入法组合中的按键不拦截（Esc 取消候选词不触发关闭）
   if (state.confirm.visible) return
   if (e.key === 'Escape' && state.settingsOpen) onCancel()
 }
