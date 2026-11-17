@@ -68,6 +68,9 @@ export const WATCHER_ERROR_RETRY_LADDER = [30000, 60000, 120000, 300000]
 /** 巡检异常连续失败上限：超过后停止监控并通知渲染层（OPT-16） */
 export const WATCHER_MAX_ERROR_RETRIES = 5
 
+/** 交付队列条目（防抖结束时压入；nativeDirs/confirmedDirs 为排重后的相对子树） */
+/** @typedef {{nativeDirs: string[], confirmedDirs: string[], needsRefresh: boolean}} DeliverQueueEntry */
+
 /**
  * 监控状态对象（syncWatcher 构造；stop/startNativeWatch/scheduleBroadcast
  * 与轮询链路共享引用）
@@ -88,7 +91,7 @@ export const WATCHER_MAX_ERROR_RETRIES = 5
  * @property {boolean} scanning 是否处于扫描期（暂停巡检与广播，变更先累积）
  * @property {boolean} pendingNeedsRefresh 待广播变更是否来自原生事件（需回填基线）
  * @property {boolean} delivering 是否正在交付防抖广播（串行化原生事件回填）
- * @property {Array<object>} deliverQueue 待交付广播队列（扫描期清空）
+ * @property {DeliverQueueEntry[]} deliverQueue 待交付广播队列（扫描期清空）
  * @property {number} snapshotRevision 快照基线代际（并发遍历丢弃依据）
  * @property {number} idleRounds 连续空闲轮数（退避爬梯）
  * @property {string[]} lastHotDirs 最近一轮巡检发现的变更子树（POSIX 相对路径；

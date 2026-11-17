@@ -62,6 +62,8 @@ import {
   syncWatcher,
 } from '../src/main/services/watcher'
 import { applyPartialBaseline } from '../src/main/services/watcher-baseline'
+import { scheduleBroadcast } from '../src/main/services/watcher-broadcast'
+import { getWatcher } from '../src/main/services/watcher-state'
 import logger from '../src/main/logger'
 
 /** 测试用小间隔时序（ms）：轮询快、防抖短，用例百毫秒级完成 */
@@ -918,6 +920,146 @@ describe('OPT-02 扫描/监控基线协同', () => {
 
     await sleep(200)
     expect(sentEvents).toHaveLength(0)
+  })
+
+  it('交付队列内的轮询确认批次不因扫描启动而丢失，停扫补发（#51）', async () => {
+    // 轮询拉到最长：广播只来自本用例的直接调度，排除轮询干扰
+    syncWatcher(root, true, [], {
+      pollInterval: 100000,
+      broadcastDebounce: 30,
+      contentCheckInterval: 0,
+    })
+    await sleep(80)
+    sentEvents.length = 0
+
+    // 轮询确认的变更先落盘并把基线写入快照（模拟轮询轮先写快照再广播：
+    // 基线已含该变更，此后轮询 diff 恒为空，被丢弃即永久丢失）。基线写入
+    // 必须先于下方回填的 before 基线捕获，避免被误认成回填差异
+    await fs.mkdir(path.join(root, 'queued'), { recursive: true })
+    await fs.writeFile(path.join(root, 'queued', 'x.safetensors'), 'x')
+    const w = getWatcher()
+    w.snapshot.set(path.join(root, 'queued'), ['x.safetensors'])
+
+    // 挂起回填占住交付泵（delivering=true），复现「防抖定时器触发时新批次
+    // 只能在交付队列中等待」的竞态前提
+    const gate = armRefreshGate()
+    scheduleBroadcast(getWatcher(), ['race-a'], { refresh: true })
+    await waitFor(() => gate.started, '回填未开始', 3000)
+
+    // 轮询确认批次在泵被占住后入队等待
+    scheduleBroadcast(w, ['queued'])
+    await waitFor(
+      () => w.deliverQueue.length >= 1,
+      '确认批次未进入交付队列',
+      3000,
+    )
+
+    // 扫描启动：旧实现整队作废，确认批次被丢弃且基线已含变更，永不补发
+    setWatcherScanning(true)
+    expect(w.deliverQueue.length).toBe(0)
+    expect(w.pendingConfirmedDirs.has('queued')).toBe(true)
+
+    gate.release()
+    refreshGate.current = null
+    await sleep(60)
+    expect(sentEvents).toHaveLength(0)
+
+    setWatcherScanning(false)
+    await waitFor(
+      () => sentEvents.length >= 1,
+      '停扫未补发队列内确认批次',
+      3000,
+    )
+    expect(sentEvents[0].channel).toBe('models:fsChanged')
+    expect(sentEvents[0].payload.dirs).toContain('queued')
+    await sleep(150)
+    expect(sentEvents).toHaveLength(1)
+  })
+
+  it('队列内确认批次转停扫补发后被全量基线覆盖则不再重复广播（#51 配套）', async () => {
+    syncWatcher(root, true, [], {
+      pollInterval: 100000,
+      broadcastDebounce: 30,
+      contentCheckInterval: 0,
+    })
+    await sleep(80)
+    sentEvents.length = 0
+
+    await fs.mkdir(path.join(root, 'queued2'), { recursive: true })
+    await fs.writeFile(path.join(root, 'queued2', 'y.safetensors'), 'x')
+    const w = getWatcher()
+    w.snapshot.set(path.join(root, 'queued2'), ['y.safetensors'])
+
+    const gate = armRefreshGate()
+    scheduleBroadcast(getWatcher(), ['race-b'], { refresh: true })
+    await waitFor(() => gate.started, '回填未开始', 3000)
+
+    scheduleBroadcast(w, ['queued2'])
+    await waitFor(
+      () => w.deliverQueue.length >= 1,
+      '确认批次未进入交付队列',
+      3000,
+    )
+
+    setWatcherScanning(true)
+    gate.release()
+    refreshGate.current = null
+    await sleep(60)
+
+    // 模拟全量扫描完成：基线覆盖该子树，clearScannedPendingDirs 清掉转存项
+    const snapshot = await collectDirSnapshot(root)
+    syncWatcher(root, true, [], { baseline: snapshot })
+    setWatcherScanning(false)
+
+    await sleep(200)
+    expect(sentEvents).toHaveLength(0)
+  })
+
+  it('扫描期进入交付的确认批次转停扫补发而非静默吞批（#51 交付入口防御）', async () => {
+    syncWatcher(root, true, [], {
+      pollInterval: 100000,
+      broadcastDebounce: 30,
+      contentCheckInterval: 0,
+    })
+    await sleep(80)
+    sentEvents.length = 0
+
+    await fs.mkdir(path.join(root, 'queued3'), { recursive: true })
+    await fs.writeFile(path.join(root, 'queued3', 'z.safetensors'), 'x')
+    const w = getWatcher()
+    w.snapshot.set(path.join(root, 'queued3'), ['z.safetensors'])
+
+    const gate = armRefreshGate()
+    scheduleBroadcast(getWatcher(), ['race-c'], { refresh: true })
+    await waitFor(() => gate.started, '回填未开始', 3000)
+
+    scheduleBroadcast(w, ['queued3'])
+    await waitFor(
+      () => w.deliverQueue.length >= 1,
+      '确认批次未进入交付队列',
+      3000,
+    )
+
+    // 模拟「扫描已置位、队列内批次尚未被消费」的交叠窗口：deliverBroadcast
+    // 入口检出扫描期（旧实现在此静默 return，确认批次永久丢失）
+    w.scanning = true
+    gate.release()
+    refreshGate.current = null
+    await waitFor(
+      () => w.pendingConfirmedDirs.has('queued3'),
+      '确认批次未转回待广播集合',
+      3000,
+    )
+
+    setWatcherScanning(false)
+    await waitFor(
+      () => sentEvents.length >= 1,
+      '停扫未补发扫描期入队批次',
+      3000,
+    )
+    expect(sentEvents[0].payload.dirs).toContain('queued3')
+    await sleep(150)
+    expect(sentEvents).toHaveLength(1)
   })
 
   it('全量基线过滤非法/越界/排除/隐藏条目，全部非法时回退基准遍历', async () => {
