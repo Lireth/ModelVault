@@ -88,6 +88,9 @@ export function isExcludedScanName(name, userExclude = new Set()) {
  * 扫描/监控共享的目录项可见性策略（O11）：隐藏项/put_、符号链接、内置排除
  * 目录与用户排除目录既不记录也不递归——两侧规则演进必须经由此单一入口，
  * 避免监控侧关注扫描侧永远不看的目录（自激励/无效唤醒）。
+ * Windows junction 等 reparse point 在部分 libuv/文件系统组合下会被 readdir
+ * 报告为普通目录，Dirent 层无法区分——由递归入队点的 lstat 复核兜底
+ * （utils.isLinkLikePath，#41），两侧遍历口径保持一致。
  * @param {import('node:fs').Dirent} entry readdir(withFileTypes) 条目
  * @param {Set<string>} [userExclude] 用户排除目录名小写集合
  * @returns {boolean}

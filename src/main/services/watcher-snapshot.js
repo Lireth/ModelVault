@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { relativeWithin, runWithConcurrency } from '../utils'
+import { isLinkLikePath, relativeWithin, runWithConcurrency } from '../utils'
 import { MAX_SCAN_DEPTH, isVisibleScanEntry } from './scanner'
 import {
   DEFAULT_TRAVERSAL_CONCURRENCY,
@@ -97,8 +97,22 @@ export async function collectDirSnapshot(
         if (isRoot) throw err
         return
       }
-      // O11：与 scanner 共享 isVisibleScanEntry，规则不再两侧各写一份
-      const visible = entries.filter((entry) => isVisibleScanEntry(entry, skip))
+      // O11：与 scanner 共享 isVisibleScanEntry，规则不再两侧各写一份。
+      // #41 防御：Windows junction 在部分 libuv/文件系统组合下被 readdir
+      // 报告为普通目录——与扫描侧同口径，递归入队前以 lstat 复核，链接
+      // 形态（含悬空 junction）既不进快照也不入队，避免监控侧对扫描侧
+      // 永远忽略的目录产生差异反复触发重扫（自激励）
+      const visible = []
+      for (const entry of entries) {
+        if (!isVisibleScanEntry(entry, skip)) continue
+        if (
+          entry.isDirectory() &&
+          (await isLinkLikePath(path.join(dir, entry.name)))
+        ) {
+          continue
+        }
+        visible.push(entry)
+      }
       const canDescend = depth < MAX_SCAN_DEPTH
       if (!withStats) {
         snapshot.set(dir, visible.map((e) => e.name).sort())

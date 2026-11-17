@@ -5,7 +5,12 @@
 
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { abortError, relativeWithin, runWithConcurrency } from '../../utils'
+import {
+  abortError,
+  isLinkLikePath,
+  relativeWithin,
+  runWithConcurrency,
+} from '../../utils'
 import {
   DISABLED_SUFFIX,
   MAX_SCAN_DEPTH,
@@ -140,7 +145,15 @@ export async function scanModels(root, onProgress, options = {}) {
           (item) => item.depth <= MAX_SCAN_DEPTH && isInsideRoot(item.dir),
         )
     : [{ dir: root, depth: 0, rel: '', descend: true }]
-  const queue = initialDirs
+  // #41 防御：子树入口同样不跟随链接形态目录（原生事件可能把 junction 路径
+  // 作为变更子树送进局部扫描）——链接子树按空子树处理（与全量扫描口径一致：
+  // junction 下没有扫描可见的模型，其路径下的旧索引残留随之移除）。
+  // 库根本身（rel=''）不在此列：用户显式登记的库根语义不变
+  const queue = []
+  for (const node of initialDirs) {
+    if (node.rel !== '' && (await isLinkLikePath(node.dir))) continue
+    queue.push(node)
+  }
   // OPT-02 并发遍历：动态 FIFO 队列 + 固定 worker（与 watcher-snapshot 的
   // pump 同构的有界并发）——readdir 在并发窗口内重叠；子目录在读取完成后
   // 压入共享队尾（BFS）。确定性保证：目录节点出队时分配单调序号，读改写
@@ -294,12 +307,22 @@ export async function scanModels(root, onProgress, options = {}) {
         skippedNames.push(name)
         continue
       }
-      visibleNames.push(name)
 
       const fullPath = path.join(dir, name)
       const relChild = rel ? `${rel}/${name}` : name
 
       if (entry.isDirectory()) {
+        // #41 防御：Windows junction（reparse point）在部分 libuv/文件系统
+        // 组合下会被 readdir 报告为普通目录（isSymbolicLink 为 false）——
+        // 据此递归会把库外文件以 junction 路径入库，junction 环也会重复
+        // 展开。递归入队前以 lstat 复核（与监控侧三处遍历同口径）：链接
+        // 形态（含悬空 junction）不递归、不进快照，登记 skippedNames 保留
+        // sidecar 剪枝可见性（O-3b，与符号链接条目同口径）
+        if (await isLinkLikePath(fullPath)) {
+          if (!skippedNames) skippedNames = []
+          skippedNames.push(name)
+          continue
+        }
         // descend=false 仅用于子树集合中的根节点（''）：不递归后代
         if (descend) {
           queue.push({
@@ -309,8 +332,10 @@ export async function scanModels(root, onProgress, options = {}) {
             descend: true,
           })
         }
+        visibleNames.push(name)
         continue
       }
+      visibleNames.push(name)
       if (!entry.isFile()) continue
       // F10：.disabled 后缀放行（WebUI 生态「禁用而非删除」的通行做法）。
       // 主扩展名（去掉 .disabled 后）须仍是所扫描的模型类型；ext 保留真实

@@ -105,6 +105,30 @@ export async function resolveRealPath(target) {
 }
 
 /**
+ * 路径是否为链接形态（#41）：符号链接与 Windows junction（reparse point）。
+ * 以 lstat 判别——Windows 上 libuv 把 junction（IO_REPARSE_TAG_MOUNT_POINT）
+ * 与符号链接统一报告为 S_IFLNK（isSymbolicLink），而 readdir(withFileTypes)
+ * 的 Dirent 在部分 libuv/文件系统组合下可能把 junction 报告为普通目录
+ * （isDirectory 为 true 且 isSymbolicLink 为 false），扫描/监控若据此递归
+ * 会把库外文件以 junction 路径入库、junction 环也会重复展开。目录递归入队
+ * 与子树入口（scanner/walk、watcher-snapshot、watcher-poll、watcher-broadcast）
+ * 经此复核：链接形态不递归、不登记。
+ *
+ * @param {string} absPath 目标绝对路径
+ * @returns {Promise<boolean>} 链接形态（含悬空 junction/符号链接）返回 true；
+ *   非链接或 lstat 失败（删除竞态，交由后续 readdir/stat 错误路径处理）
+ *   返回 false
+ */
+export async function isLinkLikePath(absPath) {
+  if (typeof absPath !== 'string' || !absPath) return false
+  try {
+    return (await fs.lstat(absPath)).isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
+/**
  * 破坏性操作的 realpath 归属判定（O6）：
  * - 目标存在：解析符号链接/junction 后必须仍在 realRoot 内；
  * - 目标不存在：回退到最近存在祖先的真实路径，防止父目录是指向库外的
