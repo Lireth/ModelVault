@@ -5,6 +5,7 @@ import {
   isRelDirInScope,
 } from '../../shared/scan-dirs'
 import { isExcludedScanEntryName, isExcludedScanName } from './scanner'
+import { WATCHER_FAILED_DIR_MAX_RETRIES } from './watcher-state'
 
 /**
  * 监控基线应用（O12 自 watcher.js 拆出）：
@@ -115,6 +116,8 @@ export function applyFullBaseline(w, snapshot) {
   // 扫描已完成；内容基线留到下一个内容校验周期重建，避免扫描后立即全树 stat
   w.lastContentCheckAt = Date.now()
   w.idleRounds = 0
+  // 全量基线已重建，失败子树的连续失败计数随之作废（#52）
+  if (w.failedDirRetries instanceof Map) w.failedDirRetries.clear()
   clearScannedPendingDirs(w, null)
   return true
 }
@@ -123,6 +126,10 @@ export function applyFullBaseline(w, snapshot) {
  * 局部扫描基线：按受影响子树替换名称快照，范围外条目保持原样。
  * B5：excludeDirs 为读取失败的子树——这些目录本次未产生扫描事实，
  * 其基线条目原样保留（含「目录已消失」判定跳过），待广播项不清理。
+ * #52 失败计数：同一子树连续失败达到 maxFailedDirRetries 后不再保留
+ * B5 保护——永久性锁定目录否则会以轮询间隔为周期无限重复注定失败的
+ * 局部扫描；放弃保护后该子树按普通扫描结果收敛，恢复可读后由轮询差异
+ * 自动重新检出（B5 恢复语义不变）。
  */
 export function applyPartialBaseline(w, dirs, snapshot, excludeDirs = []) {
   const scopes = dedupeAndPruneDescendants(Array.isArray(dirs) ? dirs : [])
@@ -130,15 +137,34 @@ export function applyPartialBaseline(w, dirs, snapshot, excludeDirs = []) {
   const excludes = dedupeAndPruneDescendants(
     Array.isArray(excludeDirs) ? excludeDirs : [],
   )
+  if (!(w.failedDirRetries instanceof Map)) w.failedDirRetries = new Map()
+  const maxRetries =
+    typeof w.maxFailedDirRetries === 'number' &&
+    Number.isFinite(w.maxFailedDirRetries) &&
+    w.maxFailedDirRetries > 0
+      ? w.maxFailedDirRetries
+      : WATCHER_FAILED_DIR_MAX_RETRIES
+  for (const rel of excludes) {
+    w.failedDirRetries.set(rel, (w.failedDirRetries.get(rel) || 0) + 1)
+  }
+  const givenUps = excludes.filter(
+    (rel) => (w.failedDirRetries.get(rel) || 0) >= maxRetries,
+  )
   const isExcluded = (relPosix) =>
     excludes.length > 0 && isRelDirInScope(relPosix, excludes)
-  const excludeAbs = excludes
+  const isGivenUp = (relPosix) =>
+    givenUps.length > 0 && isRelDirInScope(relPosix, givenUps)
+  // 连续失败达到上限的失败子树不再受 B5 保护（#52）
+  const isProtected = (relPosix) => isExcluded(relPosix) && !isGivenUp(relPosix)
+  const protectedExcludes = excludes.filter((rel) => !givenUps.includes(rel))
+  const excludeAbs = protectedExcludes
     .filter((rel) => rel !== '')
     .map((rel) => path.join(w.root, ...rel.split('/')))
   const baseline = sanitizeBaseline(w.root, snapshot, w.excludeNames)
   for (const rel of scopes) {
     // 失败子树整体跳过：不删不替换，基线与待广播项保持原样
-    if (isExcluded(rel)) continue
+    // （连续失败达到上限的子树不再跳过，按普通扫描结果收敛）
+    if (isProtected(rel)) continue
     const abs = rel === '' ? w.root : path.join(w.root, ...rel.split('/'))
     if (rel === '') {
       // 空串仅代表根目录直属：只替换根目录自身条目，保留已存在的后代快照
@@ -152,20 +178,26 @@ export function applyPartialBaseline(w, dirs, snapshot, excludeDirs = []) {
     const rel = relativeWithin(abs, w.root)
     if (rel === null) continue
     const relPosix = rel === '' ? '' : rel.split(path.sep).join('/')
-    if (!isRelDirInScope(relPosix, scopes) || isExcluded(relPosix)) continue
+    if (!isRelDirInScope(relPosix, scopes) || isProtected(relPosix)) continue
     w.snapshot.set(abs, names)
   }
   // 非根子树扫描后目录可能已消失：快照中不存在该键即视为删除
   // （失败子树跳过该判定——没有本次扫描事实，不能断言其已删除）
   for (const rel of scopes) {
-    if (rel === '' || isExcluded(rel)) continue
+    if (rel === '' || isProtected(rel)) continue
     const abs = path.join(w.root, ...rel.split('/'))
     if (!w.snapshot.has(abs)) removeSnapshotSubtree(w, abs, excludeAbs)
+  }
+  // 扫描成功覆盖的子树清除失败计数，下次失败重新起算（#52）
+  for (const rel of [...w.failedDirRetries.keys()]) {
+    if (isRelDirInScope(rel, scopes) && !isExcluded(rel)) {
+      w.failedDirRetries.delete(rel)
+    }
   }
   w.statSnapshot = null
   w.snapshotRevision += 1
   // 保留原内容校验节奏：局部扫描不推迟范围外目录的同名覆盖检测
   w.idleRounds = 0
-  clearScannedPendingDirs(w, scopes, excludes)
+  clearScannedPendingDirs(w, scopes, protectedExcludes)
   return true
 }
