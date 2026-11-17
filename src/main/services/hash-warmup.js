@@ -77,6 +77,9 @@ export function setHashRetryDelayForTests(ms) {
  * - 文件被修改（mtime 变化）：记录自动失效，新版本立即恢复预热资格；
  * - 静默期到期：自动恢复重试（占用释放/外部修复的自愈通道）；
  * - 任意一次计算成功：记录清除；
+ * - 切库时整体作废（clearHashFailuresForLibrarySwitch，库根变化时由 IPC 层
+ *   调用）：记录以绝对路径键控，跨库驻留会在路径复用且 mtime 一致时抑制
+ *   新库文件的预热资格；
  * - 详情页/识别的 priority 按需任务不受限制（用户显式等待结果）；
  * - 让路重排（PreemptedError）不是失败，不入记录。
  */
@@ -524,7 +527,17 @@ function dropQueuedBackground() {
 
 /** 入队（force=true 时插队，供详情页/识别按需任务使用） */
 function pushQueue(id, force, mode) {
-  if (queued.has(id) || inflight.has(id)) return false
+  if (queued.has(id)) {
+    // priority 请求对已在队任务升级为 force 并移至队首：批量预热先入队的
+    // 后台位不得让详情页预取排在整条队列之后；返回 true 让调用方立即调度
+    if (!force) return false
+    const index = queue.findIndex((task) => task.id === id)
+    if (index === -1) return false
+    queue.splice(index, 1)
+    queue.unshift({ id, force: true, mode: 'full' })
+    return true
+  }
+  if (inflight.has(id)) return false
   queued.add(id)
   if (force) queue.unshift({ id, force: true, mode: 'full' })
   else queue.push({ id, force: false, mode })
@@ -642,6 +655,17 @@ export function requestHashWarmup(items, opts = {}) {
     true,
   )
   scheduleDrain(priority ? 0 : (opts.delayMs ?? WARMUP_DELAY_MS))
+}
+
+/**
+ * 切库时清空哈希失败负缓存（与 resetDecorateCache 同一「库根变化即作废旧根
+ * 状态」时机，由 openLibrary/全量扫描在根目录变化时调用）：失败记录以绝对
+ * 路径键控、跨库驻留至会话结束，路径复用且 mtime 一致时旧库的失败记录
+ * （含最长 24h 静默期）会抑制新库文件的预热资格。同库重扫/重载不调用，
+ * OPT-6 的退避静默期在库会话内保持。
+ */
+export function clearHashFailuresForLibrarySwitch() {
+  hashFailures.clear()
 }
 
 /** 扫描开始：暂停 drain 取队（正在计算的单个文件不中断，处理完当前即停） */

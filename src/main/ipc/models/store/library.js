@@ -17,7 +17,10 @@ import {
 import { errorMessage } from '../../../../shared/error-text'
 import { startPerf } from '../../../services/perf'
 import { syncWatcher } from '../../../services/watcher'
-import { requestHashWarmup } from '../../../services/hash-warmup'
+import {
+  clearHashFailuresForLibrarySwitch,
+  requestHashWarmup,
+} from '../../../services/hash-warmup'
 import {
   getDecorateCacheRoot,
   resetDecorateCache,
@@ -77,6 +80,9 @@ export function registerLibraryHandlers() {
             resetDecorateCache(root)
             clearDeferredOwners()
             clearDeferredJobs()
+            // 旧库的哈希失败负缓存一并作废：记录以绝对路径键控，路径复用
+            // 且 mtime 一致时会抑制新库文件的预热资格（静默期最长 24h）
+            clearHashFailuresForLibrarySwitch()
           }
           primeHeaderInfoCache(cachedIndex.models)
           // 切库成功后才提交激活库（与扫描链路同一 V-02 状态机）
