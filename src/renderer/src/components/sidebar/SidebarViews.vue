@@ -41,6 +41,17 @@ async function onSaveViewConfirm() {
     savingBusy.value = false
   }
 }
+
+/** 输入法组合中的 Enter/Esc 不提交/取消（中文视图名输入不被截断） */
+function onViewNameEnter(e) {
+  if (e?.isComposing) return
+  onSaveViewConfirm()
+}
+
+function onViewNameEsc(e) {
+  if (e?.isComposing) return
+  cancelSaveView()
+}
 </script>
 
 <template>
@@ -77,8 +88,8 @@ async function onSaveViewConfirm() {
         maxlength="30"
         placeholder="视图名称…"
         spellcheck="false"
-        @keydown.enter="onSaveViewConfirm"
-        @keydown.esc="cancelSaveView"
+        @keydown.enter="onViewNameEnter"
+        @keydown.esc="onViewNameEsc"
       />
       <div class="view-save-actions">
         <button
