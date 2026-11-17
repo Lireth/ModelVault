@@ -99,9 +99,15 @@ export function setWatcherScanning(scanning) {
       clearTimeout(w.debounceTimer)
       w.debounceTimer = null
     }
-    // 已进入交付队列但尚未广播的批次作废：队列内批次尚未回填基线，其变更
-    // 仍可被后续轮询检出并重新累积；已在途交付的批次（deliverBroadcast 执行
-    // 中）会在回填完成后把差异确认的真实变化写回待广播集合，停扫补发（FIX-4）
+    // 已进入交付队列但尚未广播的批次：轮询确认项的基线已随快照写入更新，
+    // 静默丢弃后下一轮 diff 恒为空（变更永久丢失），转回待广播集合由停扫
+    // 补发承接（若扫描覆盖了这些子树，clearScannedPendingDirs 会按 scopes
+    // 去重清理）；原生候选尚未回填基线，其变更仍可被后续轮询检出并重新
+    // 累积，作废。已在途交付的批次（deliverBroadcast 执行中）会在回填完成
+    // 后把差异确认的真实变化写回待广播集合，停扫补发（FIX-4）
+    for (const entry of w.deliverQueue) {
+      for (const d of entry.confirmedDirs) w.pendingConfirmedDirs.add(d)
+    }
     w.deliverQueue.length = 0
     return
   }

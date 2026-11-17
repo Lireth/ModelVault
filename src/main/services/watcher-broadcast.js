@@ -143,7 +143,14 @@ async function refreshSnapshotScopes(w, relDirs, unlocated = false) {
  * @returns {Promise<void>}
  */
 async function deliverBroadcast(w, nativeDirs, confirmedDirs, needsRefresh) {
-  if (w !== getWatcher() || w.scanning) return
+  if (w !== getWatcher()) return
+  if (w.scanning) {
+    // FIX-4：扫描期进入交付的批次（队列清理与消费交叠的窗口）。confirmedDirs
+    // 的基线已随快照写入更新，静默丢弃 = 永久丢失；转回待广播集合由停扫补发
+    // 承接，语义与下方在途路径一致。原生候选尚未回填基线，轮询可再检出，作废
+    for (const d of confirmedDirs) w.pendingConfirmedDirs.add(d)
+    return
+  }
   let dirs = [...confirmedDirs]
   if (needsRefresh) {
     const before = new Map(w.snapshot)
