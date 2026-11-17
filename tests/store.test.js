@@ -919,6 +919,55 @@ describe('reloadCurrentRootData（备份恢复到当前根后的内存重载，B
       vi.restoreAllMocks()
     }
   })
+
+  it('重载窗口内的并发元数据写入不丢失：重载完成后重放进新数据（#73）', async () => {
+    const abs = await touchModel('concurrent.safetensors')
+    await replaceStoreOnDisk({ 'concurrent.safetensors': { note: '恢复数据' } })
+
+    const realReadFile = fs.readFile.bind(fs)
+    let releaseRead = () => {}
+    const gate = new Promise((resolve) => {
+      releaseRead = resolve
+    })
+    let gated = false
+    vi.spyOn(fs, 'readFile').mockImplementation(async (p, opts) => {
+      if (!gated && String(p).includes('store.json')) {
+        gated = true
+        await gate
+      }
+      return realReadFile(p, opts)
+    })
+
+    try {
+      const reload = reloadCurrentRootData()
+      // 屏障在 loadData 的 readFile 期间仍未释放：此刻的 IPC 并发写入
+      // （维护锁已在恢复返回时释放）不得调度落盘，也不得随整体替换丢失
+      await vi.waitFor(() => expect(gated).toBe(true))
+      const saved = setModelMeta(abs, { note: '重载窗口内的并发修改' })
+      expect(saved?.note).toBe('重载窗口内的并发修改')
+      expect(metaState.saveSuppressed).toBe(true)
+
+      releaseRead()
+      await reload
+      // 重放：窗口内的并发写入补进重载后的新数据，屏障已解除
+      expect(getModelMeta(abs)?.note).toBe('重载窗口内的并发修改')
+      expect(metaState.saveSuppressed).toBe(false)
+
+      // 重载完成瞬间磁盘仍保持恢复内容（窗口内未调度任何落盘）
+      const storePath = path.join(root, '.modelvault', 'store.json')
+      const before = JSON.parse(await realReadFile(storePath, 'utf-8'))
+      expect(before.models['concurrent.safetensors']?.note).toBe('恢复数据')
+
+      // 重放的写入经落盘链持久化
+      await flushStoreSave()
+      const disk = JSON.parse(await realReadFile(storePath, 'utf-8'))
+      expect(disk.models['concurrent.safetensors']?.note).toBe(
+        '重载窗口内的并发修改',
+      )
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
 })
 
 describe('切换根目录与落盘链（A6）', () => {
