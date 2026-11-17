@@ -392,3 +392,129 @@ describe('CivitaiPanel 一键补全', () => {
     wrapper.unmount()
   })
 })
+
+describe('CivitaiPanel 识别在途会话守卫', () => {
+  const staleUrl = 'https://image.civitai.com/stale.jpeg'
+  const m1Meta = {
+    civitaiUrl: 'https://civitai.red/models/1?modelVersionId=2',
+    triggerWords: '',
+    note: '',
+  }
+
+  /** 构造挂起的识别请求，返回迟到响应的 resolve 委托 */
+  function pendingIdentify() {
+    let resolveIdentify
+    window.api.models.civitaiIdentify.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveIdentify = resolve
+        }),
+    )
+    return (res) => resolveIdentify(res)
+  }
+
+  it('识别在途时切换模型，旧响应不写入新模型面板', async () => {
+    seedModels([{ id: 'm1' }])
+    const resolveIdentify = pendingIdentify()
+    const wrapper = await mountPanel()
+
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('识别 Civitai 模型'))
+      .trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('识别中…')
+
+    seedModels([{ id: 'm1' }, { id: 'm2' }])
+    state.selectedId = 'm2'
+    await flushPromises()
+
+    resolveIdentify({
+      found: true,
+      info: { images: [{ url: staleUrl, width: 1, height: 1 }] },
+      meta: m1Meta,
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.civitai-link').exists()).toBe(false)
+    expect(wrapper.find('.civitai-img-grid').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('未在 Civitai 找到匹配的模型')
+    expect(
+      wrapper
+        .findAll('button')
+        .find((b) => b.text().includes('识别 Civitai 模型'))
+        .attributes('disabled'),
+    ).toBeUndefined()
+    expect(window.api.models.civitaiIdentify).toHaveBeenCalledTimes(1)
+    expect(window.api.models.civitaiIdentify).toHaveBeenCalledWith('m1')
+    wrapper.unmount()
+  })
+
+  it('切换后重新识别，旧响应不干扰新请求的忙碌态与结果', async () => {
+    seedModels([{ id: 'm1' }])
+    const resolveFirst = pendingIdentify()
+    const wrapper = await mountPanel()
+
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('识别 Civitai 模型'))
+      .trigger('click')
+    await flushPromises()
+
+    seedModels([{ id: 'm1' }, { id: 'm2' }])
+    state.selectedId = 'm2'
+    await flushPromises()
+
+    const resolveSecond = pendingIdentify()
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('识别 Civitai 模型'))
+      .trigger('click')
+    await flushPromises()
+    expect(window.api.models.civitaiIdentify).toHaveBeenLastCalledWith('m2')
+
+    resolveFirst({ found: false })
+    await flushPromises()
+    expect(wrapper.findAll('button').some((b) => b.text() === '识别中…')).toBe(
+      true,
+    )
+    expect(wrapper.text()).not.toContain('未在 Civitai 找到匹配的模型')
+
+    resolveSecond({
+      found: true,
+      info: { images: [{ url: staleUrl, width: 1, height: 1 }] },
+      meta: {
+        civitaiUrl: 'https://civitai.red/models/2?modelVersionId=9',
+        triggerWords: '',
+        note: '',
+      },
+    })
+    await flushPromises()
+    expect(wrapper.find('.civitai-link').attributes('href')).toBe(
+      'https://civitai.red/models/2?modelVersionId=9',
+    )
+    wrapper.unmount()
+  })
+
+  it('识别在途时卸载组件，迟到响应被丢弃且无后续副作用', async () => {
+    seedModels([{ id: 'm1' }])
+    const resolveIdentify = pendingIdentify()
+    const wrapper = await mountPanel()
+
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('识别 Civitai 模型'))
+      .trigger('click')
+    await flushPromises()
+
+    wrapper.unmount()
+    resolveIdentify({
+      found: true,
+      info: { images: [{ url: staleUrl, width: 1, height: 1 }] },
+      meta: m1Meta,
+    })
+    await flushPromises()
+
+    expect(window.api.models.civitaiImportImages).not.toHaveBeenCalled()
+  })
+})
