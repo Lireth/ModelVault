@@ -317,12 +317,17 @@ export async function switchRoot(folder) {
         durationMs: res.durationMs || 0,
       }
       applyLibrarySettings(res.settings)
-      toast(
-        'success',
-        `已秒开本地索引（${res.models.length} 个模型），正在后台校验…`,
-      )
-      // 后台校验：不进入 scanning 遮罩；完成后整体替换为磁盘真实结果
-      void scanModels(state.folder, { background: true })
+      // 与 initApp 秒开同规则：autoScan 关闭时保持缓存展示，不触发全库磁盘校验
+      if (state.settings.autoScan !== false) {
+        toast(
+          'success',
+          `已秒开本地索引（${res.models.length} 个模型），正在后台校验…`,
+        )
+        // 后台校验：不进入 scanning 遮罩；完成后整体替换为磁盘真实结果
+        void scanModels(state.folder, { background: true })
+      } else {
+        toast('success', `已秒开本地索引（${res.models.length} 个模型）`)
+      }
       return
     }
     // 无可用索引：主进程未切换根目录，交由扫描链路完成 V-02 状态机
