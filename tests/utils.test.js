@@ -159,6 +159,38 @@ describe('runWithConcurrency（O-6 固定并发任务池）', () => {
       ),
     ).rejects.toThrow('boom')
   })
+
+  it('worker 失败后停止调度新任务，并等待在途任务全部完成才 reject（#44）', async () => {
+    const gate = deferred()
+    const started = []
+    let outcome = null
+    const pool = runWithConcurrency(
+      [0, 1, 2, 3],
+      async (task) => {
+        started.push(task)
+        if (task === 0) throw new Error('boom')
+        await gate.promise
+      },
+      2,
+    )
+    pool.then(
+      () => {
+        outcome = 'resolved'
+      },
+      (err) => {
+        outcome = err.message
+      },
+    )
+    // 任务 0 已失败、任务 1 仍在途：2/3 不得再被调度，池也不得提前 settle
+    // （修复前 Promise.all 立即 reject，在途任务逃逸调用方的清理窗口）
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(started).toEqual([0, 1])
+    expect(outcome).toBeNull()
+    // 放行在途任务：池等待其完成后才以首个错误拒绝
+    gate.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(outcome).toBe('boom')
+  })
 })
 
 describe('网络响应体积上限（V-06）', () => {

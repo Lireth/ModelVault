@@ -31,22 +31,37 @@ export function boundedMapSet(map, key, value, max) {
  * 无整批等待的尾延迟，且并发峰值恒定——适用于「单任务内存/IO 峰值高、
  * 需限制同时在场数量」的后台批处理（缩略图生成、批量哈希等）。
  * worker 内部须自行捕获业务错误（本函数只保证调度，不吞任务异常）。
+ * 失败语义（#44）：首个 worker 抛错即停止调度新任务，其余 runner 的在途任务
+ * 照常跑完，待全部收敛后才以首个错误 reject——调用方收到拒绝时不会再有
+ * 在途任务继续产生副作用（如扫描取消后残留 decorateOne 逃逸清理窗口）。
  * @template T
  * @param {T[]} tasks 任务列表（按序消费）
  * @param {(task: T, index: number) => Promise<any>} worker 单任务处理器
  * @param {number} concurrency 最大并发数（超出任务数或 ≤0 时自动收敛）
- * @returns {Promise<void>} 全部任务处理完毕后 resolve（worker 抛错则 reject）
+ * @returns {Promise<void>} 全部在途任务处理完毕后 resolve（worker 抛错则 reject）
  */
 export async function runWithConcurrency(tasks, worker, concurrency) {
   let next = 0
+  let failed = false
+  /** @type {unknown} 首个失败错误（failed 置位后必已赋值） */
+  let firstError = null
   async function runner() {
-    while (next < tasks.length) {
+    while (!failed && next < tasks.length) {
       const index = next++
-      await worker(/** @type {T} */ (tasks[index]), index)
+      try {
+        await worker(/** @type {T} */ (tasks[index]), index)
+      } catch (err) {
+        if (!failed) {
+          failed = true
+          firstError = err
+        }
+        return
+      }
     }
   }
   const count = Math.max(0, Math.min(concurrency, tasks.length))
   await Promise.all(Array.from({ length: count }, () => runner()))
+  if (failed) throw firstError
 }
 
 /**
