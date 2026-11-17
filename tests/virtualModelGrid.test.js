@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach, beforeAll } from 'vitest'
+import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import VirtualModelGrid from '../src/renderer/src/components/VirtualModelGrid.vue'
 import {
@@ -215,6 +215,64 @@ describe('VirtualModelGrid 虚拟滚动数学', () => {
     expect(rows[0].findAll('.model-card')[0].attributes('data-model-id')).toBe(
       'm0',
     )
+    wrapper.unmount()
+  })
+})
+
+describe('VirtualModelGrid 行高校准取已渲染卡片最高者（#57）', () => {
+  /**
+   * 注入卡片高度桩：jsdom 无布局，getBoundingClientRect 恒为 0，
+   * 按 data-model-id 返回指定高度使校准逻辑可断言。
+   */
+  function stubCardHeights(heightById, defaultHeight = 300) {
+    return vi
+      .spyOn(Element.prototype, 'getBoundingClientRect')
+      .mockImplementation(function () {
+        const id = this.getAttribute?.('data-model-id')
+        const height = (id && heightById[id]) || defaultHeight
+        return { width: 0, height, top: 0, left: 0, right: 0, bottom: height }
+      })
+  }
+
+  it('首张卡片更矮（无标签）时行距取最高卡片，避免后续行重叠', async () => {
+    const models = makeModels(20)
+    const heights = Object.fromEntries(models.map((m) => [m.id, 340]))
+    heights.m0 = 300
+    const stub = stubCardHeights(heights)
+    const { wrapper } = mountInScroller(models)
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    // 行距 = 340 + gap(14) = 354；修复前仅量测首张 → 314
+    expect(wrapper.element.style.height).toBe(`${20 * 354 - 14}px`)
+    const rows = wrapper.findAll('.grid-row')
+    expect(rows[1].element.style.transform).toBe('translateY(354px)')
+    stub.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('最高卡片位于渲染窗口末行时同样参与校准', async () => {
+    const models = makeModels(20)
+    const heights = Object.fromEntries(models.map((m) => [m.id, 300]))
+    heights.m8 = 360 // 单列可见窗口 9 行的末张卡片
+    const stub = stubCardHeights(heights)
+    const { wrapper } = mountInScroller(models)
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    // 行距 = 360 + gap(14) = 374
+    expect(wrapper.element.style.height).toBe(`${20 * 374 - 14}px`)
+    stub.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('卡片等高时行为不变（行距 = 卡片高 + 间距）', async () => {
+    const models = makeModels(20)
+    const stub = stubCardHeights({}, 320)
+    const { wrapper } = mountInScroller(models)
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    // 行距 = 320 + gap(14) = 334
+    expect(wrapper.element.style.height).toBe(`${20 * 334 - 14}px`)
+    stub.mockRestore()
     wrapper.unmount()
   })
 })
