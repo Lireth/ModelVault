@@ -556,10 +556,30 @@ export async function importBackup(win) {
   if (settingsPayload) {
     const root = getCurrentRoot()
     if (root) {
-      // 与库恢复一致：设置写入也需与扫描/切库互斥（V-02）
-      await runMaintenance('restore', root, () =>
-        saveLibrarySettings(root, settingsPayload),
-      )
+      try {
+        // 与库恢复一致：设置写入也需与扫描/切库互斥（V-02）
+        await runMaintenance('restore', root, async () => {
+          // #49：入口先有界静止设置写盘链（与全量/合并恢复同一底线）——恢复前
+          // 防抖窗口内的旧快照若在 saveLibrarySettings 入链后才冲刷，会排入
+          // 链尾更后位置，以旧值覆盖恢复结果；超时按 B3 取消恢复
+          const settingsFlushed = await flushSettingsSaveBounded()
+          if (!settingsFlushed) {
+            throw new Error(
+              '磁盘无响应：等待在途数据落盘超时，已取消恢复（继续可能让迟到的旧写入覆盖恢复结果）。请检查模型库磁盘连接后重试',
+            )
+          }
+          return saveLibrarySettings(root, settingsPayload)
+        })
+      } catch (err) {
+        if (errorCode(err) === 'EBUSY') {
+          return { error: errorMessage(err), settingsRestored: false }
+        }
+        logger.warn(`备份中的库设置恢复失败: ${errorMessage(err)}`)
+        return {
+          error: `库设置恢复失败: ${errorMessage(err)}`,
+          settingsRestored: false,
+        }
+      }
       logger.info(`备份中的库设置已写入当前模型库: ${root}`)
       return { settingsRestored: true }
     }

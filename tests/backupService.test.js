@@ -21,6 +21,7 @@ import {
   flushSettingsSave,
   getModelMeta,
   loadData,
+  loadSettings,
   setDataRoot,
   setFlushAwaitTimeoutForTests,
   setModelMeta,
@@ -1188,6 +1189,41 @@ describe('importBackup', () => {
     expect(saved.modelsFolder).toBeUndefined()
   })
 
+  it('仅设置的备份：入口先静止设置写链，恢复前防抖快照不覆盖恢复结果（#49）', async () => {
+    const lib = makeLibrary()
+    // 预置磁盘库设置并载入内存：恢复前的最后一次修改经防抖落盘（500ms 未到）
+    fs.writeFileSync(
+      path.join(lib, '.modelvault', 'settings.json'),
+      JSON.stringify({ theme: 'system' }),
+    )
+    setDataRoot(lib)
+    await loadSettings()
+    await updateSettings({ theme: 'dark' })
+
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+      { withLibrary: false },
+    )
+    dialogMock.showOpenDialog.mockReset()
+    dialogMock.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [zipPath],
+    })
+
+    const res = await importBackup(null)
+
+    expect(res.error).toBeUndefined()
+    expect(res.settingsRestored).toBe(true)
+    // 越过防抖延迟：未先静止写链时，迟到的旧快照会以恢复前的旧设置
+    // 原子覆盖刚恢复的 settings.json（磁盘=旧设置、内存=新设置的分叉）
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const saved = JSON.parse(
+      fs.readFileSync(path.join(lib, '.modelvault', 'settings.json'), 'utf8'),
+    )
+    expect(saved.theme).toBe('light')
+    expect(saved.sortBy).toBe('size')
+  })
+
   it('备份文件无法读取时返回读取失败原因（不进入解压）', async () => {
     const missing = path.join(mkTmp('modelvault-out-'), 'not-here.zip')
     dialogMock.showOpenDialog.mockResolvedValueOnce({
@@ -1685,6 +1721,48 @@ describe('flush 超时防线（B3：挂起磁盘不永久卡死）', () => {
     )
     // 维护锁已释放
     const token = tryAcquireMaintenance('restore', root)
+    expect(token).not.toBeNull()
+    releaseMaintenance(token)
+  })
+
+  it('仅设置恢复：入口 flush 挂起超时后取消恢复，设置保持原值（#49）', async () => {
+    const lib = makeLibrary()
+    // 预置磁盘库设置：恢复取消后磁盘应保持恢复前原值
+    fs.writeFileSync(
+      path.join(lib, '.modelvault', 'settings.json'),
+      JSON.stringify({ theme: 'system' }),
+    )
+    setDataRoot(lib)
+    await loadSettings()
+    // 在途修改未落盘：入口 flush 必须真实等待（挂起即超时取消）
+    await updateSettings({ theme: 'dark' })
+    hangWritesUnder(lib)
+    setFlushAwaitTimeoutForTests(50)
+    setSettingsFlushAwaitTimeoutForTests(50)
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'backup.zip'),
+      { withLibrary: false },
+    )
+    dialogMock.showOpenDialog.mockReset()
+    dialogMock.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [zipPath],
+    })
+
+    const started = Date.now()
+    const res = await importBackup(null)
+
+    // 与全量/合并恢复同一底线：按注入上限返回并取消恢复，不让迟到写入覆盖
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(res.error).toContain('磁盘无响应')
+    expect(res.settingsRestored).toBe(false)
+    // 磁盘设置未被恢复值覆盖（保持恢复前状态）
+    const saved = JSON.parse(
+      fs.readFileSync(path.join(lib, '.modelvault', 'settings.json'), 'utf8'),
+    )
+    expect(saved.theme).toBe('system')
+    // 维护锁已释放
+    const token = tryAcquireMaintenance('restore', lib)
     expect(token).not.toBeNull()
     releaseMaintenance(token)
   })
