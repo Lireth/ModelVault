@@ -6,6 +6,7 @@ import {
 } from './helpers/storeTest'
 import { IPC_ERROR } from '../src/shared/error-codes'
 import {
+  chooseFolder,
   initApp,
   partialScanModels,
   relocateFolder,
@@ -505,3 +506,118 @@ describe('库路径失效闭环（F1-offline）', () => {
 })
 
 /** 生成测试模型对象 */
+
+describe('切库选区联动（#54：选区生命周期与库生命周期挂钩）', () => {
+  it('switchRoot：秒开路径退出多选并清空旧库选区', async () => {
+    state.folder = 'D:\\models'
+    replaceModels([makeModel('D:\\models\\old.safetensors')])
+    state.multiSelect.active = true
+    state.multiSelect.ids = ['D:\\models\\old.safetensors']
+    api.models.openLibrary.mockResolvedValue({
+      root: 'D:\\other',
+      cached: true,
+      models: [makeModel('D:\\other\\cached.safetensors')],
+      settings: { modelsFolder: 'D:\\other', autoScan: false },
+      durationMs: 1,
+    })
+
+    await switchRoot('D:\\other')
+
+    expect(state.multiSelect.active).toBe(false)
+    expect(state.multiSelect.ids).toEqual([])
+    expect(state.models.map((m) => m.id)).toEqual([
+      'D:\\other\\cached.safetensors',
+    ])
+  })
+
+  it('switchRoot：目标库失效进入离线态时同样退出多选', async () => {
+    state.folder = 'D:\\libA'
+    replaceModels([makeModel('D:\\libA\\a.safetensors')])
+    state.multiSelect.active = true
+    state.multiSelect.ids = ['D:\\libA\\a.safetensors']
+    api.models.openLibrary.mockResolvedValue({
+      error: '模型文件夹不存在或不是目录',
+      folderMissing: true,
+    })
+
+    await switchRoot('D:\\goneB')
+
+    expect(state.multiSelect.active).toBe(false)
+    expect(state.multiSelect.ids).toEqual([])
+  })
+
+  it('scanModels：切换到其他库成功后退出多选（旧库选区整体失效）', async () => {
+    state.folder = 'D:\\models'
+    replaceModels([makeModel('D:\\models\\old.safetensors')])
+    state.multiSelect.active = true
+    state.multiSelect.ids = ['D:\\models\\old.safetensors']
+    api.models.scan.mockResolvedValue({
+      root: 'D:\\other',
+      models: [makeModel('D:\\other\\new.safetensors')],
+      errors: [],
+      durationMs: 1,
+    })
+
+    await scanModels('D:\\other')
+
+    expect(state.folder).toBe('D:\\other')
+    expect(state.multiSelect.active).toBe(false)
+    expect(state.multiSelect.ids).toEqual([])
+  })
+
+  it('scanModels：同库重扫保留存活选区并剔除已消失 id', async () => {
+    state.folder = 'D:\\lib'
+    replaceModels([
+      makeModel('D:\\lib\\keep.safetensors'),
+      makeModel('D:\\lib\\gone.safetensors'),
+    ])
+    state.multiSelect.active = true
+    state.multiSelect.ids = [
+      'D:\\lib\\keep.safetensors',
+      'D:\\lib\\gone.safetensors',
+    ]
+    api.models.scan.mockResolvedValue({
+      root: 'D:\\lib',
+      models: [makeModel('D:\\lib\\keep.safetensors')],
+      errors: [],
+      durationMs: 1,
+    })
+
+    await scanModels()
+
+    expect(state.multiSelect.active).toBe(true)
+    expect(state.multiSelect.ids).toEqual(['D:\\lib\\keep.safetensors'])
+  })
+})
+
+describe('批量/识别队列占用库（#54：busy 期间不得切库）', () => {
+  it('批量操作进行中（multiSelect.busy）切库被拒绝', async () => {
+    state.folder = 'D:\\models'
+    state.multiSelect.busy = true
+
+    await switchRoot('D:\\other')
+
+    expect(api.models.openLibrary).not.toHaveBeenCalled()
+    expect(api.models.scan).not.toHaveBeenCalled()
+    expect(state.folder).toBe('D:\\models')
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'warn' && t.text.includes('批量操作'),
+      ),
+    ).toBe(true)
+  })
+
+  it('识别队列进行中（civitaiQueue.running）选择目录被拒绝', async () => {
+    state.civitaiQueue.running = true
+
+    await chooseFolder()
+
+    expect(api.models.chooseFolder).not.toHaveBeenCalled()
+    expect(api.models.scan).not.toHaveBeenCalled()
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'warn' && t.text.includes('批量操作'),
+      ),
+    ).toBe(true)
+  })
+})

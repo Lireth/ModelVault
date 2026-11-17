@@ -408,7 +408,8 @@ export function modelIndexOf(id) {
 }
 
 /**
- * 模型库是否被在途任务占用（全量扫描 / 增量扫描 / 后台校验 / 外部导入）。
+ * 模型库是否被在途任务占用（全量扫描 / 增量扫描 / 后台校验 / 外部导入 /
+ * 多选批量操作 / Civitai 识别队列）。
  * 所有「切库、重扫、重新定位」入口共用同一判定，避免各处枚举漏项；
  * 需要区分具体原因时再读取对应标志位。
  * @returns {boolean}
@@ -418,7 +419,9 @@ export function isLibraryBusy() {
     state.scanning ||
     state.partialScanning ||
     state.backgroundScanning ||
-    state.importing
+    state.importing ||
+    state.multiSelect.busy ||
+    state.civitaiQueue.running
   )
 }
 
@@ -441,6 +444,13 @@ export function replaceModels(list) {
   }
   for (const id of metaOverrides.keys()) {
     if (!modelIndexById.has(id)) metaOverrides.delete(id)
+  }
+  // 选区生命周期与列表生命周期挂钩：整体替换后剔除已不存在的 id——
+  // 切库/重扫/删除不留指向旧库或已消失模型的幻影选区（与覆盖映射同口径）
+  if (state.multiSelect.ids.length > 0) {
+    state.multiSelect.ids = state.multiSelect.ids.filter((id) =>
+      modelIndexById.has(id),
+    )
   }
 }
 

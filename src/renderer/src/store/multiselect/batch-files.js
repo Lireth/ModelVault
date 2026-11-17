@@ -1,4 +1,4 @@
-import { state, replaceModels } from '../state'
+import { state, replaceModels, modelIndexOf } from '../state'
 import { toast, confirmDialog } from '../toast'
 import { applyMetaUpdates, mapWithConcurrency } from '../meta-apply'
 import { modelById } from '../selectors'
@@ -86,6 +86,9 @@ export async function batchOrganizeByTags() {
     // 局部扫描收敛（OPT-03，partialScanModels 内建回退全量兜底）
     const { partialScanModels, modelRelDirs } = await import('../partial-scan')
     if (!state.scanning) {
+      // 先释放批量 busy 再触发收敛扫描（与导入链路同约定）：局部扫描的
+      // 全量回退不应被批量互斥拦截
+      state.multiSelect.busy = false
       await partialScanModels([
         ...modelRelDirs(moves.map((mv) => mv.id)),
         LORA_DIR,
@@ -198,9 +201,15 @@ export async function batchToggleDisabled(disabled) {
   let ok = 0
   // B20/F3：逐项失败保留真实原因（串行循环逐个收集）
   const failures = []
+  // 陈旧目标（重扫/改名后脱离当前列表）跳过：不发起 IPC，也不误报取消
+  let stale = 0
   try {
     for (const id of ids) {
       if (state.multiSelect.cancelRequested) break
+      if (modelIndexOf(id) === undefined) {
+        stale += 1
+        continue
+      }
       const res = await window.api.models
         .toggleDisabled(id, disabled)
         .catch((err) => ({ error: err.message }))
@@ -212,11 +221,16 @@ export async function batchToggleDisabled(disabled) {
       // 取消场景同样需要刷新——已改名的部分必须同步到列表
       const { partialScanModels, modelRelDirs } =
         await import('../partial-scan')
-      if (!state.scanning) await partialScanModels(modelRelDirs(ids))
+      if (!state.scanning) {
+        // 先释放批量 busy 再触发收敛扫描（与导入链路同约定）：局部扫描的
+        // 全量回退不应被批量互斥拦截
+        state.multiSelect.busy = false
+        await partialScanModels(modelRelDirs(ids))
+      }
     }
     const label = disabled ? '禁用' : '启用'
     const fail = reportBatchFailures(`批量${label}`, failures)
-    const done = ok + fail
+    const done = ok + fail + stale
     if (done < ids.length) {
       toast(
         'warn',
@@ -250,9 +264,11 @@ export async function batchDeleteModels() {
     ) {
       return
     }
+    // 陈旧目标（重扫/改名后脱离当前列表）跳过不发起删除 IPC（与 civitai-queue 同语义）
+    const targets = ids.filter((id) => modelIndexOf(id) !== undefined)
     // 文件删除（回收站）是较重 IO：并发上限低于元数据批量
     const results = await mapWithConcurrency(
-      ids,
+      targets,
       (id) => window.api.models.deleteModel(id),
       8,
     )
@@ -260,10 +276,11 @@ export async function batchDeleteModels() {
     // B20/F3：逐项失败保留真实原因，失败项可经明细面板重建选区重试
     const failures = []
     results.forEach((r, i) => {
-      if (r.status === 'fulfilled' && !r.value?.error) deletedIds.add(ids[i])
+      if (r.status === 'fulfilled' && !r.value?.error)
+        deletedIds.add(targets[i])
       else
         failures.push({
-          id: ids[i],
+          id: targets[i],
           error:
             r.status === 'rejected'
               ? r.reason?.message

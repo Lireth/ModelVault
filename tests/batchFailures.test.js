@@ -139,10 +139,29 @@ describe('批量失败明细 store（B20/F3）', () => {
     state.multiSelect.ids = [idOf('a')]
     window.api.models.setMetaFlagsBulk.mockResolvedValue({ error: '失败' })
     await batchFavorite(true)
-    replaceModels([]) // 失败项已不在库中
+    // 失败项 a 已不在库中（整表替换剔除），用户手动选中了仍在库的 b
+    replaceModels([
+      {
+        id: idOf('b'),
+        name: 'b',
+        type: 'lora',
+        size: 11,
+        mtimeMs: 2,
+        favorite: false,
+        nsfw: false,
+        rating: 0,
+        alias: '',
+        note: '',
+        subCategory: '',
+        triggerWords: '',
+        coverUrl: '',
+        covers: [],
+      },
+    ])
+    state.multiSelect.ids = [idOf('b')]
     expect(reselectFailedItems()).toBe(false)
     // 拒绝重建时选区保持原样（不清空、不篡改）
-    expect(state.multiSelect.ids).toEqual([idOf('a')])
+    expect(state.multiSelect.ids).toEqual([idOf('b')])
     expect(state.toasts.some((t) => t.text.includes('已不在当前模型库'))).toBe(
       true,
     )
