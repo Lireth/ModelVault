@@ -31,6 +31,11 @@ function isRedirectStatus(status) {
   )
 }
 
+/** 无实体体状态（fetch 规范要求 null body，Response 构造器拒绝携带 body） */
+function isNullBodyStatus(status) {
+  return status === 204 || status === 205 || status === 304
+}
+
 /** Electron 网络栈对 fetch manual 重定向不支持时的特征错误 */
 function isRedirectCancelledError(err) {
   return err instanceof Error && err.message.includes('Redirect was cancelled')
@@ -47,7 +52,9 @@ function isRedirectCancelledError(err) {
  * @param {RequestInit} options 与主请求一致的选项（headers/signal）
  * @param {boolean} useSessionCookies 探测是否携带会话 Cookie（凭据语义
  *   由调用方决定：Civitai 图片 CDN 需要会话态，GitHub 公开资产不需要）
- * @returns {Promise<{status: number, location: string, headers: Headers}>}
+ * @returns {Promise<{status: number, location: string, headers: Headers,
+ *   body?: Uint8Array<ArrayBuffer>}>} body 仅在非 3xx 且非无实体体的终态
+ *   存在——探测读出的真实响应体（3xx 终态按 manual 语义无有效载荷）
  */
 function probeRedirectTarget(url, options, useSessionCookies) {
   return new Promise((resolve, reject) => {
@@ -93,13 +100,30 @@ function probeRedirectTarget(url, options, useSessionCookies) {
       },
     )
     request.on('response', (incoming) => {
-      // 未发 redirect 事件直接拿到响应（3xx 且无跳转目标等）：按终态返回空体
-      // （IncomingMessage 无 destroy 方法，经 request.abort 中止 body 传输）
-      request.abort?.()
-      finish(true, {
-        status: incoming.statusCode || 0,
-        location: '',
-        headers: headersOf(incoming.headers),
+      // 未发 redirect 事件直接拿到响应：无跳转目标的 3xx 与无实体体状态
+      // 按终态返回空体（IncomingMessage 无 destroy 方法，经 request.abort
+      // 中止 body 传输）；其余非 3xx 终态（服务端未复现 3xx 等）读出真实
+      // body 随终态返回——不得以空体冒充成功响应（issue #67）
+      const status = incoming.statusCode || 0
+      if (isRedirectStatus(status) || isNullBodyStatus(status)) {
+        request.abort?.()
+        finish(true, {
+          status,
+          location: '',
+          headers: headersOf(incoming.headers),
+        })
+        return
+      }
+      const chunks = []
+      incoming.on('error', (err) => finish(false, err))
+      incoming.on('data', (chunk) => chunks.push(chunk))
+      incoming.on('end', () => {
+        finish(true, {
+          status,
+          location: '',
+          headers: headersOf(incoming.headers),
+          body: Buffer.concat(chunks),
+        })
       })
     })
     request.on('error', (err) => finish(false, err))
@@ -159,11 +183,16 @@ export async function fetchWithValidatedRedirects(
         useSessionCookies,
       )
       // 无跳转目标的 3xx 按终态响应处理（调用方按非 ok 分支报错，与
-      // 规范的 manual 语义一致；body 恒为空——3xx 本就无有效载荷）
-      response = new Response('', {
-        status: probe.status,
-        headers: probe.headers,
-      })
+      // 规范的 manual 语义一致；body 恒为空——3xx 本就无有效载荷）。
+      // 非 3xx 终态（服务端未复现重定向）携带探测读出的真实 body 返回，
+      // 不得以空体冒充成功响应（issue #67）；无实体体状态须为 null body
+      response = new Response(
+        isNullBodyStatus(probe.status) ? null : (probe.body ?? ''),
+        {
+          status: probe.status,
+          headers: probe.headers,
+        },
+      )
     }
     if (!isRedirectStatus(response.status)) return response
     const location = response.headers.get('location')
