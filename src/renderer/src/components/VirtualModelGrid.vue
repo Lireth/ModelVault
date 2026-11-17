@@ -158,30 +158,22 @@ function onCardActionKey(e) {
 
 /* ---------------- 行高校准（网格特有，B6） ---------------- */
 
-/** 等高假设告警只发一次（开发期断言） */
-let equalHeightWarned = false
-
-/** 用已渲染卡片的真实高度校准行距（卡片高度仅随列宽与显示设置变化） */
+/**
+ * 用已渲染卡片的真实高度校准行距（卡片高度仅随列宽与显示设置变化）。
+ * 行定位按全库统一行距，取已渲染卡片的最高者：无标签卡片不渲染 .tag-row、
+ * 长标签在窄列下换行成多行，卡片高度随自由标签行数天然不齐，仅量测首张
+ * 会与更高的卡片行重叠（#57）。
+ */
 function calibrateRowPitch() {
   const cards = rootEl.value?.querySelectorAll('.grid-row .model-card')
   if (!cards || cards.length === 0) return
-  const h = cards[0].getBoundingClientRect().height
-  if (h <= 0) return
-  // 开发期断言（B6）：虚拟滚动的行定位隐含「同行卡片等高」假设，当前由
-  // ModelCard 的单行省略布局保证；未来改动（名称换行/新增可变高度内容）
-  // 会静默破坏定位产生重叠/空隙，此处提前告警
-  if (import.meta.env.DEV && !equalHeightWarned && cards.length > 1) {
-    const last = cards[cards.length - 1].getBoundingClientRect().height
-    if (Math.abs(last - h) > 2) {
-      equalHeightWarned = true
-      console.warn(
-        '[VirtualModelGrid] 同行卡片高度不一致，虚拟滚动行定位将失准:',
-        h,
-        last,
-      )
-    }
+  let maxH = 0
+  for (const card of cards) {
+    const h = card.getBoundingClientRect().height
+    if (h > maxH) maxH = h
   }
-  rowPitch.value = h + preset.value.gap
+  if (maxH <= 0) return
+  rowPitch.value = maxH + preset.value.gap
 }
 
 function scheduleCalibrate() {
