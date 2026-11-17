@@ -12,6 +12,11 @@ import { errorMessage } from '../shared/error-text'
  * 双重写入风险。本地软件无云端兜底，安全策略是：
  * 记录日志 -> 尽力落盘 -> 展示错误框 -> relaunch + exit 优雅重启。
  *
+ * 确定性崩溃（如损坏的 settings/store 在启动链路触发）会让每次重启
+ * 再次崩溃，形成重启循环——自动重启带熔断：窗口内连续重启计数经
+ * relaunch 参数跨进程携带，达到阈值后不再 relaunch，弹框交用户
+ * 手动处置（与渲染进程崩溃恢复的放弃决策范式对齐）。
+ *
  * unhandledRejection 不适用本策略（多数为可恢复的异步业务错误，
  * 且渲染进程异常另有 app:reportError 通道上报），维持仅记录，
  * 由 index.js 单独处理。
@@ -23,6 +28,14 @@ let handling = false
 /** 错误框中展示的错误信息最大长度（避免超长堆栈撑爆对话框） */
 const MAX_DETAIL_LENGTH = 500
 
+/**
+ * 重启循环熔断窗口（issue #74）：窗口起点为窗口内首次崩溃时刻，
+ * 经 relaunch 参数跨进程携带；窗口内连续自动重启达阈值则熔断。
+ */
+const RESTART_LOOP_WINDOW_MS = 60_000
+/** 熔断阈值：窗口内最多自动重启次数 */
+const MAX_AUTO_RELAUNCH_IN_WINDOW = 3
+
 /** 截取错误详情（堆栈优先），超长时截断 */
 function errorDetail(error) {
   const text = error?.stack || error?.message || String(error)
@@ -32,8 +45,31 @@ function errorDetail(error) {
 }
 
 /**
+ * 从启动参数解析上次致命重启携带的熔断计数状态（参数形式与下方
+ * relaunch 传参一致）。无合法参数视为全新启动，从 1 重新计数。
+ * @param {readonly string[]} argv 进程参数
+ * @returns {{count: number, firstMs: number}} 窗口内已重启次数与窗口起点
+ */
+function parseRestartLoopState(argv) {
+  let count = 0
+  let firstMs = 0
+  if (Array.isArray(argv)) {
+    for (const arg of argv) {
+      const text = String(arg)
+      const c = /^--fatal-restart-count=(\d{1,3})$/.exec(text)
+      if (c?.[1]) count = Number(c[1])
+      const t = /^--fatal-restart-first=(\d{1,15})$/.exec(text)
+      if (t?.[1]) firstMs = Number(t[1])
+    }
+  }
+  return { count, firstMs }
+}
+
+/**
  * 处理一个未捕获异常：尽力保存数据后提示用户并重启。
  * 可安全重复调用——首个异常进入处理流程后，后续异常仅记录警告。
+ * 窗口内连续自动重启达阈值后熔断：不再 relaunch，仅提示用户手动
+ * 处置，打断确定性崩溃形成的重启循环。
  * @param {any} error 异常对象
  */
 export async function handleUncaughtException(error) {
@@ -57,18 +93,42 @@ export async function handleUncaughtException(error) {
       logger.warn(`致命错误处理中落盘失败: ${err.message}`)
     })
   } finally {
+    // 熔断判定：窗口起点（窗口内首次崩溃时刻）不变以维持同一窗口；
+    // 窗口过期（超过 RESTART_LOOP_WINDOW_MS）则视为已恢复，重新计数
+    const prev = parseRestartLoopState(process.argv)
+    const now = Date.now()
+    const inWindow =
+      prev.firstMs > 0 && now - prev.firstMs < RESTART_LOOP_WINDOW_MS
+    const nextCount = inWindow ? prev.count + 1 : 1
+    const tripBreaker = nextCount > MAX_AUTO_RELAUNCH_IN_WINDOW
     // showErrorBox 是同步 void API（返回 undefined），不可 await/.catch；
-    // try/catch 兜底：展示失败不阻断重启
+    // try/catch 兜底：展示失败不阻断退出
     try {
       dialog.showErrorBox(
         '模匣 遇到无法恢复的错误',
-        `应用将保存数据后自动重启。\n\n错误信息：\n${errorDetail(error)}\n\n` +
-          '若同一问题反复出现，请查看日志目录（%APPDATA%\\modelvault\\logs）并联系开发者。',
+        tripBreaker
+          ? `应用已连续多次异常重启，已停止自动重启以避免重启循环。\n请手动重新启动应用；若问题持续，请查看日志目录（%APPDATA%\\modelvault\\logs）并联系开发者。\n\n错误信息：\n${errorDetail(error)}`
+          : `应用将保存数据后自动重启。\n\n错误信息：\n${errorDetail(error)}\n\n` +
+              '若同一问题反复出现，请查看日志目录（%APPDATA%\\modelvault\\logs）并联系开发者。',
       )
     } catch (dialogErr) {
       logger.warn(`错误框展示失败: ${errorMessage(dialogErr) || dialogErr}`)
     }
-    app.relaunch()
+    if (tripBreaker) {
+      logger.error(`窗口内连续崩溃重启 ${nextCount} 次，熔断生效，停止自动重启`)
+    } else {
+      app.relaunch({
+        args: [
+          `--fatal-restart-count=${nextCount}`,
+          `--fatal-restart-first=${inWindow ? prev.firstMs : now}`,
+        ],
+      })
+    }
     app.exit(1)
   }
+}
+
+/** 测试钩子：复位处理中标记（熔断计数由启动参数跨进程携带，无需复位） */
+export function resetFatalErrorForTests() {
+  handling = false
 }
