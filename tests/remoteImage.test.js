@@ -27,10 +27,19 @@ vi.mock('electron', () => ({
   dialog: { showOpenDialog: vi.fn() },
 }))
 
+// civ-cache 仅将 saveCivImageCache 替换为可注入 spy（默认直通真实实现，
+// 其余导出保持原样）——挂起磁盘形态（写入永不 settle）的用例依赖此注入
+vi.mock('../src/main/services/civ-cache', async (importOriginal) => {
+  const actual = await importOriginal()
+  return { ...actual, saveCivImageCache: vi.fn(actual.saveCivImageCache) }
+})
+
 import { net, protocol } from 'electron'
 import {
   isCivitaiVideoUrl,
   registerCivimgHandler,
+  setCivimgBodyIdleTimeoutForTests,
+  setCivimgCacheWriteTimeoutForTests,
   setCivimgFailTtlForTests,
 } from '../src/main/protocol/remote-image'
 import { registerImageScheme } from '../src/main/protocol'
@@ -71,6 +80,8 @@ beforeEach(async () => {
 
 afterEach(() => {
   setCivimgFailTtlForTests(60000)
+  setCivimgBodyIdleTimeoutForTests(30000)
+  setCivimgCacheWriteTimeoutForTests(30000)
 })
 
 describe('registerImageScheme 特权注册', () => {
@@ -482,5 +493,84 @@ describe('civimg 上游失败负缓存（OPT-7）', () => {
     const third = await civHandler(makeCivRequest(target))
     expect(third.status).toBe(200)
     expect(net.fetch).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('civimg 有界等待（#46）：停滞上游与挂起磁盘不再永久占死并发槽', () => {
+  it('响应头到达后 body 停滞：空闲超时中止返回 502，并记入负缓存静默期内零回源', async () => {
+    setCivimgBodyIdleTimeoutForTests(30)
+    // 半开连接形态：头部立即到达，body 流永不出字也永不关闭
+    vi.mocked(net.fetch).mockImplementation(() =>
+      Promise.resolve(
+        new Response(new ReadableStream({ start() {} }), {
+          status: 200,
+          headers: { 'Content-Type': 'image/jpeg' },
+        }),
+      ),
+    )
+    const target = 'https://image.civitai.com/stall-body/1.png'
+    expect((await civHandler(makeCivRequest(target))).status).toBe(502)
+    expect(net.fetch).toHaveBeenCalledTimes(1)
+    // 中止路径与网络失败同走负缓存：静默期内同 URL 零回源（到期自愈）
+    expect((await civHandler(makeCivRequest(target))).status).toBe(502)
+    expect(net.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('6 路停滞回源超时中止释放槽位后，第 7 路回源不再饿死', async () => {
+    setCivimgBodyIdleTimeoutForTests(30)
+    vi.mocked(net.fetch).mockImplementation((url) => {
+      if (String(url).includes('/stall-body/')) {
+        return Promise.resolve(
+          new Response(new ReadableStream({ start() {} }), {
+            status: 200,
+            headers: { 'Content-Type': 'image/jpeg' },
+          }),
+        )
+      }
+      return Promise.resolve(
+        new Response(PNG_MAGIC, {
+          status: 200,
+          headers: { 'Content-Type': 'image/png' },
+        }),
+      )
+    })
+    const stalled = Array.from({ length: 6 }, (_, i) =>
+      civHandler(
+        makeCivRequest(`https://image.civitai.com/stall-body/${i}.png`),
+      ),
+    )
+    const good = civHandler(
+      makeCivRequest('https://image.civitai.com/after-stall/7.png'),
+    )
+    const results = await Promise.all([...stalled, good])
+    // 修复前：6 路停滞回源永久占满槽位，第 7 路排队挂死（用例超时失败）
+    expect(results.slice(0, 6).every((r) => r.status === 502)).toBe(true)
+    expect(results[6].status).toBe(200)
+  })
+
+  it('槽内磁盘缓存写入停滞：等待有界照常返回图片，槽位不阻塞后续回源', async () => {
+    setCivimgCacheWriteTimeoutForTests(20)
+    // 挂起盘形态：两次写入均永不 settle（Once 用尽后自动回落真实实现）
+    vi.mocked(saveCivImageCache)
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockImplementationOnce(() => new Promise(() => {}))
+    vi.mocked(net.fetch).mockImplementation(() =>
+      Promise.resolve(
+        new Response(PNG_MAGIC, {
+          status: 200,
+          headers: { 'Content-Type': 'image/png' },
+        }),
+      ),
+    )
+    const first = await civHandler(
+      makeCivRequest('https://image.civitai.com/hang-disk/1.png'),
+    )
+    expect(first.status).toBe(200)
+    expect(Buffer.from(await first.arrayBuffer())).toEqual(PNG_MAGIC)
+    // 槽位已随有界等待释放：第二个不同 URL 不被挂起的写入阻塞
+    const second = await civHandler(
+      makeCivRequest('https://image.civitai.com/hang-disk/2.png'),
+    )
+    expect(second.status).toBe(200)
   })
 })

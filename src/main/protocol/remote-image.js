@@ -3,6 +3,7 @@ import logger from '../logger'
 import { getSettings } from '../services/store'
 import {
   CIVITAI_DISABLED_ERROR,
+  IMAGE_BODY_IDLE_TIMEOUT_MS,
   isAllowedCivitaiImageUrl,
   fetchCivitaiImage,
   fetchCivitaiVideo,
@@ -14,6 +15,7 @@ import {
   removeCivImageCache,
   saveCivImageCache,
 } from '../services/civ-cache'
+import { isSettledWithin } from '../utils'
 import { isImageBuffer } from '../services/covers'
 import { proxyMediaHeaders, toBodyView } from './http-cache'
 import { errorMessage } from '../../shared/error-text'
@@ -98,6 +100,38 @@ export function setCivimgFailTtlForTests(ms) {
 }
 
 /**
+ * 图片 body 读取的空闲超时（ms，与导入路径同一常量，#46）：逐段计时，
+ * 停滞即中止并经失败路径释放并发槽——响应头到达后挂死的上游不再占槽。
+ */
+let civimgBodyIdleTimeoutMs = IMAGE_BODY_IDLE_TIMEOUT_MS
+
+/**
+ * 注入图片 body 空闲超时（仅供单元测试使用；生产代码严禁调用）
+ * @param {number} ms 毫秒数
+ */
+export function setCivimgBodyIdleTimeoutForTests(ms) {
+  civimgBodyIdleTimeoutMs =
+    Number.isFinite(ms) && ms > 0 ? ms : IMAGE_BODY_IDLE_TIMEOUT_MS
+}
+
+/**
+ * 槽内磁盘缓存写入的等待上限（ms，#46）：挂起盘上的写入可在内核层阻塞
+ * 数十秒——无上界时协议请求与并发槽随之永久悬挂。
+ */
+const CIVIMG_CACHE_WRITE_TIMEOUT_MS = 30000
+/** 缓存写入等待上限（测试可注入小值验证超时路径） */
+let civimgCacheWriteTimeoutMs = CIVIMG_CACHE_WRITE_TIMEOUT_MS
+
+/**
+ * 注入 civimg 缓存写入等待上限（仅供单元测试使用；生产代码严禁调用）
+ * @param {number} ms 毫秒数
+ */
+export function setCivimgCacheWriteTimeoutForTests(ms) {
+  civimgCacheWriteTimeoutMs =
+    Number.isFinite(ms) && ms > 0 ? ms : CIVIMG_CACHE_WRITE_TIMEOUT_MS
+}
+
+/**
  * 静默期内同 URL 的缓存失败状态（无记录/已到期返回 0）。
  * 到期即惰性删除，下一次请求正常回源。
  * @param {string} target 图片 URL
@@ -153,10 +187,14 @@ function fetchCivImageShared(target) {
       }
       // 整体读入后回写磁盘缓存（best-effort，失败不影响返回）；仅缓存
       // 真实图片内容——魔数不符的字节（上游异常页等）不入缓存。
-      // 读取受 50MB 上限约束（V-06），避免异常大响应打爆主进程堆
+      // 读取受 50MB 上限约束（V-06），避免异常大响应打爆主进程堆；
+      // 逐段空闲计时（#46）：响应头到达后 body 停滞的半开连接超时中止，
+      // 经下方 catch 记入负缓存并让出并发槽，不再永久占槽饿死图片代理
       let buf
       try {
-        buf = await readCivitaiImageBody(upstream)
+        buf = await readCivitaiImageBody(upstream, {
+          idleTimeoutMs: civimgBodyIdleTimeoutMs,
+        })
       } catch (err) {
         logger.warn(`civimg 上游内容读取失败: ${errorMessage(err)}`)
         recordCivimgFailure(target)
@@ -165,7 +203,17 @@ function fetchCivImageShared(target) {
       // OPT-7：成功回源即清除失败记录（失效图重新上架的自愈即刻生效）
       civimgFailures.delete(target)
       if (isImageBuffer(buf)) {
-        await saveCivImageCache(target, buf)
+        // 槽内等待磁盘写同样有界（#46）：挂起盘的写入可在内核层阻塞，
+        // 超时放弃等待照常返回（缓存 best-effort，迟到的写入无副作用）
+        const settled = await isSettledWithin(
+          saveCivImageCache(target, buf),
+          civimgCacheWriteTimeoutMs,
+        )
+        if (!settled) {
+          logger.warn(
+            `civimg 缓存写入等待超时（${Math.round(civimgCacheWriteTimeoutMs / 1000)}s 无响应），已放弃等待: ${target.slice(0, 200)}`,
+          )
+        }
       }
       return { buf, upstream }
     } catch (err) {
