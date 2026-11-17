@@ -61,6 +61,13 @@ vi.mock('../src/main/services/watcher.js', async (importOriginal) => {
   }
 })
 
+// #61 切根提交窗口回滚回归：loadData 可单次注入失败，模拟 ensureRootStore
+// 内部 switchDataRoot 已提交、后续 loadData 抛错的部分成功场景
+vi.mock('../src/main/services/store', async (importOriginal) => {
+  const actual = await importOriginal()
+  return { ...actual, loadData: vi.fn((...args) => actual.loadData(...args)) }
+})
+
 // setStoreSaveErrorListener 的广播使用 getAllWindows（注册时不触发，桩需存在）
 vi.mocked(BrowserWindow.getAllWindows).mockReturnValue([])
 
@@ -828,6 +835,25 @@ describe('models:scan 目录校验与回写（C6）', () => {
     expect(getCurrentRoot()).toBe(root)
     const { modelsFolder } = await loadSettingsFlushed()
     expect(modelsFolder).toBe(root)
+  })
+
+  it('ensureRootStore 部分成功（切根已提交）后失败仍回滚旧根（#61）', async () => {
+    const rootB = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-scan-partial-'),
+    )
+    roots.push(rootB)
+    await updateSettings({ modelsFolder: root, modelsFolders: [root, rootB] })
+    // loadData 首次调用抛错：switchDataRoot 已在 ensureRootStore 内部提交，
+    // 调用点以异常退出、拿不到正常返回——回滚条件必须按主进程实际当前根判定
+    vi.mocked(loadData).mockRejectedValueOnce(new Error('元数据加载失败'))
+    const scan = getRegisteredHandler('models:scan')
+
+    const res = await scan(makeEvent(), { folder: rootB })
+
+    expect(res.error).toContain('元数据加载失败')
+    // 修复前 rootSwitched 在 ensureRootStore 返回后才赋值，恒为 false，
+    // finally 回滚不触发——主进程根停留在渲染层不可见的新库
+    expect(getCurrentRoot()).toBe(root)
   })
 })
 
