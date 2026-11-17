@@ -100,6 +100,21 @@ describe('输入自动补全（FEAT-1）', () => {
     wrapper.unmount()
   })
 
+  it('鼠标点击候选应用被点项（而非键盘高亮项，#56）', async () => {
+    const wrapper = mountToolbar()
+    const input = wrapper.find('input[type="text"]')
+    await input.setValue('type:')
+    const items = () => wrapper.findAll('.search-suggest li')
+    // 键盘高亮保持在第 1 条，直接点击第 3 条
+    expect(items()[0].classes()).toContain('active')
+    await items()[2].trigger('mousedown')
+    await items()[2].trigger('click')
+    await flushPromises()
+    expect(input.element.value).toBe('type:vae ')
+    expect(wrapper.find('.search-suggest').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('自由文本不弹候选（无候选时无下拉）', async () => {
     const wrapper = mountToolbar()
     await wrapper.find('input[type="text"]').setValue('赛博朋克机娘')

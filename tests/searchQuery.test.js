@@ -106,6 +106,30 @@ describe('parseSearchQuery 解析器', () => {
     expect(parseSearchQuery('hash:xyz').filters).toEqual([])
   })
 
+  it('mtime/opened 裸值携带输入单位粒度（不再毫秒全等，#56）', () => {
+    const DAY = 24 * 3600 * 1000
+    expect(parseSearchQuery('mtime:7d').filters).toEqual([
+      { kind: 'mtime', op: '=', ms: 7 * DAY, unitMs: DAY },
+    ])
+    // 缺省单位 d；h 单位粒度为 1h
+    expect(parseSearchQuery('opened:12h').filters).toEqual([
+      {
+        kind: 'opened',
+        never: false,
+        op: '=',
+        ms: 12 * 3600 * 1000,
+        unitMs: 3600 * 1000,
+      },
+    ])
+    expect(parseSearchQuery('opened:7').filters[0]).toMatchObject({
+      kind: 'opened',
+      never: false,
+      op: '=',
+      ms: 7 * DAY,
+      unitMs: DAY,
+    })
+  })
+
   it('使用轨迹语法：opened 年龄/never 与 uses 次数（F3）', () => {
     expect(parseSearchQuery('opened:>30d').filters).toEqual([
       {
@@ -307,6 +331,41 @@ describe('matchSearchFilters 匹配器', () => {
       matchSearchFilters(model({ hash: 'ABCDEF12' + '0'.repeat(56) }), hash),
     ).toBe(true)
     expect(matchSearchFilters(model({ hash: '1234abcd' }), hash)).toBe(false)
+  })
+
+  it('mtime/opened 裸值命中语义：按输入单位粒度取整（#56）', () => {
+    const DAY = 24 * 3600 * 1000
+    const mtime = parseSearchQuery('mtime:7d').filters
+    // 年龄落在第 7 天桶内（[7d, 8d)）命中
+    expect(
+      matchSearchFilters(
+        model({ mtimeMs: Date.now() - 7 * DAY - 3600 * 1000 }),
+        mtime,
+      ),
+    ).toBe(true)
+    expect(
+      matchSearchFilters(model({ mtimeMs: Date.now() - 6.5 * DAY }), mtime),
+    ).toBe(false)
+    expect(
+      matchSearchFilters(model({ mtimeMs: Date.now() - 8.5 * DAY }), mtime),
+    ).toBe(false)
+    expect(matchSearchFilters(model({}), mtime)).toBe(false)
+
+    const opened = parseSearchQuery('opened:7d').filters
+    expect(
+      matchSearchFilters(
+        model({ lastOpenedAt: Date.now() - 7 * DAY - 3600 * 1000 }),
+        opened,
+      ),
+    ).toBe(true)
+    expect(
+      matchSearchFilters(
+        model({ lastOpenedAt: Date.now() - 0.5 * DAY }),
+        opened,
+      ),
+    ).toBe(false)
+    // 从未打开对裸值精确不命中
+    expect(matchSearchFilters(model({ lastOpenedAt: 0 }), opened)).toBe(false)
   })
 
   it('cover/note/params/ext/path/dup 命中语义（F4）', () => {
