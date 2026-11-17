@@ -16,6 +16,7 @@ import {
   normalizeStoreData,
   saveLibrarySettings,
   setModelMeta,
+  suppressLibrarySettingsSave,
 } from './store'
 import { notifyStoreSaveError } from './store-events'
 import { LIB_PREFIX, parseBackupManifest } from './backup-format'
@@ -138,13 +139,21 @@ async function restoreLibraryLocked(
     )
   }
 
+  // B-02 设置侧屏障（#47）：入口 flush 只静止恢复发起时刻的写盘链，流式解压
+  // 可达分钟级——期间用户改设置触发的库设置防抖写，会在既有数据让位
+  // （.modelvault → .bak）后用非递归 mkdir 把 .modelvault 重建为只含
+  // settings.json 的空目录，令目录交换与回滚双双失败。与元数据侧
+  // saveSuppressed 同一口径：抑制窗口内丢弃目标根的库设置待写快照
+  // （修改保留在内存；恢复目标为当前库时随重载对齐恢复结果），
+  // 解除与流程退出绑定（finally），失败路径同样不遗留抑制
+  suppressLibrarySettingsSave(root)
   const dataDir = path.join(root, DATA_DIR)
   const stamp = Date.now()
   const tmpDir = `${dataDir}.restore-${stamp}`
   const coversDir = path.join(tmpDir, COVERS_DIR)
-  await fs.rm(tmpDir, { recursive: true, force: true })
   let covers = 0
   try {
+    await fs.rm(tmpDir, { recursive: true, force: true })
     await fs.mkdir(coversDir, { recursive: true })
     const stats = { skippedCovers }
     const decoder = new TextDecoder()
@@ -223,6 +232,8 @@ async function restoreLibraryLocked(
     // 失败兜底：清理本次解出的临时目录，不在用户模型目录留垃圾
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
     throw err
+  } finally {
+    suppressLibrarySettingsSave(null)
   }
 }
 
