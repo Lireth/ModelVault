@@ -1,6 +1,10 @@
 import { app, BrowserWindow } from 'electron'
 import logger from '../logger'
-import { isAllowedExternalUrl, readResponseTextLimited } from '../utils'
+import {
+  cancelResponseBody,
+  isAllowedExternalUrl,
+  readResponseTextLimited,
+} from '../utils'
 import { getSettings } from './store-settings'
 import { REQUEST_TIMEOUT_MS } from './net-fetch'
 import {
@@ -90,6 +94,7 @@ async function fetchReleaseJson(url, current) {
     updateRequestOptions(current),
   )
   if (!response.ok) {
+    cancelResponseBody(response)
     // OPT-13：GitHub API 限流（未鉴权 60 req/h/IP，触发时 x-ratelimit-remaining
     // 为 0）给出可辨识文案——裸 403 会让用户误判为服务故障
     const remaining = response.headers?.get?.('x-ratelimit-remaining')

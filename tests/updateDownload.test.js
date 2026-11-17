@@ -282,6 +282,24 @@ describe('downloadUpdatePackage（校验和阶段）', () => {
     expect(r.error).toContain('校验和下载失败（HTTP 500）')
   })
 
+  it('校验和 HTTP 错误返回前取消未消费的响应体（防连接挂留）', async () => {
+    armPending()
+    let cancelled = false
+    routeFetches({
+      checksum: new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true
+          },
+        }),
+        { status: 500 },
+      ),
+    })
+    const r = await downloadUpdatePackage()
+    expect(r.error).toContain('校验和下载失败（HTTP 500）')
+    expect(cancelled).toBe(true)
+  })
+
   it('校验和请求超时映射专用文案', async () => {
     armPending()
     routeFetches({

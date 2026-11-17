@@ -162,6 +162,29 @@ describe('fetchCivitaiModelType', () => {
     expect(net.fetch).toHaveBeenCalledTimes(4)
   })
 
+  it('429 重试丢弃旧响应前取消其未消费的 body（防连接挂留）', async () => {
+    let cancelled = false
+    vi.mocked(net.fetch)
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream({
+            cancel() {
+              cancelled = true
+            },
+          }),
+          { status: 429, headers: { 'Retry-After': '0' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 123, type: 'LORA', tags: [] }), {
+          status: 200,
+        }),
+      )
+    const res = await fetchCivitaiModelType('123')
+    expect(res.found).toBe(true)
+    expect(cancelled).toBe(true)
+  })
+
   it('429 等待超过单次超时后，重试使用新的超时信号而非已终止信号', async () => {
     // 将单次请求超时压缩到 10ms（真实 timers，避免 fake timers 介入节流链）：
     // 429 的 50ms 等待必然跨过第一次请求的超时窗口。
@@ -423,6 +446,23 @@ describe('Civitai 网络边界（V-06）', () => {
     )
     const res = await downloadCivitaiImage('https://image.civitai.com/a.jpg')
     expect(res.error).toContain('过大')
+  })
+
+  it('图片下载非 ok 响应返回错误前取消未消费的 body（防连接挂留）', async () => {
+    let cancelled = false
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true
+          },
+        }),
+        { status: 404 },
+      ),
+    )
+    const res = await downloadCivitaiImage('https://image.civitai.com/a.jpg')
+    expect(res.error).toContain('HTTP 404')
+    expect(cancelled).toBe(true)
   })
 })
 

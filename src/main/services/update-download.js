@@ -5,6 +5,7 @@ import path from 'node:path'
 import { app } from 'electron'
 import logger from '../logger'
 import {
+  cancelResponseBody,
   isAllowedExternalUrl,
   raceIdleTimeout,
   readResponseTextLimited,
@@ -254,7 +255,10 @@ export async function downloadUpdatePackage(onProgress) {
       const res = await fetchUpdateUrlReliably(checksumUrl, () => ({
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       }))
-      if (!res.ok) return { error: `校验和下载失败（HTTP ${res.status}）` }
+      if (!res.ok) {
+        cancelResponseBody(res)
+        return { error: `校验和下载失败（HTTP ${res.status}）` }
+      }
       expected = parseChecksumHash(
         await readResponseTextLimited(res, MAX_CHECKSUM_BYTES, '校验和文件'),
       )

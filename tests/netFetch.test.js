@@ -95,6 +95,59 @@ describe('fetchWithValidatedRedirects（V-06 逐跳白名单）', () => {
     ).rejects.toThrow('测试请求重定向目标不在白名单内，已拒绝')
   })
 
+  it('跟随重定向时取消中间响应未消费的 body（防连接挂留）', async () => {
+    let cancelled = false
+    vi.mocked(net.fetch)
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream({
+            cancel() {
+              cancelled = true
+            },
+          }),
+          {
+            status: 302,
+            headers: { Location: 'https://cdn.example.com/asset' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(new Response('ok', { status: 200 }))
+    const res = await fetchWithValidatedRedirects(
+      'https://a.example.com/x',
+      {},
+      allowExample,
+      '测试请求',
+    )
+    expect(res.status).toBe(200)
+    expect(cancelled).toBe(true)
+  })
+
+  it('白名单外跳转拒绝前同样取消中间响应体', async () => {
+    let cancelled = false
+    vi.mocked(net.fetch).mockResolvedValueOnce(
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true
+          },
+        }),
+        {
+          status: 302,
+          headers: { Location: 'https://evil.net/x' },
+        },
+      ),
+    )
+    await expect(
+      fetchWithValidatedRedirects(
+        'https://a.example.com/x',
+        {},
+        allowExample,
+        '测试请求',
+      ),
+    ).rejects.toThrow('测试请求重定向目标不在白名单内，已拒绝')
+    expect(cancelled).toBe(true)
+  })
+
   it('超过最大跳数时拒绝，实际请求数为上限 + 1 次', async () => {
     vi.mocked(net.fetch).mockImplementation(
       async () =>

@@ -167,6 +167,27 @@ describe('civimg 图片代理', () => {
     expect(res.status).toBe(502)
   })
 
+  it('上游非 ok 返回 502 前取消未消费的上游 body（防连接挂留）', async () => {
+    let cancelled = false
+    vi.mocked(net.fetch).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            cancel() {
+              cancelled = true
+            },
+          }),
+          { status: 403 },
+        ),
+      ),
+    )
+    const res = await civHandler(
+      makeCivRequest('https://image.civitai.com/cancel-body/1.png'),
+    )
+    expect(res.status).toBe(502)
+    expect(cancelled).toBe(true)
+  })
+
   it('图片代理响应头按白名单重建：Set-Cookie/Content-Disposition/X-* 不透传', async () => {
     vi.mocked(net.fetch).mockResolvedValue(
       new Response('upstream-error-page', {
@@ -273,6 +294,25 @@ describe('civimg 视频流式代理（FN-02）', () => {
     expect(res.headers.get('content-range')).toBe('bytes 10-12/100')
     // 视频不进入图片缓存路径（仅一次网络请求）
     expect(net.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('视频上游非 ok 返回 502 前取消未消费的上游 body（防连接挂留）', async () => {
+    let cancelled = false
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true
+          },
+        }),
+        { status: 404 },
+      ),
+    )
+    const res = await civHandler(
+      makeCivRequest('https://image.civitai.com/x/cancel-body.mp4'),
+    )
+    expect(res.status).toBe(502)
+    expect(cancelled).toBe(true)
   })
 
   it('isCivitaiVideoUrl：识别常见视频扩展名', () => {
