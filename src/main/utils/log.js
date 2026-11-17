@@ -15,7 +15,8 @@
 export function sanitizeLogText(text) {
   let out = ''
   for (const ch of text) {
-    const code = ch.codePointAt(0)
+    // for-of 产出单码点字符串，codePointAt(0) 必中（strictNullChecks cast）
+    const code = /** @type {number} */ (ch.codePointAt(0))
     if (code === 0x0a) out += '\\n'
     else if (code === 0x0d) out += '\\r'
     else if (code === 0x09) out += '\\t'
