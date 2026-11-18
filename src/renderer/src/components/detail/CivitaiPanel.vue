@@ -28,6 +28,9 @@ const identifying = ref(false)
 const completing = ref(false)
 const importing = ref(false)
 
+/** 识别请求序号：切模型/卸载时自增作废在途请求，迟到响应不写入当前面板 */
+let identifySeq = 0
+
 const model = computed(() => selectedModel.value)
 /** 已识别：详情页展示模型页链接 */
 const identified = computed(() => !!model.value?.civitaiUrl)
@@ -102,14 +105,18 @@ function onVideoKeydown(e) {
 onMounted(() =>
   window.addEventListener('keydown', onVideoKeydown, { capture: true }),
 )
-onBeforeUnmount(() =>
-  window.removeEventListener('keydown', onVideoKeydown, { capture: true }),
-)
+onBeforeUnmount(() => {
+  identifySeq += 1
+  window.removeEventListener('keydown', onVideoKeydown, { capture: true })
+})
 
-// 切换模型时清空上次识别结论与示例图状态（URL 本身随模型对象走，无需清理）
+// 切换模型时作废在途识别请求并清空上次识别结论与示例图状态（URL 本身随模型
+// 对象走，无需清理）；identifying 一并复位，避免新模型面板停留在禁用态
 watch(
   () => model.value?.id,
   () => {
+    identifySeq += 1
+    identifying.value = false
     lastResult.value = ''
     images.value = []
     videos.value = []
@@ -126,8 +133,10 @@ async function onIdentify() {
     return
   identifying.value = true
   lastResult.value = ''
+  const seq = ++identifySeq
   try {
     const res = await civitaiIdentify(model.value.id)
+    if (seq !== identifySeq) return
     if (res.error) return
     if (!res.found) {
       lastResult.value = 'notfound'
@@ -138,7 +147,7 @@ async function onIdentify() {
     imagesLoaded.value = true
     selectedUrls.clear()
   } finally {
-    identifying.value = false
+    if (seq === identifySeq) identifying.value = false
   }
 }
 

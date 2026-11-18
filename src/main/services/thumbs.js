@@ -325,6 +325,8 @@ export function clearDeferredJobs() {
  *   单张慢图拖住 15 张已完成任务的推送；worker 池流式取任务，完成即回调。
  * 每成功生成一个缩略图，调用 onGenerated(源图路径, 缩略图路径)
  * 通知调用方（用于推送渲染进程更新卡片封面）。
+ * 切库安全（#44，C5 同类）：以 drain 起点的根目录为准——切库后剩余任务
+ * 整体跳过，不把旧根源图写进新根 thumbs、不经 onGenerated 推送无效更新。
  * @param {(absCover: string, thumbPath: string) => void} onGenerated 生成成功回调
  * @param {number} [concurrency] 并发 worker 数
  */
@@ -334,15 +336,22 @@ export async function drainDeferredThumbs(
 ) {
   const jobs = [...deferredJobs.values()]
   deferredJobs.clear()
+  // #44（C5 同类）：快照数组取出后 clearDeferredJobs 便清不掉在途任务，
+  // worker 也不得执行时现取 getThumbsDir()——按当前根计算会把旧根源图的
+  // 缩略图写进新根 thumbs 并经 onGenerated 推送无效更新。以 drain 起点的
+  // 根目录为准：任务开始前与生成返回后双重校验，切库后剩余任务整体跳过
+  const rootAtStart = getCurrentRoot()
+  if (!rootAtStart) return
+  const thumbsDir = path.join(rootAtStart, '.modelvault', THUMBS_DIR)
   await runWithConcurrency(
     jobs,
     async ({ absCover, mtimeMs }) => {
-      const thumbPath = path.join(
-        getThumbsDir(),
-        thumbFileName(absCover, mtimeMs),
-      )
+      if (getCurrentRoot() !== rootAtStart) return
+      const thumbPath = path.join(thumbsDir, thumbFileName(absCover, mtimeMs))
       try {
         const outcome = await generateThumb(absCover, thumbPath)
+        // 渲染等待期间切库：本轮生成结果作废，不写跨根缓存、不推送更新
+        if (getCurrentRoot() !== rootAtStart) return
         // 判别收窄用 in 守卫：checkJs 非 strict 下 ok 的字面量类型可能放宽
         if ('verdict' in outcome) {
           if (outcome.verdict !== 'offline') {
@@ -399,13 +408,23 @@ export async function pruneThumbs(keepNames) {
     }
     const stale = entries.filter((n) => !keepNames.has(n))
     if (stale.length === 0) return
-    // OPT-09：失效缩略图可能数千个，统一有界并发，避免瞬时耗尽文件句柄
+    // OPT-09：失效缩略图可能数千个，统一有界并发，避免瞬时耗尽文件句柄。
+    // worker 内捕获单文件失败（async.js 约定）：单个被占用文件不中止整批，
+    // 统计按真实删除数上报，与实际清理结果一致（#79）
+    let cleaned = 0
     await runWithConcurrency(
       stale,
-      (n) => fs.rm(path.join(dir, n), { force: true }),
+      async (n) => {
+        try {
+          await fs.rm(path.join(dir, n), { force: true })
+          cleaned += 1
+        } catch (err) {
+          logger.warn(`失效缩略图删除失败: ${n}: ${errorMessage(err)}`)
+        }
+      },
       16,
     )
-    logger.info(`已清理 ${stale.length} 个失效缩略图`)
+    logger.info(`已清理 ${cleaned} 个失效缩略图`)
   } catch (err) {
     if (errorCode(err) !== 'ENOENT')
       logger.warn(`缩略图清理失败: ${errorMessage(err)}`)

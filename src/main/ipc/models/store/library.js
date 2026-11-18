@@ -9,13 +9,18 @@ import { BrowserWindow, dialog } from 'electron'
 import logger from '../../../logger'
 import { samePathIgnoreCase } from '../../../utils'
 import {
+  getCurrentRoot,
   getSettings,
   isRegisteredLibrary,
   updateSettings,
 } from '../../../services/store'
+import { errorMessage } from '../../../../shared/error-text'
 import { startPerf } from '../../../services/perf'
 import { syncWatcher } from '../../../services/watcher'
-import { requestHashWarmup } from '../../../services/hash-warmup'
+import {
+  clearHashFailuresForLibrarySwitch,
+  requestHashWarmup,
+} from '../../../services/hash-warmup'
 import {
   getDecorateCacheRoot,
   resetDecorateCache,
@@ -65,57 +70,85 @@ export function registerLibraryHandlers() {
       }
 
       return withMaintenanceLock('switch', root, async (token) => {
-        await ensureRootStore(root, { maintenanceToken: token })
-        // IDX-REUSE：切库后的后台校验复用目标库索引中的头部解析结果。
-        // 先清空旧根的装饰/头部缓存与延迟缩略图归属，再按目标索引播种，
-        // 使随后的后台校验扫描无需再次读取索引即可命中头部快照
-        if (!samePathIgnoreCase(getDecorateCacheRoot(), root)) {
-          resetDecorateCache(root)
-          clearDeferredOwners()
-          clearDeferredJobs()
-        }
-        primeHeaderInfoCache(cachedIndex.models)
-        // 切库成功后才提交激活库（与扫描链路同一 V-02 状态机）
-        await updateSettings({ modelsFolder: root })
-        const settings = getSettings()
-        syncWatcher(
-          root,
-          settings.autoRescan === true,
-          settings.excludeDirs || [],
-          {
-            nativeWatch: true,
-          },
-        )
-        // 切库即作废旧库的后台哈希预热队列：秒切库不经过扫描链路的 full 快照
-        // 重播种，旧库排队任务若继续消费，会对已不在当前根内的文件白算
-        // SHA256——跨根写守卫使结果无法落盘，纯浪费分钟级磁盘 IO（后台校验
-        // 扫描失败/取消时该队列会一直消费到空）。以索引模型的 size/mtime 按
-        // 新库策略整体重播种（full=true 丢弃旧排队项并重置体积索引）；随后的
-        // 后台校验扫描完成时再次 full 播种，幂等无冲突。索引模型即上次扫描的
-        // 装饰结果（含 id/size/mtimeMs），readLibraryIndex 的宽返回类型在此断言
-        const indexModels = /** @type {any[]} */ (cachedIndex.models)
-        requestHashWarmup(indexModels, {
-          mode: settings.hashWarmup,
-          concurrency: settings.hashWarmupConcurrency,
-          full: true,
-        })
-        logger.info(
-          `模型库已打开（本地索引 ${cachedIndex.models.length} 个模型）: ${root}`,
-        )
-        perf(`本地索引 ${cachedIndex.models.length} 个模型`)
-        // OPT-PAYLOAD：秒开列表下发瘦身模型（先合成元数据展示字段再剥离，
-        // 顺序不可颠倒——合成依赖 folderSubCategory）
-        const slimmed = slimModelsForList(
-          overlayCurrentMeta(/** @type {any[]} */ (cachedIndex.models)),
-        )
-        logPayloadSize('models:openLibrary', slimmed.approxBytes)
-        return {
-          root,
-          settings,
-          cached: true,
-          models: slimmed.models,
-          savedAt: cachedIndex.savedAt,
-          durationMs: cachedIndex.durationMs,
+        const previousRoot = getCurrentRoot()
+        try {
+          await ensureRootStore(root, { maintenanceToken: token })
+          // IDX-REUSE：切库后的后台校验复用目标库索引中的头部解析结果。
+          // 先清空旧根的装饰/头部缓存与延迟缩略图归属，再按目标索引播种，
+          // 使随后的后台校验扫描无需再次读取索引即可命中头部快照
+          if (!samePathIgnoreCase(getDecorateCacheRoot(), root)) {
+            resetDecorateCache(root)
+            clearDeferredOwners()
+            clearDeferredJobs()
+            // 旧库的哈希失败负缓存一并作废：记录以绝对路径键控，路径复用
+            // 且 mtime 一致时会抑制新库文件的预热资格（静默期最长 24h）
+            clearHashFailuresForLibrarySwitch()
+          }
+          primeHeaderInfoCache(cachedIndex.models)
+          // 切库成功后才提交激活库（与扫描链路同一 V-02 状态机）
+          await updateSettings({ modelsFolder: root })
+          const settings = getSettings()
+          syncWatcher(
+            root,
+            settings.autoRescan === true,
+            settings.excludeDirs || [],
+            {
+              nativeWatch: true,
+            },
+          )
+          // 切库即作废旧库的后台哈希预热队列：秒切库不经过扫描链路的 full 快照
+          // 重播种，旧库排队任务若继续消费，会对已不在当前根内的文件白算
+          // SHA256——跨根写守卫使结果无法落盘，纯浪费分钟级磁盘 IO（后台校验
+          // 扫描失败/取消时该队列会一直消费到空）。以索引模型的 size/mtime 按
+          // 新库策略整体重播种（full=true 丢弃旧排队项并重置体积索引）；随后的
+          // 后台校验扫描完成时再次 full 播种，幂等无冲突。索引模型即上次扫描的
+          // 装饰结果（含 id/size/mtimeMs），readLibraryIndex 的宽返回类型在此断言
+          const indexModels = /** @type {any[]} */ (cachedIndex.models)
+          requestHashWarmup(indexModels, {
+            mode: settings.hashWarmup,
+            concurrency: settings.hashWarmupConcurrency,
+            full: true,
+          })
+          logger.info(
+            `模型库已打开（本地索引 ${cachedIndex.models.length} 个模型）: ${root}`,
+          )
+          perf(`本地索引 ${cachedIndex.models.length} 个模型`)
+          // OPT-PAYLOAD：秒开列表下发瘦身模型（先合成元数据展示字段再剥离，
+          // 顺序不可颠倒——合成依赖 folderSubCategory）
+          const slimmed = slimModelsForList(
+            overlayCurrentMeta(/** @type {any[]} */ (cachedIndex.models)),
+          )
+          logPayloadSize('models:openLibrary', slimmed.approxBytes)
+          return {
+            root,
+            settings,
+            cached: true,
+            models: slimmed.models,
+            savedAt: cachedIndex.savedAt,
+            durationMs: cachedIndex.durationMs,
+          }
+        } catch (err) {
+          // 切根已提交但后续步骤失败：回滚到原根，避免主进程根目录与渲染层
+          // 保留的旧列表错位（V-02，与扫描链路同一约定）。切换事实按主进程
+          // 实际当前根判定——ensureRootStore 部分成功（switchDataRoot 已提交、
+          // loadData/reloadLibrarySettings 抛错）与切根成功后 updateSettings
+          // 抛错均落在该回滚窗口（#61）；未发生切根时原样透传错误
+          if (
+            previousRoot &&
+            !samePathIgnoreCase(previousRoot, getCurrentRoot() || '')
+          ) {
+            try {
+              await ensureRootStore(previousRoot, { maintenanceToken: token })
+              logger.warn(
+                `打开模型库未完成，已回滚模型库根目录: ${root} → ${previousRoot}`,
+              )
+            } catch (rollbackErr) {
+              logger.error(
+                `打开模型库失败后回滚模型库根目录失败: ${errorMessage(rollbackErr)}`,
+              )
+            }
+          }
+          throw err
         }
       })
     },

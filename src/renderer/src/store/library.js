@@ -11,6 +11,7 @@ import {
 } from './state'
 import { applyCoverOverrides, clearCoverOverrides } from './cover-overrides'
 import { clearBatchFailures } from './multiselect/batch-failures'
+import { exitMultiSelect } from './multiselect/selection'
 import { toast } from './toast'
 import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
 import { IPC_ERROR } from '../../../shared/error-codes'
@@ -246,7 +247,7 @@ export async function chooseFolder() {
   // 扫描/增量刷新/后台校验/导入进行中拒绝切换目录（S2/B-01）：
   // 否则目录已切、列表未刷新，留下半状态
   if (isLibraryBusy()) {
-    toast('warn', '正在扫描、校验或导入中，请稍候')
+    toast('warn', '正在扫描、校验、导入或批量操作中，请稍候')
     return
   }
   try {
@@ -269,7 +270,7 @@ export async function chooseFolder() {
  */
 export async function switchRoot(folder) {
   if (isLibraryBusy()) {
-    toast('warn', '正在扫描、校验或导入中，请稍候')
+    toast('warn', '正在扫描、校验、导入或批量操作中，请稍候')
     return
   }
   if (!folder || folder === state.folder) return
@@ -284,6 +285,8 @@ export async function switchRoot(folder) {
         clearCoverOverrides()
         clearHashOverrides()
         clearBatchFailures()
+        // 选区同属旧库（id 语境已失效）：退出多选并清空，不留幻影选区
+        exitMultiSelect()
         replaceModels([])
         state.lastScan = null
         state.folderMissing = true
@@ -303,6 +306,8 @@ export async function switchRoot(folder) {
       clearHashOverrides()
       // B20/F3：失败明细属于旧库（id 语境已失效），切库即清，不留幻影
       clearBatchFailures()
+      // 选区同属旧库：退出多选并清空（含范围锚点），不留幻影选区
+      exitMultiSelect()
       replaceModels(res.models)
       state.folder = res.root || folder
       // F1-offline：目标库可打开（主进程已通过存在性校验），清除离线残留
@@ -312,12 +317,17 @@ export async function switchRoot(folder) {
         durationMs: res.durationMs || 0,
       }
       applyLibrarySettings(res.settings)
-      toast(
-        'success',
-        `已秒开本地索引（${res.models.length} 个模型），正在后台校验…`,
-      )
-      // 后台校验：不进入 scanning 遮罩；完成后整体替换为磁盘真实结果
-      void scanModels(state.folder, { background: true })
+      // 与 initApp 秒开同规则：autoScan 关闭时保持缓存展示，不触发全库磁盘校验
+      if (state.settings.autoScan !== false) {
+        toast(
+          'success',
+          `已秒开本地索引（${res.models.length} 个模型），正在后台校验…`,
+        )
+        // 后台校验：不进入 scanning 遮罩；完成后整体替换为磁盘真实结果
+        void scanModels(state.folder, { background: true })
+      } else {
+        toast('success', `已秒开本地索引（${res.models.length} 个模型）`)
+      }
       return
     }
     // 无可用索引：主进程未切换根目录，交由扫描链路完成 V-02 状态机
@@ -357,7 +367,7 @@ export async function removeRoot(folder) {
 export async function relocateFolder() {
   // 与 chooseFolder 同规则：扫描/校验/导入进行中拒绝切换，避免半状态
   if (isLibraryBusy()) {
-    toast('warn', '正在扫描、校验或导入中，请稍候')
+    toast('warn', '正在扫描、校验、导入或批量操作中，请稍候')
     return
   }
   const oldFolder = state.folder
@@ -395,6 +405,7 @@ export async function relocateFolder() {
  */
 export async function scanModels(folder = state.folder, options = {}) {
   const background = options.background === true
+  const prevFolder = state.folder
   const targetRoot =
     typeof folder === 'string' && folder ? folder : state.folder
   if (!targetRoot) {
@@ -411,7 +422,11 @@ export async function scanModels(folder = state.folder, options = {}) {
           ? '正在增量刷新，请稍候'
           : state.importing
             ? '正在导入模型，请稍候'
-            : '正在扫描或校验中，请稍候',
+            : state.multiSelect.busy
+              ? '正在批量操作，请稍候'
+              : state.civitaiQueue.running
+                ? '正在后台识别队列中，请稍候'
+                : '正在扫描或校验中，请稍候',
       )
     }
     return false
@@ -454,6 +469,11 @@ export async function scanModels(folder = state.folder, options = {}) {
     replaceModels(res.models)
     // 扫描成功后才提交激活库（主进程已在同一维护锁内完成切根）
     state.folder = res.root || targetRoot
+    // 库身份变化（chooseFolder/switchRoot 回退/重新定位）后旧选区整体失效：
+    // 退出多选并清空；同库重扫保留存活选区（replaceModels 已剔除消失项）
+    if (state.folder.toLowerCase() !== prevFolder.toLowerCase()) {
+      exitMultiSelect()
+    }
     // F1-offline：库恢复可用——清除离线态并把该库移出失效清单
     markRootAvailable(state.folder)
     state.lastScan = { count: res.models.length, durationMs: res.durationMs }
@@ -465,10 +485,12 @@ export async function scanModels(folder = state.folder, options = {}) {
         ? `（已自动重新关联 ${res.relinked} 个移动/重命名模型的标注）`
         : ''
     const prefix = background ? '后台校验完成' : '扫描完成'
-    if (res.errors?.length) {
+    // #62：errors 载荷经主进程裁剪，真实错误总数以 errorCount 下发
+    const errorCount = res.errorCount ?? res.errors?.length ?? 0
+    if (errorCount > 0) {
       toast(
         'warn',
-        `${prefix}，但有 ${res.errors.length} 个目录无法读取${relinkedSuffix}`,
+        `${prefix}，但有 ${errorCount} 个目录无法读取${relinkedSuffix}`,
       )
     } else {
       toast(

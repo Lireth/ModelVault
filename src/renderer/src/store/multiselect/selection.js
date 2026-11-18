@@ -72,6 +72,9 @@ export const allFilteredSelected = computed(() => {
 
 /** 全选/取消全选（作用范围为当前筛选结果） */
 export function toggleSelectAllFiltered() {
+  // 筛选结果为空时整体替换会清空范围外已选项：空范围「全选」应为 no-op
+  const filtered = filteredModels.value
+  if (filtered.length === 0) return
   // O-4 棘轮过渡：ids 声明在 state.js（strictNullChecks 下推断为 never[]），
   // 类型别名仅收窄赋值目标，运行时仍写回同一 reactive 对象；state.js 补
   // 声明标注后可移除
@@ -80,7 +83,7 @@ export function toggleSelectAllFiltered() {
   if (allFilteredSelected.value) {
     ms.ids = []
   } else {
-    ms.ids = filteredModels.value.map((m) => m.id)
+    ms.ids = filtered.map((m) => m.id)
   }
   clearSelectionAnchor()
 }

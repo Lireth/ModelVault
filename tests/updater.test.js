@@ -167,6 +167,23 @@ describe('checkForUpdate（主路径）', () => {
     expect(r.error).toContain('HTTP 500')
   })
 
+  it('非 ok 响应返回错误前取消未消费的 body（防连接挂留）', async () => {
+    let cancelled = false
+    vi.mocked(fetchAllowedUpdateUrl).mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true
+          },
+        }),
+        { status: 500 },
+      ),
+    )
+    const r = await checkForUpdate()
+    expect(r.error).toContain('HTTP 500')
+    expect(cancelled).toBe(true)
+  })
+
   it('响应体非法 JSON：解析失败文案', async () => {
     vi.mocked(fetchAllowedUpdateUrl).mockResolvedValue(
       new Response('not-json', { status: 200 }),

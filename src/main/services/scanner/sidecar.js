@@ -230,7 +230,7 @@ export async function findSidecarCivitaiInfo(modelPath, snapshot = null) {
 /**
  * 由 civitai.info 内容与当前元数据构造自动导入补丁（纯函数，F8）：
  * - 触发词为空：导入 trainedWords（逗号连接），来源标记 civitai；
- * - NSFW 未标记且来源明确为 NSFW：导入 nsfw 标记；
+ * - NSFW 未标注（非用户显式 true/false）且来源明确为 NSFW：导入 nsfw 标记；
  * 均不满足时不产生补丁——绝不覆盖任何用户已有标注（与 .txt sidecar
  * 的「空字段才写入」同一原则）。
  * @param {Record<string, any>} meta 当前模型元数据（导入判空的基准）
@@ -250,7 +250,7 @@ export function civitaiImportPatch(meta, info) {
       patch.triggerWordsSource = 'civitai'
     }
   }
-  if (meta.nsfw !== true && info.nsfw === true) {
+  if (meta.nsfw === undefined && info.nsfw === true) {
     patch.nsfw = true
   }
   return Object.keys(patch).length > 0 ? patch : null

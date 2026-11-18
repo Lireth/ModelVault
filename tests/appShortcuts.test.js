@@ -5,7 +5,9 @@ import { flushPromises, mount } from '@vue/test-utils'
 import App from '../src/renderer/src/App.vue'
 import {
   state,
+  compareState,
   defaultSettings,
+  openCompare,
   rejectConfirm,
   replaceModels,
 } from '../src/renderer/src/store/appStore'
@@ -196,6 +198,26 @@ describe('App 全局快捷键（B-03）', () => {
 
     press('Escape')
     expect(state.search).toBe('')
+  })
+
+  it('对比面板打开时 Esc 只关对比，不连带退出多选（再次 Esc 才退出多选）', async () => {
+    const wrapper = await mountApp()
+    await setupGrid(wrapper)
+    press('a', { ctrlKey: true })
+    expect(state.multiSelect.active).toBe(true)
+    openCompare(state.multiSelect.ids)
+    await nextTick()
+    expect(compareState.open).toBe(true)
+
+    press('Escape')
+    expect(compareState.open).toBe(false)
+    expect(state.multiSelect.active).toBe(true)
+    expect(state.multiSelect.ids).toHaveLength(2)
+    expect(state.search).toBe('')
+
+    press('Escape')
+    expect(state.multiSelect.active).toBe(false)
+    expect(state.multiSelect.ids).toEqual([])
   })
 
   it('多选批量进行中按 Esc：请求取消而非退出多选，busy 结束后再次 Esc 才退出', async () => {

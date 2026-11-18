@@ -54,19 +54,23 @@ const MAX_POOL_CONCURRENCY = 4
  *     { type: 'done', id, hash } 成功；
  *     { type: 'done', id, error, name, code } 失败（含取消；code 供上层识别
  *     可重试的临时文件错误）。
- * 单 worker 内任务严格串行（并发由多槽位实现）：worker 内 aborted 标志只
- * 作用于当前任务（任务开始时复位，abort 消息不会泄漏到后续任务）。
+ * 单 worker 内任务不严格串行：取消在途任务后主进程会立即向同一 worker 补派
+ * 新任务，旧任务的收尾读块与新任务短暂并发。取消状态因此按任务 id 跟踪
+ * （abortedIds）：abort 消息只命中对应 id 的任务，不会被补派的新任务复位，
+ * 也不会泄漏到其他任务；旧任务在下一读块边界中止后自行清理。
  */
 const WORKER_SOURCE = `
 const { parentPort } = require('node:worker_threads')
 const { createHash } = require('node:crypto')
 const fs = require('node:fs/promises')
 const CHUNK = ${WORKER_CHUNK_SIZE}
-let aborted = false
+const abortedIds = new Set()
 parentPort.on('message', (msg) => {
-  if (msg && msg.type === 'abort') aborted = true
+  if (msg && msg.type === 'abort') {
+    abortedIds.add(msg.id)
+    return
+  }
   if (!msg || msg.type !== 'hash') return
-  aborted = false
   const { id, filePath } = msg
   ;(async () => {
     const handle = await fs.open(filePath, 'r')
@@ -76,7 +80,7 @@ parentPort.on('message', (msg) => {
       const totalBytes = (await handle.stat()).size
       let position = 0
       for (;;) {
-        if (aborted) {
+        if (abortedIds.has(id)) {
           const err = new Error('已取消')
           err.name = 'AbortError'
           throw err
@@ -99,6 +103,8 @@ parentPort.on('message', (msg) => {
       name: err.name,
       code: err.code
     })
+  }).finally(() => {
+    abortedIds.delete(id)
   })
 })
 `
@@ -605,4 +611,14 @@ export function crashHashWorkerForTests() {
     }
   }
   return false
+}
+
+/**
+ * 以线程池同源的内联源码创建裸 worker（仅供单元测试使用；生产代码严禁调用）。
+ * 用于直接验证 worker 消息协议语义（如取消后立即补派的按 id 取消），不受
+ * 主进程消息路由过滤的干扰。
+ * @returns {Worker} 未绑定任何池内状态的裸 worker 实例
+ */
+export function createHashWorkerForTests() {
+  return new Worker(WORKER_SOURCE, { eval: true })
 }

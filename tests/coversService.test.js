@@ -20,6 +20,7 @@ vi.mock('electron', () => ({
 }))
 
 import { clipboard } from 'electron'
+import logger from '../src/main/logger'
 import {
   deleteCoverFile,
   hasImageMagic,
@@ -232,6 +233,51 @@ describe('pruneOrphanCovers（孤儿封面清理）', () => {
 
   it('封面目录不存在时静默跳过（ENOENT 容错）', async () => {
     await expect(pruneOrphanCovers()).resolves.toBeUndefined()
+  })
+
+  it('单个文件删除失败不中止整批，统计按真实删除数上报（#79）', async () => {
+    const coversDir = path.join(root, DATA_DIR, COVERS_DIR)
+    await fs.mkdir(coversDir, { recursive: true })
+    const locked = path.join(coversDir, 'locked.png')
+    const gone1 = path.join(coversDir, 'gone1.png')
+    const gone2 = path.join(coversDir, 'gone2.png')
+    await fs.writeFile(locked, PNG_MAGIC)
+    await fs.writeFile(gone1, PNG_MAGIC)
+    await fs.writeFile(gone2, PNG_MAGIC)
+
+    // 模拟单个文件被占用（EBUSY）：worker 内自捕获，其余文件同一轮照常删除，
+    // 不因首个失败 reject 整批走「清理失败」导致统计与真实结果不一致
+    const realRm = fs.rm.bind(fs)
+    const rmSpy = vi.spyOn(fs, 'rm').mockImplementation(async (p, ...rest) => {
+      if (String(p) === locked) {
+        throw Object.assign(new Error('EBUSY: resource busy'), {
+          code: 'EBUSY',
+        })
+      }
+      return realRm(p, ...rest)
+    })
+    const infoSpy = vi.spyOn(logger, 'info')
+    const warnSpy = vi.spyOn(logger, 'warn')
+    // mockRestore 会清空调用记录，须在 finally 恢复前捕获
+    let infoCalls
+    let warnCalls
+    try {
+      await pruneOrphanCovers()
+      infoCalls = infoSpy.mock.calls
+      warnCalls = warnSpy.mock.calls
+    } finally {
+      rmSpy.mockRestore()
+      infoSpy.mockRestore()
+      warnSpy.mockRestore()
+    }
+    await expect(fs.access(gone1)).rejects.toThrow()
+    await expect(fs.access(gone2)).rejects.toThrow()
+    // 失败文件保留，留给下次扫描重试
+    await expect(fs.access(locked)).resolves.toBeUndefined()
+    // 统计与真实结果一致：仅计入实际删除数，失败文件单独告警
+    expect(infoCalls).toEqual([['已清理 2 个孤儿封面文件']])
+    expect(warnCalls).toHaveLength(1)
+    expect(warnCalls[0][0]).toContain('locked.png')
   })
 
   it('readdir 在途时登记引用的封面不被误删（B4 上传/清理竞态回归）', async () => {

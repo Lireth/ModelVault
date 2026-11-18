@@ -321,6 +321,26 @@ describe('批量操作单次状态合并（O2）', () => {
     ).toBe(true)
   })
 
+  it('一键移动文件：sidecar 未迁移时计数进入提示并以 warn 呈现', async () => {
+    state.models = [makeModel('a', { type: 'lora', subCategory: 'role' })]
+    state.multiSelect.ids = ['a']
+    state.scanning = true
+    api.models.organizeByTags.mockResolvedValue({
+      moved: 1,
+      failed: [],
+      skipped: [],
+      sidecarWarnings: ['a.txt 的目标已存在，已跳过'],
+    })
+    const p = batchOrganizeByTags()
+    acceptConfirm()
+    await p
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'warn' && t.text.includes('sidecar 未迁移 1 个'),
+      ),
+    ).toBe(true)
+  })
+
   it('一键移动文件：选中模型均非 LoRA 时提示且不发起 IPC', async () => {
     state.models = [makeModel('a', { type: 'checkpoint', subCategory: '' })]
     state.multiSelect.ids = ['a']
@@ -838,5 +858,92 @@ describe('批量取消（Esc 请求取消，串行批量提前收尾）', () => 
 
     expect(api.models.deleteModel).toHaveBeenCalledTimes(2)
     expect(state.multiSelect.cancelRequested).toBe(false)
+  })
+})
+
+describe('批量循环陈旧目标跳过（#54：与 civitai-queue 陈旧目标语义对齐）', () => {
+  it('批量禁用：脱离当前列表的 id 跳过不发 IPC，不计失败不误报取消', async () => {
+    state.models = [makeModel('a'), makeModel('b')]
+    state.multiSelect.ids = ['a', 'b', 'ghost']
+    state.scanning = true // 跳过禁用后的收敛扫描（该链路单独覆盖）
+    api.models.toggleDisabled.mockResolvedValue({ ok: true })
+
+    await batchToggleDisabled(true)
+
+    expect(api.models.toggleDisabled).toHaveBeenCalledTimes(2)
+    expect(api.models.toggleDisabled.mock.calls.map((c) => c[0])).toEqual([
+      'a',
+      'b',
+    ])
+    expect(state.multiSelect.failures).toBeNull()
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'success' && t.text.includes('已禁用 2 个模型'),
+      ),
+    ).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('已取消'))).toBe(false)
+  })
+
+  it('批量禁用：收敛扫描发起前先释放批量 busy（全量回退不被自身互斥拦截）', async () => {
+    state.models = [makeModel('a')]
+    state.multiSelect.ids = ['a']
+    state.folder = 'D:\\lib'
+    state.scanning = false
+    api.models.toggleDisabled.mockResolvedValue({ ok: true })
+    // modelRelDirs 为空（模型无 relDir）时局部扫描自动回退全量扫描；
+    // 修复前该回退被批量自身 busy 拦截（误提示「正在批量操作」且列表不收敛）
+    api.models.scan.mockResolvedValue({
+      root: 'D:\\lib',
+      models: [makeModel('a2')],
+      errors: [],
+      durationMs: 1,
+    })
+
+    await batchToggleDisabled(true)
+
+    expect(api.models.toggleDisabled).toHaveBeenCalledTimes(1)
+    expect(api.models.scan).toHaveBeenCalledWith('D:\\lib')
+    expect(state.scanning).toBe(false)
+    expect(state.toasts.some((t) => t.text.includes('请稍候'))).toBe(false)
+  })
+
+  it('批量识别：脱离当前列表的 id 跳过不发 IPC 也不计失败', async () => {
+    state.models = [makeModel('a')]
+    state.multiSelect.ids = ['a', 'ghost']
+    api.models.civitaiIdentify.mockResolvedValue({
+      found: true,
+      meta: { civitaiUrl: 'https://civitai.com/models/x' },
+    })
+
+    await batchCivitaiIdentify()
+
+    expect(api.models.civitaiIdentify).toHaveBeenCalledTimes(1)
+    expect(api.models.civitaiIdentify).toHaveBeenCalledWith('a')
+    expect(state.multiSelect.failures).toBeNull()
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'success' && t.text.includes('成功 1 个'),
+      ),
+    ).toBe(true)
+    expect(state.toasts.some((t) => t.text.includes('已取消'))).toBe(false)
+  })
+
+  it('批量删除：脱离当前列表的 id 跳过不发删除 IPC', async () => {
+    state.models = [makeModel('a')]
+    state.multiSelect.ids = ['a', 'ghost']
+    api.models.deleteModel.mockResolvedValue({ ok: true })
+    const p = batchDeleteModels()
+    acceptConfirm()
+    await p
+
+    expect(api.models.deleteModel).toHaveBeenCalledTimes(1)
+    expect(api.models.deleteModel).toHaveBeenCalledWith('a')
+    expect(state.models.map((m) => m.id)).toEqual([])
+    expect(
+      state.toasts.some(
+        (t) =>
+          t.type === 'success' && t.text.includes('已将 1 个模型移入回收站'),
+      ),
+    ).toBe(true)
   })
 })

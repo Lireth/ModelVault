@@ -329,13 +329,23 @@ export async function pruneOrphanCovers() {
     const prefix = `${DATA_DIR}/${COVERS_DIR}/`
     const stale = entries.filter((n) => !referenced.has(`${prefix}${n}`))
     if (stale.length === 0) return
-    // OPT-09：孤儿封面批量删除统一有界并发，避免瞬时耗尽文件句柄
+    // OPT-09：孤儿封面批量删除统一有界并发，避免瞬时耗尽文件句柄。
+    // worker 内捕获单文件失败（async.js 约定）：单个被占用文件不中止整批，
+    // 统计按真实删除数上报，与实际清理结果一致（#79）
+    let cleaned = 0
     await runWithConcurrency(
       stale,
-      (n) => fs.rm(path.join(dir, n), { force: true }),
+      async (n) => {
+        try {
+          await fs.rm(path.join(dir, n), { force: true })
+          cleaned += 1
+        } catch (err) {
+          logger.warn(`孤儿封面删除失败: ${n}: ${errorMessage(err)}`)
+        }
+      },
       16,
     )
-    logger.info(`已清理 ${stale.length} 个孤儿封面文件`)
+    logger.info(`已清理 ${cleaned} 个孤儿封面文件`)
   } catch (err) {
     if (errorCode(err) !== 'ENOENT')
       logger.warn(`孤儿封面清理失败: ${errorMessage(err)}`)

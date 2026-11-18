@@ -317,6 +317,39 @@ describe('partialScanModels 增量合并（A-03）', () => {
     expect(api.models.scan).toHaveBeenCalledTimes(1)
     expect(state.partialScanning).toBe(false)
   })
+
+  it('全量扫描在途时丢弃局部请求：不发 IPC 也不降级冗余全量（#55）', async () => {
+    setGrid([makeModel('keep-id')])
+    state.scanning = true
+    api.models.partialScan.mockResolvedValue({
+      models: [],
+      dirs: ['lora'],
+      relinked: 0,
+    })
+
+    await partialScanModels(['lora'])
+
+    expect(api.models.partialScan).not.toHaveBeenCalled()
+    expect(api.models.scan).not.toHaveBeenCalled()
+    expect(state.partialScanning).toBe(false)
+    expect(state.toasts.some((t) => t.type === 'warn')).toBe(false)
+  })
+
+  it('后台校验在途时同样丢弃局部请求（#55）', async () => {
+    setGrid([makeModel('keep-id')])
+    state.backgroundScanning = true
+    api.models.partialScan.mockResolvedValue({
+      models: [],
+      dirs: ['lora'],
+      relinked: 0,
+    })
+
+    await partialScanModels(['lora'])
+
+    expect(api.models.partialScan).not.toHaveBeenCalled()
+    expect(api.models.scan).not.toHaveBeenCalled()
+    expect(state.partialScanning).toBe(false)
+  })
 })
 
 describe('scanModels 重关联提示（A-02）', () => {
@@ -353,5 +386,16 @@ describe('scanModels 重关联提示（A-02）', () => {
     const notice = state.toasts.find((t) => t.type === 'warn')
     expect(notice.text).toContain('1 个目录无法读取')
     expect(notice.text).toContain('自动重新关联 1 个')
+  })
+
+  it('errorCount 携带真实错误总数：载荷裁剪后仍按总数提示', async () => {
+    api.models.scan.mockResolvedValue({
+      models: [makeModel('m1')],
+      errors: [],
+      errorCount: 25,
+    })
+    await scanModels()
+    const notice = state.toasts.find((t) => t.type === 'warn')
+    expect(notice.text).toContain('25 个目录无法读取')
   })
 })

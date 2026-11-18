@@ -128,11 +128,11 @@ function onSearchKeydown(e) {
   }
 }
 
-/** 应用当前高亮候选：替换区间文本并把光标落到插入文本末尾 */
-async function applyActiveSuggestion() {
+/** 应用候选：键盘确认取当前高亮下标，鼠标点击取事件携带的被点项下标 */
+async function applyActiveSuggestion(index) {
   const sugg = suggestion.value
   if (!sugg || !sugg.items.length) return
-  const item = sugg.items[suggestionIndex.value]
+  const item = sugg.items[index ?? suggestionIndex.value]
   searchInput.value = applySearchSuggestion(searchInput.value, sugg, item)
   suggestion.value = null
   await nextTick()

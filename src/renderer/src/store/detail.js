@@ -43,21 +43,30 @@ async function enrichSelectedModel(id) {
   if (!id || enrichingIds.has(id)) return
   const idx = modelIndexOf(id)
   if (idx === undefined) return
-  if (state.models[idx]?.detailFull) return
+  const target = state.models[idx]
+  if (target?.detailFull) return
   enrichingIds.add(id)
+  let reEnrich = false
   try {
     const res = await window.api.models.getDetail(id)
-    if (!res || res.error || !res.model) return
     const cur = modelIndexOf(id)
-    if (cur === undefined) return
-    // 切库/重扫期间元素可能已被替换或移除：以当前列表为准
-    if (state.models[cur]?.detailFull) return
-    state.models[cur] = { ...res.model, detailFull: true }
+    // 在途期间元素可能已被 replaceModels 整体替换或移除：仅当请求时刻的
+    // 元素仍在位时写入，防止请求时刻的旧主进程快照覆盖更新后的瘦身元素；
+    // 新元素仍缺详情时释放占位后补跑一次（其引用变化触发的二次 watch 已被
+    // 防重入集合吞掉）
+    if (cur !== undefined && state.models[cur] === target) {
+      if (!res || res.error || !res.model) return
+      if (state.models[cur]?.detailFull) return
+      state.models[cur] = { ...res.model, detailFull: true }
+    } else if (cur !== undefined && !state.models[cur]?.detailFull) {
+      reEnrich = true
+    }
   } catch {
     /* 详情补全失败不阻断详情页：瘦身字段足够展示基础信息 */
   } finally {
     enrichingIds.delete(id)
   }
+  if (reEnrich) void enrichSelectedModel(id)
 }
 
 // 选中模型引用变化即检查补全：打开详情（openDetail/openAdjacentDetail）、

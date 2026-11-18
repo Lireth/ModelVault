@@ -374,4 +374,33 @@ describe('全选判定（allFilteredSelected）', () => {
     toggleSelect(id('m05000'))
     expect(allFilteredSelected.value).toBe(false)
   })
+
+  it('筛选结果为空时「全选」为 no-op：范围外已选项保留', () => {
+    seedModels(['a', 'b'])
+    state.multiSelect.active = true
+    toggleSelect(id('a'))
+    state.showFavoritesOnly = true // 均非 favorite：筛选结果为空
+    toggleSelectAllFiltered()
+    expect(state.multiSelect.ids).toEqual([id('a')])
+  })
+})
+
+describe('选区生命周期与列表整体替换联动', () => {
+  it('replaceModels 剔除已不存在的选中 id，保留仍在列表的选区', () => {
+    seedModels(['a', 'b', 'c'])
+    state.multiSelect.active = true
+    toggleSelect(id('a'))
+    toggleSelect(id('c'))
+    seedModels(['a', 'c']) // b 消失（删除/重扫）后的整表替换
+    expect(state.multiSelect.ids).toEqual([id('a'), id('c')])
+    expect(state.multiSelect.active).toBe(true)
+  })
+
+  it('整体替换为无交集的新列表（如切库）后旧选区全部剔除', () => {
+    seedModels(['a', 'b'])
+    state.multiSelect.active = true
+    toggleSelect(id('a'))
+    seedModels(['x', 'y'])
+    expect(state.multiSelect.ids).toEqual([])
+  })
 })

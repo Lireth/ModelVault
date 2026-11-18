@@ -155,8 +155,13 @@ function stopCycle() {
   cycleBrokenUrls.clear()
 }
 
-/** 已展示轮播图加载失败（预加载成功后的兜底）：跳过该图继续推进 */
+/**
+ * 已展示轮播图加载失败（预加载成功后的兜底）：跳过该图继续推进。
+ * 停播复位（covers 变化/离开）后交叉淡出过渡期旧图 error 才到达时，
+ * 模板实参 cycleList[cycleIdx] 已求值为 undefined，静默忽略。
+ */
 function onCycleImgError(c) {
+  if (!c) return
   cycleFailed.add(c.path)
   advanceCycle(cycleSession)
 }

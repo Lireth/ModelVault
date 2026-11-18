@@ -71,6 +71,24 @@ vi.mock('../src/main/services/atomic-write', async (importOriginal) => {
   }
 })
 
+// #61 openLibrary 回滚回归：updateSettings 可单次注入失败，模拟切根提交
+// 后激活库写盘抛错的部分成功场景；其余导出保持真实实现
+const { usHook } = vi.hoisted(() => ({ usHook: { rejectOnce: null } }))
+vi.mock('../src/main/services/store', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    updateSettings: (...args) => {
+      if (usHook.rejectOnce) {
+        const err = usHook.rejectOnce
+        usHook.rejectOnce = null
+        return Promise.reject(err)
+      }
+      return actual.updateSettings(...args)
+    },
+  }
+})
+
 import {
   paramSummaryFromMeta,
   sidecarFilesFor,
@@ -88,12 +106,15 @@ import {
   whenWarmupIdle,
 } from '../src/main/services/hash-warmup'
 import {
+  flushStoreSave,
   flushStoreSaveBounded,
   getCurrentRoot,
   getSwitchFlushTimeoutMs,
   loadSettings,
+  reloadCurrentRootData,
   setFlushAwaitTimeoutForTests,
   setModelMeta,
+  setReloadSaveWaitTimeoutForTests,
   setSwitchFlushTimeoutForTests,
 } from '../src/main/services/store'
 import { ensureRootStore } from '../src/main/ipc/models/store'
@@ -340,11 +361,51 @@ describe('models:openLibrary 秒切库（F1）', () => {
     vi.mocked(syncWatcher).mockClear()
     vi.mocked(computeFileHash).mockReset()
     resetHashWarmupForTests()
+    usHook.rejectOnce = null
     registerStoreHandlers()
   })
 
   afterAll(() => {
     for (const dir of tmpRoots) fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('openLibrary 切根提交后激活库写盘抛错仍回滚旧根（#61）', async () => {
+    const rootA = fs.mkdtempSync(path.join(os.tmpdir(), 'modelvault-open-ra-'))
+    const rootB = fs.mkdtempSync(path.join(os.tmpdir(), 'modelvault-open-rb-'))
+    tmpRoots.push(rootA, rootB)
+    fs.writeFileSync(
+      path.join(fakeUserData, 'settings.json'),
+      JSON.stringify({
+        modelsFolder: rootA,
+        modelsFolders: [rootA, rootB],
+        autoScan: false,
+      }),
+    )
+    await loadSettings()
+    // 库 A 激活为当前根（loadStore 的 ensureRootStore 路径）
+    await getRegisteredHandler('models:loadStore')(makeEvent())
+    expect(getCurrentRoot()).toBe(rootA)
+    writeIndex(rootB, [
+      {
+        id: path.join(rootB, 'b.safetensors'),
+        name: 'b',
+        type: 'lora',
+        ext: '.safetensors',
+        size: 1,
+        mtimeMs: 1,
+        relDir: '',
+      },
+    ])
+
+    // ensureRootStore 已提交切根后，激活库提交（updateSettings）抛错：
+    // 必须回滚到原根而非把主进程留在渲染层不可见的新库（#61）
+    usHook.rejectOnce = new Error('激活库提交失败')
+    const res = await getRegisteredHandler('models:openLibrary')(makeEvent(), {
+      folder: rootB,
+    })
+
+    expect(res.error).toContain('激活库提交失败')
+    expect(getCurrentRoot()).toBe(rootA)
   })
 
   it('切库后作废旧库的后台哈希预热队列并按新库索引重播种', async () => {
@@ -715,6 +776,7 @@ describe('切库链路超时保护与同根判定（OPT-19 切库防线）', () 
     await new Promise((resolve) => setImmediate(resolve))
     setSwitchFlushTimeoutForTests()
     setFlushAwaitTimeoutForTests()
+    setReloadSaveWaitTimeoutForTests()
     if (metaState.offlineRetryTimer) {
       clearTimeout(metaState.offlineRetryTimer)
       metaState.offlineRetryTimer = null
@@ -826,5 +888,27 @@ describe('切库链路超时保护与同根判定（OPT-19 切库防线）', () 
     await flushStoreSaveBounded()
     setFlushAwaitTimeoutForTests(50)
     await expect(flushStoreSaveBounded()).resolves.toBe(true)
+  })
+
+  it('reloadCurrentRootData：在途写盘挂起时按上限超时继续重载（B3）', async () => {
+    const { rootA } = await setupHangOnOldRoot()
+    setReloadSaveWaitTimeoutForTests(50)
+    // 触发一次落盘并令其挂起：runSave 置 saving=true 后阻塞在原子写上
+    const hungFlush = flushStoreSave()
+
+    const started = Date.now()
+    const data = await reloadCurrentRootData()
+    // 挂起磁盘场景下按注入上限返回，恢复链路不再被在途写盘永久卡死
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(data).toMatchObject({ version: 1 })
+    // 超时只是放弃等待：挂起的写入仍在途（未被取消/截断）
+    expect(awHook.pending.length).toBeGreaterThan(0)
+
+    // 磁盘恢复：reject 挂起残尾（错误降级为日志），写盘链静止后 flush 可返回
+    awHook.hangPrefix = null
+    for (const p of awHook.pending.splice(0)) p.reject(new Error('磁盘恢复'))
+    expect(await waitForIdle()).toBe(true)
+    await hungFlush
+    expect(getCurrentRoot()).toBe(rootA)
   })
 })

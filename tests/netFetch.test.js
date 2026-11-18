@@ -4,7 +4,8 @@ import { fakeUserData } from './setup'
 /**
  * net-fetch.js 共享网络基元单元测试（V-06 逐跳白名单单一实现）：
  * - fetchWithValidatedRedirects：白名单拒绝文案（label 拼接）、逐跳放行、
- *   跳数上限、Electron 重定向探测的凭据语义参数化
+ *   跳数上限、Electron 重定向探测的凭据语义参数化、探测终态语义
+ *   （issue #67：非 3xx 终态返回真实 body 而非空体冒充）
  * - isTransientNetworkError：连接级瞬时特征（含 cause 链 / Electron
  *   net:: 前缀）与超时/普通错误的边界
  * electron 以全局最小桩提供，仅 mock net.fetch / net.request。
@@ -95,6 +96,59 @@ describe('fetchWithValidatedRedirects（V-06 逐跳白名单）', () => {
     ).rejects.toThrow('测试请求重定向目标不在白名单内，已拒绝')
   })
 
+  it('跟随重定向时取消中间响应未消费的 body（防连接挂留）', async () => {
+    let cancelled = false
+    vi.mocked(net.fetch)
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream({
+            cancel() {
+              cancelled = true
+            },
+          }),
+          {
+            status: 302,
+            headers: { Location: 'https://cdn.example.com/asset' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(new Response('ok', { status: 200 }))
+    const res = await fetchWithValidatedRedirects(
+      'https://a.example.com/x',
+      {},
+      allowExample,
+      '测试请求',
+    )
+    expect(res.status).toBe(200)
+    expect(cancelled).toBe(true)
+  })
+
+  it('白名单外跳转拒绝前同样取消中间响应体', async () => {
+    let cancelled = false
+    vi.mocked(net.fetch).mockResolvedValueOnce(
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true
+          },
+        }),
+        {
+          status: 302,
+          headers: { Location: 'https://evil.net/x' },
+        },
+      ),
+    )
+    await expect(
+      fetchWithValidatedRedirects(
+        'https://a.example.com/x',
+        {},
+        allowExample,
+        '测试请求',
+      ),
+    ).rejects.toThrow('测试请求重定向目标不在白名单内，已拒绝')
+    expect(cancelled).toBe(true)
+  })
+
   it('超过最大跳数时拒绝，实际请求数为上限 + 1 次', async () => {
     vi.mocked(net.fetch).mockImplementation(
       async () =>
@@ -152,6 +206,137 @@ describe('fetchWithValidatedRedirects（V-06 逐跳白名单）', () => {
       expect(res.status).toBe(200)
     }
     expect(seenCookies).toEqual([true, false])
+  })
+})
+
+describe('fetchWithValidatedRedirects（探测终态语义，issue #67）', () => {
+  /** 构造 net.request 桩：end 后异步触发 emit 回调（Electron manual 形态） */
+  const stubRequest = (emit) => {
+    const listeners = {}
+    const req = {
+      on: (evt, cb) => {
+        ;(listeners[evt] ||= []).push(cb)
+        return req
+      },
+      end: () => {
+        queueMicrotask(() => emit(listeners))
+      },
+      abort: () => {},
+    }
+    return req
+  }
+
+  /** 构造 IncomingMessage 桩：事件同步注册后按序放 data/end（真实 body） */
+  const stubIncoming = (statusCode, headers, chunks) => {
+    const listeners = {}
+    const incoming = {
+      statusCode,
+      headers,
+      on: (evt, cb) => {
+        ;(listeners[evt] ||= []).push(cb)
+        return incoming
+      },
+    }
+    return {
+      incoming,
+      fire: () => {
+        for (const chunk of chunks) {
+          listeners.data?.forEach((cb) => cb(Buffer.from(chunk)))
+        }
+        listeners.end?.forEach((cb) => cb())
+      },
+    }
+  }
+
+  it('探测拿到非 3xx 终态时返回真实响应体，不以空体冒充成功（issue #67）', async () => {
+    vi.mocked(net.fetch).mockRejectedValueOnce(
+      new Error('Redirect was cancelled'),
+    )
+    vi.mocked(net.request).mockImplementation(() =>
+      stubRequest((listeners) => {
+        const { incoming, fire } = stubIncoming(
+          200,
+          { 'Content-Type': ['application/json'] },
+          ['{"ok"', ':true}'],
+        )
+        listeners.response?.[0]?.(incoming)
+        fire()
+      }),
+    )
+    const res = await fetchWithValidatedRedirects(
+      'https://a.example.com/x',
+      {},
+      allowExample,
+      '测试请求',
+    )
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('application/json')
+    expect(await res.text()).toBe('{"ok":true}')
+  })
+
+  it('探测拿到非 3xx 错误终态同样保留真实响应体（错误信息可读）', async () => {
+    vi.mocked(net.fetch).mockRejectedValueOnce(
+      new Error('Redirect was cancelled'),
+    )
+    vi.mocked(net.request).mockImplementation(() =>
+      stubRequest((listeners) => {
+        const { incoming, fire } = stubIncoming(
+          404,
+          { 'Content-Type': ['application/json'] },
+          ['{"error":"gone"}'],
+        )
+        listeners.response?.[0]?.(incoming)
+        fire()
+      }),
+    )
+    const res = await fetchWithValidatedRedirects(
+      'https://a.example.com/x',
+      {},
+      allowExample,
+      '测试请求',
+    )
+    expect(res.status).toBe(404)
+    expect(await res.text()).toBe('{"error":"gone"}')
+  })
+
+  it('探测拿到无跳转目标的 3xx 终态仍按空体终态返回', async () => {
+    vi.mocked(net.fetch).mockRejectedValueOnce(
+      new Error('Redirect was cancelled'),
+    )
+    vi.mocked(net.request).mockImplementation(() =>
+      stubRequest((listeners) => {
+        const { incoming } = stubIncoming(302, {}, [])
+        listeners.response?.[0]?.(incoming)
+      }),
+    )
+    const res = await fetchWithValidatedRedirects(
+      'https://a.example.com/x',
+      {},
+      allowExample,
+      '测试请求',
+    )
+    expect(res.status).toBe(302)
+    expect(await res.text()).toBe('')
+  })
+
+  it('探测拿到无实体体状态（304）时构造 null body 响应而不报错', async () => {
+    vi.mocked(net.fetch).mockRejectedValueOnce(
+      new Error('Redirect was cancelled'),
+    )
+    vi.mocked(net.request).mockImplementation(() =>
+      stubRequest((listeners) => {
+        const { incoming } = stubIncoming(304, {}, [])
+        listeners.response?.[0]?.(incoming)
+      }),
+    )
+    const res = await fetchWithValidatedRedirects(
+      'https://a.example.com/x',
+      {},
+      allowExample,
+      '测试请求',
+    )
+    expect(res.status).toBe(304)
+    expect(res.body).toBeNull()
   })
 })
 

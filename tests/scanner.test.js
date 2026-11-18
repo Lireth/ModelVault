@@ -18,6 +18,7 @@ import {
   sidecarFilesFor,
   sidecarImportPatch,
 } from '../src/main/services/scanner'
+import { normalizeModelMeta } from '../src/main/services/store-meta-normalize'
 
 /**
  * scanner.js 单元测试：
@@ -589,6 +590,156 @@ describe('scanModels', () => {
   })
 })
 
+describe('scanModels junction/reparse point 防御（#41）', () => {
+  /** 构造 readdir(withFileTypes) 的 Dirent 替身（遍历层仅消费这几个方法） */
+  function fakeDirent(name, kind) {
+    return {
+      name,
+      isDirectory: () => kind === 'dir',
+      isFile: () => kind === 'file',
+      isSymbolicLink: () => kind === 'sym',
+    }
+  }
+
+  /** 平台对应的目录链接：Windows 用 junction（SD 社区跨盘做法），POSIX 用目录符号链接 */
+  async function makeDirLink(target, link) {
+    if (process.platform === 'win32') await fs.symlink(target, link, 'junction')
+    else await fs.symlink(target, link, 'dir')
+  }
+
+  it('Windows junction 不递归入队：库外文件不入库、环不重复展开、登记为跳过（O-3b）', async (ctx) => {
+    const outside = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-junction-out-'),
+    )
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-junction-in-'),
+    )
+    try {
+      await fs.writeFile(path.join(outside, 'outer.safetensors'), 'x')
+      await fs.writeFile(path.join(root, 'a.safetensors'), 'x')
+      await fs.mkdir(path.join(root, 'real'))
+      await fs.writeFile(path.join(root, 'real', 'b.safetensors'), 'x')
+      try {
+        await fs.symlink(outside, path.join(root, 'link'), 'junction')
+        // junction 环：loop -> 库根自身
+        await fs.symlink(root, path.join(root, 'loop'), 'junction')
+      } catch {
+        ctx.skip()
+      }
+
+      const { models, errors, dirSnapshot, dirRawNames } = await scanModels(
+        root,
+        undefined,
+        {},
+      )
+
+      expect(errors).toHaveLength(0)
+      const ids = models.map((m) => m.id)
+      // 普通子目录照常遍历
+      expect(ids).toContain(path.join(root, 'a.safetensors'))
+      expect(ids).toContain(path.join(root, 'real', 'b.safetensors'))
+      // 库外文件不以 junction 路径入库，也不以其真实路径入库
+      expect(ids).not.toContain(path.join(root, 'link', 'outer.safetensors'))
+      expect(ids).not.toContain(path.join(outside, 'outer.safetensors'))
+      // 环未展开：junction 路径下无重复登记
+      expect(ids).not.toContain(path.join(root, 'loop', 'a.safetensors'))
+      // 快照口径：junction 名不进 dirSnapshot，保留在 dirRawNames（sidecar 剪枝）
+      expect(dirSnapshot.get(root)).toContain('real')
+      expect(dirSnapshot.get(root)).not.toContain('link')
+      expect(dirSnapshot.get(root)).not.toContain('loop')
+      expect(dirRawNames.get(root)).toContain('link')
+      expect(dirRawNames.get(root)).toContain('loop')
+      // junction 目录未被读取（无快照键）
+      expect(dirSnapshot.has(path.join(root, 'link'))).toBe(false)
+      expect(dirSnapshot.has(path.join(root, 'loop'))).toBe(false)
+    } finally {
+      await fs.rm(root, { recursive: true, force: true }).catch(() => {})
+      await fs.rm(outside, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+
+  it('readdir 把链接报告为普通目录时仍不递归（递归入队点 lstat 复核）', async () => {
+    const outside = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-junction-out-'),
+    )
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-junction-pre-'),
+    )
+    const originalReaddir = fs.readdir
+    let spy
+    try {
+      await fs.writeFile(path.join(outside, 'outer.safetensors'), 'x')
+      await fs.writeFile(path.join(root, 'a.safetensors'), 'x')
+      await fs.mkdir(path.join(root, 'real'))
+      await fs.writeFile(path.join(root, 'real', 'b.safetensors'), 'x')
+      const link = path.join(root, 'link')
+      await makeDirLink(outside, link)
+
+      // 模拟 issue 前提（部分 libuv/文件系统组合）：Dirent 把 junction 报告
+      // 为普通目录（isDirectory=true、isSymbolicLink=false），仅改写根层条目
+      spy = vi.spyOn(fs, 'readdir').mockImplementation(async (p, opts) => {
+        const entries = await originalReaddir.call(fs, p, opts)
+        return entries.map((e) =>
+          String(p) === root && e.name === 'link'
+            ? fakeDirent('link', 'dir')
+            : fakeDirent(
+                e.name,
+                e.isDirectory() ? 'dir' : e.isFile() ? 'file' : 'sym',
+              ),
+        )
+      })
+
+      const { models, errors, dirSnapshot, dirRawNames } = await scanModels(
+        root,
+        undefined,
+        {},
+      )
+      expect(errors).toHaveLength(0)
+      const ids = models.map((m) => m.id)
+      // 普通子目录照常遍历
+      expect(ids).toContain(path.join(root, 'a.safetensors'))
+      expect(ids).toContain(path.join(root, 'real', 'b.safetensors'))
+      // lstat 复核兜底：junction 目标不被遍历
+      expect(ids).not.toContain(path.join(root, 'link', 'outer.safetensors'))
+      expect(dirSnapshot.get(root)).not.toContain('link')
+      expect(dirRawNames.get(root)).toContain('link')
+      expect(dirSnapshot.has(link)).toBe(false)
+    } finally {
+      spy?.mockRestore()
+      await fs.rm(root, { recursive: true, force: true }).catch(() => {})
+      await fs.rm(outside, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+
+  it('子树入口为链接目录时同样不跟随：局部扫描按空子树处理', async (ctx) => {
+    const outside = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-junction-out-'),
+    )
+    const root = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-junction-sub-'),
+    )
+    try {
+      await fs.writeFile(path.join(outside, 'outer.safetensors'), 'x')
+      const link = path.join(root, 'link')
+      try {
+        await makeDirLink(outside, link)
+      } catch {
+        ctx.skip()
+      }
+
+      const { models, errors } = await scanModels(root, undefined, {
+        subDirs: ['link'],
+      })
+      expect(errors).toHaveLength(0)
+      // 链接子树不读取：库外文件不入库（与全量扫描口径一致，空子树）
+      expect(models).toHaveLength(0)
+    } finally {
+      await fs.rm(root, { recursive: true, force: true }).catch(() => {})
+      await fs.rm(outside, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+})
+
 describe('findSidecarPreview', () => {
   let dir
 
@@ -826,22 +977,30 @@ describe('civitaiImportPatch / findSidecarCivitaiInfo（F8）', () => {
     ).toBeNull()
   })
 
-  it('nsfw 仅在来源明确为 true 且当前未标记时导入，单向不可逆', () => {
-    const patch = civitaiImportPatch(
-      { triggerWords: 'x', nsfw: false },
-      { nsfw: true },
-    )
+  it('nsfw 仅在来源明确为 true 且当前未标注时导入，单向不可逆', () => {
+    const patch = civitaiImportPatch({ triggerWords: 'x' }, { nsfw: true })
     expect(patch).toEqual({ nsfw: true })
-    // 已标记：不重复；来源非 true：不导入（civitai.info 缺失该字段时不得清标记）
+    // 已标注：不重复；来源非 true：不导入（civitai.info 缺失该字段时不得清标记）
     expect(
       civitaiImportPatch({ triggerWords: 'x', nsfw: true }, { nsfw: true }),
     ).toBeNull()
     expect(
-      civitaiImportPatch({ triggerWords: 'x', nsfw: false }, { nsfw: false }),
+      civitaiImportPatch({ triggerWords: 'x' }, { nsfw: false }),
     ).toBeNull()
+    expect(civitaiImportPatch({ triggerWords: 'x' }, {})).toBeNull()
+  })
+
+  it('用户显式标注的非 NSFW（nsfw:false）绝不被 civitai.info 翻转为 true（#69）', () => {
     expect(
-      civitaiImportPatch({ triggerWords: 'x', nsfw: false }, {}),
+      civitaiImportPatch({ triggerWords: 'x', nsfw: false }, { nsfw: true }),
     ).toBeNull()
+  })
+
+  it('归一化区分「未标注」与「用户显式标注非 NSFW」（#69）', () => {
+    expect(normalizeModelMeta({}).nsfw).toBeUndefined()
+    expect(normalizeModelMeta({ nsfw: false }).nsfw).toBe(false)
+    expect(normalizeModelMeta({ nsfw: true }).nsfw).toBe(true)
+    expect(normalizeModelMeta({ nsfw: 'yes' }).nsfw).toBeUndefined()
   })
 
   it('真实文件读取：合法 JSON 解析、损坏/超大/缺失返回 null', async () => {

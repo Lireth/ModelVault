@@ -62,6 +62,7 @@ describe('SettingsPage 应用内检查更新（A-15）', () => {
     // 下载链接保留
     const link = box.find('a')
     expect(link.attributes('href')).toContain('github.com')
+    wrapper.unmount()
   })
 
   it('更新说明为空时不渲染说明节点', async () => {
@@ -76,6 +77,7 @@ describe('SettingsPage 应用内检查更新（A-15）', () => {
 
     expect(wrapper.find('.update-notes').exists()).toBe(false)
     expect(wrapper.find('.update-row').text()).toContain('发现新版本 v0.2.0')
+    wrapper.unmount()
   })
 
   it('更新说明以文本插值渲染，不执行其中的 HTML（XSS 防护）', async () => {
@@ -91,6 +93,7 @@ describe('SettingsPage 应用内检查更新（A-15）', () => {
     // 不含真实 img 元素：远程文本按文本节点渲染
     expect(wrapper.find('.update-notes').find('img').exists()).toBe(false)
     expect(wrapper.find('.update-notes').text()).toContain('<img src=x')
+    wrapper.unmount()
   })
 })
 
@@ -104,6 +107,7 @@ describe('SettingsPage 日志与诊断入口（B-04）', () => {
     expect(btn).toBeTruthy()
     await btn.trigger('click')
     expect(window.api.app.openLogs).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
   })
 
   it('打开失败时提示错误（不静默）', async () => {
@@ -119,6 +123,7 @@ describe('SettingsPage 日志与诊断入口（B-04）', () => {
         (t) => t.type === 'error' && t.text.includes('目录不存在'),
       ),
     ).toBe(true)
+    wrapper.unmount()
   })
 
   it('「导出诊断包」调用 app.exportDiagnostics 并提示成功（FN-05）', async () => {
@@ -141,6 +146,7 @@ describe('SettingsPage 日志与诊断入口（B-04）', () => {
         (t) => t.type === 'success' && t.text.includes('诊断包已导出'),
       ),
     ).toBe(true)
+    wrapper.unmount()
   })
 
   it('复制诊断信息时剪贴板内容包含版本与平台信息', async () => {
@@ -159,6 +165,7 @@ describe('SettingsPage 日志与诊断入口（B-04）', () => {
     expect(text).toContain('0.1.0')
     expect(text).toContain('44.0.0')
     expect(text).toContain('win32')
+    wrapper.unmount()
   })
 })
 
@@ -278,6 +285,41 @@ describe('SettingsPage 后台哈希预热策略（O1）', () => {
     expect(window.api.settings.update).toHaveBeenCalledWith(
       expect.objectContaining({ hashWarmup: 'full' }),
     )
+    wrapper.unmount()
+  })
+})
+
+describe('SettingsPage ESC 输入法组合态守卫（issue #59）', () => {
+  /** 挂载后制造脏表单（关闭「自动每日备份标注」开关） */
+  async function mountDirtySettings() {
+    const wrapper = await mountSettings()
+    const row = wrapper
+      .findAll('.setting-row')
+      .find((r) => r.text().includes('自动每日备份标注'))
+    expect(row).toBeTruthy()
+    await row.find('input[type="checkbox"]').setValue(false)
+    return wrapper
+  }
+
+  it('输入法组合态 Esc 不触发关闭流程（脏表单不弹确认层）', async () => {
+    const wrapper = await mountDirtySettings()
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', isComposing: true }),
+    )
+    await flushPromises()
+    expect(state.confirm.visible).toBe(false)
+    expect(state.settingsOpen).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('非组合态 Esc 触发脏保护确认层（行为不变）', async () => {
+    const wrapper = await mountDirtySettings()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+    expect(state.confirm.visible).toBe(true)
+    acceptConfirm()
+    await flushPromises()
+    expect(state.settingsOpen).toBe(false)
     wrapper.unmount()
   })
 })

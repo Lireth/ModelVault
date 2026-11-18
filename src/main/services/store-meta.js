@@ -125,6 +125,31 @@ export function wasDataReset() {
 }
 
 /**
+ * 恢复重载等待在途写盘的上限（ms，B3）：与 FLUSH_AWAIT_TIMEOUT_MS/
+ * SWITCH_FLUSH_TIMEOUT_MS 同一底线——挂起磁盘上的原子写可在内核层阻塞
+ * 数十秒，恢复路径持有的全局维护锁不能为此永久卡死。
+ */
+export const RELOAD_SAVE_WAIT_TIMEOUT_MS = 5000
+
+/** 恢复重载写盘等待上限（测试可注入；生产代码严禁调用注入器） */
+let reloadSaveWaitTimeoutMs = RELOAD_SAVE_WAIT_TIMEOUT_MS
+
+/** 注入恢复重载的写盘等待上限（仅供单元测试使用） */
+export function setReloadSaveWaitTimeoutForTests(ms) {
+  reloadSaveWaitTimeoutMs =
+    Number.isFinite(ms) && ms >= 0 ? ms : RELOAD_SAVE_WAIT_TIMEOUT_MS
+}
+
+/**
+ * 恢复重载窗口内落下的并发写入（#73）：维护锁在 restoreLibrary 返回时已释放，
+ * loadData 的 readFile/parse 期间 IPC 元数据写入仍可进入——此时写入落在尚未
+ * 替换的旧 data 对象上，随整体替换静默丢失。窗口内的写入在此登记，待新数据
+ * 就位后由 reloadCurrentRootData 重放。null 表示不在重载窗口内。
+ * @type {Array<{relKey: string, normalized: Record<string, any>}> | null}
+ */
+let reloadPendingWrites = null
+
+/**
  * 从磁盘重载当前根目录的元数据，并丢弃在途的防抖保存（备份恢复到当前根后调用）。
  * 备份恢复直接替换磁盘上的 store.json，若不重载：内存中的旧数据会在下一次
  * setModelMeta → saveStoreNow 时原子覆盖刚恢复的文件，恢复结果被静默回滚。
@@ -139,19 +164,51 @@ export async function reloadCurrentRootData() {
   }
   // B-02 恢复屏障：
   // 1) 丢弃挂起的补写请求，恢复窗口内不再调度新落盘；
-  // 2) 等待已开始的原子写结束（其 rename 不可取消），避免读到交换中的文件；
+  // 2) 等待已开始的原子写结束（其 rename 不可取消），避免读到交换中的文件
+  //    （B3：等待有上限——超时按有界 flush 同一降级路径继续重载，绝不卡死
+  //    维护锁；写盘仍在后台续跑，迟到收尾由同根守卫与 saveSuppressed 拦截）；
   // 3) 之后才从磁盘重载，保证内存基线就是恢复后的内容。
   metaState.saveSuppressed = true
   metaState.pendingSave = false
   metaState.pendingSnapshot = false
+  reloadPendingWrites = []
   try {
-    while (metaState.saving) {
-      await new Promise((resolve) => setImmediate(resolve))
+    let awaitingIdle = true
+    try {
+      const settled = await isSettledWithin(
+        (async () => {
+          while (awaitingIdle && metaState.saving) {
+            await new Promise((resolve) => setImmediate(resolve))
+          }
+        })(),
+        reloadSaveWaitTimeoutMs,
+      )
+      if (!settled) {
+        logger.warn(
+          '恢复重载等待写盘链静止超时（磁盘无响应），按未静止继续重载（在途写盘仍在后台续跑）',
+        )
+      }
+    } finally {
+      awaitingIdle = false
     }
+    // 屏障保持到重载完成（#73）：提前释放会让 loadData 的 readFile/parse
+    // 期间进入的并发写入落进旧 data 对象后随整体替换丢失，迟到的 delta
+    // 还会把恢复前内存写回刚恢复的文件
+    return await loadData()
   } finally {
     metaState.saveSuppressed = false
+    const pending = reloadPendingWrites
+    reloadPendingWrites = null
+    if (pending && pending.length > 0 && metaState.data) {
+      // 重放窗口内落下的并发写入（#73）：落在旧对象上的副本已随整体替换
+      // 丢弃，这里把写入时的值补进重载后的新数据并调度一次落盘
+      for (const { relKey, normalized } of pending) {
+        metaState.data.models[relKey] = normalized
+        markDirty(relKey)
+      }
+      scheduleSave()
+    }
   }
-  return loadData()
 }
 
 /** 收集元数据中引用的所有封面相对路径（孤儿封面清理的保留名单） */
@@ -276,6 +333,9 @@ function writeMetaEntry(modelId, meta) {
   if (!normalized) return null
   metaState.data.models[relKey] = normalized
   markDirty(relKey)
+  // 重载窗口内额外登记重放（#73）：上面的原地写入落在尚未替换的旧 data
+  // 对象上，loadData 整体替换后会丢失，由 reloadCurrentRootData 补进新数据
+  if (reloadPendingWrites) reloadPendingWrites.push({ relKey, normalized })
   return normalized
 }
 

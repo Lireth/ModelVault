@@ -85,6 +85,21 @@ export function raceIdleTimeout(promise, ms, message, onCancel) {
 }
 
 /**
+ * 取消错误/重试路径上不再消费的响应体（#64）：
+ * 非 ok / 被丢弃的中间响应若既不读也不 cancel，底层连接会挂留至 GC
+ * （限流退避重试、画廊批量 404 等场景逐请求累积）。取消失败（流已锁/
+ * 已结束等同步异常与拒绝）不影响调用方错误路径的既有语义。
+ * @param {Response} response 待丢弃的响应（可为 null/undefined）
+ */
+export function cancelResponseBody(response) {
+  try {
+    response?.body?.cancel()?.catch?.(() => {})
+  } catch {
+    /* 已锁/已取消等同步异常不影响错误路径语义 */
+  }
+}
+
+/**
  * 读取响应体并强制字节上限（V-06 网络边界）：
  * 先看 Content-Length 提前拒绝，再流式累计实际字节——上游缺失/伪造
  * Content-Length 时仍会在超限处取消读取，避免整包进入主进程堆。

@@ -67,6 +67,18 @@ export const DEFAULT_FULL_WALK_INTERVAL = 5
 export const WATCHER_ERROR_RETRY_LADDER = [30000, 60000, 120000, 300000]
 /** 巡检异常连续失败上限：超过后停止监控并通知渲染层（OPT-16） */
 export const WATCHER_MAX_ERROR_RETRIES = 5
+/**
+ * 失败子树连续局部扫描失败上限（#52）：读取失败（EACCES/EBUSY 等）的子树
+ * 由 B5 保留基线与待广播项以等待磁盘恢复；但永久性锁定目录会让「差异检出→
+ * 广播→局部扫描失败→保留→停扫补发」以轮询间隔为周期反复重复注定失败的
+ * 局部扫描，无任何退避或失败计数。同一子树连续失败达到该次数后不再保留
+ * B5 保护——基线按扫描结果收敛、待广播项清理；恢复可读后该目录会重新
+ * 出现在快照中，由轮询差异自动重新检出并收敛（B5 恢复语义不变）。
+ */
+export const WATCHER_FAILED_DIR_MAX_RETRIES = 3
+
+/** 交付队列条目（防抖结束时压入；nativeDirs/confirmedDirs 为排重后的相对子树） */
+/** @typedef {{nativeDirs: string[], confirmedDirs: string[], needsRefresh: boolean}} DeliverQueueEntry */
 
 /**
  * 监控状态对象（syncWatcher 构造；stop/startNativeWatch/scheduleBroadcast
@@ -88,7 +100,7 @@ export const WATCHER_MAX_ERROR_RETRIES = 5
  * @property {boolean} scanning 是否处于扫描期（暂停巡检与广播，变更先累积）
  * @property {boolean} pendingNeedsRefresh 待广播变更是否来自原生事件（需回填基线）
  * @property {boolean} delivering 是否正在交付防抖广播（串行化原生事件回填）
- * @property {Array<object>} deliverQueue 待交付广播队列（扫描期清空）
+ * @property {DeliverQueueEntry[]} deliverQueue 待交付广播队列（扫描期清空）
  * @property {number} snapshotRevision 快照基线代际（并发遍历丢弃依据）
  * @property {number} idleRounds 连续空闲轮数（退避爬梯）
  * @property {string[]} lastHotDirs 最近一轮巡检发现的变更子树（POSIX 相对路径；
@@ -97,6 +109,11 @@ export const WATCHER_MAX_ERROR_RETRIES = 5
  * @property {number} fullWalkInterval 活跃期全量回扫周期（每 N 轮一次全树遍历）
  * @property {Set<string>} pendingDirs 防抖静默期内累积的变更子树（原生事件候选）
  * @property {Set<string>} pendingConfirmedDirs 轮询已确认的变更子树（基线已更新）
+ * @property {Map<string, number>} failedDirRetries 失败子树的连续局部扫描失败计数
+ *   （#52；POSIX 相对路径 -> 连续失败次数，达到 maxFailedDirRetries 后不再保留
+ *   B5 保护；扫描成功覆盖该子树后重置）
+ * @property {number=} maxFailedDirRetries 失败子树放弃 B5 保护的连续失败上限
+ *   （测试可注入缩小；缺省用 WATCHER_FAILED_DIR_MAX_RETRIES）
  * @property {number} pollInterval 基础轮询间隔（ms）
  * @property {boolean} nativeWatch 是否启用原生事件监听
  * @property {import('node:fs').FSWatcher|null} nativeWatcher 原生监听实例（未开启/失败为 null）

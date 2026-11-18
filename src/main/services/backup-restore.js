@@ -16,6 +16,7 @@ import {
   normalizeStoreData,
   saveLibrarySettings,
   setModelMeta,
+  suppressLibrarySettingsSave,
 } from './store'
 import { notifyStoreSaveError } from './store-events'
 import { LIB_PREFIX, parseBackupManifest } from './backup-format'
@@ -71,10 +72,13 @@ async function pruneRestoreArtifacts(root, keepBakName) {
   } catch {
     return
   }
+  // #48：本次恢复目标原本无 .modelvault（keepBakName 为空串）时，现存
+  // .bak-* 可能是崩溃于两次 rename 之间遗留的唯一旧数据副本，不得清除
+  const canPruneBak = keepBakName !== ''
   for (const name of entries) {
     const isStaleTmp = name.startsWith(RESTORE_TMP_PREFIX)
     const isOldBackup =
-      name.startsWith(BACKUP_DIR_PREFIX) && name !== keepBakName
+      canPruneBak && name.startsWith(BACKUP_DIR_PREFIX) && name !== keepBakName
     if (!isStaleTmp && !isOldBackup) continue
     await fs
       .rm(path.join(root, name), { recursive: true, force: true })
@@ -138,13 +142,21 @@ async function restoreLibraryLocked(
     )
   }
 
+  // B-02 设置侧屏障（#47）：入口 flush 只静止恢复发起时刻的写盘链，流式解压
+  // 可达分钟级——期间用户改设置触发的库设置防抖写，会在既有数据让位
+  // （.modelvault → .bak）后用非递归 mkdir 把 .modelvault 重建为只含
+  // settings.json 的空目录，令目录交换与回滚双双失败。与元数据侧
+  // saveSuppressed 同一口径：抑制窗口内丢弃目标根的库设置待写快照
+  // （修改保留在内存；恢复目标为当前库时随重载对齐恢复结果），
+  // 解除与流程退出绑定（finally），失败路径同样不遗留抑制
+  suppressLibrarySettingsSave(root)
   const dataDir = path.join(root, DATA_DIR)
   const stamp = Date.now()
   const tmpDir = `${dataDir}.restore-${stamp}`
   const coversDir = path.join(tmpDir, COVERS_DIR)
-  await fs.rm(tmpDir, { recursive: true, force: true })
   let covers = 0
   try {
+    await fs.rm(tmpDir, { recursive: true, force: true })
     await fs.mkdir(coversDir, { recursive: true })
     const stats = { skippedCovers }
     const decoder = new TextDecoder()
@@ -223,6 +235,8 @@ async function restoreLibraryLocked(
     // 失败兜底：清理本次解出的临时目录，不在用户模型目录留垃圾
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
     throw err
+  } finally {
+    suppressLibrarySettingsSave(null)
   }
 }
 
@@ -542,10 +556,30 @@ export async function importBackup(win) {
   if (settingsPayload) {
     const root = getCurrentRoot()
     if (root) {
-      // 与库恢复一致：设置写入也需与扫描/切库互斥（V-02）
-      await runMaintenance('restore', root, () =>
-        saveLibrarySettings(root, settingsPayload),
-      )
+      try {
+        // 与库恢复一致：设置写入也需与扫描/切库互斥（V-02）
+        await runMaintenance('restore', root, async () => {
+          // #49：入口先有界静止设置写盘链（与全量/合并恢复同一底线）——恢复前
+          // 防抖窗口内的旧快照若在 saveLibrarySettings 入链后才冲刷，会排入
+          // 链尾更后位置，以旧值覆盖恢复结果；超时按 B3 取消恢复
+          const settingsFlushed = await flushSettingsSaveBounded()
+          if (!settingsFlushed) {
+            throw new Error(
+              '磁盘无响应：等待在途数据落盘超时，已取消恢复（继续可能让迟到的旧写入覆盖恢复结果）。请检查模型库磁盘连接后重试',
+            )
+          }
+          return saveLibrarySettings(root, settingsPayload)
+        })
+      } catch (err) {
+        if (errorCode(err) === 'EBUSY') {
+          return { error: errorMessage(err), settingsRestored: false }
+        }
+        logger.warn(`备份中的库设置恢复失败: ${errorMessage(err)}`)
+        return {
+          error: `库设置恢复失败: ${errorMessage(err)}`,
+          settingsRestored: false,
+        }
+      }
       logger.info(`备份中的库设置已写入当前模型库: ${root}`)
       return { settingsRestored: true }
     }

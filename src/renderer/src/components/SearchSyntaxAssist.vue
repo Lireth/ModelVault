@@ -22,7 +22,7 @@ defineProps({
 defineEmits([
   /** 点击帮助面板中的示例（负载为语法条目） */
   'insert-example',
-  /** 点击/确认应用当前高亮候选 */
+  /** 应用候选：点击携带被点项下标，键盘确认不携带（取当前高亮下标） */
   'apply-suggestion',
 ])
 </script>
@@ -68,7 +68,7 @@ defineEmits([
       :aria-selected="i === suggestionIndex"
       :class="{ active: i === suggestionIndex }"
       @mousedown.prevent
-      @click="$emit('apply-suggestion')"
+      @click="$emit('apply-suggestion', i)"
     >
       <code>{{ item.insert }}</code>
       <span class="suggest-label">{{ item.label }}</span>

@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { BrowserWindow } from 'electron'
 import logger from '../logger'
-import { relativeWithin } from '../utils'
+import { isLinkLikePath, relativeWithin } from '../utils'
 import { dedupeAndPruneDescendants } from '../../shared/scan-dirs'
 import { MAX_SCAN_DEPTH } from './scanner'
 import { getWatcher } from './watcher-state'
@@ -64,6 +64,15 @@ async function refreshSnapshotScopes(w, relDirs, unlocated = false) {
       if (depth > MAX_SCAN_DEPTH) continue
       const abs = rel === '' ? w.root : path.join(w.root, ...rel.split('/'))
       if (relativeWithin(abs, w.root) === null) continue
+      // #41 防御：链接形态子树（junction/符号链接）不回填——原生事件可能
+      // 以 junction 路径为 filename（创建/删除 junction 本身），以它为根
+      // 遍历会跟随进 junction 目标，把库外目录写入基线并在下一轮巡检比对
+      // 时反复广播（自激励）。其名称不进任何快照（与扫描/巡检同口径），
+      // 基线若有残留按键清理
+      if (rel !== '' && (await isLinkLikePath(abs))) {
+        removeSnapshotSubtree(w, abs)
+        continue
+      }
       // OPT-10：unlocated 的全根回填强制仅名称（内容基线随之置空，见上）
       const withStats = Boolean(w.statSnapshot) && !(unlocated && rel === '')
       let snapshot
@@ -134,7 +143,14 @@ async function refreshSnapshotScopes(w, relDirs, unlocated = false) {
  * @returns {Promise<void>}
  */
 async function deliverBroadcast(w, nativeDirs, confirmedDirs, needsRefresh) {
-  if (w !== getWatcher() || w.scanning) return
+  if (w !== getWatcher()) return
+  if (w.scanning) {
+    // FIX-4：扫描期进入交付的批次（队列清理与消费交叠的窗口）。confirmedDirs
+    // 的基线已随快照写入更新，静默丢弃 = 永久丢失；转回待广播集合由停扫补发
+    // 承接，语义与下方在途路径一致。原生候选尚未回填基线，轮询可再检出，作废
+    for (const d of confirmedDirs) w.pendingConfirmedDirs.add(d)
+    return
+  }
   let dirs = [...confirmedDirs]
   if (needsRefresh) {
     const before = new Map(w.snapshot)

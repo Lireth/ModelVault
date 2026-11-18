@@ -41,6 +41,17 @@ async function onSaveViewConfirm() {
     savingBusy.value = false
   }
 }
+
+/** 输入法组合中的 Enter/Esc 不提交/取消（中文视图名输入不被截断） */
+function onViewNameEnter(e) {
+  if (e?.isComposing) return
+  onSaveViewConfirm()
+}
+
+function onViewNameEsc(e) {
+  if (e?.isComposing) return
+  cancelSaveView()
+}
 </script>
 
 <template>
@@ -55,17 +66,14 @@ async function onSaveViewConfirm() {
           @click="applySavedView(v.id)"
         >
           <span class="view-name">{{ v.name }}</span>
-          <span
-            class="view-remove"
-            role="button"
-            tabindex="0"
-            title="删除该视图（不影响筛选状态）"
-            :aria-label="`删除视图 ${v.name}`"
-            @click.stop="deleteSavedView(v.id)"
-            @keydown.enter.stop.prevent="deleteSavedView(v.id)"
-            @keydown.space.stop.prevent="deleteSavedView(v.id)"
-            >✕</span
-          >
+        </button>
+        <button
+          class="view-remove"
+          title="删除该视图（不影响筛选状态）"
+          :aria-label="`删除视图 ${v.name}`"
+          @click="deleteSavedView(v.id)"
+        >
+          ✕
         </button>
       </li>
     </ul>
@@ -77,8 +85,8 @@ async function onSaveViewConfirm() {
         maxlength="30"
         placeholder="视图名称…"
         spellcheck="false"
-        @keydown.enter="onSaveViewConfirm"
-        @keydown.esc="cancelSaveView"
+        @keydown.enter="onViewNameEnter"
+        @keydown.esc="onViewNameEsc"
       />
       <div class="view-save-actions">
         <button
@@ -112,8 +120,17 @@ async function onSaveViewConfirm() {
   margin-bottom: 8px;
 }
 
+/* 条目行：应用按钮 + 删除按钮并列（移除不得嵌套于 button 内——非法
+   HTML 交互嵌套且后代 Tab 聚焦行为不可靠），hover 提升到 li 级保持整行联动 */
+.view-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .view-item {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -130,7 +147,7 @@ async function onSaveViewConfirm() {
     box-shadow var(--dur-fast) var(--ease-out);
 }
 
-.view-item:hover {
+.view-list li:hover .view-item {
   background: var(--bg-hover);
 }
 
@@ -152,7 +169,8 @@ async function onSaveViewConfirm() {
   white-space: nowrap;
 }
 
-/* 删除按钮：键盘可达（OPT-2），装配语义与侧栏库列表移除按钮一致 */
+/* 删除按钮：原生 button 自带 Tab 序列与 Enter/Space 激活（OPT-2），装配语义
+   与侧栏库列表移除按钮一致 */
 .view-remove {
   flex-shrink: 0;
   width: 18px;
@@ -160,6 +178,9 @@ async function onSaveViewConfirm() {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   font-size: 10px;
@@ -169,7 +190,7 @@ async function onSaveViewConfirm() {
   transition: opacity var(--dur-fast) var(--ease-out);
 }
 
-.view-item:hover .view-remove,
+.view-list li:hover .view-remove,
 .view-remove:focus-visible {
   opacity: 1;
   pointer-events: auto;

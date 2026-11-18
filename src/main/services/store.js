@@ -63,6 +63,7 @@ export {
   flushSettingsSave,
   flushSettingsSaveBounded,
   setSettingsFlushAwaitTimeoutForTests,
+  suppressLibrarySettingsSave,
   isRegisteredLibrary,
 } from './store-settings'
 
@@ -72,6 +73,7 @@ export {
   loadData,
   wasDataReset,
   reloadCurrentRootData,
+  setReloadSaveWaitTimeoutForTests,
   normalizeStoreData,
   getModelMeta,
   getMetaMapByAbsPath,

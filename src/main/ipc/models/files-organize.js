@@ -3,7 +3,12 @@ import path from 'node:path'
 import { BrowserWindow, dialog } from 'electron'
 import logger from '../../logger'
 import { isPathRealWithin } from '../../utils'
-import { getCurrentRoot, renameModelMeta, toRelKey } from '../../services/store'
+import {
+  DATA_DIR,
+  getCurrentRoot,
+  renameModelMeta,
+  toRelKey,
+} from '../../services/store'
 import { sidecarFilesFor } from './misc'
 import {
   LORA_DIR,
@@ -106,8 +111,14 @@ export function registerMoveHandlers() {
       const targetDir = pick.filePaths[0]
       // 目标目录必须在当前库内（以构造文件路径换算相对键判定）
       const newPath = path.join(targetDir, path.basename(id))
-      if (!toRelKey(newPath)) {
+      const relKey = toRelKey(newPath)
+      if (!relKey) {
         return { error: '目标文件夹不在当前模型库内' }
+      }
+      // 关联存储目录（.modelvault 及其子目录）不可作为移动目标：扫描器排除
+      // 该目录，模型移入后将从库中「消失」，且会被备份 zip 当元数据整体携带
+      if (relKey.startsWith(`${DATA_DIR}/`)) {
+        return { error: '不能移动到关联存储目录' }
       }
       // O6：真实路径校验——拦截目标目录本身是指向库外的 junction/符号链接
       const rootReal = await getRealRootPath()
@@ -115,7 +126,11 @@ export function registerMoveHandlers() {
         return { error: '目标文件夹真实路径不在当前模型库内' }
       }
       if (newPath === id)
-        return { path: id, targetRelDir: toRelKey(targetDir) ?? '' }
+        return {
+          path: id,
+          targetRelDir: toRelKey(targetDir) ?? '',
+          sidecarWarnings: [],
+        }
       // 维护锁（OPT-14）：在对话框与校验之后、移动之前取锁——持锁等待用户
       // 选择目录会长时间冻结扫描/恢复等大操作。file-op 彼此兼容
       return withMaintenanceLock('file-op', getCurrentRoot(), async () => {
@@ -136,17 +151,37 @@ export function registerMoveHandlers() {
           logger.warn(`模型移动失败: ${id} ${errorMessage(err)}`)
           return { error: `移动失败: ${errorMessage(err)}` }
         }
-        // 同名 sidecar（预览图/说明文本）一并移动：整理场景下说明与模型不应分家
+        // 同名 sidecar（预览图/说明文本）一并移动：整理场景下说明与模型不应
+        // 分家。目标同名 sidecar 跳过不覆盖（Windows rename 带替换语义，静默
+        // 覆盖会丢用户数据）；失败不吞掉，回传警告与改名链路同一约定
+        const sidecarWarnings = []
         for (const f of sidecarFilesFor(id)) {
-          await fs
-            .rename(f, path.join(targetDir, path.basename(f)))
-            .catch(() => {})
+          const sidecarTarget = path.join(targetDir, path.basename(f))
+          try {
+            await fs.access(sidecarTarget)
+            sidecarWarnings.push(`${path.basename(f)} 的目标已存在，已跳过`)
+            continue
+          } catch {
+            /* 目标不存在，可移动 */
+          }
+          try {
+            await fs.rename(f, sidecarTarget)
+          } catch (err) {
+            // 源 sidecar 本就不存在（ENOENT）属常态，其余失败须可见
+            if (errorCode(err) !== 'ENOENT') {
+              sidecarWarnings.push(`${path.basename(f)}: ${errorMessage(err)}`)
+            }
+          }
         }
         renameModelMeta(id, newPath)
         logger.info(`模型已移动: ${id} -> ${newPath}`)
         // targetRelDir：渲染层据此对目标子树做局部扫描（OPT-03）；
         // 目标为库根时 toRelKey 返回 null，映射为 ''（根直属文件子树）
-        return { path: newPath, targetRelDir: toRelKey(targetDir) ?? '' }
+        return {
+          path: newPath,
+          targetRelDir: toRelKey(targetDir) ?? '',
+          sidecarWarnings,
+        }
       })
     },
     { errorPrefix: '移动失败' },
@@ -211,6 +246,7 @@ export function registerMoveHandlers() {
             moved: 0,
             failed: [],
             skipped,
+            sidecarWarnings: [],
             ...(aborted() ? { canceled: true } : {}),
           }
         }
@@ -237,6 +273,7 @@ export function registerMoveHandlers() {
         let moved = 0
         let canceled = false
         const failed = []
+        const sidecarWarnings = []
         // OPT-22/P4：目标标签子文件夹的真实路径校验按目录缓存——候选目标
         // 目录只有 8 个（LoRA 根 + 7 标签），万级批次此前逐项重复 realpath；
         // 目录级 realpath 一次解析后按小写路径缓存判定结果
@@ -272,11 +309,30 @@ export function registerMoveHandlers() {
             failed.push({ id, error: errorMessage(err) })
             continue
           }
-          // 同名 sidecar（预览图/说明文本）一并移动，与 moveModelTo 同一约定
+          // 同名 sidecar（预览图/说明文本）一并移动，与 moveModelTo 同一约定：
+          // 目标同名跳过不覆盖，失败回传警告不吞掉
           for (const f of sidecarFilesFor(id)) {
-            await fs
-              .rename(f, path.join(path.dirname(newPath), path.basename(f)))
-              .catch(() => {})
+            const sidecarTarget = path.join(
+              path.dirname(newPath),
+              path.basename(f),
+            )
+            try {
+              await fs.access(sidecarTarget)
+              sidecarWarnings.push(`${path.basename(f)} 的目标已存在，已跳过`)
+              continue
+            } catch {
+              /* 目标不存在，可移动 */
+            }
+            try {
+              await fs.rename(f, sidecarTarget)
+            } catch (err) {
+              // 源 sidecar 本就不存在（ENOENT）属常态，其余失败须可见
+              if (errorCode(err) !== 'ENOENT') {
+                sidecarWarnings.push(
+                  `${path.basename(f)}: ${errorMessage(err)}`,
+                )
+              }
+            }
           }
           renameModelMeta(id, newPath)
           moved += 1
@@ -288,6 +344,7 @@ export function registerMoveHandlers() {
           moved,
           failed,
           skipped,
+          sidecarWarnings,
           ...(canceled ? { canceled: true } : {}),
         }
       })

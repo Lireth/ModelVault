@@ -30,9 +30,11 @@ import {
   drainDeferredThumbs,
   clearDeferredJobs,
   setThumbFailTtlForTests,
+  pruneThumbs,
 } from '../src/main/services/thumbs'
 import { setDataRoot } from '../src/main/services/store'
 import { renderThumbFromPath } from '../src/main/services/thumb-renderer'
+import logger from '../src/main/logger'
 
 const roots = []
 let root
@@ -187,6 +189,30 @@ describe('延迟生成队列（扫描装饰阶段专用）', () => {
     expect(kept).toHaveLength(1)
     expect(kept[0].absCover).toBe(source)
   })
+
+  it('drain 进行中切库：剩余任务跳过，不写新根 thumbs、不推送回调（#44）', async () => {
+    const sourceB = path.join(root, 'cover-b.png')
+    await fs.writeFile(sourceB, Buffer.from('png-bytes-b'))
+    // 渲染桩在首次渲染期间切换模型根：模拟 drain 在途时用户切库——
+    // 快照数组已取出，clearDeferredJobs 清不掉，worker 不得按当前根落盘
+    vi.mocked(renderThumbFromPath).mockImplementation(async () => {
+      setDataRoot(path.join(root, 'switched'))
+      return { jpeg: Buffer.from('fake-jpeg') }
+    })
+    expect(await getThumbPathDeferred(source)).toBe('')
+    expect(await getThumbPathDeferred(sourceB)).toBe('')
+    const generated = []
+    await drainDeferredThumbs(
+      (absCover, thumbPath) => generated.push({ absCover, thumbPath }),
+      1,
+    )
+    // 渲染等待期间已切库：本轮生成结果作废，不写跨根缓存、不经 onGenerated 推送
+    expect(generated).toHaveLength(0)
+    // 切库后剩余任务整体跳过：仅首个任务已进入渲染
+    expect(renderThumbFromPath).toHaveBeenCalledTimes(1)
+    // 新根目录树零写入（修复前旧根封面缩略图会落进新根 .modelvault/thumbs/）
+    await expect(fs.access(path.join(root, 'switched'))).rejects.toThrow()
+  })
 })
 
 describe('命中结果 TTL 缓存（PERF-5）', () => {
@@ -333,5 +359,52 @@ describe('缩略图负缓存（P1-3）', () => {
     const recovered = []
     await drainDeferredThumbs((_, p) => recovered.push(p))
     expect(recovered).toHaveLength(1)
+  })
+})
+
+describe('pruneThumbs（失效缩略图清理）', () => {
+  it('单个文件删除失败不中止整批，统计按真实删除数上报（#79）', async () => {
+    const thumbsDir = path.join(root, '.modelvault', 'thumbs')
+    await fs.mkdir(thumbsDir, { recursive: true })
+    const locked = path.join(thumbsDir, 'locked.jpg')
+    const gone1 = path.join(thumbsDir, 'gone1.jpg')
+    const gone2 = path.join(thumbsDir, 'gone2.jpg')
+    await fs.writeFile(locked, Buffer.from('jpeg-bytes'))
+    await fs.writeFile(gone1, Buffer.from('jpeg-bytes'))
+    await fs.writeFile(gone2, Buffer.from('jpeg-bytes'))
+
+    // 模拟单个文件被占用（EBUSY）：worker 内自捕获，其余文件同一轮照常删除，
+    // 不因首个失败 reject 整批走「清理失败」导致统计与真实结果不一致
+    const realRm = fs.rm.bind(fs)
+    const rmSpy = vi.spyOn(fs, 'rm').mockImplementation(async (p, ...rest) => {
+      if (String(p) === locked) {
+        throw Object.assign(new Error('EBUSY: resource busy'), {
+          code: 'EBUSY',
+        })
+      }
+      return realRm(p, ...rest)
+    })
+    const infoSpy = vi.spyOn(logger, 'info')
+    const warnSpy = vi.spyOn(logger, 'warn')
+    // mockRestore 会清空调用记录，须在 finally 恢复前捕获
+    let infoCalls
+    let warnCalls
+    try {
+      await pruneThumbs(new Set())
+      infoCalls = infoSpy.mock.calls
+      warnCalls = warnSpy.mock.calls
+    } finally {
+      rmSpy.mockRestore()
+      infoSpy.mockRestore()
+      warnSpy.mockRestore()
+    }
+    await expect(fs.access(gone1)).rejects.toThrow()
+    await expect(fs.access(gone2)).rejects.toThrow()
+    // 失败文件保留，留给下次扫描重试
+    await expect(fs.access(locked)).resolves.toBeUndefined()
+    // 统计与真实结果一致：仅计入实际删除数，失败文件单独告警
+    expect(infoCalls).toEqual([['已清理 2 个失效缩略图']])
+    expect(warnCalls).toHaveLength(1)
+    expect(warnCalls[0][0]).toContain('locked.jpg')
   })
 })

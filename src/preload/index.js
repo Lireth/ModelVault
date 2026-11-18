@@ -281,15 +281,20 @@ const api = {
      */
     renameModel: (id, name) =>
       invokeValidated('models:renameModel', { id, name }),
-    /** 库内移动模型（F11，目标目录经原生对话框选择），返回 { path } / { canceled } / { error } */
+    /**
+     * 库内移动模型（F11，目标目录经原生对话框选择），同名 sidecar 一并移动
+     * （目标同名跳过不覆盖，失败回传警告），
+     * 返回 { path, targetRelDir, sidecarWarnings } / { canceled } / { error }
+     */
     moveModelTo: (id) => invokeValidated('models:moveModelTo', { id }),
     /**
      * 一键移动文件（自动标签整理）：payload 为 { moves: [{ id, subCategory }],
      * opId? }——opId 为 OPT-18 取消令牌（Esc 经 models:cancelOp 中止），整体
      * 透传（与 transferToLibrary 同一约定，由 wrapHandler 在顶层剥离 opId）。
      * 主进程在模型库根目录创建 7 个分类文件夹并移动已分配标签的模型（元数据
-     * 键同步迁移），返回 { moved, failed: [{id, error}], skipped: [{id, reason}] }
-     * 或 { canceled } / { error }
+     * 键同步迁移，sidecar 目标同名跳过不覆盖、失败回传警告），
+     * 返回 { moved, failed: [{id, error}], skipped: [{id, reason}],
+     * sidecarWarnings } 或 { canceled } / { error }
      */
     organizeByTags: (payload) =>
       invokeValidated('models:organizeByTags', payload),

@@ -445,7 +445,18 @@ export async function moveModelTo(id) {
     toast('error', res.error)
     return false
   }
-  toast('success', `已移动到 ${res.path}`)
+  // sidecar 目标同名跳过/移动失败不吞掉：计数提示与改名链路同一承诺
+  const warnings = Array.isArray(res?.sidecarWarnings)
+    ? res.sidecarWarnings
+    : []
+  if (warnings.length > 0) {
+    toast(
+      'warn',
+      `已移动到 ${res.path}，但 ${warnings.length} 个 sidecar 未迁移`,
+    )
+  } else {
+    toast('success', `已移动到 ${res.path}`)
+  }
   if (!state.scanning) {
     // 源/目标两个子树都刷新；targetRelDir 缺失（响应形状漂移防御）时
     // 无法确定目标子树——传空数组整体回退全量，绝不静默漏掉目标子树
@@ -545,7 +556,7 @@ export async function importModels(mode = 'copy', paths = null) {
     if (renamed > 0) parts.push(`重命名 ${renamed} 个`)
     if (failed.length > 0) parts.push(`${failed.length} 个失败`)
     if (Array.isArray(res.warnings) && res.warnings.length > 0) {
-      parts.push(`${res.warnings.length} 个 sidecar 警告`)
+      parts.push(`${res.warnings.length} 个警告`)
     }
     toast(failed.length > 0 ? 'warn' : 'success', parts.join('，'))
     // 先释放导入标记，再触发局部扫描（扫描/全量回退不应被导入互斥拦截）
@@ -558,9 +569,15 @@ export async function importModels(mode = 'copy', paths = null) {
     toast('error', `导入失败: ${errorMessage(err)}`)
     return false
   } finally {
-    state.importing = false
-    state.importProgress = null
-    activeImportOpId = null
+    // 仅当在途令牌仍归属本次任务时才清理：正常/取消路径先释放 importing
+    // 再经动态 import('./partial-scan') 挂起，窗口内启动的新导入会改写
+    // activeImportOpId——旧任务 finally 绝不清掉新任务的导入标志、进度
+    // 与取消令牌（否则新导入失去取消能力与进度显示，#60）
+    if (activeImportOpId === opId) {
+      state.importing = false
+      state.importProgress = null
+      activeImportOpId = null
+    }
   }
 }
 

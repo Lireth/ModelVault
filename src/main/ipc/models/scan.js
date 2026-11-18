@@ -17,6 +17,7 @@ import {
   syncWatcher,
 } from '../../services/watcher'
 import {
+  clearHashFailuresForLibrarySwitch,
   pauseHashWarmup,
   requestHashWarmup,
   resumeHashWarmup,
@@ -57,6 +58,13 @@ import { errorMessage } from '../../../shared/error-text'
 
 /** 进度事件节流间隔（ms），避免大量小文件时 IPC 过载 */
 const PROGRESS_INTERVAL = 120
+
+/**
+ * models:scan 响应 errors 载荷条目上限（#62）：与日志截断同口径。
+ * 整树权限异常/离线盘场景下 errors 可达万级，裁剪只发生在 IPC 边界
+ * （errors 原始数组仍供日志统计真实总数），真实总数经 errorCount 下发。
+ */
+const MAX_SCAN_ERROR_ENTRIES = 20
 
 /** 当前扫描的取消控制器（null 表示无进行中的扫描） */
 /** @type {AbortController|null} */
@@ -120,7 +128,6 @@ export function registerScanHandlers() {
         const signal = scanAbort.signal
         const startedAt = Date.now()
         const previousRoot = getCurrentRoot()
-        let rootSwitched = false
         let completed = false
 
         try {
@@ -157,8 +164,6 @@ export function registerScanHandlers() {
           // 切换/加载该根目录的关联存储，并清理孤儿封面文件。
           // 维护锁由本扫描持有，传入令牌避免 ensureRootStore 再次加锁
           await ensureRootStore(root, { maintenanceToken: token })
-          rootSwitched =
-            Boolean(previousRoot) && !samePathIgnoreCase(previousRoot, root)
           await pruneOrphanCovers()
           // 切换根目录后装饰缓存全部失效；延迟缩略图队列同步清空——
           // 残留的旧根条目会被下一轮 drain 以「新根」的 thumbs 目录生成（跨根写文件），
@@ -171,6 +176,9 @@ export function registerScanHandlers() {
             resetDecorateCache(root)
             clearDeferredOwners()
             clearDeferredJobs()
+            // 切根即作废旧库的哈希失败负缓存（路径复用且 mtime 一致时，
+            // 旧记录会抑制新库文件的预热资格）
+            clearHashFailuresForLibrarySwitch()
           }
           // IDX-REUSE：通过「选择文件夹/重新定位」首次进入某库时，若目标库
           // 已有本地索引，先播种上次扫描的头部解析结果，避免首扫对全库重复读盘
@@ -233,7 +241,9 @@ export function registerScanHandlers() {
             `扫描完成：${decorated.length} 个模型 / ${dirCount} 个目录 / 耗时 ${Date.now() - startedAt}ms / ${errors.length} 个错误`,
           )
           if (errors.length > 0) {
-            logger.warn(`扫描错误详情: ${JSON.stringify(errors.slice(0, 20))}`)
+            logger.warn(
+              `扫描错误详情: ${JSON.stringify(errors.slice(0, MAX_SCAN_ERROR_ENTRIES))}`,
+            )
           }
 
           // F1：全量扫描完成后写入本地索引（秒切库/启动缓存）。
@@ -289,7 +299,9 @@ export function registerScanHandlers() {
             root,
             models: slimmed.models,
             byType,
-            errors,
+            // #62：errors 载荷按上限裁剪，真实总数随 errorCount 下发
+            errors: errors.slice(0, MAX_SCAN_ERROR_ENTRIES),
+            errorCount: errors.length,
             durationMs: Date.now() - startedAt,
             // 本次扫描自动重新关联的移动/重命名模型数（A-02，渲染层据此提示）
             relinked: relinkResult.relinked,
@@ -299,7 +311,13 @@ export function registerScanHandlers() {
           }
         } finally {
           // 扫描失败/取消且已经切到新根：回滚到原根，避免主进程根目录与
-          // 渲染层保留的旧列表不一致（V-02 切库状态机）
+          // 渲染层保留的旧列表不一致（V-02 切库状态机）。切换事实按主进程
+          // 实际当前根判定而非调用点返回后的赋值：ensureRootStore 内部
+          // switchDataRoot 已提交、后续 loadData/reloadLibrarySettings 抛错时
+          // 调用点以异常退出，后置开关恒为 false 会漏掉该回滚窗口（#61）
+          const rootSwitched =
+            Boolean(previousRoot) &&
+            !samePathIgnoreCase(previousRoot, getCurrentRoot() || '')
           if (!completed && rootSwitched && previousRoot) {
             try {
               await ensureRootStore(previousRoot, { maintenanceToken: token })

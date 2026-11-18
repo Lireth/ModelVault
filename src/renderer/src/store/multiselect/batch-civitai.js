@@ -146,9 +146,15 @@ async function identifySequentially(ids, label) {
   let notFound = 0
   const failures = []
   let firstError = ''
+  // 陈旧目标（重扫/切库后脱离当前列表）跳过：不发起 IPC，也不误报取消
+  let stale = 0
   for (let i = 0; i < ids.length; i++) {
     if (state.multiSelect.cancelRequested) break
     const id = ids[i]
+    if (id === undefined || modelIndexOf(id) === undefined) {
+      stale += 1
+      continue
+    }
     const m = byId.get(id)
     state.multiSelect.progress = `${label} ${i + 1}/${ids.length}：${m?.alias || m?.name || ''}`
     let res
@@ -175,7 +181,7 @@ async function identifySequentially(ids, label) {
     notFound,
     failures,
     firstError,
-    cancelled: metas.size + notFound + failures.length < ids.length,
+    cancelled: metas.size + notFound + failures.length + stale < ids.length,
   }
 }
 

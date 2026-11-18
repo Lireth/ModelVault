@@ -27,10 +27,20 @@ vi.mock('electron', () => ({
   dialog: { showOpenDialog: vi.fn() },
 }))
 
+// civ-cache 仅将 saveCivImageCache 替换为可注入 spy（默认直通真实实现，
+// 其余导出保持原样）——挂起磁盘形态（写入永不 settle）的用例依赖此注入
+vi.mock('../src/main/services/civ-cache', async (importOriginal) => {
+  const actual = await importOriginal()
+  return { ...actual, saveCivImageCache: vi.fn(actual.saveCivImageCache) }
+})
+
 import { net, protocol } from 'electron'
+import logger from '../src/main/logger'
 import {
   isCivitaiVideoUrl,
   registerCivimgHandler,
+  setCivimgBodyIdleTimeoutForTests,
+  setCivimgCacheWriteTimeoutForTests,
   setCivimgFailTtlForTests,
 } from '../src/main/protocol/remote-image'
 import { registerImageScheme } from '../src/main/protocol'
@@ -71,6 +81,8 @@ beforeEach(async () => {
 
 afterEach(() => {
   setCivimgFailTtlForTests(60000)
+  setCivimgBodyIdleTimeoutForTests(30000)
+  setCivimgCacheWriteTimeoutForTests(30000)
 })
 
 describe('registerImageScheme 特权注册', () => {
@@ -127,6 +139,62 @@ describe('civimg 协议门禁（白名单与隐私开关）', () => {
   })
 })
 
+describe('civimg 可控 target 日志净化（#66 日志伪造面）', () => {
+  it('非白名单地址携带 %0A 解码换行：403 且日志单行转义，不注入伪造行', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn')
+    try {
+      const res = await civHandler(
+        makeCivRequest('https://evil.com/a.jpeg\n[INFO] 伪造日志行'),
+      )
+      expect(res.status).toBe(403)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      const line = String(warnSpy.mock.calls[0][0])
+      // 换行已转义为字面量 \n：按行落盘的日志不会拆出伪造的 [INFO] 行
+      expect(line).toBe(
+        'civimg 协议拒绝非白名单图片地址: https://evil.com/a.jpeg\\n[INFO] 伪造日志行',
+      )
+      expect(line.includes('\n')).toBe(false)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('白名单地址携带 %0A 解码换行且上游失败：异常日志同样单行转义', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(new Response('', { status: 403 }))
+    const warnSpy = vi.spyOn(logger, 'warn')
+    try {
+      const res = await civHandler(
+        makeCivRequest('https://image.civitai.com/x/1.jpeg\n[WARN] 伪造行'),
+      )
+      expect(res.status).toBe(502)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      const line = String(warnSpy.mock.calls[0][0])
+      expect(line).toBe(
+        'civimg 上游响应异常（HTTP 403）: https://image.civitai.com/x/1.jpeg\\n[WARN] 伪造行',
+      )
+      expect(line.includes('\n')).toBe(false)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('不含控制字符的地址日志原样输出，白名单放行语义不变', async () => {
+    vi.mocked(net.fetch).mockResolvedValue(new Response('', { status: 403 }))
+    const warnSpy = vi.spyOn(logger, 'warn')
+    try {
+      const target = 'https://image.civitai.com/plain/1.jpeg'
+      const res = await civHandler(makeCivRequest(target))
+      expect(res.status).toBe(502)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(String(warnSpy.mock.calls[0][0])).toBe(
+        `civimg 上游响应异常（HTTP 403）: ${target}`,
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+})
+
 describe('civimg 图片代理', () => {
   it('白名单 CDN 图片经 net.fetch 代理放行，附加按天缓存头', async () => {
     vi.mocked(net.fetch).mockResolvedValue(
@@ -154,6 +222,27 @@ describe('civimg 图片代理', () => {
       makeCivRequest('https://image.civitai.com/fail-502/a.jpeg'),
     )
     expect(res.status).toBe(502)
+  })
+
+  it('上游非 ok 返回 502 前取消未消费的上游 body（防连接挂留）', async () => {
+    let cancelled = false
+    vi.mocked(net.fetch).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            cancel() {
+              cancelled = true
+            },
+          }),
+          { status: 403 },
+        ),
+      ),
+    )
+    const res = await civHandler(
+      makeCivRequest('https://image.civitai.com/cancel-body/1.png'),
+    )
+    expect(res.status).toBe(502)
+    expect(cancelled).toBe(true)
   })
 
   it('图片代理响应头按白名单重建：Set-Cookie/Content-Disposition/X-* 不透传', async () => {
@@ -262,6 +351,25 @@ describe('civimg 视频流式代理（FN-02）', () => {
     expect(res.headers.get('content-range')).toBe('bytes 10-12/100')
     // 视频不进入图片缓存路径（仅一次网络请求）
     expect(net.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('视频上游非 ok 返回 502 前取消未消费的上游 body（防连接挂留）', async () => {
+    let cancelled = false
+    vi.mocked(net.fetch).mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true
+          },
+        }),
+        { status: 404 },
+      ),
+    )
+    const res = await civHandler(
+      makeCivRequest('https://image.civitai.com/x/cancel-body.mp4'),
+    )
+    expect(res.status).toBe(502)
+    expect(cancelled).toBe(true)
   })
 
   it('isCivitaiVideoUrl：识别常见视频扩展名', () => {
@@ -482,5 +590,84 @@ describe('civimg 上游失败负缓存（OPT-7）', () => {
     const third = await civHandler(makeCivRequest(target))
     expect(third.status).toBe(200)
     expect(net.fetch).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('civimg 有界等待（#46）：停滞上游与挂起磁盘不再永久占死并发槽', () => {
+  it('响应头到达后 body 停滞：空闲超时中止返回 502，并记入负缓存静默期内零回源', async () => {
+    setCivimgBodyIdleTimeoutForTests(30)
+    // 半开连接形态：头部立即到达，body 流永不出字也永不关闭
+    vi.mocked(net.fetch).mockImplementation(() =>
+      Promise.resolve(
+        new Response(new ReadableStream({ start() {} }), {
+          status: 200,
+          headers: { 'Content-Type': 'image/jpeg' },
+        }),
+      ),
+    )
+    const target = 'https://image.civitai.com/stall-body/1.png'
+    expect((await civHandler(makeCivRequest(target))).status).toBe(502)
+    expect(net.fetch).toHaveBeenCalledTimes(1)
+    // 中止路径与网络失败同走负缓存：静默期内同 URL 零回源（到期自愈）
+    expect((await civHandler(makeCivRequest(target))).status).toBe(502)
+    expect(net.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('6 路停滞回源超时中止释放槽位后，第 7 路回源不再饿死', async () => {
+    setCivimgBodyIdleTimeoutForTests(30)
+    vi.mocked(net.fetch).mockImplementation((url) => {
+      if (String(url).includes('/stall-body/')) {
+        return Promise.resolve(
+          new Response(new ReadableStream({ start() {} }), {
+            status: 200,
+            headers: { 'Content-Type': 'image/jpeg' },
+          }),
+        )
+      }
+      return Promise.resolve(
+        new Response(PNG_MAGIC, {
+          status: 200,
+          headers: { 'Content-Type': 'image/png' },
+        }),
+      )
+    })
+    const stalled = Array.from({ length: 6 }, (_, i) =>
+      civHandler(
+        makeCivRequest(`https://image.civitai.com/stall-body/${i}.png`),
+      ),
+    )
+    const good = civHandler(
+      makeCivRequest('https://image.civitai.com/after-stall/7.png'),
+    )
+    const results = await Promise.all([...stalled, good])
+    // 修复前：6 路停滞回源永久占满槽位，第 7 路排队挂死（用例超时失败）
+    expect(results.slice(0, 6).every((r) => r.status === 502)).toBe(true)
+    expect(results[6].status).toBe(200)
+  })
+
+  it('槽内磁盘缓存写入停滞：等待有界照常返回图片，槽位不阻塞后续回源', async () => {
+    setCivimgCacheWriteTimeoutForTests(20)
+    // 挂起盘形态：两次写入均永不 settle（Once 用尽后自动回落真实实现）
+    vi.mocked(saveCivImageCache)
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockImplementationOnce(() => new Promise(() => {}))
+    vi.mocked(net.fetch).mockImplementation(() =>
+      Promise.resolve(
+        new Response(PNG_MAGIC, {
+          status: 200,
+          headers: { 'Content-Type': 'image/png' },
+        }),
+      ),
+    )
+    const first = await civHandler(
+      makeCivRequest('https://image.civitai.com/hang-disk/1.png'),
+    )
+    expect(first.status).toBe(200)
+    expect(Buffer.from(await first.arrayBuffer())).toEqual(PNG_MAGIC)
+    // 槽位已随有界等待释放：第二个不同 URL 不被挂起的写入阻塞
+    const second = await civHandler(
+      makeCivRequest('https://image.civitai.com/hang-disk/2.png'),
+    )
+    expect(second.status).toBe(200)
   })
 })

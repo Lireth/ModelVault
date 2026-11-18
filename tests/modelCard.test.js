@@ -2,6 +2,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ModelCard from '../src/renderer/src/components/ModelCard.vue'
+import ModelCardCover from '../src/renderer/src/components/ModelCardCover.vue'
 import { state } from '../src/renderer/src/store/appStore'
 import { setupComponentTest, settle } from './helpers/componentTest'
 
@@ -408,6 +409,37 @@ describe('ModelCard 封面悬停轮播', () => {
     expect(currentCycleSrc(wrapper)).toBe(covers[2].url)
     await vi.advanceTimersByTimeAsync(CYCLE_INTERVAL)
     expect(currentCycleSrc(wrapper)).toBe(covers[0].url)
+    wrapper.unmount()
+  })
+
+  it('covers 变化停播复位后，过渡期旧图 error 才到达不抛 TypeError（#75）', async () => {
+    const covers = makeCovers('g', 2)
+    const wrapper = mountCard(
+      makeModel('m1', {
+        cover: covers[0].path,
+        covers,
+        coverUrl: 'mvimg://thumb/g0.png',
+      }),
+    )
+    await wrapper.find('.cover').trigger('mouseenter')
+    await vi.advanceTimersByTimeAsync(HOVER_DELAY)
+    expect(wrapper.find('.cycle-layer').exists()).toBe(true)
+    // 详情页增删封面后回到列表：covers 集合变化触发 watch→stopCycle，cycleIdx 复位 -1
+    await wrapper.setProps({
+      model: makeModel('m1', {
+        cover: covers[0].path,
+        covers: makeCovers('g2', 2),
+        coverUrl: 'mvimg://thumb/g0.png',
+      }),
+    })
+    // 交叉淡出过渡期间旧 <img> 仍驻留 DOM，其 error 才到达时模板实参
+    // cycleList[cycleIdx] 求值为 undefined
+    const coverVm = wrapper.findComponent(ModelCardCover).vm
+    const staleArg = coverVm.cycleList[coverVm.cycleIdx]
+    expect(staleArg).toBeUndefined()
+    // 处理器不得抛 TypeError，也不得在停播后复活轮播层
+    expect(() => coverVm.onCycleImgError(staleArg)).not.toThrow()
+    expect(wrapper.find('.cycle-layer').exists()).toBe(false)
     wrapper.unmount()
   })
 })

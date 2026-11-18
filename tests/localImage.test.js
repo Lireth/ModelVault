@@ -27,6 +27,7 @@ vi.mock('electron', () => ({
 }))
 
 import { net, protocol } from 'electron'
+import logger from '../src/main/logger'
 import { registerMvimgHandler } from '../src/main/protocol/local-image'
 import { toImageUrl } from '../src/shared/image-url'
 import { setDataRoot } from '../src/main/services/store'
@@ -195,5 +196,28 @@ describe('mvimg 条件请求（OPT-7）', () => {
     })
     expect(second.status).toBe(304)
     expect(second.headers.get('cache-control')).toContain('immutable')
+  })
+})
+
+describe('mvimg 拒绝日志净化（#66 日志伪造面）', () => {
+  it('根目录外已存在路径 403：拒绝日志输出经净化的路径文本', async () => {
+    const outsideDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-outside-'),
+    )
+    const outsideFile = path.join(outsideDir, 'evil.png')
+    await fs.writeFile(outsideFile, PNG_MAGIC)
+    const warnSpy = vi.spyOn(logger, 'warn')
+    try {
+      const res = await handler(makeRequest(outsideFile))
+      expect(res.status).toBe(403)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      const line = String(warnSpy.mock.calls[0][0])
+      // 正常路径不含控制字符：输出与原文一致（净化对常规路径透明）
+      expect(line).toBe(`mvimg 协议拒绝访问路径: ${outsideFile}`)
+      expect(line.includes('\n')).toBe(false)
+    } finally {
+      warnSpy.mockRestore()
+      await fs.rm(outsideDir, { recursive: true, force: true }).catch(() => {})
+    }
   })
 })

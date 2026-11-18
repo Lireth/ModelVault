@@ -25,10 +25,11 @@ import { normalizeBaseModel } from '../../../shared/model-categories'
  * - path:<文本>               模型绝对路径包含匹配（不区分大小写）
  * - dup:yes|no                是否属于当前可见重复组（与「重复」筛选同口径）
  * - mtime:<|<=|>|>=<数值><单位> 文件年龄（距今时长，单位 m/h/d/w/y，缺省 d）：
- *                             `mtime:<7d` 近 7 天更新；`mtime:>30d` 超过 30 天未更新
+ *                             `mtime:<7d` 近 7 天更新；`mtime:>30d` 超过 30 天未更新；
+ *                             裸值（如 `mtime:7d`）按输入单位粒度取整精确命中
  * - opened:<|<=|>|>=<数值><单位> 最近打开距今时长（单位 m/h/d/w/y，缺省 d）：
  *                             `opened:>30d` 超过 30 天未打开（含从未打开）；
- *                             `opened:never` 仅从未打开
+ *                             `opened:never` 仅从未打开；裸值同 mtime 粒度精确
  * - uses:<|<=|>|>=<次数>      累计打开次数（裸值为精确匹配）
  * - author:<文本>             safetensors 头部解析/Civitai 回填的作者包含命中
  * - trigger:<文本>            触发词或训练标签候选包含命中
@@ -81,6 +82,17 @@ function compareOp(v, op, n) {
     default:
       return v === n
   }
+}
+
+/**
+ * 年龄比较（mtime/opened 共用）：裸值（op '=' 且携带输入单位 unitMs）
+ * 按单位粒度取整后比较——毫秒级全等不可命中，按「距今 N 个单位」判定。
+ */
+function compareAge(ageMs, op, ms, unitMs) {
+  if (op === '=' && unitMs) {
+    return Math.floor(ageMs / unitMs) === Math.floor(ms / unitMs)
+  }
+  return compareOp(ageMs, op, ms)
 }
 
 /**
@@ -147,6 +159,8 @@ function parseFilter(prefix, value) {
         kind: 'mtime',
         op: m[1] || '=',
         ms: amount * TIME_UNITS[unit],
+        // 裸值（无比较符）携带输入单位粒度：命中时按该粒度取整比较
+        unitMs: m[1] ? undefined : TIME_UNITS[unit],
       }
     }
     // F4 整理类布尔语法：封面/备注/推荐参数/重复项
@@ -183,6 +197,8 @@ function parseFilter(prefix, value) {
         never: false,
         op: m[1] || '=',
         ms: amount * TIME_UNITS[unit],
+        // 裸值（无比较符）携带输入单位粒度：命中时按该粒度取整比较
+        unitMs: m[1] ? undefined : TIME_UNITS[unit],
       }
     }
     case 'uses': {
@@ -303,7 +319,7 @@ function matchFilter(m, f, resolveHash, resolveFlags, resolveDuplicate) {
       // mtime 为文件修改时间；年龄 = 当前时间 - mtime（缺失值不命中）
       const t = Number(m.mtimeMs)
       if (!Number.isFinite(t) || t <= 0) return false
-      return compareOp(Date.now() - t, f.op, f.ms)
+      return compareAge(Date.now() - t, f.op, f.ms, f.unitMs)
     }
     case 'opened': {
       // F3 使用轨迹：最近打开时间缺失视为从未打开（年龄无穷大）
@@ -313,7 +329,7 @@ function matchFilter(m, f, resolveHash, resolveFlags, resolveDuplicate) {
           : 0
       if (f.never) return openedAt === 0
       if (!openedAt) return f.op === '>' || f.op === '>='
-      return compareOp(Date.now() - openedAt, f.op, f.ms)
+      return compareAge(Date.now() - openedAt, f.op, f.ms, f.unitMs)
     }
     case 'uses': {
       const count =

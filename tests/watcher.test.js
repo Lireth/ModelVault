@@ -62,6 +62,10 @@ import {
   syncWatcher,
 } from '../src/main/services/watcher'
 import { applyPartialBaseline } from '../src/main/services/watcher-baseline'
+import { scheduleBroadcast } from '../src/main/services/watcher-broadcast'
+import { getWatcher } from '../src/main/services/watcher-state'
+// runWalk 为引擎内部 API（门面未再导出），#52 用例手动驱动轮次消除时序抖动
+import { runWalk } from '../src/main/services/watcher-poll'
 import logger from '../src/main/logger'
 
 /** 测试用小间隔时序（ms）：轮询快、防抖短，用例百毫秒级完成 */
@@ -355,6 +359,97 @@ describe('collectDirSnapshot / snapshotsEqual', () => {
     })
     expect(snapshot.has(depth8)).toBe(true)
     expect(snapshot.has(depth9)).toBe(false)
+  })
+
+  it('#41 Windows junction 不进快照也不递归（与扫描侧同口径）', async (ctx) => {
+    const outside = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-junction-out-'),
+    )
+    roots.push(outside)
+    await fs.writeFile(path.join(outside, 'outer.safetensors'), 'x')
+    await fs.mkdir(path.join(root, 'real'))
+    await fs.writeFile(path.join(root, 'real', 'inner.safetensors'), 'x')
+    try {
+      await fs.symlink(outside, path.join(root, 'link'), 'junction')
+      // junction 环：loop -> 监控根自身
+      await fs.symlink(root, path.join(root, 'loop'), 'junction')
+    } catch {
+      ctx.skip()
+    }
+
+    const snapshot = await collectDirSnapshot(root, new Set())
+
+    // junction 名不进根条目清单，目标子树无快照键（未递归）
+    expect(snapshot.get(root)).not.toContain('link')
+    expect(snapshot.get(root)).not.toContain('loop')
+    expect(snapshot.has(path.join(root, 'link'))).toBe(false)
+    expect(snapshot.has(path.join(root, 'loop'))).toBe(false)
+    // 普通子目录照常递归
+    expect(snapshot.has(path.join(root, 'real'))).toBe(true)
+    expect(snapshot.get(path.join(root, 'real'))).toContain('inner.safetensors')
+
+    // 内容快照同口径：junction 既不作为目录条目登记，也不入队
+    const statSnapshot = await collectDirSnapshot(root, new Set(), {
+      withStats: true,
+    })
+    expect(statSnapshot.get(root).map((e) => e.name)).not.toContain('link')
+    expect(statSnapshot.get(root).map((e) => e.name)).not.toContain('loop')
+    expect(statSnapshot.has(path.join(root, 'link'))).toBe(false)
+  })
+
+  it('readdir 把链接报告为普通目录时同样不进快照（lstat 复核，#41）', async (ctx) => {
+    const outside = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-junction-out-'),
+    )
+    roots.push(outside)
+    await fs.writeFile(path.join(outside, 'outer.safetensors'), 'x')
+    await fs.writeFile(path.join(root, 'a.safetensors'), 'x')
+    const link = path.join(root, 'link')
+    try {
+      if (process.platform === 'win32') {
+        await fs.symlink(outside, link, 'junction')
+      } else {
+        await fs.symlink(outside, link, 'dir')
+      }
+    } catch {
+      ctx.skip()
+    }
+
+    // 模拟 issue 前提（部分 libuv/文件系统组合）：Dirent 把 junction 报告
+    // 为普通目录（isDirectory=true、isSymbolicLink=false）
+    const originalReaddir = fs.readdir
+    const spy = vi.spyOn(fs, 'readdir').mockImplementation(async (p, opts) => {
+      const entries = await originalReaddir.call(fs, p, opts)
+      return entries.map((e) =>
+        e.name === 'link'
+          ? {
+              name: 'link',
+              isDirectory: () => true,
+              isFile: () => false,
+              isSymbolicLink: () => false,
+            }
+          : {
+              name: e.name,
+              isDirectory: () => e.isDirectory(),
+              isFile: () => e.isFile(),
+              isSymbolicLink: () => e.isSymbolicLink(),
+            },
+      )
+    })
+    try {
+      const snapshot = await collectDirSnapshot(root, new Set())
+      // lstat 复核兜底：junction 名不进快照，目标子树不被遍历
+      expect(snapshot.get(root)).not.toContain('link')
+      expect(
+        [...snapshot.keys()].some((dir) =>
+          dir.toLowerCase().startsWith(link.toLowerCase()),
+        ),
+      ).toBe(false)
+      // 普通条目不受影响
+      expect(snapshot.get(root)).toContain('a.safetensors')
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 
@@ -829,6 +924,146 @@ describe('OPT-02 扫描/监控基线协同', () => {
     expect(sentEvents).toHaveLength(0)
   })
 
+  it('交付队列内的轮询确认批次不因扫描启动而丢失，停扫补发（#51）', async () => {
+    // 轮询拉到最长：广播只来自本用例的直接调度，排除轮询干扰
+    syncWatcher(root, true, [], {
+      pollInterval: 100000,
+      broadcastDebounce: 30,
+      contentCheckInterval: 0,
+    })
+    await sleep(80)
+    sentEvents.length = 0
+
+    // 轮询确认的变更先落盘并把基线写入快照（模拟轮询轮先写快照再广播：
+    // 基线已含该变更，此后轮询 diff 恒为空，被丢弃即永久丢失）。基线写入
+    // 必须先于下方回填的 before 基线捕获，避免被误认成回填差异
+    await fs.mkdir(path.join(root, 'queued'), { recursive: true })
+    await fs.writeFile(path.join(root, 'queued', 'x.safetensors'), 'x')
+    const w = getWatcher()
+    w.snapshot.set(path.join(root, 'queued'), ['x.safetensors'])
+
+    // 挂起回填占住交付泵（delivering=true），复现「防抖定时器触发时新批次
+    // 只能在交付队列中等待」的竞态前提
+    const gate = armRefreshGate()
+    scheduleBroadcast(getWatcher(), ['race-a'], { refresh: true })
+    await waitFor(() => gate.started, '回填未开始', 3000)
+
+    // 轮询确认批次在泵被占住后入队等待
+    scheduleBroadcast(w, ['queued'])
+    await waitFor(
+      () => w.deliverQueue.length >= 1,
+      '确认批次未进入交付队列',
+      3000,
+    )
+
+    // 扫描启动：旧实现整队作废，确认批次被丢弃且基线已含变更，永不补发
+    setWatcherScanning(true)
+    expect(w.deliverQueue.length).toBe(0)
+    expect(w.pendingConfirmedDirs.has('queued')).toBe(true)
+
+    gate.release()
+    refreshGate.current = null
+    await sleep(60)
+    expect(sentEvents).toHaveLength(0)
+
+    setWatcherScanning(false)
+    await waitFor(
+      () => sentEvents.length >= 1,
+      '停扫未补发队列内确认批次',
+      3000,
+    )
+    expect(sentEvents[0].channel).toBe('models:fsChanged')
+    expect(sentEvents[0].payload.dirs).toContain('queued')
+    await sleep(150)
+    expect(sentEvents).toHaveLength(1)
+  })
+
+  it('队列内确认批次转停扫补发后被全量基线覆盖则不再重复广播（#51 配套）', async () => {
+    syncWatcher(root, true, [], {
+      pollInterval: 100000,
+      broadcastDebounce: 30,
+      contentCheckInterval: 0,
+    })
+    await sleep(80)
+    sentEvents.length = 0
+
+    await fs.mkdir(path.join(root, 'queued2'), { recursive: true })
+    await fs.writeFile(path.join(root, 'queued2', 'y.safetensors'), 'x')
+    const w = getWatcher()
+    w.snapshot.set(path.join(root, 'queued2'), ['y.safetensors'])
+
+    const gate = armRefreshGate()
+    scheduleBroadcast(getWatcher(), ['race-b'], { refresh: true })
+    await waitFor(() => gate.started, '回填未开始', 3000)
+
+    scheduleBroadcast(w, ['queued2'])
+    await waitFor(
+      () => w.deliverQueue.length >= 1,
+      '确认批次未进入交付队列',
+      3000,
+    )
+
+    setWatcherScanning(true)
+    gate.release()
+    refreshGate.current = null
+    await sleep(60)
+
+    // 模拟全量扫描完成：基线覆盖该子树，clearScannedPendingDirs 清掉转存项
+    const snapshot = await collectDirSnapshot(root)
+    syncWatcher(root, true, [], { baseline: snapshot })
+    setWatcherScanning(false)
+
+    await sleep(200)
+    expect(sentEvents).toHaveLength(0)
+  })
+
+  it('扫描期进入交付的确认批次转停扫补发而非静默吞批（#51 交付入口防御）', async () => {
+    syncWatcher(root, true, [], {
+      pollInterval: 100000,
+      broadcastDebounce: 30,
+      contentCheckInterval: 0,
+    })
+    await sleep(80)
+    sentEvents.length = 0
+
+    await fs.mkdir(path.join(root, 'queued3'), { recursive: true })
+    await fs.writeFile(path.join(root, 'queued3', 'z.safetensors'), 'x')
+    const w = getWatcher()
+    w.snapshot.set(path.join(root, 'queued3'), ['z.safetensors'])
+
+    const gate = armRefreshGate()
+    scheduleBroadcast(getWatcher(), ['race-c'], { refresh: true })
+    await waitFor(() => gate.started, '回填未开始', 3000)
+
+    scheduleBroadcast(w, ['queued3'])
+    await waitFor(
+      () => w.deliverQueue.length >= 1,
+      '确认批次未进入交付队列',
+      3000,
+    )
+
+    // 模拟「扫描已置位、队列内批次尚未被消费」的交叠窗口：deliverBroadcast
+    // 入口检出扫描期（旧实现在此静默 return，确认批次永久丢失）
+    w.scanning = true
+    gate.release()
+    refreshGate.current = null
+    await waitFor(
+      () => w.pendingConfirmedDirs.has('queued3'),
+      '确认批次未转回待广播集合',
+      3000,
+    )
+
+    setWatcherScanning(false)
+    await waitFor(
+      () => sentEvents.length >= 1,
+      '停扫未补发扫描期入队批次',
+      3000,
+    )
+    expect(sentEvents[0].payload.dirs).toContain('queued3')
+    await sleep(150)
+    expect(sentEvents).toHaveLength(1)
+  })
+
   it('全量基线过滤非法/越界/排除/隐藏条目，全部非法时回退基准遍历', async () => {
     await fs.mkdir(path.join(root, 'temp'))
     await fs.writeFile(path.join(root, 'a.safetensors'), 'x')
@@ -997,6 +1232,152 @@ describe('OPT-02 扫描/监控基线协同', () => {
     // 已覆盖的 'a' 清理；失败子树 'a/b' 的待广播保留（停扫后自动重试）
     expect(w.pendingDirs.has('a')).toBe(false)
     expect(w.pendingDirs.has('a/b')).toBe(true)
+  })
+
+  it('applyPartialBaseline：同一子树连续失败达到上限后不再保留基线与待广播项（#52）', () => {
+    const w = {
+      root,
+      snapshot: new Map([
+        [path.join(root, 'lora'), ['a.safetensors']],
+        [path.join(root, 'other'), ['b.safetensors']],
+      ]),
+      statSnapshot: null,
+      excludeNames: new Set(),
+      pendingDirs: new Set(['lora']),
+      pendingConfirmedDirs: new Set(),
+      debounceTimer: null,
+      snapshotRevision: 0,
+      idleRounds: 0,
+      failedDirRetries: new Map(),
+      maxFailedDirRetries: 2,
+    }
+    // 第 1 次失败：未达上限，B5 保护语义不变
+    expect(applyPartialBaseline(w, ['lora'], new Map(), ['lora'])).toBe(true)
+    expect(w.snapshot.get(path.join(root, 'lora'))).toEqual(['a.safetensors'])
+    expect(w.pendingDirs.has('lora')).toBe(true)
+    expect(w.failedDirRetries.get('lora')).toBe(1)
+    // 第 2 次失败（达到上限）：不再保留——基线按扫描结果收敛，待广播清理，
+    // 轮询差异不再把该子树当作「已消失」反复检出（#52 活循环根因）
+    expect(applyPartialBaseline(w, ['lora'], new Map(), ['lora'])).toBe(true)
+    expect(w.snapshot.has(path.join(root, 'lora'))).toBe(false)
+    expect(w.pendingDirs.has('lora')).toBe(false)
+    expect(w.failedDirRetries.get('lora')).toBe(2)
+    // 范围外条目不受影响
+    expect(w.snapshot.get(path.join(root, 'other'))).toEqual(['b.safetensors'])
+  })
+
+  it('applyPartialBaseline：失败子树被扫描成功覆盖后失败计数重置（#52）', () => {
+    const w = {
+      root,
+      snapshot: new Map([[path.join(root, 'lora'), ['a.safetensors']]]),
+      statSnapshot: null,
+      excludeNames: new Set(),
+      pendingDirs: new Set(),
+      pendingConfirmedDirs: new Set(),
+      debounceTimer: null,
+      snapshotRevision: 0,
+      idleRounds: 0,
+      failedDirRetries: new Map([['lora', 2]]),
+      maxFailedDirRetries: 2,
+    }
+    // 扫描成功读到 lora（无排除）：计数清零
+    const snapshot = new Map([[path.join(root, 'lora'), ['new.safetensors']]])
+    expect(applyPartialBaseline(w, ['lora'], snapshot, [])).toBe(true)
+    expect(w.failedDirRetries.size).toBe(0)
+    expect(w.snapshot.get(path.join(root, 'lora'))).toEqual(['new.safetensors'])
+    // 下次失败重新起算：仍在 B5 保护期内
+    expect(applyPartialBaseline(w, ['lora'], new Map(), ['lora'])).toBe(true)
+    expect(w.failedDirRetries.get('lora')).toBe(1)
+    expect(w.snapshot.get(path.join(root, 'lora'))).toEqual(['new.safetensors'])
+  })
+
+  it('applyPartialBaseline：达到上限的失败后代不再被父级回填保留（#52）', () => {
+    const abs = (rel) => path.join(root, ...rel.split('/'))
+    const w = {
+      root,
+      snapshot: new Map([
+        [abs('a'), ['x']],
+        [abs('a/b'), ['locked.safetensors']],
+        [abs('a/c'), ['old.safetensors']],
+      ]),
+      statSnapshot: null,
+      excludeNames: new Set(),
+      pendingDirs: new Set(['a/b']),
+      pendingConfirmedDirs: new Set(),
+      debounceTimer: null,
+      snapshotRevision: 0,
+      idleRounds: 0,
+      failedDirRetries: new Map([['a/b', 2]]),
+      maxFailedDirRetries: 2,
+    }
+    // 扫描子树 'a'，a/b 再次失败但已达到上限：不再按 B5 保留其基线与待广播
+    const snapshot = new Map([
+      [abs('a'), ['x']],
+      [abs('a/c'), ['new.safetensors']],
+    ])
+    applyPartialBaseline(w, ['a'], snapshot, ['a/b'])
+    expect(w.snapshot.get(abs('a'))).toEqual(['x'])
+    expect(w.snapshot.get(abs('a/c'))).toEqual(['new.safetensors'])
+    // 放弃保护的失败后代基线随父级回填移除，待广播项清理
+    expect(w.snapshot.has(abs('a/b'))).toBe(false)
+    expect(w.pendingDirs.has('a/b')).toBe(false)
+  })
+
+  it('曾可读目录转为不可读再恢复：失败期计数受保护，恢复后差异自动重新检出（#52）', async () => {
+    await fs.mkdir(path.join(root, 'lora'), { recursive: true })
+    await fs.writeFile(path.join(root, 'lora', 'a.safetensors'), 'x')
+    syncWatcher(root, true, [], {
+      // 超长轮询间隔：轮次由测试手动驱动，消除时序抖动
+      pollInterval: 10_000_000,
+      broadcastDebounce: 10,
+      contentCheckInterval: 0,
+      isVisible: () => true,
+      onPollScheduled: () => {},
+    })
+    const w = getWatcher()
+    await waitFor(() => w.snapshotRevision > 0, '基准基线建立')
+    sentEvents.length = 0
+
+    /** 手动驱动一轮巡检并等待在途遍历结束 */
+    async function driveWalk() {
+      await runWalk(w, false)
+      await waitFor(() => !w.polling, '巡检轮结束')
+      await sleep(30) // 广播防抖（10ms）到期
+    }
+
+    // 目录转为不可读：readdir 以 EACCES 失败（父层条目清单仍含该目录）
+    const originalReaddir = fs.readdir
+    const lockedAbs = path.join(root, 'lora')
+    const spy = vi.spyOn(fs, 'readdir').mockImplementation((p, opts) => {
+      if (String(p).toLowerCase() === lockedAbs.toLowerCase()) {
+        const err = new Error('EACCES: permission denied')
+        err.code = 'EACCES'
+        return Promise.reject(err)
+      }
+      return originalReaddir.call(fs, p, opts)
+    })
+    try {
+      // 轮 1（全量）：差异检出 lora 消失 → 广播
+      await driveWalk()
+      expect(sentEvents.some((e) => e.payload.dirs.includes('lora'))).toBe(true)
+      // 渲染层局部扫描失败（B5）：基线回填带排除语义，计数起算且受保护
+      setWatcherScanning(true)
+      refreshWatcherBaseline(root, ['lora'], new Map(), ['lora'])
+      setWatcherScanning(false)
+      expect(w.failedDirRetries.get('lora')).toBe(1)
+    } finally {
+      spy.mockRestore()
+    }
+
+    // 目录恢复可读：快照重新出现该目录，差异自动再次检出（B5 恢复语义）
+    sentEvents.length = 0
+    await driveWalk()
+    expect(sentEvents.some((e) => e.payload.dirs.includes('lora'))).toBe(true)
+    // 模拟恢复后的成功局部扫描：计数重置、基线回填
+    const snapshot = await collectDirSnapshot(lockedAbs)
+    expect(refreshWatcherBaseline(root, ['lora'], snapshot, [])).toBe(true)
+    expect(w.failedDirRetries.has('lora')).toBe(false)
+    expect(w.snapshot.get(lockedAbs)).toEqual(['a.safetensors'])
   })
 
   it('原生事件子树回填：噪声不广播，真实变更/删除按子树广播（含内容基线）', async () => {
@@ -1267,6 +1648,103 @@ describe('OPT-9 渐进内容校验（冷区轮转 + 热区即时）', () => {
       6000,
     )
   }, 15_000) // 两次检出等待 + 基准轮等待在 CI 慢盘高负载下可超过默认 5s
+})
+
+describe('#71 内容校验轮被判陈旧丢弃后不推进 lastContentCheckAt', () => {
+  /** 激活采集门控：collectDirSnapshot 挂起直至 release，started 标记已进入采集 */
+  function armSnapshotGate() {
+    const gate = {
+      started: false,
+      blocked: null,
+      release: () => {},
+      markStarted: () => {},
+    }
+    gate.blocked = new Promise((resolve) => {
+      gate.release = resolve
+    })
+    gate.markStarted = () => {
+      gate.started = true
+    }
+    refreshGate.current = gate
+    return gate
+  }
+
+  /** 启动监控并等基准内容基线建立（轮次随后由测试手动驱动） */
+  async function setupWatcher() {
+    await fs.mkdir(path.join(root, 'lora'), { recursive: true })
+    await fs.writeFile(path.join(root, 'lora', 'a.safetensors'), 'x')
+    syncWatcher(root, true, [], {
+      pollInterval: 10_000_000,
+      broadcastDebounce: 10,
+      contentCheckInterval: 30,
+      isVisible: () => true,
+      onPollScheduled: () => {},
+    })
+    const w = getWatcher()
+    await waitFor(
+      () => w.statSnapshot && w.snapshotRevision > 0,
+      '基准基线建立',
+    )
+    return w
+  }
+
+  it('内容校验轮采集期间进入扫描期被丢弃：lastContentCheckAt 不推进，下一轮立即重试', async () => {
+    const w = await setupWatcher()
+    const revisionAtBaseline = w.snapshotRevision
+    // 强制下一轮为内容校验轮（wantStats 判据只看 lastContentCheckAt）
+    w.lastContentCheckAt = 0
+
+    // 门控把 setWatcherScanning(true) 精确插入名称快照采集窗口内
+    const gate = armSnapshotGate()
+    runWalk(w, false)
+    await waitFor(() => gate.started, '内容校验轮名称快照未开始', 3000)
+    // 修复后：采集进行中尚未推进 lastContentCheckAt（旧实现在轮首已推进）
+    expect(w.lastContentCheckAt).toBe(0)
+    setWatcherScanning(true)
+    gate.release()
+    refreshGate.current = null
+    await waitFor(() => !w.polling, '巡检轮结束')
+
+    // 陈旧丢弃：本轮未写入任何基线，lastContentCheckAt 保持原值不白扣周期
+    expect(w.lastContentCheckAt).toBe(0)
+    expect(w.statSnapshot).not.toBeNull()
+    expect(w.snapshotRevision).toBe(revisionAtBaseline)
+    setWatcherScanning(false)
+
+    // 下一轮立即再次成为内容校验轮并正常完成（不再等待整个间隔）
+    await runWalk(w, false)
+    await waitFor(() => !w.polling, '重试轮结束')
+    expect(w.lastContentCheckAt).toBeGreaterThan(0)
+  })
+
+  it('内容基线缺失的重建轮被判陈旧丢弃：lastContentCheckAt 不推进，下一轮立即重试', async () => {
+    const w = await setupWatcher()
+    // 局部扫描基线置空内容快照（生产路径），强制下一轮走重建分支
+    expect(applyPartialBaseline(w, ['lora'], new Map(), [])).toBe(true)
+    expect(w.statSnapshot).toBeNull()
+    w.lastContentCheckAt = 0
+    const revisionAfterPartial = w.snapshotRevision
+
+    const gate = armSnapshotGate()
+    runWalk(w, false)
+    await waitFor(() => gate.started, '重建轮采集未开始', 3000)
+    expect(w.lastContentCheckAt).toBe(0)
+    setWatcherScanning(true)
+    gate.release()
+    refreshGate.current = null
+    await waitFor(() => !w.polling, '巡检轮结束')
+
+    expect(w.lastContentCheckAt).toBe(0)
+    expect(w.statSnapshot).toBeNull()
+    expect(w.snapshotRevision).toBe(revisionAfterPartial)
+    setWatcherScanning(false)
+
+    // 下一轮立即重试重建：基线写回且 lastContentCheckAt 随写入推进
+    await runWalk(w, false)
+    await waitFor(() => !w.polling, '重试轮结束')
+    expect(w.statSnapshot).not.toBeNull()
+    expect(w.lastContentCheckAt).toBeGreaterThan(0)
+  })
 })
 
 describe('OPT-10 原生事件 filename 缺失降级', () => {

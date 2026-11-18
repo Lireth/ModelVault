@@ -6,10 +6,11 @@ import { state, acceptConfirm } from '../src/renderer/src/store/appStore'
 import { setupComponentTest } from './helpers/componentTest'
 
 /**
- * Sidebar 组件测试（OPT-16 基建；OPT-2 回归）：
- * 模型库移除按钮原为 display:none + :hover，键盘用户不可达。
- * 修复后以 opacity + pointer-events 保留 Tab 序列，span 补 role/tabindex/
- * 键盘激活——本文件固化这些可 DOM 观测的装配特征与激活行为。
+ * Sidebar 组件测试（OPT-16 基建；OPT-2 回归；issue #78）：
+ * 模型库移除按钮原为 display:none + :hover，键盘用户不可达。修复后以
+ * opacity + pointer-events 保留 Tab 序列；issue #78 进一步把 span[role=button]
+ * 改为原生 button 并移出父级 button（消除非法交互嵌套，Enter/Space 激活由
+ * 浏览器合成 click）——本文件固化这些可 DOM 观测的装配特征与激活行为。
  */
 
 setupComponentTest()
@@ -20,45 +21,34 @@ function setupTwoRoots() {
   state.settings.modelsFolders = ['D:\\libA', 'D:\\libB']
 }
 
-describe('Sidebar 模型库移除键盘可达（OPT-2 回归）', () => {
-  it('移除按钮具备 role/tabindex/aria-label（可键盘聚焦与读屏识别）', () => {
+describe('Sidebar 模型库移除键盘可达（OPT-2 回归 / issue #78）', () => {
+  it('移除按钮为原生 button 且不嵌套于按钮内（aria-label 可读屏识别）', () => {
     setupTwoRoots()
     const wrapper = mount(Sidebar)
     const remove = wrapper.find('.root-remove')
     expect(remove.exists()).toBe(true)
-    expect(remove.attributes('role')).toBe('button')
-    expect(remove.attributes('tabindex')).toBe('0')
+    // 原生 button：无需手工 role/tabindex 装配，浏览器自带 Tab 序列与
+    // Enter/Space 激活（issue #78 前为嵌套在 button 内的 span[role=button]）
+    expect(remove.element.tagName).toBe('BUTTON')
+    expect(remove.element.closest('button')).toBe(remove.element)
     expect(remove.attributes('aria-label')).toContain('libB')
     expect(remove.attributes('title')).toContain('磁盘数据不受影响')
   })
 
-  it('Enter 键触发移除（经 saveSettings 持久化，仅移出列表不删数据）', async () => {
+  it('点击移除经 saveSettings 持久化（仅移出列表不删数据）', async () => {
     setupTwoRoots()
     window.api.settings.update.mockResolvedValue({
       settings: { ...state.settings, modelsFolders: ['D:\\libA'] },
     })
     const wrapper = mount(Sidebar)
-    await wrapper.find('.root-remove').trigger('keydown', { key: 'Enter' })
+    await wrapper.find('.root-remove').trigger('click')
     await flushPromises()
     expect(window.api.settings.update).toHaveBeenCalledWith({
       modelsFolders: ['D:\\libA'],
     })
   })
 
-  it('Space 键同样触发移除', async () => {
-    setupTwoRoots()
-    window.api.settings.update.mockResolvedValue({
-      settings: { ...state.settings, modelsFolders: ['D:\\libA'] },
-    })
-    const wrapper = mount(Sidebar)
-    await wrapper.find('.root-remove').trigger('keydown', { key: ' ' })
-    await flushPromises()
-    expect(window.api.settings.update).toHaveBeenCalledWith({
-      modelsFolders: ['D:\\libA'],
-    })
-  })
-
-  it('点击移除不触发父级「切换模型库」（事件阻断）', async () => {
+  it('点击移除不触发父级「切换模型库」（并列结构下事件不落于切换按钮）', async () => {
     setupTwoRoots()
     window.api.settings.update.mockResolvedValue({
       settings: { ...state.settings },
@@ -152,15 +142,16 @@ describe('Sidebar 智能视图（组合筛选收藏）', () => {
     wrapper.unmount()
   })
 
-  it('删除视图：键盘 Enter 先弹确认（P0-8），接受后持久化且不冒泡应用视图', async () => {
+  it('删除视图：点击删除先弹确认（P0-8），接受后持久化且不冒泡应用视图', async () => {
     state.folder = 'D:\\libA'
     seedView()
     echoSettingsUpdate()
     const wrapper = mount(Sidebar)
     const remove = wrapper.find('.view-remove')
-    expect(remove.attributes('role')).toBe('button')
-    expect(remove.attributes('tabindex')).toBe('0')
-    await remove.trigger('keydown', { key: 'Enter' })
+    // 原生 button（issue #78：不再嵌套于父级 button 内）
+    expect(remove.element.tagName).toBe('BUTTON')
+    expect(remove.element.closest('button')).toBe(remove.element)
+    await remove.trigger('click')
     await flushPromises()
     // 确认层打开且未误删；接受后完成删除
     expect(state.confirm.visible).toBe(true)
@@ -211,6 +202,42 @@ describe('Sidebar 智能视图（组合筛选收藏）', () => {
     state.folder = ''
     const wrapper = mount(Sidebar)
     expect(wrapper.find('.view-save-btn').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('输入法组合态回车不保存视图（isComposing 守卫，表单保持展开）', async () => {
+    state.folder = 'D:\\libA'
+    echoSettingsUpdate()
+    const wrapper = mount(Sidebar)
+    await wrapper.find('.view-save-btn').trigger('click')
+    const input = wrapper.find('.view-save-form input')
+    await input.setValue('我的视图')
+    input.element.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        isComposing: true,
+        bubbles: true,
+      }),
+    )
+    await flushPromises()
+    expect(wrapper.find('.view-save-form').exists()).toBe(true)
+    expect(window.api.settings.update).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('输入法组合态 Esc 不取消保存（isComposing 守卫，表单保持展开）', async () => {
+    state.folder = 'D:\\libA'
+    const wrapper = mount(Sidebar)
+    await wrapper.find('.view-save-btn').trigger('click')
+    wrapper.find('.view-save-form input').element.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Escape',
+        isComposing: true,
+        bubbles: true,
+      }),
+    )
+    await flushPromises()
+    expect(wrapper.find('.view-save-form').exists()).toBe(true)
     wrapper.unmount()
   })
 })

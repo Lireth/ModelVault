@@ -8,6 +8,7 @@ import {
   runWithConcurrency,
   samePathIgnoreCase,
   sameResolvedPathIgnoreCase,
+  sanitizeLogText,
   waitForProcessExit,
 } from '../src/main/utils'
 
@@ -158,6 +159,38 @@ describe('runWithConcurrency（O-6 固定并发任务池）', () => {
         2,
       ),
     ).rejects.toThrow('boom')
+  })
+
+  it('worker 失败后停止调度新任务，并等待在途任务全部完成才 reject（#44）', async () => {
+    const gate = deferred()
+    const started = []
+    let outcome = null
+    const pool = runWithConcurrency(
+      [0, 1, 2, 3],
+      async (task) => {
+        started.push(task)
+        if (task === 0) throw new Error('boom')
+        await gate.promise
+      },
+      2,
+    )
+    pool.then(
+      () => {
+        outcome = 'resolved'
+      },
+      (err) => {
+        outcome = err.message
+      },
+    )
+    // 任务 0 已失败、任务 1 仍在途：2/3 不得再被调度，池也不得提前 settle
+    // （修复前 Promise.all 立即 reject，在途任务逃逸调用方的清理窗口）
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(started).toEqual([0, 1])
+    expect(outcome).toBeNull()
+    // 放行在途任务：池等待其完成后才以首个错误拒绝
+    gate.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(outcome).toBe('boom')
   })
 })
 
@@ -350,5 +383,32 @@ describe('路径大小写不敏感比较（C2 单一来源）', () => {
     ).toBe(true)
     expect(sameResolvedPathIgnoreCase(p, p.toUpperCase())).toBe(true)
     expect(sameResolvedPathIgnoreCase(p, path.resolve('mv-cmp-b'))).toBe(false)
+  })
+})
+
+describe('sanitizeLogText（#66 日志伪造面）', () => {
+  it('换行与回车替换为可见转义，日志保持单行', () => {
+    expect(sanitizeLogText('a\nb')).toBe('a\\nb')
+    expect(sanitizeLogText('a\r\nb')).toBe('a\\r\\nb')
+    expect(sanitizeLogText('a\rb')).toBe('a\\rb')
+    // %0A 解码后注入伪造 [INFO] 行的形态：换行被转义后无法拆行
+    expect(sanitizeLogText('x.jpeg\n[INFO] 伪造日志行')).toBe(
+      'x.jpeg\\n[INFO] 伪造日志行',
+    )
+  })
+
+  it('制表符与其余 C0/C1 控制字符转义，普通文本原样保留', () => {
+    expect(sanitizeLogText('a\tb')).toBe('a\\tb')
+    // ESC（终端转义序列前缀）与 DEL 按 \xHH 呈现
+    expect(sanitizeLogText('a\u001b[31mb')).toBe('a\\x1b[31mb')
+    expect(sanitizeLogText('a\u007fb')).toBe('a\\x7fb')
+    expect(sanitizeLogText('a\u009fb')).toBe('a\\x9fb')
+    expect(sanitizeLogText('D:\\lib\\model.preview.png')).toBe(
+      'D:\\lib\\model.preview.png',
+    )
+    expect(sanitizeLogText('https://image.civitai.com/a/b.jpeg')).toBe(
+      'https://image.civitai.com/a/b.jpeg',
+    )
+    expect(sanitizeLogText('')).toBe('')
   })
 })

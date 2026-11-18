@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -216,6 +216,41 @@ describe('parseHeaderBuffer / readSafetensorsInfo', () => {
       await fs.writeFile(lying, Buffer.concat([lenBuf, Buffer.from('{}')]))
       expect(await readSafetensorsInfo(lying)).toBeNull()
     } finally {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+
+  /**
+   * 模拟网络盘短读：包装 fs.open 返回的句柄，位置 8（头部区）的首次
+   * read 只返回请求长度的一半，其余读取直通真实句柄。
+   */
+  function mockShortReadAtHeader() {
+    const realOpen = fs.open.bind(fs)
+    return vi.spyOn(fs, 'open').mockImplementation(async (filePath, flags) => {
+      const handle = await realOpen(filePath, flags)
+      const realRead = handle.read.bind(handle)
+      let headerCalls = 0
+      handle.read = (buf, off, len, pos) => {
+        if (pos === 8 && headerCalls === 0) {
+          headerCalls += 1
+          return realRead(buf, off, Math.max(1, len >> 1), pos)
+        }
+        return realRead(buf, off, len, pos)
+      }
+      return handle
+    })
+  }
+
+  it('头部单次 read 短读时循环续读至填满，不误判损坏（#68）', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-st-short-'))
+    const openSpy = mockShortReadAtHeader()
+    try {
+      const file = path.join(dir, 'short-read.safetensors')
+      await fs.writeFile(file, buildFile({ ss_base_model_version: 'SDXL 1.0' }))
+      const info = await readSafetensorsInfo(file)
+      expect(info?.baseModel).toBe('SDXL 1.0')
+    } finally {
+      openSpy.mockRestore()
       await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
     }
   })
@@ -502,6 +537,36 @@ describe('checkSafetensorsHealthy（F6 健康检查）', () => {
         await checkSafetensorsHealthy(path.join(dir, 'missing.safetensors')),
       ).toBe(false)
     } finally {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+
+  it('头部单次 read 短读时循环续读至填满，不误判不健康（#68）', async () => {
+    const dir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-st-short-h-'),
+    )
+    const realOpen = fs.open.bind(fs)
+    const openSpy = vi
+      .spyOn(fs, 'open')
+      .mockImplementation(async (filePath, flags) => {
+        const handle = await realOpen(filePath, flags)
+        const realRead = handle.read.bind(handle)
+        let headerCalls = 0
+        handle.read = (buf, off, len, pos) => {
+          if (pos === 8 && headerCalls === 0) {
+            headerCalls += 1
+            return realRead(buf, off, Math.max(1, len >> 1), pos)
+          }
+          return realRead(buf, off, len, pos)
+        }
+        return handle
+      })
+    try {
+      const file = path.join(dir, 'short-read.safetensors')
+      await fs.writeFile(file, buildFile({ ss_base_model_version: 'SD 1.5' }))
+      expect(await checkSafetensorsHealthy(file)).toBe(true)
+    } finally {
+      openSpy.mockRestore()
       await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
     }
   })

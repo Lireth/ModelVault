@@ -17,6 +17,7 @@ import crypto from 'node:crypto'
 
 import {
   computeFileHashOffThread,
+  createHashWorkerForTests,
   crashHashWorkerForTests,
   isRetryableHashPoolError,
   resetHashPoolForTests,
@@ -40,6 +41,14 @@ async function writeFixture(name, content) {
   await fs.writeFile(abs, content)
   const expected = crypto.createHash('sha256').update(content).digest('hex')
   return { abs, expected }
+}
+
+/** 轮询等待事件流中出现满足条件的消息（3s 超时） */
+async function waitForWorkerEvent(events, match) {
+  const deadline = Date.now() + 3000
+  while (!events.some(match) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
 }
 
 it('后台线程计算的哈希与 node crypto 结果一致，进度可达终值', async () => {
@@ -230,6 +239,50 @@ it('在途任务取消：立即 reject AbortError（同步 abort，不依赖读�
   // pump 同步派发（任务已成 current），此刻 abort 必走在途取消分支
   controller.abort()
   await expect(p).rejects.toMatchObject({ name: 'AbortError' })
+})
+
+it('取消后同 worker 立即补派：abort 按任务 id 命中，旧任务在块边界中止', async () => {
+  // 回归 issue #53：取消在途任务后主进程立即向同一 worker 补派新任务，
+  // 旧任务仍在途读块未到边界。若取消是单一 aborted 标志，新任务的 hash
+  // 消息会把它复位，旧任务将把整个大文件读完（其消息被主进程按 id 丢弃，
+  // 不致错但白耗 IO/CPU）。以裸 worker 复现池的补派时序：abort(1) 与
+  // hash(2) 连发，断言旧任务在 abort 后至多再产出少量进度并以 AbortError 收尾
+  const big = await writeFixture(
+    'redispatch-big.bin',
+    Buffer.alloc(64 * 1024 * 1024, 3),
+  )
+  const small = await writeFixture(
+    'redispatch-small.bin',
+    Buffer.from('re-dispatch'),
+  )
+  const worker = createHashWorkerForTests()
+  try {
+    const events = []
+    worker.on('message', (msg) => events.push(msg))
+    worker.postMessage({ type: 'hash', id: 1, filePath: big.abs })
+    await waitForWorkerEvent(events, (m) => m.type === 'progress' && m.id === 1)
+    // 与主进程取消路径一致的消息顺序：abort(1) → 立即补派 hash(2)
+    worker.postMessage({ type: 'abort', id: 1 })
+    worker.postMessage({ type: 'hash', id: 2, filePath: small.abs })
+
+    // 新任务不受旧任务取消影响，正常算出正确哈希
+    await waitForWorkerEvent(events, (m) => m.type === 'done' && m.id === 2)
+    const done2 = events.find((m) => m.type === 'done' && m.id === 2)
+    expect(done2.hash).toBe(small.expected)
+
+    // 旧任务在下一读块边界以 AbortError 中止，而非把 64MB 读完
+    await waitForWorkerEvent(events, (m) => m.type === 'done' && m.id === 1)
+    const done1 = events.find((m) => m.type === 'done' && m.id === 1)
+    expect(done1.name).toBe('AbortError')
+    // done(2) 之后旧任务至多再完成 1 个在途读块（8MB）；被复位时会有 ~7 个
+    const done2Idx = events.indexOf(done2)
+    const lateProgress1 = events
+      .slice(done2Idx)
+      .filter((m) => m.type === 'progress' && m.id === 1)
+    expect(lateProgress1.length).toBeLessThanOrEqual(3)
+  } finally {
+    await worker.terminate()
+  }
 })
 
 it('调用前 signal 已取消：直接 AbortError，不派发任务', async () => {

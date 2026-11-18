@@ -1,7 +1,7 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import logger from '../logger'
-import { relativeWithin } from '../utils'
+import { isLinkLikePath, relativeWithin } from '../utils'
 import { dedupeAndPruneDescendants } from '../../shared/scan-dirs'
 import { isVisibleScanEntry } from './scanner'
 import { removeSnapshotSubtree } from './watcher-baseline'
@@ -141,13 +141,22 @@ function handleWalkError(w, err) {
 async function collectHotSnapshot(w, hotRels) {
   const partial = new Map()
   const entries = await fs.readdir(w.root, { withFileTypes: true })
-  partial.set(
-    w.root,
-    entries
-      .filter((entry) => isVisibleScanEntry(entry, w.excludeNames))
-      .map((entry) => entry.name)
-      .sort(),
-  )
+  // #41 防御：junction 复核与 collectDirSnapshot/扫描侧同口径——根直属
+  // junction（部分 libuv/文件系统组合下 readdir 报告为普通目录）不进根
+  // 清单，否则热点轮根清单与扫描基线口径不一致，会对扫描侧永远忽略的
+  // junction 反复触发局部重扫（自激励）
+  const rootNames = []
+  for (const entry of entries) {
+    if (!isVisibleScanEntry(entry, w.excludeNames)) continue
+    if (
+      entry.isDirectory() &&
+      (await isLinkLikePath(path.join(w.root, entry.name)))
+    ) {
+      continue
+    }
+    rootNames.push(entry.name)
+  }
+  partial.set(w.root, rootNames.sort())
   for (const rel of hotRels) {
     if (rel === '') continue // 根直属由上方 readdir 覆盖（防御：'' 不得整树递归）
     const abs = path.join(w.root, ...rel.split('/'))
@@ -277,7 +286,7 @@ async function collectRoundSnapshot(w, { wantStats, isFullRound, hotRels }) {
  * 基线，全部目录记为本轮已校验。
  * @param {WatcherState} w 监控状态
  * @param {number} revisionAtStart 轮次开始时的快照修订号
- * @returns {Promise<void>}
+ * @returns {Promise<boolean>} 是否写入基线（false = 判陈旧丢弃，未写入）
  */
 async function rebuildStatBaseline(w, revisionAtStart) {
   const snapshot = await collectDirSnapshot(w.root, w.excludeNames, {
@@ -286,7 +295,7 @@ async function rebuildStatBaseline(w, revisionAtStart) {
   })
   if (isWalkStale(w, revisionAtStart)) {
     w.idleRounds = 0
-    return
+    return false
   }
   w.statSnapshot = /** @type {Map<string, SnapshotEntry[]>} */ (snapshot)
   w.snapshot = namesFromSnapshot(snapshot)
@@ -296,6 +305,7 @@ async function rebuildStatBaseline(w, revisionAtStart) {
   w.snapshotRevision += 1
   w.idleRounds += 1
   w.lastHotDirs = []
+  return true
 }
 
 /**
@@ -398,9 +408,12 @@ async function applyContentCheckResult(w, nameSnapshot, selected) {
  * @returns {Promise<void>}
  */
 async function runContentCheck(w, revisionAtStart) {
-  w.lastContentCheckAt = Date.now()
   if (!w.statSnapshot) {
-    await rebuildStatBaseline(w, revisionAtStart)
+    // 基线重建成功才算一次内容校验（#71：重建被判陈旧丢弃时未写入任何
+    // 基线，不推进 lastContentCheckAt，下一轮立即重试而非白扣一个周期）
+    if (await rebuildStatBaseline(w, revisionAtStart)) {
+      w.lastContentCheckAt = Date.now()
+    }
     return
   }
   const nameSnapshot = /** @type {Map<string, string[]>} */ (
@@ -412,6 +425,10 @@ async function runContentCheck(w, revisionAtStart) {
     w.idleRounds = 0
     return
   }
+  // #71：陈旧校验通过后才推进 lastContentCheckAt——被判陈旧丢弃的轮次
+  // 未写入基线，提前推进会让 walkOnce 的 wantStats 把下一次内容校验推后
+  // 整个 contentCheckInterval（口径同 runBaselineWalk：写入成功才记录）
+  w.lastContentCheckAt = Date.now()
   const selected = selectContentCheckDirs(w, nameSnapshot)
   const changedDirs = await applyContentCheckResult(w, nameSnapshot, selected)
   if (changedDirs.length === 0) {

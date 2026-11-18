@@ -1,5 +1,6 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useDialogFocus } from '../../composables/useDialogFocus'
 import { coverImageUrl, state } from '../../store/appStore'
 
 /**
@@ -7,9 +8,12 @@ import { coverImageUrl, state } from '../../store/appStore'
  * - 缩放：滚轮（以光标为锚点）/ 工具栏按钮 / 双击在适应与 2.5 倍间切换；
  * - 平移：左键拖拽（指针捕获，拖出窗口不丢手势），切换图片或复位时归零；
  * - 切换：← → 方向键 / 两侧按钮，相邻图自动预加载避免白闪；
- * - 快捷键：Esc 关闭、Delete 删除当前、D 设为默认、+/-/0 缩放控制；
+ * - 快捷键：Esc 关闭、Delete 删除当前、D 设为默认、+/-/0 缩放控制
+ *   （Ctrl/Meta/Alt 组合键让位浏览器与系统，不触发画廊行为）；
  * - 键盘经 window 捕获阶段监听并阻断冒泡——Esc 不会穿透关闭详情页（F1），
  *   删除确认层可见时整键让位（与详情页同一约定）；
+ * - 焦点：挂载即记录触发元素并移入容器（useDialogFocus），Tab 在画廊控件内
+ *   首末循环不穿透遮罩，关闭（卸载）时焦点归还触发元素；
  * - 层级 --z-gallery（详情之上、Toast/确认层之下），删除确认与提示正常置顶。
  */
 
@@ -90,8 +94,6 @@ const tx = ref(0)
 const ty = ref(0)
 const dragging = ref(false)
 
-const stageEl = ref(null)
-
 function resetView() {
   scale.value = 1
   tx.value = 0
@@ -168,6 +170,9 @@ function onPointerUp() {
 function onKeydown(e) {
   // 确认层（删除确认）可见时整键让位（F1：模态确认期间底层不得响应）
   if (state.confirm.visible) return
+  // 组合键（Ctrl/Meta/Alt）不归属画廊快捷键：Ctrl+D / Alt+0 等让位
+  // 浏览器与系统语义，且不拦截、不阻断（继续传播给底层监听）
+  if (e.ctrlKey || e.metaKey || e.altKey) return
   switch (e.key) {
     case 'Escape':
       e.preventDefault()
@@ -220,12 +225,16 @@ function onKeydown(e) {
   }
 }
 
-onMounted(async () => {
+/* ---------------- 焦点管理（O10：模态焦点陷阱 + 关闭归还触发元素） ---------------- */
+
+const { containerRef: stageEl, focusIn, onContainerKeydown } = useDialogFocus()
+
+onMounted(() => {
   window.addEventListener('keydown', onKeydown, { capture: true })
   preloadAround()
-  await nextTick()
-  // 焦点移入画廊：避免 Enter/Space 触发详情页上的残留焦点按钮
-  stageEl.value?.focus()
+  // 挂载即打开态：记录触发元素并移焦点入画廊——避免 Enter/Space 触发
+  // 详情页上的残留焦点按钮；卸载（关闭画廊）时由 composable 归还焦点
+  focusIn()
 })
 
 onBeforeUnmount(() => {
@@ -244,6 +253,7 @@ onBeforeUnmount(() => {
       aria-label="封面全屏画廊"
       @wheel="onWheel"
       @dblclick="onDblClick"
+      @keydown="onContainerKeydown"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
