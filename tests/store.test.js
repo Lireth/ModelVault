@@ -196,6 +196,40 @@ describe('不可信 store.json 清洗（B-04）', () => {
     expect({}.alias).toBeUndefined()
   })
 
+  it('normalizeModelMeta 截断 params.sampler/scheduler（#90）：自由字符串无界入库', () => {
+    const data = normalizeStoreData({
+      models: {
+        'm.safetensors': {
+          params: { sampler: 'x'.repeat(5000), scheduler: 'y'.repeat(5000) },
+        },
+      },
+    })
+    const params = data.models['m.safetensors'].params
+    expect(params.sampler).toHaveLength(100)
+    expect(params.scheduler).toHaveLength(100)
+  })
+
+  it('normalizeStoreData 剔除库外穿越形态键（.. 段/反斜杠/绝对形态）', () => {
+    const parsed = JSON.parse(
+      JSON.stringify({
+        models: {
+          '../evil.safetensors': { alias: 'up' },
+          'a/../b.safetensors': { alias: 'mid' },
+          'a\\b.safetensors': { alias: 'backslash' },
+          '/abs.safetensors': { alias: 'abs' },
+          'C:x.safetensors': { alias: 'drive' },
+          'dir/model.safetensors': { alias: 'nested-ok' },
+          'ok.safetensors': { alias: 'ok' },
+        },
+      }),
+    )
+    const data = normalizeStoreData(parsed)
+    expect(Object.keys(data.models).sort()).toEqual([
+      'dir/model.safetensors',
+      'ok.safetensors',
+    ])
+  })
+
   it('磁盘加载时剔除危险键，后续保存也不会把危险键写回', async () => {
     await fs.mkdir(path.join(root, '.modelvault'), { recursive: true })
     await fs.writeFile(

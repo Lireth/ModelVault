@@ -342,7 +342,8 @@ describe('models:importCover', () => {
     )
     const handler = getRegisteredHandler('models:importCover')
     const res = await handler(makeEvent(), { id: outsideId, path: png })
-    expect(res.error).toBe('封面关联失败（模型需位于当前模型根目录内）')
+    // #89：归属校验前置到封面文件落盘之前（不再先写出孤儿封面再拒绝）
+    expect(res.error).toBe('模型不在当前根目录内，无法导入封面')
   })
 })
 

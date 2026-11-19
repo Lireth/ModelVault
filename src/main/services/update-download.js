@@ -179,6 +179,12 @@ let pendingAssets = null
 /** 已完成校验的更新包路径（安装入口的唯一合法来源） */
 let downloadedFile = ''
 /**
+ * 已完成校验的更新包 SHA256 基准（与 downloadedFile 同步写入）：安装前
+ * 复核文件现状用，覆盖「下载后文件被替换」窗口（update-install.js）。
+ * @type {string}
+ */
+let downloadedChecksum = ''
+/**
  * 进行中下载的取消控制器（null 表示空闲）
  * @type {AbortController|null}
  */
@@ -203,8 +209,13 @@ export function getDownloadedFile() {
   return downloadedFile
 }
 
-/** 流式计算文件 SHA256（小写 hex） */
-async function hashFile(filePath) {
+/** 已完成校验的更新包 SHA256 基准（安装前复核用；仅本模块写入） */
+export function getDownloadedChecksum() {
+  return downloadedChecksum
+}
+
+/** 流式计算文件 SHA256（小写 hex；安装前复核复用同一实现） */
+export async function hashFile(filePath) {
   const hash = createHash('sha256')
   await updateHashFromFile(hash, filePath)
   return hash.digest('hex').toLowerCase()
@@ -290,6 +301,7 @@ export async function downloadUpdatePackage(onProgress) {
         const signature = await verifyUpdateSignature(target)
         if (signature.ok) {
           downloadedFile = target
+          downloadedChecksum = expected
           logger.info(`更新包已存在且校验通过，直接复用: ${target}`)
           return { path: target, size: size || 0, reused: true }
         }
@@ -421,6 +433,7 @@ export async function downloadUpdatePackage(onProgress) {
     await fsp.rm(target, { force: true }).catch(() => {})
     await fsp.rename(partPath, target)
     downloadedFile = target
+    downloadedChecksum = expected
     logger.info(`更新包下载完成并通过校验: ${target}（${received} 字节）`)
     return { path: target, size: received }
   } catch (err) {

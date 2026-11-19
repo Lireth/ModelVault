@@ -351,6 +351,20 @@ describe('safeCoverName', () => {
     expect(safeCoverName('library/covers/..')).toBe('')
     expect(safeCoverName('settings.json')).toBe('')
   })
+
+  it('拒绝 NTFS ADS 形态（冒号任意位置）与 Windows 保留设备名（含带扩展名形态）', () => {
+    // ADS：`a:b.png` 会写入宿主文件 a 的备用数据流
+    expect(safeCoverName('library/covers/a:b.png')).toBe('')
+    // 保留设备名：写入空设备（writeFile 成功但无文件，恢复计数虚报）
+    expect(safeCoverName('library/covers/nul')).toBe('')
+    expect(safeCoverName('library/covers/CON.safetensors')).toBe('')
+    expect(safeCoverName('library/covers/com1.png')).toBe('')
+    expect(safeCoverName('library/covers/LPT9.zip')).toBe('')
+    expect(safeCoverName('library/covers/Aux')).toBe('')
+    // 含保留名的普通文件名不受影响
+    expect(safeCoverName('library/covers/nulx.png')).toBe('nulx.png')
+    expect(safeCoverName('library/covers/console.png')).toBe('console.png')
+  })
 })
 
 describe('exportBackup', () => {

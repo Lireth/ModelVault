@@ -86,8 +86,16 @@ export function parseBackupManifest(bytes) {
 }
 
 /**
+ * Windows 保留设备名（大小写不敏感，含 `nul.png` / `CON.safetensors` 等
+ * 带扩展名形态）：这类名字写入时命中空设备或失败，恢复计数虚报。
+ */
+const WINDOWS_RESERVED_NAMES = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\..*)?$/i
+
+/**
  * 校验 zip 条目名是否为安全的封面文件名（纯函数）：
- * 拒绝路径穿越（..）、绝对/驱动器路径与任何子目录结构——
+ * 拒绝路径穿越（..）、绝对/驱动器路径、任何子目录结构、冒号（NTFS 备用
+ * 数据流 ADS，如 `a:b.png` 会写入宿主文件 `a` 的数据流）与 Windows 保留
+ * 设备名（`nul`/`con`/`com1` 等，含带扩展名形态）——
  * 备份 zip 可能来自不可信来源，条目名不得参与拼接近路。
  * @param {string} entryName zip 内的完整条目名
  * @returns {string} 安全的文件名；不合法返回 ''
@@ -98,7 +106,9 @@ export function safeCoverName(entryName) {
   const base = entryName.slice(LIB_COVERS_PREFIX.length)
   if (!base || base === '.' || base === '..') return ''
   if (base.includes('/') || base.includes('\\')) return ''
-  // 驱动器相对路径（如 C:x.png）在 Windows 上会改变解析基准
-  if (/^[a-zA-Z]:/.test(base)) return ''
+  // 冒号一律拒绝：驱动器相对路径（C:x.png）会改变解析基准；
+  // 其余 `a:b.png` 形态是 NTFS ADS，绕过「封面落盘」审计面
+  if (base.includes(':')) return ''
+  if (WINDOWS_RESERVED_NAMES.test(base)) return ''
   return base
 }
