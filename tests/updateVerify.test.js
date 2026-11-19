@@ -23,6 +23,7 @@ import { spawn } from 'node:child_process'
 import {
   parseChecksumHash,
   normalizeThumbprint,
+  resolveSignerThumbprint,
   evaluateUpdateSignature,
   verifyUpdateSignature,
 } from '../src/main/services/update-verify'
@@ -100,6 +101,26 @@ describe('normalizeThumbprint（指纹规范化）', () => {
     expect(normalizeThumbprint('01 23-45:67')).toBe('01234567')
     expect(normalizeThumbprint(undefined)).toBe('')
     expect(normalizeThumbprint(null)).toBe('')
+  })
+})
+
+describe('resolveSignerThumbprint（指纹取值优先级，纯函数）', () => {
+  it('构建期指纹存在时优先，运行期环境变量不得覆盖（E1 钉扎不可被运行期替换）', () => {
+    expect(resolveSignerThumbprint('b'.repeat(40), 'a'.repeat(40))).toBe(
+      'b'.repeat(40),
+    )
+  })
+
+  it('无构建期指纹（未签名构建）时回退环境变量；两者皆空返回空串', () => {
+    expect(resolveSignerThumbprint('', 'a'.repeat(40))).toBe('a'.repeat(40))
+    expect(resolveSignerThumbprint('', '')).toBe('')
+    expect(resolveSignerThumbprint(undefined, null)).toBe('')
+  })
+
+  it('构建期指纹与运行期值均做 trim 归一', () => {
+    expect(
+      resolveSignerThumbprint(`  ${'b'.repeat(40)}  `, 'a'.repeat(40)),
+    ).toBe('b'.repeat(40))
   })
 })
 

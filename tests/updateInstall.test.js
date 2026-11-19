@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
+import { createHash } from 'node:crypto'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
@@ -10,6 +11,7 @@ import { fakeUserData } from './setup'
  * 安装入口的完整拒绝链与成功链——
  * - 未下载 / 路径越界（update 目录之外）/ 文件名不符版本白名单：拒绝执行；
  * - 文件不存在或不是普通文件：拒绝（异步 stat，P0-5 主线程零同步 IO）；
+ * - 缺少 SHA256 基准 / 哈希与基准不一致（拒绝并清理）/ 哈希读取失败：拒绝；
  * - 安装前签名复核失败：拒绝（覆盖「下载后文件被替换」窗口）；
  * - 成功：spawn 直接传参（不经 shell）携带 --wait-for-pid=<pid>、
  *   detached+unref 不阻塞退出，500ms 后才 app.quit；
@@ -19,6 +21,8 @@ import { fakeUserData } from './setup'
 
 const UPDATE_DIR = path.join(fakeUserData, 'update')
 const TARGET = path.join(UPDATE_DIR, 'ModelVault-9.9.9.exe')
+const FILE_CONTENT = 'EXE'
+const FILE_CHECKSUM = createHash('sha256').update(FILE_CONTENT).digest('hex')
 
 vi.mock('electron', () => ({
   app: {
@@ -33,6 +37,8 @@ vi.mock('node:child_process', () => ({ spawn: vi.fn() }))
 vi.mock('../src/main/services/update-download', () => ({
   getDownloadedFile: vi.fn(() => ''),
   getUpdateDir: vi.fn(() => UPDATE_DIR),
+  getDownloadedChecksum: vi.fn(() => ''),
+  hashFile: vi.fn(),
 }))
 
 vi.mock('../src/main/services/update-verify', () => ({
@@ -41,7 +47,11 @@ vi.mock('../src/main/services/update-verify', () => ({
 
 import { app } from 'electron'
 import { spawn } from 'node:child_process'
-import { getDownloadedFile } from '../src/main/services/update-download'
+import {
+  getDownloadedChecksum,
+  getDownloadedFile,
+  hashFile,
+} from '../src/main/services/update-download'
 import { verifyUpdateSignature } from '../src/main/services/update-verify'
 import { installUpdatePackage } from '../src/main/services/update-install'
 
@@ -64,7 +74,11 @@ beforeEach(async () => {
   })
   await fsp.rm(UPDATE_DIR, { recursive: true, force: true })
   await fsp.mkdir(UPDATE_DIR, { recursive: true })
-  await fsp.writeFile(TARGET, 'EXE')
+  await fsp.writeFile(TARGET, FILE_CONTENT)
+  vi.mocked(getDownloadedChecksum).mockReset()
+  vi.mocked(getDownloadedChecksum).mockReturnValue(FILE_CHECKSUM)
+  vi.mocked(hashFile).mockReset()
+  vi.mocked(hashFile).mockResolvedValue(FILE_CHECKSUM)
 })
 
 afterEach(() => {
@@ -120,6 +134,29 @@ describe('installUpdatePackage（拒绝链）', () => {
     expect(r.error).toBe('更新包数字签名无效（HashMismatch）')
     expect(spawn).not.toHaveBeenCalled()
     expect(verifyUpdateSignature).toHaveBeenCalledWith(path.resolve(TARGET))
+  })
+
+  it('缺少 SHA256 校验和基准：拒绝安装（防模块态脱钩时静默放行）', async () => {
+    vi.mocked(getDownloadedChecksum).mockReturnValue('')
+    const r = await installUpdatePackage()
+    expect(r.error).toContain('完整性基准')
+    expect(spawn).not.toHaveBeenCalled()
+    expect(verifyUpdateSignature).not.toHaveBeenCalled()
+  })
+
+  it('文件哈希与下载时基准不一致：拒绝安装并清理（未配置指纹时的完整性防线）', async () => {
+    vi.mocked(hashFile).mockResolvedValue('a'.repeat(64))
+    const r = await installUpdatePackage()
+    expect(r.error).toContain('校验和不一致')
+    expect(spawn).not.toHaveBeenCalled()
+    await expect(fsp.access(TARGET)).rejects.toThrow()
+  })
+
+  it('文件哈希读取失败：拒绝安装', async () => {
+    vi.mocked(hashFile).mockRejectedValue(new Error('EIO'))
+    const r = await installUpdatePackage()
+    expect(r.error).toContain('无法读取')
+    expect(spawn).not.toHaveBeenCalled()
   })
 })
 

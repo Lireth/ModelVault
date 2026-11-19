@@ -44,11 +44,24 @@ export function normalizeThumbprint(value) {
     .toUpperCase()
 }
 
-/** 当前签名者指纹原始值：运行期环境变量 > 构建期注入 */
+/**
+ * 指纹取值解析（纯函数，单测锁定）：构建期注入的官方指纹优先。
+ * 运行期环境变量仅在未签名构建（无构建期指纹）时作为兜底配置——若允许
+ * 环境变量覆盖构建期钉扎，本机进程可静默替换发布者校验基准（E1 失效）。
+ * @param {string} buildThumbprint 构建期 Vite define 注入的指纹
+ * @param {string} envThumbprint 运行期环境变量值
+ * @returns {string} 生效的指纹原始值（可能为空串）
+ */
+export function resolveSignerThumbprint(buildThumbprint, envThumbprint) {
+  return String(buildThumbprint || envThumbprint || '').trim()
+}
+
+/** 当前签名者指纹原始值：构建期注入优先，环境变量仅兜底（见 resolveSignerThumbprint） */
 function signerThumbprintSetting() {
-  return String(
-    process.env.MODELVAULT_SIGNER_THUMBPRINT || BUILD_SIGNER_THUMBPRINT || '',
-  ).trim()
+  return resolveSignerThumbprint(
+    BUILD_SIGNER_THUMBPRINT,
+    process.env.MODELVAULT_SIGNER_THUMBPRINT,
+  )
 }
 
 /**
