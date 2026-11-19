@@ -3,7 +3,12 @@ import fsp from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { app } from 'electron'
 import logger from '../logger'
-import { getDownloadedFile, getUpdateDir } from './update-download'
+import {
+  getDownloadedChecksum,
+  getDownloadedFile,
+  getUpdateDir,
+  hashFile,
+} from './update-download'
 import { verifyUpdateSignature } from './update-verify'
 import { errorMessage } from '../../shared/error-text'
 
@@ -24,8 +29,8 @@ const QUIT_DELAY_MS = 500
  * 安全（V-06）：
  * - 不经过 cmd/start，路径作为 spawn 的参数直接传递，无命令拼接注入面；
  * - 仅接受本服务下载并校验通过、且位于 update 目录、文件名符合版本白名单的路径；
- * - E1：启动前再次校验 Authenticode（防止下载后文件被替换），配置了
- *   发布者指纹时失败即拒绝执行。
+ * - 启动前复核文件 SHA256 与下载时记录的校验和基准一致（防下载后替换）；
+ * - E1：启动前再次校验 Authenticode（配置了发布者指纹时失败即拒绝执行）。
  * @returns {Promise<{ok: true} | {error: string}>}
  */
 export async function installUpdatePackage() {
@@ -51,6 +56,29 @@ export async function installUpdatePackage() {
     }
   } catch {
     return { error: '更新包不存在，请重新下载更新' }
+  }
+  // 安装前复核 SHA256：与下载完成时记录的校验和基准比对，覆盖「下载后
+  // 文件被替换」的窗口——未配置发布者指纹时（验签退化为放行），这是
+  // 安装前唯一的文件完整性防线；替换文件将被拒绝并清理
+  const expectedChecksum = getDownloadedChecksum()
+  if (!expectedChecksum) {
+    return { error: '更新包缺少完整性基准，请重新下载更新' }
+  }
+  let actualChecksum
+  try {
+    actualChecksum = await hashFile(resolved)
+  } catch {
+    return { error: '更新包无法读取，请重新下载更新' }
+  }
+  if (actualChecksum !== expectedChecksum) {
+    logger.warn(
+      `更新包与下载时校验和不一致（可能已被替换），拒绝安装并清理: ${resolved}`,
+    )
+    await fsp.rm(resolved, { force: true }).catch(() => {})
+    return {
+      error:
+        '更新包与下载时的校验和不一致（可能已被替换），已拒绝安装并清理，请重新下载更新',
+    }
   }
   // 安装前复核签名：覆盖「下载后文件被替换」的窗口
   const signature = await verifyUpdateSignature(resolved)
