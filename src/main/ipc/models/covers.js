@@ -3,6 +3,7 @@ import logger from '../../logger'
 import { runWithConcurrency } from '../../utils'
 import {
   getMetaMapByAbsPath,
+  getCurrentRoot,
   getModelMeta,
   relativizeCover,
   setModelMeta,
@@ -24,7 +25,12 @@ import {
   startThumbDrain,
   trackDeferredOwner,
 } from './decorate'
-import { wrapHandler, checkModelId } from '../handler'
+import {
+  wrapHandler,
+  checkModelId,
+  checkModelIdInRootReal,
+  withMaintenanceLock,
+} from '../handler'
 import { errorMessage } from '../../../shared/error-text'
 
 /**
@@ -114,30 +120,46 @@ export async function refreshCoverThumbnail(win, modelId, absCover) {
 
 /** 注册封面链路的 IPC 处理器 */
 export function registerCoverHandlers() {
+  // 封面写链路的统一前置（#89，与 deleteModel 等破坏性操作同一约定）：
+  // - O6 归属校验按 realpath：上传/粘贴/导入在封面文件落盘之前执行（此前
+  //   仅字面非空校验，库外 id 也会先写出封面文件再被 appendCoverMeta 拒绝，
+  //   残留孤儿文件）；删除/清空物理删文件必须执行
+  // - 维护锁（OPT-14）：与大维护操作（扫描/恢复/跨库传输/切库）互斥——
+  //   pruneOrphanCovers 与整目录交换期间新增/删除封面会让恢复结果与
+  //   元数据指向错位。file-op 彼此兼容，不改变封面链路的可用并发
+  /** 归属校验（realpath），非法返回错误文案 */
+  const checkCoverTarget = (id, message) =>
+    checkModelIdInRootReal(id, { message })
+
   // 上传/添加模型封面图（追加到多封面列表，无默认时设为默认）
   wrapHandler(
     'models:uploadCover',
     async (event, { id } = {}) => {
-      const invalid = checkModelId(id)
-      if (invalid) return { error: invalid }
-      // win 可为 null（fromWebContents 无对应窗口）：选择对话框运行期视为
-      // 无父窗口弹出，类型声明仅接受 BrowserWindow，此处按运行期契约断言
-      const win = /** @type {import('electron').BrowserWindow} */ (
-        BrowserWindow.fromWebContents(event.sender)
-      )
-      const result = await pickAndSaveCover(win)
-      if (result.canceled) return { canceled: true }
-      if (result.error) return { error: result.error }
+      return withMaintenanceLock('file-op', getCurrentRoot(), async () => {
+        const invalid = await checkCoverTarget(
+          id,
+          '模型不在当前根目录内，无法添加封面',
+        )
+        if (invalid) return { error: invalid }
+        // win 可为 null（fromWebContents 无对应窗口）：选择对话框运行期视为
+        // 无父窗口弹出，类型声明仅接受 BrowserWindow，此处按运行期契约断言
+        const win = /** @type {import('electron').BrowserWindow} */ (
+          BrowserWindow.fromWebContents(event.sender)
+        )
+        const result = await pickAndSaveCover(win)
+        if (result.canceled) return { canceled: true }
+        if (result.error) return { error: result.error }
 
-      const applied = appendCoverMeta(id, result.cover)
-      if ('error' in applied) return applied
-      logger.info(`模型封面已添加: ${id}`)
-      await refreshCoverThumbnail(
-        win,
-        id,
-        applied.meta.cover ? resolveCoverSafe(applied.meta.cover) : '',
-      )
-      return buildCoverResponse(result.cover, applied.meta)
+        const applied = appendCoverMeta(id, result.cover)
+        if ('error' in applied) return applied
+        logger.info(`模型封面已添加: ${id}`)
+        await refreshCoverThumbnail(
+          win,
+          id,
+          applied.meta.cover ? resolveCoverSafe(applied.meta.cover) : '',
+        )
+        return buildCoverResponse(result.cover, applied.meta)
+      })
     },
     { errorPrefix: '封面上传失败' },
   )
@@ -146,20 +168,25 @@ export function registerCoverHandlers() {
   wrapHandler(
     'models:pasteCover',
     async (event, { id } = {}) => {
-      const invalid = checkModelId(id)
-      if (invalid) return { error: invalid }
-      const result = await saveClipboardImage()
-      if (result.error) return result
+      return withMaintenanceLock('file-op', getCurrentRoot(), async () => {
+        const invalid = await checkCoverTarget(
+          id,
+          '模型不在当前根目录内，无法添加封面',
+        )
+        if (invalid) return { error: invalid }
+        const result = await saveClipboardImage()
+        if (result.error) return result
 
-      const applied = appendCoverMeta(id, result.cover)
-      if ('error' in applied) return applied
-      logger.info(`剪贴板封面已添加: ${id}`)
-      await refreshCoverThumbnail(
-        BrowserWindow.fromWebContents(event.sender),
-        id,
-        applied.meta.cover ? resolveCoverSafe(applied.meta.cover) : '',
-      )
-      return buildCoverResponse(result.cover, applied.meta)
+        const applied = appendCoverMeta(id, result.cover)
+        if ('error' in applied) return applied
+        logger.info(`剪贴板封面已添加: ${id}`)
+        await refreshCoverThumbnail(
+          BrowserWindow.fromWebContents(event.sender),
+          id,
+          applied.meta.cover ? resolveCoverSafe(applied.meta.cover) : '',
+        )
+        return buildCoverResponse(result.cover, applied.meta)
+      })
     },
     { errorPrefix: '封面粘贴失败' },
   )
@@ -196,30 +223,32 @@ export function registerCoverHandlers() {
   wrapHandler(
     'models:deleteCover',
     async (event, { id, cover } = {}) => {
-      const invalid =
-        checkModelId(id) ||
-        (typeof cover === 'string' && cover ? '' : '无效的封面参数')
-      if (invalid) return { error: invalid }
-      const existing = getModelMeta(id) || {}
-      const covers = Array.isArray(existing.covers) ? existing.covers : []
-      if (!covers.includes(cover)) {
-        return { error: '封面不存在，无法删除' }
-      }
-      const abs = resolveCoverSafe(cover)
-      const wasDefault = existing.cover === cover
-      const newCovers = covers.filter((c) => c !== cover)
-      // 删除默认封面时自动回退到下一张（无剩余则为空，卡片回退 sidecar 预览图）
-      const meta = setModelMeta(id, {
-        ...existing,
-        covers: newCovers,
-        cover: wasDefault ? newCovers[0] || '' : existing.cover,
+      return withMaintenanceLock('file-op', getCurrentRoot(), async () => {
+        const invalid =
+          (await checkCoverTarget(id, '模型不在当前根目录内，无法删除封面')) ||
+          (typeof cover === 'string' && cover ? '' : '无效的封面参数')
+        if (invalid) return { error: invalid }
+        const existing = getModelMeta(id) || {}
+        const covers = Array.isArray(existing.covers) ? existing.covers : []
+        if (!covers.includes(cover)) {
+          return { error: '封面不存在，无法删除' }
+        }
+        const abs = resolveCoverSafe(cover)
+        const wasDefault = existing.cover === cover
+        const newCovers = covers.filter((c) => c !== cover)
+        // 删除默认封面时自动回退到下一张（无剩余则为空，卡片回退 sidecar 预览图）
+        const meta = setModelMeta(id, {
+          ...existing,
+          covers: newCovers,
+          cover: wasDefault ? newCovers[0] || '' : existing.cover,
+        })
+        if (!meta) {
+          return { error: '封面删除失败' }
+        }
+        if (abs) await deleteCoverFile(abs)
+        logger.info(`封面已删除: ${id} -> ${cover}`)
+        return buildCoverResponse(resolveCoverSafe(meta.cover), meta)
       })
-      if (!meta) {
-        return { error: '封面删除失败' }
-      }
-      if (abs) await deleteCoverFile(abs)
-      logger.info(`封面已删除: ${id} -> ${cover}`)
-      return buildCoverResponse(resolveCoverSafe(meta.cover), meta)
     },
     { errorPrefix: '封面删除失败' },
   )
@@ -228,23 +257,28 @@ export function registerCoverHandlers() {
   wrapHandler(
     'models:clearCovers',
     async (event, { id } = {}) => {
-      const invalid = checkModelId(id)
-      if (invalid) return { error: invalid }
-      const existing = getModelMeta(id) || {}
-      const covers = Array.isArray(existing.covers) ? existing.covers : []
-      const meta = setModelMeta(id, { ...existing, covers: [], cover: '' })
-      if (!meta) {
-        return { error: '封面移除失败' }
-      }
-      // 物理文件删除放在元数据更新之后：单张失败不阻塞整体（失败残留的
-      // 孤儿文件由 pruneOrphanCovers 周期清理兜底）。OPT-09：有界并发删除
-      await runWithConcurrency(
-        covers,
-        (rel) => deleteCoverFile(resolveCoverSafe(rel)),
-        8,
-      )
-      logger.info(`已移除全部示例图: ${id}（${covers.length} 张）`)
-      return buildCoverResponse('', meta)
+      return withMaintenanceLock('file-op', getCurrentRoot(), async () => {
+        const invalid = await checkCoverTarget(
+          id,
+          '模型不在当前根目录内，无法移除封面',
+        )
+        if (invalid) return { error: invalid }
+        const existing = getModelMeta(id) || {}
+        const covers = Array.isArray(existing.covers) ? existing.covers : []
+        const meta = setModelMeta(id, { ...existing, covers: [], cover: '' })
+        if (!meta) {
+          return { error: '封面移除失败' }
+        }
+        // 物理文件删除放在元数据更新之后：单张失败不阻塞整体（失败残留的
+        // 孤儿文件由 pruneOrphanCovers 周期清理兜底）。OPT-09：有界并发删除
+        await runWithConcurrency(
+          covers,
+          (rel) => deleteCoverFile(resolveCoverSafe(rel)),
+          8,
+        )
+        logger.info(`已移除全部示例图: ${id}（${covers.length} 张）`)
+        return buildCoverResponse('', meta)
+      })
     },
     { errorPrefix: '封面移除失败' },
   )
@@ -254,31 +288,35 @@ export function registerCoverHandlers() {
   wrapHandler(
     'models:clearAllCovers',
     async () => {
-      const metas = getMetaMapByAbsPath()
-      let clearedModels = 0
-      let clearedImages = 0
-      const deletions = []
-      for (const [id, meta] of Object.entries(metas)) {
-        const covers = Array.isArray(meta.covers) ? meta.covers : []
-        if (covers.length === 0) continue
-        setModelMeta(id, { ...meta, covers: [], cover: '' })
-        clearedModels += 1
-        clearedImages += covers.length
-        for (const rel of covers) {
-          deletions.push(resolveCoverSafe(rel))
+      // 全库物理删除同样互斥于扫描/恢复（#89）：getMetaMapByAbsPath 的
+      // 快照期间若发生整目录交换，删除会落到交换后的旧目录
+      return withMaintenanceLock('file-op', getCurrentRoot(), async () => {
+        const metas = getMetaMapByAbsPath()
+        let clearedModels = 0
+        let clearedImages = 0
+        const deletions = []
+        for (const [id, meta] of Object.entries(metas)) {
+          const covers = Array.isArray(meta.covers) ? meta.covers : []
+          if (covers.length === 0) continue
+          setModelMeta(id, { ...meta, covers: [], cover: '' })
+          clearedModels += 1
+          clearedImages += covers.length
+          for (const rel of covers) {
+            deletions.push(resolveCoverSafe(rel))
+          }
         }
-      }
-      // 引用清理已全部完成后统一删文件：单张失败不阻塞（孤儿文件由
-      // pruneOrphanCovers 周期清理兜底）。OPT-09：全库封面可能数千张，
-      // 统一有界并发，避免瞬时耗尽文件句柄
-      await runWithConcurrency(deletions, (abs) => deleteCoverFile(abs), 8)
-      // 同步清理被移除封面对应的失效缩略图（按源图路径哈希前缀精确匹配，
-      // 不误删 sidecar 预览图等仍在使用的缩略图；失败不阻塞清理结果）
-      await removeThumbsForSources(deletions)
-      logger.info(
-        `已清空全部示例图: ${clearedModels} 个模型共 ${clearedImages} 张`,
-      )
-      return { cleared: clearedModels, images: clearedImages }
+        // 引用清理已全部完成后统一删文件：单张失败不阻塞（孤儿文件由
+        // pruneOrphanCovers 周期清理兜底）。OPT-09：全库封面可能数千张，
+        // 统一有界并发，避免瞬时耗尽文件句柄
+        await runWithConcurrency(deletions, (abs) => deleteCoverFile(abs), 8)
+        // 同步清理被移除封面对应的失效缩略图（按源图路径哈希前缀精确匹配，
+        // 不误删 sidecar 预览图等仍在使用的缩略图；失败不阻塞清理结果）
+        await removeThumbsForSources(deletions)
+        logger.info(
+          `已清空全部示例图: ${clearedModels} 个模型共 ${clearedImages} 张`,
+        )
+        return { cleared: clearedModels, images: clearedImages }
+      })
     },
     { errorPrefix: '示例图清空失败' },
   )
@@ -287,19 +325,24 @@ export function registerCoverHandlers() {
   wrapHandler(
     'models:importCover',
     async (event, { id, path: source } = {}) => {
-      const invalid = checkModelId(id)
-      if (invalid) return { error: invalid }
-      const result = await importCoverFromPath(source)
-      if (result.error) return result
-      const applied = appendCoverMeta(id, result.cover)
-      if ('error' in applied) return applied
-      logger.info(`拖拽封面已添加: ${id}`)
-      await refreshCoverThumbnail(
-        BrowserWindow.fromWebContents(event.sender),
-        id,
-        applied.meta.cover ? resolveCoverSafe(applied.meta.cover) : '',
-      )
-      return buildCoverResponse(result.cover, applied.meta)
+      return withMaintenanceLock('file-op', getCurrentRoot(), async () => {
+        const invalid = await checkCoverTarget(
+          id,
+          '模型不在当前根目录内，无法导入封面',
+        )
+        if (invalid) return { error: invalid }
+        const result = await importCoverFromPath(source)
+        if (result.error) return result
+        const applied = appendCoverMeta(id, result.cover)
+        if ('error' in applied) return applied
+        logger.info(`拖拽封面已添加: ${id}`)
+        await refreshCoverThumbnail(
+          BrowserWindow.fromWebContents(event.sender),
+          id,
+          applied.meta.cover ? resolveCoverSafe(applied.meta.cover) : '',
+        )
+        return buildCoverResponse(result.cover, applied.meta)
+      })
     },
     { errorPrefix: '封面导入失败' },
   )
