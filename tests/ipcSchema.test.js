@@ -547,6 +547,27 @@ describe('IPC payload 通道校验（validateIpcPayload）', () => {
     ).toBe('')
   })
 
+  it('models:exportModelList：content 字符上限 10M（#90，字节量恒低于 handler 32MB 兜底）', () => {
+    expect(
+      validateIpcPayload('models:exportModelList', {
+        format: 'csv',
+        content: 'a'.repeat(10 * 1024 * 1024),
+      }),
+    ).toBe('')
+    expect(
+      validateIpcPayload('models:exportModelList', {
+        format: 'csv',
+        content: 'a'.repeat(10 * 1024 * 1024 + 1),
+      }),
+    ).toBe('content 长度超限（≤10485760）')
+    expect(
+      validateIpcPayload('models:exportModelList', {
+        format: 'nope',
+        content: 'x',
+      }),
+    ).toBe('')
+  })
+
   it('window:setTheme：theme 必填字符串', () => {
     expect(validateIpcPayload('window:setTheme', { theme: 'dark' })).toBe('')
     expect(validateIpcPayload('window:setTheme', {})).toBe('theme 缺失')
