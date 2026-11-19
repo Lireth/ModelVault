@@ -287,5 +287,11 @@ export function validateValue(value, rule, label, depth = 1) {
     return rule.nullable ? '' : `${label} 不能为 null`
   }
   const validate = KIND_VALIDATORS[rule.kind]
-  return validate ? validate(value, rule, label, depth) : ''
+  // fail-closed（#88）：域文件把构造器误拼/漏写（如 vObj 手误成未知 kind，
+  // 或规则对象缺 kind）时，该字段不得静默放行——结构门禁的存在意义就是
+  // 「非法 payload 不进入业务代码」，未知规则按非法处理
+  if (!validate) {
+    return `${label} 规则类型未知（kind: ${String(rule.kind)}），拒绝校验`
+  }
+  return validate(value, rule, label, depth)
 }

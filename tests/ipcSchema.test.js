@@ -216,6 +216,19 @@ describe('IPC schema 校验器（validateValue）', () => {
       }),
     ).toBe('')
   })
+
+  it('未知 rule.kind fail-closed（#88）：规则误拼/缺 kind 一律拒绝而非静默放行', () => {
+    // 模拟域文件手误（如 vObj 写成未登记的 kind）
+    expect(validateValue({}, { kind: 'objct' }, 'f')).toBe(
+      'f 规则类型未知（kind: objct），拒绝校验',
+    )
+    // 规则对象缺 kind 同样拒绝
+    expect(validateValue('x', { max: 10 }, 'f')).toBe(
+      'f 规则类型未知（kind: undefined），拒绝校验',
+    )
+    // required 缺失的检查先于 kind 判定（缺 kind 但字段缺省时不误报）
+    expect(validateValue(undefined, { kind: 'objct' }, 'f')).toBe('')
+  })
 })
 
 describe('IPC payload 通道校验（validateIpcPayload）', () => {
@@ -572,6 +585,36 @@ describe('IPC 通道单一来源对账（O2）', () => {
     for (const rule of Object.values(IPC_PAYLOAD_SCHEMAS)) {
       expect(['object', 'void']).toContain(rule.kind)
     }
+  })
+
+  it('注册表全量规则 kind 对账（#88）：任意深度不得出现未知/缺失 kind', () => {
+    const KNOWN = new Set([
+      'void',
+      'string',
+      'boolean',
+      'int',
+      'array',
+      'object',
+    ])
+    const problems = []
+    const walk = (rule, at) => {
+      if (!rule || typeof rule !== 'object') {
+        problems.push(`${at}: 规则缺失或非对象`)
+        return
+      }
+      if (!KNOWN.has(rule.kind))
+        problems.push(`${at}: kind=${String(rule.kind)}`)
+      if (rule.items) walk(rule.items, `${at}.items`)
+      if (rule.fields) {
+        for (const [name, child] of Object.entries(rule.fields)) {
+          walk(child, `${at}.${name}`)
+        }
+      }
+    }
+    for (const [channel, schema] of Object.entries(IPC_PAYLOAD_SCHEMAS)) {
+      walk(schema, channel)
+    }
+    expect(problems).toEqual([])
   })
 
   it('事件通道单一来源（O9）：preload subscribe 调用点与注册表一致', () => {
