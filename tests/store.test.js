@@ -196,6 +196,19 @@ describe('不可信 store.json 清洗（B-04）', () => {
     expect({}.alias).toBeUndefined()
   })
 
+  it('normalizeModelMeta 截断 params.sampler/scheduler（#90）：自由字符串无界入库', () => {
+    const data = normalizeStoreData({
+      models: {
+        'm.safetensors': {
+          params: { sampler: 'x'.repeat(5000), scheduler: 'y'.repeat(5000) },
+        },
+      },
+    })
+    const params = data.models['m.safetensors'].params
+    expect(params.sampler).toHaveLength(100)
+    expect(params.scheduler).toHaveLength(100)
+  })
+
   it('normalizeStoreData 剔除库外穿越形态键（.. 段/反斜杠/绝对形态）', () => {
     const parsed = JSON.parse(
       JSON.stringify({

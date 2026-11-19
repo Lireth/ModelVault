@@ -212,8 +212,15 @@ export function normalizeModelMeta(raw) {
       // CFG 为区间字段；兼容旧版单值 cfg（迁移为 min = max = 旧值）
       cfgMin: pickLegacyRes(params.cfgMin, [params.cfg]),
       cfgMax: pickLegacyRes(params.cfgMax, [params.cfg]),
-      sampler: typeof params.sampler === 'string' ? params.sampler : '',
-      scheduler: typeof params.scheduler === 'string' ? params.scheduler : '',
+      // 采样器/调度器（#90）：自由字符串同样截断（100 与 alias/baseModel
+      // 同口径）——这两个字段此前是 normalizeModelMeta 中唯一无长度上限的
+      // 字符串，任意长度输入会随每次快照/增量重复序列化
+      sampler:
+        typeof params.sampler === 'string' ? params.sampler.slice(0, 100) : '',
+      scheduler:
+        typeof params.scheduler === 'string'
+          ? params.scheduler.slice(0, 100)
+          : '',
       // 模型精度（如 FP16 / BF16 / FP32 / FP8）
       precision:
         typeof params.precision === 'string'
