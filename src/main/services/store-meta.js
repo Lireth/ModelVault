@@ -299,7 +299,11 @@ export function getMetaMapByAbsPath() {
   const root = getCurrentRoot()
   if (!metaState.data || !root) return result
   for (const [relKey, meta] of Object.entries(metaState.data.models)) {
-    result[path.join(root, relKey)] = meta
+    const abs = path.join(root, relKey)
+    // 穿越形态键（历史脏数据/外部写入）会产库外绝对路径：与当前根
+    // 做归属回验，回验不过的键不参与健康检查/孤儿判定
+    if (toRelKey(abs) !== relKey) continue
+    result[abs] = meta
   }
   return result
 }
@@ -312,9 +316,14 @@ export function getMetaMapByAbsPath() {
 export function getModelIdsByAbsPath() {
   const root = getCurrentRoot()
   if (!metaState.data || !root) return []
-  return Object.keys(metaState.data.models).map((relKey) =>
-    path.join(root, relKey),
-  )
+  const ids = []
+  for (const relKey of Object.keys(metaState.data.models)) {
+    const abs = path.join(root, relKey)
+    // 与 getMetaMapByAbsPath 同一库外路径防线（穿越键不外泄）
+    if (toRelKey(abs) !== relKey) continue
+    ids.push(abs)
+  }
+  return ids
 }
 
 /**
