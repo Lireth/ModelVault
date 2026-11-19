@@ -84,7 +84,7 @@
 
 ## 快速开始
 
-环境要求：Windows 10 及以上，Node.js ≥ 22.22.2（`package.json` `engines` 强制要求；CI 与发布构建统一以 Node 24 执行）。
+环境要求：Windows 10 及以上，Node.js ≥ 22.22.2（`package.json` `engines` 声明；仓库未启用 `engine-strict`，npm 对越界版本默认仅告警不阻断，请自行确认版本——jsdom 30 要求 Node ≥ 22.22；CI 与发布构建统一以 Node 24 执行）。
 
 ```bash
 # 1. 安装依赖（prepare 脚本自动激活 husky pre-commit 钩子）
@@ -237,7 +237,7 @@ wrapHandler('my:channel', async (event, payload) => {
 
 ### 测试
 
-单元测试位于 `tests/`（91 个文件 / 1623 用例；渲染层 store 测试自 appStore.test.js 按域拆分为 appStore*.test.js，共享装配在 `tests/helpers/storeTest.js`）：主进程纯逻辑与 IPC handler（node 环境）、渲染层 store 按域拆分测试、组件交互测试（`@vue/test-utils` + jsdom，文件头 `// @vitest-environment jsdom` 声明）。Electron API 在 `tests/setup.js` 中统一 mock，公共挂载/IPC 脚手架在 `tests/helpers/` 中复用。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证；`npm run test:coverage` 受防退化阈值门禁约束（Statements 75% / Branches 68% / Functions 72% / Lines 77%），门禁按「实测基线下浮 ~10pt」口径随基线上移棘轮渐进上调（棘轮记录见 `vitest.config.mjs` 注释）。
+单元测试位于 `tests/`（101 个文件 / 1886 用例；渲染层 store 测试自 appStore.test.js 按域拆分为 appStore*.test.js，共享装配在 `tests/helpers/storeTest.js`）：主进程纯逻辑与 IPC handler（node 环境）、渲染层 store 按域拆分测试、组件交互测试（`@vue/test-utils` + jsdom，文件头 `// @vitest-environment jsdom` 声明）。Electron API 在 `tests/setup.js` 中统一 mock，公共挂载/IPC 脚手架在 `tests/helpers/` 中复用。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证；`npm run test:coverage` 受防退化阈值门禁约束（Statements 75% / Branches 68% / Functions 72% / Lines 77%），门禁按「实测基线下浮 ~10pt」口径随基线上移棘轮渐进上调（棘轮记录见 `vitest.config.mjs` 注释）。
 
 ### CI 与发版
 
