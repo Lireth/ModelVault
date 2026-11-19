@@ -60,7 +60,7 @@ export function resolveSignerThumbprint(buildThumbprint, envThumbprint) {
 function signerThumbprintSetting() {
   return resolveSignerThumbprint(
     BUILD_SIGNER_THUMBPRINT,
-    process.env.MODELVAULT_SIGNER_THUMBPRINT,
+    process.env.MODELVAULT_SIGNER_THUMBPRINT || '',
   )
 }
 
