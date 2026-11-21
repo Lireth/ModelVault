@@ -138,7 +138,17 @@ function onAutoApplyTriggers(words) {
 }
 
 /** 供 ModelDetail.vue 第三列的 AutoInfoPanel「一键填入」跨列调用 */
-defineExpose({ onAutoApplyResolution, onAutoApplyTriggers })
+defineExpose({ onAutoApplyResolution, onAutoApplyTriggers, applyAliasUpdate })
+
+/** 顶部「备注名」快捷编辑保存后同步本地副本：只更新 alias 字段与其脏检测
+ *  基线，不触碰其它字段的未保存编辑——否则表单里的旧备注名会在下次
+ *  「保存参数」时覆写回主进程（C8 脏保护语境下的字段级同步） */
+function applyAliasUpdate(alias) {
+  form.alias = alias
+  if (formSnapshot.value) {
+    formSnapshot.value = { ...formSnapshot.value, alias }
+  }
+}
 
 /** 将表单收集为可校验的参数对象 */
 function collectParams() {

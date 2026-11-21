@@ -10,11 +10,12 @@ import {
   closeDetail,
   detailPosition,
   openAdjacentDetail,
-  renameModel,
   revealModel,
+  saveModelData,
   selectedModel,
   showContextMenu,
   state,
+  toast,
 } from '../store/appStore'
 
 /**
@@ -75,17 +76,19 @@ const positionText = computed(
   () => `${detailPosition.value.index + 1} / ${detailPosition.value.total}`,
 )
 
-/* ---------------- 文件重命名（N1） ---------------- */
+/* ---------------- 显示名（备注名）快速编辑 ----------------
+ * 仅写元数据 alias（软件内显示名），不改动磁盘上的模型文件名；
+ * 中部表单「备注名」为完整编辑入口，此处提供免「保存参数」的快捷通道 */
 
 const renameOpen = ref(false)
 const renameValue = ref('')
 const renameBusy = ref(false)
 const renameInput = ref(null)
 
-/** 打开重命名条：预填当前文件基名（不含扩展名）并聚焦全选 */
+/** 打开显示名编辑条：预填当前备注名（为空显示占位文件名）并聚焦全选 */
 function openRename() {
-  if (!selectedModel.value || selectedModel.value.disabled) return
-  renameValue.value = selectedModel.value.name || ''
+  if (!selectedModel.value) return
+  renameValue.value = selectedModel.value.alias || ''
   renameOpen.value = true
   nextTick(() => {
     renameInput.value?.focus()
@@ -98,7 +101,7 @@ function cancelRename() {
   renameOpen.value = false
 }
 
-/** 输入法组合中的 Enter/Esc 不提交/取消（中文文件名输入不被截断） */
+/** 输入法组合中的 Enter/Esc 不提交/取消（中文名称输入不被截断） */
 function onRenameEnter(e) {
   if (e?.isComposing) return
   submitRename()
@@ -109,21 +112,30 @@ function onRenameEscape(e) {
   cancelRename()
 }
 
-/** 提交重命名：成功后主进程已迁移文件/元数据，重扫后详情关闭 */
+/** 提交显示名：留空即清除备注名（卡片恢复显示文件名）；模型 id 不变，
+ *  详情保持打开，标题即时跟随（alias || name） */
 async function submitRename() {
   if (renameBusy.value || !selectedModel.value) return
-  const name = renameValue.value.trim()
-  if (!name) return
   renameBusy.value = true
   try {
-    const ok = await renameModel(selectedModel.value.id, name)
-    if (ok) renameOpen.value = false
+    const alias = renameValue.value.trim()
+    const id = selectedModel.value.id
+    const ok = await saveModelData(id, { alias }, { silent: true })
+    if (!ok) return
+    renameOpen.value = false
+    // 同步中部表单副本（只动 alias 一个字段与其脏检测基线），
+    // 避免表单里未保存的旧备注名在下次「保存参数」时覆写回来（C8）
+    metaFormRef.value?.applyAliasUpdate(alias)
+    toast(
+      'success',
+      alias ? `显示名已更新为「${alias}」` : '已清除显示名，恢复显示文件名',
+    )
   } finally {
     renameBusy.value = false
   }
 }
 
-// 切换模型时收起重命名条，避免把待改名输入带到另一模型
+// 切换模型时收起显示名编辑条，避免把待改输入带到另一模型
 watch(
   () => selectedModel.value?.id,
   () => {
@@ -193,11 +205,10 @@ watch(
           <div class="detail-header-actions">
             <button
               class="btn"
-              :disabled="selectedModel.disabled"
-              title="重命名模型文件（扩展名保持不变）"
+              title="修改软件内显示的名称（不改动磁盘文件名）"
               @click="openRename"
             >
-              重命名
+              备注名
             </button>
             <button class="btn" @click="revealModel(selectedModel.id)">
               打开所在文件夹
@@ -219,27 +230,29 @@ watch(
           </div>
         </header>
 
-        <!-- 文件重命名（N1）：只改基名，扩展名由主进程保留 -->
+        <!-- 显示名（备注名）快速编辑：仅写元数据 alias，不改动磁盘文件名；
+             留空提交即清除备注名，卡片恢复显示文件名 -->
         <div v-if="renameOpen" class="rename-bar">
-          <span class="rename-label">新文件名</span>
+          <span class="rename-label">显示名</span>
           <input
             ref="renameInput"
             v-model="renameValue"
             class="rename-input"
             type="text"
-            maxlength="120"
+            maxlength="100"
             spellcheck="false"
             :placeholder="selectedModel.name"
+            title="留空提交则清除备注名，恢复显示文件名"
             @keydown.enter.prevent="onRenameEnter"
             @keydown.esc.stop.prevent="onRenameEscape"
           />
-          <span class="rename-ext">{{ selectedModel.ext }}</span>
+          <span class="rename-hint">仅软件内显示，不改动磁盘文件名</span>
           <button
             class="btn btn-primary"
-            :disabled="renameBusy || !renameValue.trim()"
+            :disabled="renameBusy"
             @click="submitRename"
           >
-            {{ renameBusy ? '重命名中…' : '确认' }}
+            {{ renameBusy ? '保存中…' : '保存' }}
           </button>
           <button class="btn" :disabled="renameBusy" @click="cancelRename">
             取消
@@ -358,7 +371,7 @@ watch(
   flex-shrink: 0;
 }
 
-/* 重命名条：位于标题与正文之间，编辑态不遮挡三列内容 */
+/* 显示名编辑条：位于标题与正文之间，编辑态不遮挡三列内容 */
 .rename-bar {
   display: flex;
   align-items: center;
@@ -383,7 +396,6 @@ watch(
   background: color-mix(in srgb, var(--bg-card) 60%, transparent);
   color: var(--text);
   font-size: var(--font-xs);
-  font-family: var(--font-mono);
   outline: none;
 }
 
@@ -391,11 +403,11 @@ watch(
   border-color: var(--accent);
 }
 
-.rename-ext {
+.rename-hint {
   flex-shrink: 0;
-  font-family: var(--font-mono);
   font-size: var(--font-xs);
   color: var(--text-muted);
+  opacity: 0.8;
 }
 
 .detail-body {

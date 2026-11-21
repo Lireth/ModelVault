@@ -250,7 +250,6 @@ export {
   showContextMenu,
   handleMenuAction,
   toggleDisabledModel,
-  renameModel,
   moveModelTo,
   importModels,
   cancelImport,

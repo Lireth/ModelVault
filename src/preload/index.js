@@ -275,13 +275,6 @@ const api = {
     toggleDisabled: (id, disabled) =>
       invokeValidated('models:toggleDisabled', { id, disabled }),
     /**
-     * 重命名模型文件（N1）：name 为不含扩展名的新文件名，扩展名保持不变；
-     * 同名 sidecar 一并改名，元数据键即时迁移。
-     * 返回 { path, renamedSidecars, sidecarWarnings } / { error }
-     */
-    renameModel: (id, name) =>
-      invokeValidated('models:renameModel', { id, name }),
-    /**
      * 库内移动模型（F11，目标目录经原生对话框选择），同名 sidecar 一并移动
      * （目标同名跳过不覆盖，失败回传警告），
      * 返回 { path, targetRelDir, sidecarWarnings } / { canceled } / { error }

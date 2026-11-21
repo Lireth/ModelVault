@@ -5,8 +5,8 @@
  * 与 ipc/models/index.js 的注册路径不变。
  *
  * 域划分：
- * - files-rename.js：models:toggleDisabled（F10 禁用/启用）+ models:renameModel
- *   （N1 重命名）——「改名类」操作，维护锁内执行；
+ * - files-rename.js：models:toggleDisabled（F10 禁用/启用）——「改名类」操作，
+ *   维护锁内执行（软件内重命名已改为备注名机制，不再改动磁盘文件名）；
  * - files-organize.js：models:moveModelTo（F11 库内移动）+ models:transferToLibrary
  *   （F-3 跨库传输）+ models:organizeByTags（自动标签一键整理）——「移动类」操作；
  * - files-import.js：models:importModels（F2 外部模型导入，复制/移动入台）。
@@ -17,7 +17,6 @@ export {
   planImportTarget,
   splitModelFileName,
 } from './files-import'
-export { planRenameTarget } from './files-rename'
 export { planOrganizeMoves } from './files-organize'
 
 import { registerImportModelsHandler } from './files-import'

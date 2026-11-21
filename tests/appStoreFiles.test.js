@@ -10,7 +10,6 @@ import {
   deleteModel,
   moveModelTo,
   removeModelTag,
-  renameModel,
   revealModel,
   replaceModels,
   setModelTags,
@@ -288,65 +287,6 @@ describe('文件操作编排（F10/F11）', () => {
     )
   })
 
-  it('renameModel 成功：关闭详情、提示并重扫；未变化时提示且不重扫', async () => {
-    replaceModels([makeModel('m1')])
-    state.selectedId = 'm1'
-    api.models.renameModel.mockResolvedValue({
-      path: 'D:\\models\\b.safetensors',
-      renamedSidecars: 2,
-      sidecarWarnings: [],
-    })
-
-    expect(await renameModel('m1', ' b ')).toBe(true)
-    expect(api.models.renameModel).toHaveBeenCalledWith('m1', 'b')
-    expect(state.selectedId).toBeNull()
-    expect(state.toasts.some((t) => t.text.includes('已重命名为「b」'))).toBe(
-      true,
-    )
-    expect(api.models.scan).toHaveBeenCalledTimes(1)
-
-    api.models.scan.mockClear()
-    api.models.renameModel.mockResolvedValue({
-      path: 'm1',
-      sidecarWarnings: [],
-    })
-    expect(await renameModel('m1', 'm1')).toBe(true)
-    expect(state.toasts.some((t) => t.text.includes('文件名未变化'))).toBe(true)
-    expect(api.models.scan).not.toHaveBeenCalled()
-  })
-
-  it('renameModel sidecar 未迁移时以 warn 提示', async () => {
-    api.models.renameModel.mockResolvedValue({
-      path: 'D:\\models\\b.safetensors',
-      sidecarWarnings: ['a.txt 的目标已存在，已跳过'],
-    })
-
-    expect(await renameModel('m1', 'b')).toBe(true)
-    expect(
-      state.toasts.some(
-        (t) => t.type === 'warn' && t.text.includes('1 个 sidecar 未迁移'),
-      ),
-    ).toBe(true)
-  })
-
-  it('renameModel 空名/扫描中不发起 IPC；业务错误与 IPC reject 均提示', async () => {
-    expect(await renameModel('m1', '   ')).toBe(false)
-    state.scanning = true
-    expect(await renameModel('m1', 'b')).toBe(false)
-    state.scanning = false
-    expect(api.models.renameModel).not.toHaveBeenCalled()
-
-    api.models.renameModel.mockResolvedValue({ error: '目标文件名已存在' })
-    expect(await renameModel('m1', 'b')).toBe(false)
-    expect(state.toasts.some((t) => t.text.includes('目标文件名已存在'))).toBe(
-      true,
-    )
-
-    api.models.renameModel.mockRejectedValue(new Error('通道断开'))
-    expect(await renameModel('m1', 'b')).toBe(false)
-    expect(state.toasts.some((t) => t.text.includes('重命名失败'))).toBe(true)
-  })
-
   it('deleteModel 删除当前打开模型：selectedId 与 detailDirty 同步清除（FIX-9）', async () => {
     api.models.deleteModel.mockResolvedValue({ ok: true })
     replaceModels([makeModel('m1'), makeModel('m2')])
@@ -361,20 +301,6 @@ describe('文件操作编排（F10/F11）', () => {
     // 删除当前打开模型：详情被强制关闭，MetaForm 已卸载、无人写回脏标记，
     // 不同步清除会让下一次 openDetail 误弹「放弃修改」确认（幽灵确认框）
     expect(await deleteModel('m2')).toBe(true)
-    expect(state.selectedId).toBeNull()
-    expect(state.detailDirty).toBe(false)
-  })
-
-  it('renameModel 重命名当前打开模型：detailDirty 同步清除（FIX-9）', async () => {
-    api.models.renameModel.mockResolvedValue({
-      path: 'D:\\models\\b.safetensors',
-      sidecarWarnings: [],
-    })
-    replaceModels([makeModel('m1')])
-    state.selectedId = 'm1'
-    state.detailDirty = true
-
-    expect(await renameModel('m1', 'b')).toBe(true)
     expect(state.selectedId).toBeNull()
     expect(state.detailDirty).toBe(false)
   })

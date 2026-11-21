@@ -460,46 +460,72 @@ describe('ModelDetail 自由标签编辑器（F-5）', () => {
   })
 })
 
-describe('ModelDetail 文件重命名（N1）', () => {
-  it('打开重命名条预填基名，回车提交新文件名并重扫', async () => {
-    selectModel({ name: 'old-name' })
-    state.folder = 'D:\\models'
-    window.api.models.renameModel = vi.fn().mockResolvedValue({
-      path: 'D:\\models\\new-name.safetensors',
-      sidecarWarnings: [],
-    })
-    window.api.models.scan = vi
+describe('ModelDetail 显示名（备注名）快速编辑', () => {
+  it('打开编辑条预填备注名，回车提交 saveModelData 且详情保持打开', async () => {
+    selectModel({ name: 'file-name', alias: '旧备注名' })
+    window.api.models.saveModelData = vi
       .fn()
-      .mockResolvedValue({ models: [], errors: [], byType: {}, durationMs: 1 })
+      .mockResolvedValue({ meta: { alias: '新备注名' } })
     const wrapper = mountDetail()
     await flushPromises()
 
-    const btn = wrapper.findAll('button').find((b) => b.text() === '重命名')
+    const btn = wrapper.findAll('button').find((b) => b.text() === '备注名')
     expect(btn).toBeTruthy()
     await btn.trigger('click')
     await flushPromises()
 
     const input = wrapper.find('.rename-input')
     expect(input.exists()).toBe(true)
-    expect(input.element.value).toBe('old-name')
-    await input.setValue('new-name')
+    expect(input.element.value).toBe('旧备注名')
+    await input.setValue('新备注名')
     await input.trigger('keydown', { key: 'Enter' })
     await flushPromises()
 
-    expect(window.api.models.renameModel).toHaveBeenCalledWith('m1', 'new-name')
-    expect(state.selectedId).toBeNull()
+    // 仅写元数据 alias，不发起任何文件改名/重扫 IPC
+    expect(window.api.models.saveModelData).toHaveBeenCalledWith({
+      id: 'm1',
+      alias: '新备注名',
+    })
+    expect(window.api.models.renameModel).toBeUndefined()
+    // 模型 id 不变：详情保持打开
+    expect(state.selectedId).toBe('m1')
     expect(
-      state.toasts.some((t) => t.text.includes('已重命名为「new-name」')),
+      state.toasts.some((t) => t.text.includes('显示名已更新为「新备注名」')),
     ).toBe(true)
     wrapper.unmount()
   })
 
-  it('禁用模型的「重命名」按钮不可用', async () => {
+  it('留空提交清除备注名并提示恢复显示文件名', async () => {
+    selectModel({ alias: '旧备注名' })
+    window.api.models.saveModelData = vi
+      .fn()
+      .mockResolvedValue({ meta: { alias: '' } })
+    const wrapper = mountDetail()
+    await flushPromises()
+
+    const btn = wrapper.findAll('button').find((b) => b.text() === '备注名')
+    await btn.trigger('click')
+    await flushPromises()
+
+    const input = wrapper.find('.rename-input')
+    await input.setValue('   ')
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(window.api.models.saveModelData).toHaveBeenCalledWith({
+      id: 'm1',
+      alias: '',
+    })
+    expect(state.toasts.some((t) => t.text.includes('已清除显示名'))).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('禁用模型同样可编辑备注名（不涉及文件操作）', async () => {
     selectModel({ disabled: true })
     const wrapper = mountDetail()
     await flushPromises()
-    const btn = wrapper.findAll('button').find((b) => b.text() === '重命名')
-    expect(btn.element.disabled).toBe(true)
+    const btn = wrapper.findAll('button').find((b) => b.text() === '备注名')
+    expect(btn.element.disabled).toBe(false)
     wrapper.unmount()
   })
 })

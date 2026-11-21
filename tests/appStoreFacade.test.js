@@ -199,7 +199,6 @@ const EXPECTED_EXPORTS = [
   'handleMenuAction',
   // 文件操作（批次 4）
   'toggleDisabledModel',
-  'renameModel',
   'moveModelTo',
   'importModels',
   'cancelImport',

@@ -42,7 +42,6 @@ export function makeApiMock() {
         Promise.resolve({ updated: [], failed: [] }),
       ),
       toggleDisabled: vi.fn(),
-      renameModel: vi.fn(),
       moveModelTo: vi.fn(),
       deleteModel: vi.fn(),
       popupMenu: vi.fn(),

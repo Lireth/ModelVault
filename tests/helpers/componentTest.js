@@ -51,9 +51,6 @@ function makeComponentApiMock() {
       setModelTagsBulk: vi.fn(() =>
         Promise.resolve({ updated: [], failed: [] }),
       ),
-      renameModel: vi.fn(() =>
-        Promise.resolve({ path: '', sidecarWarnings: [] }),
-      ),
       renameTag: vi.fn(() => Promise.resolve({ changed: 0 })),
       removeTag: vi.fn(() => Promise.resolve({ changed: 0 })),
       deleteModel: vi.fn(),

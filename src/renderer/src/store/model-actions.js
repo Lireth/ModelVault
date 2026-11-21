@@ -377,57 +377,6 @@ export async function toggleDisabledModel(id, disabled) {
 }
 
 /**
- * 重命名模型文件（N1）：name 为不含扩展名的新文件名。
- * 扩展名由主进程保留；同名 sidecar 一并改名，元数据键即时迁移。
- * 成功后关闭当前详情并对所在子树局部扫描收敛新文件名（OPT-03）。
- * @param {string} id 模型 id
- * @param {string} name 新文件名（不含扩展名）
- * @returns {Promise<boolean>} 是否完成重命名
- */
-export async function renameModel(id, name) {
-  const trimmed = typeof name === 'string' ? name.trim() : ''
-  if (!trimmed) {
-    toast('warn', '请输入新的文件名')
-    return false
-  }
-  if (state.scanning || state.partialScanning || state.importing) {
-    toast('warn', '正在扫描、增量刷新或导入中，请稍候')
-    return false
-  }
-  let res
-  try {
-    res = await window.api.models.renameModel(id, trimmed)
-  } catch (err) {
-    toast('error', `重命名失败: ${errorMessage(err)}`)
-    return false
-  }
-  if (res?.canceled) return false
-  if (res?.error) {
-    toast('error', res.error)
-    return false
-  }
-  if (res?.path === id) {
-    toast('info', '文件名未变化')
-    return true
-  }
-  const warnings = Array.isArray(res?.sidecarWarnings)
-    ? res.sidecarWarnings
-    : []
-  if (warnings.length > 0) {
-    toast(
-      'warn',
-      `已重命名为「${trimmed}」，但 ${warnings.length} 个 sidecar 未迁移`,
-    )
-  } else {
-    toast('success', `已重命名为「${trimmed}」`)
-  }
-  // 文件 id 已变化：关闭当前详情（同步清脏，FIX-9），所在子树局部扫描收敛新文件名
-  clearSelectedModel()
-  await refreshAfterFileChange([id])
-  return true
-}
-
-/**
  * 库内移动模型（F11）：目标目录经主进程原生对话框选择，
  * 元数据随键迁移，成功后对源/目标子树局部扫描刷新（OPT-03）
  * @param {string} id 模型 id

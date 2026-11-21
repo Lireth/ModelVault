@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 /**
  * 文件操作后的局部扫描收敛（OPT-03）单元测试：
- * 此前重命名/禁用/移动（单模型与批量）一律整表 scanModels()——全库磁盘
+ * 此前禁用/移动（单模型与批量）一律整表 scanModels()——全库磁盘
  * IO + 全屏扫描遮罩；改为收集所涉子树走 partialScanModels 就地合并
  * （partialScanModels 内建「目录过多/异常回退全量」兜底）。
  * 本文件 mock partialScanModels 与 scanModels，断言各操作传入的子树集合
@@ -36,7 +36,6 @@ import {
 } from '../src/renderer/src/store/partial-scan'
 import {
   moveModelTo,
-  renameModel,
   toggleDisabledModel,
 } from '../src/renderer/src/store/model-actions'
 import {
@@ -63,10 +62,6 @@ beforeEach(() => {
     api: {
       models: {
         toggleDisabled: vi.fn(async () => ({})),
-        renameModel: vi.fn(async () => ({
-          path: 'D:\\lib\\a\\renamed.safetensors',
-          renamedSidecars: 0,
-        })),
         moveModelTo: vi.fn(async () => ({
           path: 'D:\\lib\\dst\\m1.safetensors',
           targetRelDir: 'dst',
@@ -105,13 +100,6 @@ describe('modelRelDirs（子树收集）', () => {
 describe('单模型文件操作 → 局部扫描（OPT-03）', () => {
   it('禁用/启用后只扫所在子树，不触发全量', async () => {
     const ok = await toggleDisabledModel(MODELS[0].id, true)
-    expect(ok).toBe(true)
-    expect(partialScanModels).toHaveBeenCalledWith(['a'])
-    expect(scanModels).not.toHaveBeenCalled()
-  })
-
-  it('重命名成功后只扫所在子树', async () => {
-    const ok = await renameModel(MODELS[1].id, 'renamed')
     expect(ok).toBe(true)
     expect(partialScanModels).toHaveBeenCalledWith(['a'])
     expect(scanModels).not.toHaveBeenCalled()

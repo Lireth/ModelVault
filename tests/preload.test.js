@@ -111,11 +111,6 @@ describe('暴露面与通道对账（活体）', () => {
 describe('调用语义', () => {
   it('invoke 透传通道与 payload 形状（语义化参数组装）', async () => {
     const modelId = 'D:' + path.sep + 'm' + path.sep + 'a.safetensors'
-    await api.models.renameModel(modelId, '新名字')
-    expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith(
-      'models:renameModel',
-      { id: modelId, name: '新名字' },
-    )
     await api.models.toggleDisabled(modelId, true)
     expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith(
       'models:toggleDisabled',

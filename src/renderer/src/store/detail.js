@@ -155,7 +155,7 @@ function recordModelOpen(id) {
 }
 
 /**
- * 静默清除当前详情选中（FIX-9）：删除/重命名等操作使模型消失或 id 变化、
+ * 静默清除当前详情选中（FIX-9）：删除/移动/禁用等操作使模型消失或 id 变化、
  * 详情被强制关闭时调用。此时 MetaForm 已随详情卸载
  * （ModelDetail 的 v-if="selectedModel"），其 formDirty watcher 不会再
  * 写回——只清 selectedId 会残留 detailDirty=true，下一次 openDetail
