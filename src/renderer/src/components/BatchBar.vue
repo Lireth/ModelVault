@@ -27,7 +27,9 @@ import {
 } from '../store/appStore'
 
 /**
- * 多选批量操作栏（E4/E6，O9 自 App.vue 拆出）：位于多选结果行下方。
+ * 多选批量操作栏（E4/E6，O9 自 App.vue 拆出）：位于工具行（多选开关所在行）
+ * 下方的固定区（App.vue 常驻区，滚动容器之外），多选模式下置顶常驻，
+ * 下滑模型清单时不随列表滚走。
  * 布局按操作频率分组：选择组（全选/反选/计数/进度）→ 常用组（收藏/NSFW/评分）
  * →「更多」下拉（低频：触发词/Civitai/标签/禁用）→ 危险区（回收站/退出），
  * 危险操作与常规操作物理隔离防误触。
@@ -372,10 +374,10 @@ onUnmounted(() => {
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
   box-shadow: 0 4px 20px color-mix(in srgb, var(--accent) 10%, transparent);
-  /* 层叠修复：backdrop-filter 使本栏成为独立层叠上下文，「更多」下拉的
-     z-index 只在栏内生效；不提升本栏层级时，DOM 顺序靠后的模型清单
-     （sticky 表头 z-index: 2）会盖住下拉菜单。relative + z-index 让整栏
-     高于清单兄弟元素，仍低于全局弹层（确认层/Toast） */
+  /* 层叠：backdrop-filter 使本栏成为独立层叠上下文，「更多」下拉的
+     z-index 只在栏内生效；relative + z-index 让整栏盖过 DOM 顺序靠后的
+     滚动区（清单 sticky 表头 z-index: 2 等），下拉展开时可覆盖下方列表，
+     整栏仍低于全局弹层（确认层/Toast） */
   position: relative;
   z-index: 30;
 }

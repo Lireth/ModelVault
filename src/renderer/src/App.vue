@@ -282,9 +282,9 @@ onUnmounted(() => {
       <Sidebar />
 
       <main class="content">
-        <!-- 模型视图固定区（仅模型视图渲染）：状态横幅与工具行常驻不滚动，
-             滚动仅发生在下方 .content-scroll——列表内容不会经过工具行背后，
-             无需玻璃遮罩（替代旧 sticky 吸附方案） -->
+        <!-- 模型视图固定区（仅模型视图渲染）：状态横幅、工具行与多选批量栏
+             常驻不滚动，滚动仅发生在下方 .content-scroll——列表内容不会经过
+             固定区背后，无需玻璃遮罩（替代旧 sticky 吸附方案） -->
         <template v-if="!state.statsOpen && !state.settingsOpen">
           <!-- 离线横幅（F1-offline 双形态之一）：库路径失效但有缓存模型可展示时
                顶部提示（区别于金色 scan-error-bar 的普通扫描失败）；空库时的
@@ -327,6 +327,20 @@ onUnmounted(() => {
             ref="toolbarRef"
           />
 
+          <!-- 多选批量操作栏（E4/E6，O9 拆分为 BatchBar）：与工具行同处固定区，
+               多选模式下置顶常驻，下滑模型清单时不随列表滚走。
+               外层门控与 LibraryStates 插槽渲染条件对齐（仅浏览态显示：
+               启动/扫描中/扫描失败/空库不出现），多选激活判断由组件内部承担 -->
+          <BatchBar
+            v-if="
+              !state.booting &&
+              state.folder &&
+              !state.scanning &&
+              !state.scanError &&
+              state.models.length > 0
+            "
+          />
+
           <!-- 返回顶部（U-滚动）：工具行常驻后深位浏览的快速回顶补充。
                固定于内容区右下角，滚动超过阈值淡入（onContentScroll），
                点击平滑回顶；仅模型视图渲染 -->
@@ -367,10 +381,6 @@ onUnmounted(() => {
             <LibraryStates>
               <!-- 筛选 chips（重复/LoRA/基底/标签） -->
               <ResultBar />
-
-              <!-- 多选批量操作栏（E4/E6，O9 拆分为 BatchBar）：
-                   位于多选开关所在的结果行与模型清单之间，靠近操作对象 -->
-              <BatchBar />
 
               <!-- 批量失败明细条（B20/F3）：仅在最近一次批量操作有逐项失败时出现，
                    全成功不打扰；可展开定位、可重选失败项后用批量栏重试 -->
