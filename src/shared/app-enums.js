@@ -59,6 +59,15 @@ export const HASH_WARMUP_DEFS = [
 export const HASH_WARMUP_KEYS = new Set(HASH_WARMUP_DEFS.map((d) => d.key))
 
 /**
+ * Civitai 未收录负缓存静默期（OP-D）：同哈希识别 404（模型未被 Civitai
+ * 收录）后，静默期内识别链路跳过网络反查——全库批量识别对自训/其他来源
+ * 的模型零请求（此前每轮重付 1.2s 节流 + API 往返）。详情页手动识别
+ * force 绕过缓存取最新结果；模型被作者上架后最迟次日批量识别恢复。
+ * 取 24h 与哈希失败负缓存的退避封顶一致。
+ */
+export const CIVITAI_MISS_TTL_MS = 24 * 60 * 60 * 1000
+
+/**
  * 单次批量标注/标签 IPC 的条目上限（C1 单一来源）：
  * main 的 payload schema 与渲染层的分块大小共用此值。5000 条 × 典型绝对
  * 路径（约 200B）≈ 1MB 载荷，兼顾万级批量与主进程结构化克隆开销；超过

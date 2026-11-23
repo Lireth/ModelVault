@@ -7,8 +7,10 @@ import { MAX_IMPORT_IMAGES } from '../app-enums'
 export const CIVITAI_SCHEMAS = {
   // FEAT-9：fillMissing=true 时识别成功后顺带补全空缺触发词/备注
   // （复用同一次反查结果，不再二次请求 Civitai）
+  // OP-D：force=true 绕过未收录负缓存（详情页手动识别取最新结果）；
+  // 批量链路不传——已确认未收录的模型零网络快速返回
   'models:civitaiIdentify': vObj({
-    fields: { id: ID, fillMissing: vBool() },
+    fields: { id: ID, fillMissing: vBool(), force: vBool() },
   }),
   'models:civitaiCategory': vObj({ fields: { id: ID } }),
   'models:civitaiComplete': vObj({ fields: { id: ID } }),

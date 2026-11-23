@@ -199,6 +199,22 @@ describe('元数据规范化', () => {
     expect(bad.quickHash).toBe('')
     expect(bad.quickHashMtime).toBe(0)
   })
+
+  it('civitaiMiss 负缓存字段规范化：哈希小写收口、时间取整、非法值清空（OP-D）', async () => {
+    const abs = await touchModel('miss.safetensors')
+    const meta = setModelMeta(abs, {
+      civitaiMissHash: 'CD'.repeat(32),
+      civitaiMissAt: 1700000000000.7,
+    })
+    expect(meta.civitaiMissHash).toBe('cd'.repeat(32))
+    expect(meta.civitaiMissAt).toBe(1700000000001)
+    const bad = setModelMeta(abs, {
+      civitaiMissHash: 'nope',
+      civitaiMissAt: -1,
+    })
+    expect(bad.civitaiMissHash).toBe('')
+    expect(bad.civitaiMissAt).toBe(0)
+  })
 })
 
 describe('不可信 store.json 清洗（B-04）', () => {

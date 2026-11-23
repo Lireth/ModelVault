@@ -24,7 +24,10 @@ import {
   civitaiTypeToTag,
 } from '../../../shared/model-categories'
 // OPT-13：单次导入的示例图数量上限与 schema 共用 shared 单一来源
-import { MAX_IMPORT_IMAGES } from '../../../shared/app-enums'
+import {
+  CIVITAI_MISS_TTL_MS,
+  MAX_IMPORT_IMAGES,
+} from '../../../shared/app-enums'
 import {
   computeAndCacheHash,
   requestHashWarmup,
@@ -88,15 +91,37 @@ async function ensureHash(id, meta, mtimeMs) {
   return { hash, meta: getModelMeta(id) || meta }
 }
 
+/**
+ * 未收录负缓存是否命中（OP-D）：同哈希识别 404（模型未被 Civitai 收录）
+ * 后，静默期内跳过网络反查——全库批量识别对自训/其他来源模型零请求
+ * （此前每轮重付 1.2s 节流 + API 往返，800 个未收录模型即 16 分钟纯 404）。
+ * 失效条件任一即不命中：哈希变化（文件替换，miss 绑定的 civitaiMissHash
+ * 不再匹配）、静默期到期（模型可能已被作者上架）。详情页手动识别 force
+ * 绕过缓存（用户显式请求最新结果），命中后仍会刷新静默期。
+ * @param {Record<string, any>} meta 最新元数据（ensureHash 返回）
+ * @param {string} hash 本次识别的文件 SHA256
+ * @returns {boolean}
+ */
+function isCivitaiMissCached(meta, hash) {
+  return Boolean(
+    meta?.civitaiMissHash === hash &&
+    Number.isFinite(meta?.civitaiMissAt) &&
+    meta.civitaiMissAt > 0 &&
+    Date.now() - meta.civitaiMissAt < CIVITAI_MISS_TTL_MS,
+  )
+}
+
 /** 注册 Civitai 识别链路的 IPC 处理器 */
 export function registerCivitaiHandlers() {
   // 在线识别：哈希反查 Civitai，成功时保存模型页 URL。
   // FEAT-9：fillMissing=true 时顺带补全空缺触发词/备注（复用同一次反查
   // 结果生成补丁，与「一键补全」同一「绝不覆盖用户标注」原则；详情页
   // 单模型链路不传该字段，行为不变）
+  // OP-D：force=true（详情页手动识别）绕过未收录负缓存取最新结果；
+  // 批量链路不传 force——已确认未收录的模型零网络快速返回
   wrapHandler(
     'models:civitaiIdentify',
-    async (event, { id, fillMissing } = {}) => {
+    async (event, { id, fillMissing, force } = {}) => {
       const disabled = rejectIfCivitaiDisabled()
       if (disabled) return disabled
       const invalid = checkModelIdInRoot(id)
@@ -112,14 +137,27 @@ export function registerCivitaiHandlers() {
         getModelMeta(id) || {},
         stat.mtimeMs,
       )
+      if (force !== true && isCivitaiMissCached(meta, hash)) {
+        logger.info(`Civitai 未收录负缓存命中（跳过网络反查）: ${id}`)
+        return { found: false, cachedMiss: true }
+      }
       const res = await fetchCivitaiVersionByHash(hash)
       if (res.error) return { error: res.error }
       if (!res.found) {
+        // 404 记入负缓存（写盘前重读最新元数据，与既有写模式一致）：
+        // 静默期内批量识别不再为该哈希重复付网络成本
+        const missed = getModelMeta(id) || meta
+        setModelMeta(id, {
+          ...missed,
+          civitaiMissAt: Date.now(),
+          civitaiMissHash: hash,
+        })
         logger.info(`Civitai 无匹配记录: ${id}`)
         return { found: false }
       }
       // URL 写盘前重读最新元数据，避免覆盖哈希计算期间的用户并发保存。
-      // baseModel 一并回填（F-2 筛选数据源）：已有值不覆盖（宁留旧不覆盖）
+      // baseModel 一并回填（F-2 筛选数据源）：已有值不覆盖（宁留旧不覆盖）；
+      // 识别成功即清除未收录记录（模型上架后重新识别的自愈即刻生效）
       const latest = getModelMeta(id) || meta
       /** @type {Record<string, any>|null} */
       let patch = null
@@ -134,6 +172,8 @@ export function registerCivitaiHandlers() {
         ...latest,
         civitaiUrl: res.info.url,
         baseModel: latest.baseModel || res.info.baseModel || '',
+        civitaiMissAt: 0,
+        civitaiMissHash: '',
         ...(patch || {}),
       })
       logger.info(

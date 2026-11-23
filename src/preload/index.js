@@ -316,11 +316,14 @@ const api = {
      * FEAT-9：fillMissing=true 时识别成功后顺带补全空缺触发词/备注
      * （复用同一次反查结果，响应附带 applied 字段列表；批量队列专用，
      * 单模型链路不传保持原行为）
+     * OP-D：force=true 绕过未收录负缓存（详情页手动识别取最新结果）；
+     * 批量链路不传——已确认未收录的模型零网络快速返回（响应带 cachedMiss）
      */
-    civitaiIdentify: (id, fillMissing = false) =>
+    civitaiIdentify: (id, fillMissing = false, force = false) =>
       invokeValidated('models:civitaiIdentify', {
         id,
         ...(fillMissing ? { fillMissing: true } : null),
+        ...(force ? { force: true } : null),
       }),
     /**
      * Civitai 一键分配标签（仅 LoRA 模型；按已保存链接查询模型分类并映射

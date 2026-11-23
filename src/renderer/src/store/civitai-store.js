@@ -35,13 +35,15 @@ function applyModelMeta(id, meta) {
 
 /**
  * 在线识别模型（按文件 SHA256 反查 Civitai）。
+ * 详情页手动识别 force=true（OP-D）：绕过未收录负缓存取最新结果——
+ * 用户显式点击即期望当前状态（模型可能刚被作者上架）。
  * @param {string} id 模型 id
  * @returns {Promise<{found: boolean, url?: string, info?: object, error?: string}>}
  */
 export async function civitaiIdentify(id) {
   let res
   try {
-    res = await window.api.models.civitaiIdentify(id)
+    res = await window.api.models.civitaiIdentify(id, false, true)
   } catch (err) {
     toast('error', `Civitai 识别失败: ${errorMessage(err)}`)
     return { found: false, error: errorMessage(err) }

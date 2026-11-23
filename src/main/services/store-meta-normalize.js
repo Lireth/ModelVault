@@ -213,6 +213,17 @@ export function normalizeModelMeta(raw) {
       typeof raw.baseModel === 'string'
         ? raw.baseModel.trim().slice(0, 100)
         : '',
+    // OP-D 未收录负缓存：miss 判定时的哈希（文件替换后 hash 变化即失效）
+    // 与静默期起点；识别成功时随识别写入一并清空
+    civitaiMissHash:
+      typeof raw.civitaiMissHash === 'string' &&
+      /^[0-9a-f]{64}$/i.test(raw.civitaiMissHash)
+        ? raw.civitaiMissHash.toLowerCase()
+        : '',
+    civitaiMissAt:
+      Number.isFinite(raw.civitaiMissAt) && raw.civitaiMissAt > 0
+        ? Math.round(raw.civitaiMissAt)
+        : 0,
     // 自由标签（F-5）：用户自定义多标签，与二级分类标签（固定枚举）互补；
     // 随元数据整体迁移（relink），不参与文件夹整理的目录映射
     tags: normalizeTags(raw.tags),
