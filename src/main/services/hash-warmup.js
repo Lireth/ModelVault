@@ -6,7 +6,9 @@ import {
   isRetryableHashPoolError,
   setHashPoolConcurrency,
 } from './hash-worker-pool'
+import { resolveAdaptiveHashConcurrency } from './disk-profile'
 import {
+  AUTO_WARMUP_CONCURRENCY,
   MAX_WARMUP_CONCURRENCY,
   MIN_WARMUP_CONCURRENCY,
 } from '../../shared/app-enums'
@@ -27,6 +29,8 @@ import { errorMessage, errorName } from '../../shared/error-text'
  *
  * 设计要点：
  * - 单文件串行处理：避免多路大文件读取争抢磁盘 I/O（与后台缩略图共用磁盘）；
+ *   OP-B 自动档（设置值 0）按盘符介质探测放宽并发（SSD/NVMe → 4），
+ *   手动档 1-4 保留完全控制权；
  * - 去重：队列内 queued 集合 + 计算中 inflight 映射双重拦截；
  * - 共享计算：computeAndCacheHash 是预热与识别链路的唯一哈希计算入口，
  *   识别到达时若同一模型（同 mtime）正在预热，直接复用同一 Promise，
@@ -175,27 +179,58 @@ const VALID_MODES = new Set(['candidates', 'full', 'off'])
 const DEFAULT_MODE = 'full'
 
 /**
- * 后台预热并行消费数（OPT-3）：1 = 串行（默认，机械硬盘/移动硬盘友好，
- * 避免多路大文件读取争抢磁盘 I/O）；SSD/NVMe 用户可调高（上限 4，与设置
- * normalize/schema 上限一致）加快全库预热。经 setHashWarmupConcurrency
- * 调整（requestHashWarmup 的 opts.concurrency 与 settings:update 链路），
- * 同时同步线程池并行度——两条链路（批量预热/识别）共用同一执行池。
- * 并发数在 drain 启动时读取：批量进行中调整自下一轮批量生效。
+ * 后台预热并行消费数（OPT-3/OP-B）：
+ * - AUTO_WARMUP_CONCURRENCY（0）= 自动档（新装默认，设置项显式选择）：drain
+ *   启动时按队首任务所在盘的随机读延迟探测磁盘介质解析实际并发（SSD/NVMe
+ *   → 4、SATA SSD → 2、HDD/探测失败 → 1），每盘符缓存；解析结果同步线程池，
+ *   批量预热与识别链路共用同一执行池；
+ * - 1 = 串行（服务层缺省，机械硬盘/移动硬盘的手动保守档）；
+ * - 2-4 = 手动档，立即同步线程池并行度。
+ * 经 setHashWarmupConcurrency 调整（requestHashWarmup 的 opts.concurrency 与
+ * settings:update 链路）。并发数在 drain 启动时解析：批量进行中调整自下一轮
+ * 批量生效。
  */
 let warmupConcurrency = 1
 
 /**
- * 调整哈希预热并行消费数（OPT-3）：收口到 shared/app-enums 定义的区间，
- * 同时同步线程池并行度。
- * @param {number} n 并行任务数（非法值按 1 处理）
+ * 调整哈希预热并行消费数（OPT-3/OP-B）：
+ * - 0（自动档）：仅记录档位标记，不同步线程池——实际并发在 drain 启动时
+ *   按目标盘探测解析后同步（不同库可能位于不同介质）；
+ * - 1-4（手动档）：立即同步线程池并行度（识别链路即时生效）。
+ * 非法值按串行处理（服务层既有语义保持）。
+ * @param {number} n 并行任务数（0 = 自动档；非法值按 1 处理）
  */
 export function setHashWarmupConcurrency(n) {
   const value = Number(n)
+  if (value === AUTO_WARMUP_CONCURRENCY) {
+    warmupConcurrency = AUTO_WARMUP_CONCURRENCY
+    return
+  }
   warmupConcurrency =
     Number.isFinite(value) && value >= MIN_WARMUP_CONCURRENCY
       ? Math.min(MAX_WARMUP_CONCURRENCY, Math.floor(value))
       : MIN_WARMUP_CONCURRENCY
   setHashPoolConcurrency(warmupConcurrency)
+}
+
+/**
+ * 解析本次 drain 的实际并发（OP-B 自动档）：
+ * 手动档直接返回设置值；自动档按队首任务所在盘探测（磁盘探测缓存按盘符
+ * 命中，重复触发零成本），解析结果同步线程池——批量预热与识别链路（按需
+ * 哈希）共用同一执行池，介质判定对两条链路一致生效。队列为空或文件体积
+ * 未知时保守串行。
+ * @returns {Promise<number>} 本次 drain 的 lane 数
+ */
+async function resolveEffectiveLanes() {
+  if (warmupConcurrency !== AUTO_WARMUP_CONCURRENCY) return warmupConcurrency
+  const head = queue[0]
+  if (!head) return MIN_WARMUP_CONCURRENCY
+  const resolved = await resolveAdaptiveHashConcurrency(
+    head.id,
+    knownInfo.get(head.id)?.size ?? null,
+  )
+  setHashPoolConcurrency(resolved)
+  return resolved
 }
 
 /**
@@ -766,18 +801,21 @@ async function drainLane() {
 }
 
 /**
- * 消费预热队列（OPT-3 并行改造）：按 warmupConcurrency 启动至多 N 条取队
- * lane 并行消费（1 = 串行，既有行为）。lane 共享同一队列 FIFO，同一模型
- * 只会被一条 lane 取走（队列内 id 唯一）；进入扫描期（paused）后各 lane
- * 在当前任务完成后依次退出，已在计算的单个文件不中断。
- * 并发数在本次 drain 启动时确定，批量进行中调整自下一轮批量生效。
+ * 消费预热队列（OPT-3 并行改造 + OP-B 自适应）：按并发档位启动至多 N 条
+ * 取队 lane 并行消费（1 = 串行，既有行为）。手动档直接用设置值；自动档
+ * 在启动时按队首任务所在盘探测解析（disk-profile，每盘符缓存），批量预热
+ * 与识别链路共用同一执行池。lane 共享同一队列 FIFO，同一模型只会被一条
+ * lane 取走（队列内 id 唯一）；进入扫描期（paused）后各 lane 在当前任务
+ * 完成后依次退出，已在计算的单个文件不中断。
+ * 并发数在本次 drain 启动时解析，批量进行中调整自下一轮批量生效。
  */
 async function drain() {
   if (draining) return
   draining = true
   try {
     const lanes = []
-    for (let i = 0; i < warmupConcurrency; i++) lanes.push(drainLane())
+    const laneCount = await resolveEffectiveLanes()
+    for (let i = 0; i < laneCount; i++) lanes.push(drainLane())
     await Promise.all(lanes)
     if (queue.length === 0 && doneCount > 0) {
       // 本轮批量清空：先广播最终计数，再归零供下一轮从 0 计数
@@ -817,6 +855,8 @@ export function resetHashWarmupForTests() {
   doneCount = 0
   lastEmitAt = 0
   warmupConcurrency = 1
+  // 线程池并行度一并复位：前序用例的自动档解析/手动调整不泄漏
+  setHashPoolConcurrency(1)
   if (drainTimer) {
     clearTimeout(drainTimer)
     drainTimer = null

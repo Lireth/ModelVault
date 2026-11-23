@@ -89,15 +89,36 @@ export const NSFW_BLUR_DEFS = [
 export const NSFW_BLUR_KEYS = new Set(NSFW_BLUR_DEFS.map((d) => d.key))
 
 /**
- * 哈希预热并发数选项（OPT-3；A-12 单一来源）：设置页分段选择与
- * 主进程 normalize（store-settings 收口 1-4）共用同一区间。
- * 上限 4：并发收益受磁盘随机读限制，更高并发只放大内存与句柄占用。
+ * 哈希预热并发数选项（OPT-3/OP-B；A-12 单一来源）：设置页分段选择与
+ * 主进程 normalize（store-settings 收口）共用同一清单。
+ * - 0 = 自动（默认）：drain 启动时按目标文件所在盘的随机读延迟探测磁盘
+ *   介质（SSD/NVMe → 4、SATA SSD → 2、机械盘/探测失败 → 1），每盘符缓存；
+ * - 1 = 串行：机械硬盘/移动硬盘的保守手动档；
+ * - 2-4：手动档，上限 4——并发收益受磁盘随机读限制，更高并发只放大
+ *   内存与句柄占用。
  */
-export const WARMUP_CONCURRENCY_OPTIONS = [1, 2, 3, 4]
+export const AUTO_WARMUP_CONCURRENCY = 0
+export const WARMUP_CONCURRENCY_OPTIONS = [
+  { key: AUTO_WARMUP_CONCURRENCY, label: '自动' },
+  { key: 1, label: '串行' },
+  { key: 2, label: '2' },
+  { key: 3, label: '3' },
+  { key: 4, label: '4' },
+]
 
-/** 哈希预热并发数合法区间（由选项派生，避免多处硬编码 1/4） */
-export const MIN_WARMUP_CONCURRENCY = Math.min(...WARMUP_CONCURRENCY_OPTIONS)
-export const MAX_WARMUP_CONCURRENCY = Math.max(...WARMUP_CONCURRENCY_OPTIONS)
+/**
+ * 手动档合法区间（由选项派生，避免多处硬编码 1/4）。
+ * 注意 MIN 只约束手动档：0（自动）由 AUTO_WARMUP_CONCURRENCY 哨兵表达，
+ * 合法取值全集 = {0} ∪ [MIN, MAX]。
+ */
+export const MIN_WARMUP_CONCURRENCY = Math.min(
+  ...WARMUP_CONCURRENCY_OPTIONS.filter(
+    (o) => o.key !== AUTO_WARMUP_CONCURRENCY,
+  ).map((o) => o.key),
+)
+export const MAX_WARMUP_CONCURRENCY = Math.max(
+  ...WARMUP_CONCURRENCY_OPTIONS.map((o) => o.key),
+)
 
 /**
  * 模型自由标签上限（F-5 单一来源）：主进程规范化、IPC 前置校验与

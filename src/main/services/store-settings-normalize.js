@@ -1,5 +1,6 @@
 import { MODEL_EXTENSION_SET } from '../../shared/model-extensions'
 import {
+  AUTO_WARMUP_CONCURRENCY,
   CARD_SIZE_KEYS,
   HASH_WARMUP_KEYS,
   MAX_SAVED_VIEW_NAME,
@@ -7,7 +8,6 @@ import {
   MAX_TAG_LEN,
   MAX_VIEW_TAG_FILTERS,
   MAX_WARMUP_CONCURRENCY,
-  MIN_WARMUP_CONCURRENCY,
   NSFW_BLUR_KEYS,
   SORT_BY_KEYS,
   VIEW_MODE_KEYS,
@@ -77,18 +77,19 @@ function normalizeExtensions(raw) {
 }
 
 /**
- * 规范化哈希预热并发数（OPT-3）：整数收口到 shared/app-enums 定义的区间，
- * 非法值回退基准值。并发收益受磁盘随机读限制，更高并发只放大内存与句柄占用。
+ * 规范化哈希预热并发数（OPT-3/OP-B）：合法全集 = {0 自动} ∪ [1, MAX]，
+ * 有限整数收口到该区间（负数/小数向下取整进自动档或手动档），非有限值
+ * 回退基准值。并发收益受磁盘随机读限制，更高并发只放大内存与句柄占用。
  * @param {unknown} raw 设置原文
  * @param {number} fallback 非法时的回退值（默认设置或旧值）
- * @returns {number} 合法区间内的整数
+ * @returns {number} 自动档哨兵或合法手动档整数
  */
 function normalizeHashConcurrency(raw, fallback) {
   const n = Number(raw)
   if (!Number.isFinite(n)) return fallback
   return Math.min(
     MAX_WARMUP_CONCURRENCY,
-    Math.max(MIN_WARMUP_CONCURRENCY, Math.floor(n)),
+    Math.max(AUTO_WARMUP_CONCURRENCY, Math.floor(n)),
   )
 }
 

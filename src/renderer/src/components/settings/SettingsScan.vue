@@ -86,20 +86,21 @@ defineProps({
       <div class="setting-info">
         <span class="setting-title">预热并发数</span>
         <span class="setting-desc">
-          同时计算的模型文件数。1
-          为逐个串行（机械硬盘/移动硬盘推荐，避免多路大文件读盘互相争抢）；固态硬盘可调高以加快「全库」预热的完成速度。
+          同时计算的模型文件数。「自动」按模型所在磁盘的类型探测并发（固态硬盘
+          提升并行、机械硬盘保持串行）；「串行」为逐个计算（机械硬盘/移动硬盘
+          手动保守档）；2-4 为固定并发档。
         </span>
       </div>
       <div class="seg-group">
         <button
-          v-for="n in WARMUP_CONCURRENCY_OPTIONS"
-          :key="n"
+          v-for="o in WARMUP_CONCURRENCY_OPTIONS"
+          :key="o.key"
           type="button"
           class="seg-btn"
-          :class="{ active: form.hashWarmupConcurrency === n }"
-          @click="form.hashWarmupConcurrency = n"
+          :class="{ active: form.hashWarmupConcurrency === o.key }"
+          @click="form.hashWarmupConcurrency = o.key"
         >
-          {{ n }}
+          {{ o.label }}
         </button>
       </div>
     </div>

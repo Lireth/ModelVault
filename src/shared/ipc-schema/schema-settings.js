@@ -2,9 +2,9 @@
 
 import { vArr, vBool, vInt, vObj, vStr } from './rules'
 import {
+  AUTO_WARMUP_CONCURRENCY,
   MAX_SAVED_VIEWS,
   MAX_WARMUP_CONCURRENCY,
-  MIN_WARMUP_CONCURRENCY,
 } from '../app-enums'
 
 export const SETTINGS_SCHEMAS = {
@@ -36,9 +36,10 @@ export const SETTINGS_SCHEMAS = {
       autoRescan: vBool(),
       autoCheckUpdate: vBool(),
       hashWarmup: vStr({ max: 16 }),
-      // 哈希预热并发数（OPT-3）：整数区间单一来源 shared/app-enums
+      // 哈希预热并发数（OPT-3/OP-B）：合法全集 = {0 自动} ∪ [1, 4]，
+      // 区间单一来源 shared/app-enums；0（自动）的介质探测在主进程 drain 链路
       hashWarmupConcurrency: vInt({
-        min: MIN_WARMUP_CONCURRENCY,
+        min: AUTO_WARMUP_CONCURRENCY,
         max: MAX_WARMUP_CONCURRENCY,
       }),
       autoBackup: vBool(),

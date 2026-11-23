@@ -1274,21 +1274,24 @@ describe('应用设置规范化', () => {
     expect(s.savedViews[2].tagFilters).toEqual(['旧标签'])
   })
 
-  it('hashWarmupConcurrency 规范化：整数收口 1-4，非法值回退（OPT-3）', async () => {
+  it('hashWarmupConcurrency 规范化：0 自动档 + 1-4 手动档收口，非法值回退（OPT-3/OP-B）', async () => {
     await updateSettings({ hashWarmupConcurrency: 3 })
     let s = await loadSettingsFlushed()
     expect(s.hashWarmupConcurrency).toBe(3)
-    // 越界钳制到上限/下限
+    // 越界钳制到上限；0（自动档哨兵）合法保留
     await updateSettings({ hashWarmupConcurrency: 9 })
     s = await loadSettingsFlushed()
     expect(s.hashWarmupConcurrency).toBe(4)
     await updateSettings({ hashWarmupConcurrency: 0 })
     s = await loadSettingsFlushed()
-    expect(s.hashWarmupConcurrency).toBe(1)
-    // 非数值回退默认 1；小数向下取整
+    expect(s.hashWarmupConcurrency).toBe(0)
+    // 负数向下收口进自动档；非数值回退基准值（自动）；小数向下取整
+    await updateSettings({ hashWarmupConcurrency: -3 })
+    s = await loadSettingsFlushed()
+    expect(s.hashWarmupConcurrency).toBe(0)
     await updateSettings({ hashWarmupConcurrency: 'oops' })
     s = await loadSettingsFlushed()
-    expect(s.hashWarmupConcurrency).toBe(1)
+    expect(s.hashWarmupConcurrency).toBe(0)
     await updateSettings({ hashWarmupConcurrency: 2.9 })
     s = await loadSettingsFlushed()
     expect(s.hashWarmupConcurrency).toBe(2)

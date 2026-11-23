@@ -22,6 +22,7 @@ vi.mock('../src/main/services/civitai', () => ({
 }))
 
 import { computeFileHash } from '../src/main/services/civitai'
+import { resetDiskProfileForTests } from '../src/main/services/disk-profile'
 import {
   clearHashFailuresForLibrarySwitch,
   computeAndCacheHash,
@@ -52,6 +53,8 @@ const roots = []
 beforeEach(async () => {
   vi.clearAllMocks()
   resetHashWarmupForTests()
+  // OP-B：磁盘探测缓存按盘符跨用例共享，一并复位保证自动档用例确定性
+  resetDiskProfileForTests()
   setHashRetryDelayForTests(0)
   setWarmupProgressListener(null)
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-warmup-'))
@@ -418,6 +421,29 @@ describe('预热并发（OPT-3）', () => {
     await vi.waitFor(() => expect(computeFileHash).toHaveBeenCalledTimes(2))
     d2.resolve(fakeHash(2))
     await whenWarmupIdle()
+    expect(getModelMeta(b).hash).toBe(fakeHash(2))
+  })
+
+  it('自动档（concurrency=0）：小体积测试文件无探测意义，串行语义保持（OP-B）', async () => {
+    const a = await makeModel('auto-a.safetensors')
+    const b = await makeModel('auto-b.safetensors')
+    const d1 = deferredHash()
+    const d2 = deferredHash()
+    const deferreds = [d1, d2]
+    let call = 0
+    computeFileHash.mockImplementation(() => deferreds[call++].promise)
+
+    requestHashWarmup([a, b], { mode: 'full', concurrency: 0, delayMs: 0 })
+    await vi.waitFor(() => expect(computeFileHash).toHaveBeenCalledTimes(1))
+    await new Promise((r) => setTimeout(r, 20))
+    // 文件体积低于探测下限（16MB）→ 保守串行：第二任务不被并行取走
+    expect(computeFileHash).toHaveBeenCalledTimes(1)
+
+    d1.resolve(fakeHash(1))
+    await vi.waitFor(() => expect(computeFileHash).toHaveBeenCalledTimes(2))
+    d2.resolve(fakeHash(2))
+    await whenWarmupIdle()
+    expect(getModelMeta(a).hash).toBe(fakeHash(1))
     expect(getModelMeta(b).hash).toBe(fakeHash(2))
   })
 })
