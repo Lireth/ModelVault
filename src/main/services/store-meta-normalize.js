@@ -181,6 +181,15 @@ export function normalizeModelMeta(raw) {
         ? raw.hash.toLowerCase()
         : '',
     hashMtime: Number.isFinite(raw.hashMtime) ? raw.hashMtime : 0,
+    // OP-C 两阶段查重的快指纹缓存（头尾 1MB SHA256，仅候选筛选用，语义与
+    // 全量 hash 不同绝不混用）：mtime 绑定同 hash/hashMtime 约定
+    quickHash:
+      typeof raw.quickHash === 'string' && /^[0-9a-f]{64}$/i.test(raw.quickHash)
+        ? raw.quickHash.toLowerCase()
+        : '',
+    quickHashMtime: Number.isFinite(raw.quickHashMtime)
+      ? raw.quickHashMtime
+      : 0,
     // F3 使用轨迹：最近打开时间（epoch ms）与累计打开次数。
     // 负数/非数值回退 0（从未打开）；次数封顶防御病态输入。
     lastOpenedAt:

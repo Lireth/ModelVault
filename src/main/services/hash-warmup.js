@@ -7,6 +7,7 @@ import {
   setHashPoolConcurrency,
 } from './hash-worker-pool'
 import { resolveAdaptiveHashConcurrency } from './disk-profile'
+import { computeQuickFingerprint } from './quick-fingerprint'
 import {
   AUTO_WARMUP_CONCURRENCY,
   MAX_WARMUP_CONCURRENCY,
@@ -26,6 +27,12 @@ import { errorMessage, errorName } from '../../shared/error-text'
  * 大小相同）。默认 candidates 策略先按体积分组，仅对同尺寸成员数 ≥2 的
  * 模型读盘计算，避免首次扫描后把整个模型库顺序读一遍；详情页/识别的
  * 按需任务（priority）不受策略限制。全库预热与关闭策略由设置显式选择。
+ *
+ * OP-C 两阶段查重（candidates 策略的阶段细化）：同尺寸组内先用「头尾各
+ * 1MB 的快指纹」筛选——指纹互异的文件内容必然不同，直接跳过全量 SHA256；
+ * 仅指纹相同的候选组做全量确认。指纹按 mtime 绑定缓存（meta.quickHash），
+ * 查重 IO 从「组员体积之和」降到「2MB × 组员数」，组员全互异的常见场景
+ * （同架构不同权重的 LoRA）零全量哈希成本。
  *
  * 设计要点：
  * - 单文件串行处理：避免多路大文件读取争抢磁盘 I/O（与后台缩略图共用磁盘）；
@@ -547,6 +554,42 @@ function hasValidCachedHash(id) {
 }
 
 /**
+ * 获取模型快指纹（OP-C 两阶段查重的阶段一，meta 缓存 + 按需计算）：
+ * quickHash 且 quickHashMtime 与当前 stat 一致 → 缓存命中零读盘；否则计算
+ * （头尾各 1MB，成本与文件体积无关）并写回元数据——写盘前重读最新元数据，
+ * 与 computeAndCacheHash 同一约定。
+ * 文件缺失/不可读/计算失败返回 null（调用方保守回退全量判定；指纹成本仅
+ * 2MB 读盘，失败不入负缓存——下轮重试代价可忽略）。
+ * @param {string} id 模型绝对路径
+ * @returns {Promise<string|null>} 64 位十六进制快指纹
+ */
+async function ensureQuickFingerprint(id) {
+  let stat
+  try {
+    stat = await fs.stat(id)
+    if (!stat.isFile()) return null
+  } catch {
+    return null
+  }
+  const meta = getModelMeta(id)
+  if (meta?.quickHash && meta.quickHashMtime === stat.mtimeMs) {
+    return meta.quickHash
+  }
+  try {
+    const fp = await computeQuickFingerprint(id, stat.size)
+    // 写盘前重读最新元数据：指纹计算期间用户可能已并发保存其他字段
+    const latest = getModelMeta(id) || {}
+    setModelMeta(id, { ...latest, quickHash: fp, quickHashMtime: stat.mtimeMs })
+    return fp
+  } catch (err) {
+    logger.warn(
+      `快指纹计算失败（该模型保守回退全量判定）: ${id} ${errorMessage(err)}`,
+    )
+    return null
+  }
+}
+
+/**
  * 丢弃队列中尚未开始的普通后台任务（保留详情页/识别的 force 任务）。
  * 全量快照请求代表「当前库 + 当前策略」的最新事实：旧排队项可能来自
  * 已删除模型或旧策略（如用户切换到关闭/仅候选），必须作废后重新规划；
@@ -760,8 +803,27 @@ async function drainLane() {
       if (task.mode === 'candidates') {
         const group = sizeIndex.get(stat.size)
         if (!group || group.size < 2) continue // 体积唯一：不可能有重复副本
-        // 本次 stat 可能首次建立同尺寸分组：把组内其他尚未计算的模型补入队
-        enqueueCollisionPeers(stat.size, id)
+        // OP-C 两阶段查重：阶段一以快指纹筛选同尺寸组——指纹互异的文件
+        // 头/尾字节必然不同，内容不可能相同，直接跳过全量 SHA256（同尺寸
+        // 全互异的常见场景把组内查重 IO 从「组员体积之和」降到 2MB × 组员数）；
+        // 仅指纹相同的候选组进入阶段二（全量 SHA256 确认，中段不同的
+        // 超集误报在此被正确排除）。自身指纹不可得（IO 失败）时保守回退
+        // 全量判定（旧行为）。
+        const myFp = await ensureQuickFingerprint(id)
+        if (myFp) {
+          let collisionCount = 1
+          for (const peerId of group) {
+            if (peerId === id) continue
+            if ((await ensureQuickFingerprint(peerId)) !== myFp) continue
+            collisionCount += 1
+            // 指纹相同的同伴补入队（各自 drain 轮次经同一筛选后确认全量哈希；
+            // pushQueue 自带 queued/inflight 去重），已有有效全量哈希的同伴跳过
+            if (!hasValidCachedHash(peerId)) {
+              pushQueue(peerId, false, 'candidates')
+            }
+          }
+          if (collisionCount < 2) continue
+        }
       }
     }
     const meta = getModelMeta(id)

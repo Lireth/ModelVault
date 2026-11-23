@@ -182,6 +182,23 @@ describe('元数据规范化', () => {
     expect(invalid.lastOpenedAt).toBe(0)
     expect(invalid.openCount).toBe(0)
   })
+
+  it('quickHash 快指纹缓存规范化：hex 小写收口、非法值清空（OP-C）', async () => {
+    const abs = await touchModel('fp.safetensors')
+    const meta = setModelMeta(abs, {
+      quickHash: 'AB'.repeat(32),
+      quickHashMtime: 12345,
+    })
+    expect(meta.quickHash).toBe('ab'.repeat(32))
+    expect(meta.quickHashMtime).toBe(12345)
+    // 非法指纹清空、非法 mtime 归零（与 hash/hashMtime 同款契约）
+    const bad = setModelMeta(abs, {
+      quickHash: 'not-a-hash',
+      quickHashMtime: Number.NaN,
+    })
+    expect(bad.quickHash).toBe('')
+    expect(bad.quickHashMtime).toBe(0)
+  })
 })
 
 describe('不可信 store.json 清洗（B-04）', () => {

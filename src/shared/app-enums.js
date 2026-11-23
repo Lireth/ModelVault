@@ -43,9 +43,10 @@ export const VIEW_MODE_DEFS = [
 export const VIEW_MODE_KEYS = new Set(VIEW_MODE_DEFS.map((d) => d.key))
 
 /**
- * 后台哈希预热策略（O1 单一来源：主进程校验与设置页展示共用）：
- * - candidates：仅对同尺寸模型计算（内容相同的文件必然同大小）；
- * - full：全库缺失哈希都计算（旧行为）；
+ * 后台哈希预热策略（O1/OP-C 单一来源：主进程校验与设置页展示共用）：
+ * - candidates：同尺寸组内先按头尾快指纹筛选，仅对指纹相同的候选组计算
+ *   全量 SHA256（内容相同的文件必然同大小、指纹必然相同）；
+ * - full：全库缺失哈希都计算（旧行为，识别预加速）；
  * - off：后台不预热，仅详情页/识别按需计算。
  */
 export const HASH_WARMUP_DEFS = [

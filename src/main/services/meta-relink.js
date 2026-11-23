@@ -163,6 +163,9 @@ export function isEmptyModelMeta(meta) {
     (Number.isFinite(meta.lastOpenedAt) && meta.lastOpenedAt > 0) ||
     (Number.isFinite(meta.openCount) && meta.openCount > 0) ||
     meta.hash ||
+    // OP-C 快指纹缓存与全量哈希同为「重算有成本的可再生产物」：孤儿清理
+    // 与失效判定同口径保留
+    meta.quickHash ||
     meta.noteSource ||
     meta.triggerWordsSource ||
     hasParams
