@@ -48,6 +48,11 @@ import {
   writeLibraryIndex,
 } from '../../services/library-index'
 import { slimModelsForList, logPayloadSize } from './list-payload'
+import {
+  beginListSnapshot,
+  computeScanDelta,
+  updateListSnapshotPartial,
+} from './list-delta'
 import { errorMessage } from '../../../shared/error-text'
 
 /**
@@ -111,7 +116,7 @@ export function registerScanHandlers() {
   // 可经 models:cancelScan 取消）
   wrapHandler(
     'models:scan',
-    async (event, { folder } = {}) => {
+    async (event, { folder, snapshot } = {}) => {
       // 复用内存中的设置（B3）：应用启动时已 loadSettings，热路径无需重读磁盘，
       // 也避免 loadSettings 的损坏重置副作用在扫描路径被意外触发
       const root =
@@ -291,13 +296,41 @@ export function registerScanHandlers() {
           )
 
           completed = true
+          // SCAN-DELTA：渲染层快照代际与注册表一致时仅回差量（万级库的
+          // 重复重扫从 10MB+ 级结构化克隆降为 KB 级）；失配（窗口重载/
+          // 离线清空/无快照）返回 null，走全量下发并播种新代际。
+          // 差量命中时跳过全量瘦身（未变化条目不需要 slim 拷贝）
+          const delta = computeScanDelta(root, snapshot, decorated)
+          if (delta) {
+            logPayloadSize('models:scan:delta', delta.approxBytes)
+            return {
+              root,
+              delta: { upsert: delta.upsert, remove: delta.remove },
+              // 差量应用后的库总规模（渲染层 toast/lastScan 用）
+              total: delta.total,
+              unchanged: delta.unchanged,
+              snap: { root, gen: delta.gen },
+              byType,
+              // #62：errors 载荷按上限裁剪，真实总数随 errorCount 下发
+              errors: errors.slice(0, MAX_SCAN_ERROR_ENTRIES),
+              errorCount: errors.length,
+              durationMs: Date.now() - startedAt,
+              // 本次扫描自动重新关联的移动/重命名模型数（A-02，渲染层据此提示）
+              relinked: relinkResult.relinked,
+              // 库设置随模型库走：显式传入 folder 的扫描即切库（chooseFolder/switchRoot
+              // 均经此路径），响应携带目标库合并后的设置供渲染层应用（主题/视图随库切换）
+              settings: getSettings(),
+            }
+          }
           // OPT-PAYLOAD：列表通道下发瘦身模型（索引/预热/装饰缓存仍持有
           // 完整装饰对象——瘦身只发生在 IPC 边界，decorated 数组不改动）
           const slimmed = slimModelsForList(decorated)
+          const snap = beginListSnapshot(root, decorated)
           logPayloadSize('models:scan', slimmed.approxBytes)
           return {
             root,
             models: slimmed.models,
+            snap: { root, gen: snap.gen },
             byType,
             // #62：errors 载荷按上限裁剪，真实总数随 errorCount 下发
             errors: errors.slice(0, MAX_SCAN_ERROR_ENTRIES),
@@ -463,6 +496,9 @@ export function registerScanHandlers() {
             dirRawNames: scanResult.dirRawNames,
           })
           models.length = 0 // 同全量扫描：装饰后立即释放原始数组（O8）
+          // SCAN-DELTA：局部结果同步进快照注册表（渲染层将合并同一批对象，
+          // 注册表保持为渲染层列表的镜像；尚无快照时跳过，全量扫描自然播种）
+          updateListSnapshotPartial(root, decorated)
 
           // O8/OPT-03：局部结果合并入索引更新队列，短窗口内多次局部扫描只做
           // 一次索引读改写；索引缺失时跳过，不凭空创建不完整索引。

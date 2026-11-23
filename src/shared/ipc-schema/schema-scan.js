@@ -1,12 +1,23 @@
 /** 扫描域通道 schema（全量/局部扫描、取消、导入入台） */
 
-import { vArr, vObj, vStr, vVoid } from './rules'
+import { vArr, vInt, vObj, vStr, vVoid } from './rules'
 import { MAX_IMPORT_PATHS } from '../app-enums'
 import { MAX_PARTIAL_SCAN_DIRS_INPUT } from '../scan-dirs'
 
 export const SCAN_SCHEMAS = {
   'models:scan': vObj({
-    fields: { folder: vStr({ max: 1000 }) },
+    fields: {
+      folder: vStr({ max: 1000 }),
+      // SCAN-DELTA：渲染层快照代际握手（可选）。gen 由主进程全量下发时
+      // 随响应颁发，渲染层原样回传；主进程代际/根一致时全量扫描仅回差量，
+      // 失配（窗口重载/离线清空列表/无快照）自动降级全量（fail-safe）
+      snapshot: vObj({
+        fields: {
+          root: vStr({ max: 1000 }),
+          gen: vInt({ required: true, min: 0 }),
+        },
+      }),
+    },
   }),
   'models:partialScan': vObj({
     fields: {

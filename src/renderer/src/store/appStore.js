@@ -23,6 +23,7 @@
 export {
   state,
   replaceModels,
+  applyModelDelta,
   replaceSettings,
   MODEL_TYPES,
   SUB_CATEGORIES,

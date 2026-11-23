@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+﻿// @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import LibraryStates from '../src/renderer/src/components/LibraryStates.vue'
@@ -83,7 +83,7 @@ describe('LibraryStates 离线分支（F1-offline）', () => {
     const wrapper = mount(LibraryStates)
     await wrapper.findAll('.offline-actions button').at(1).trigger('click')
     await flushPromises()
-    expect(window.api.models.scan).toHaveBeenCalledWith('D:\\back-lib')
+    expect(window.api.models.scan).toHaveBeenCalledWith('D:\\back-lib', null)
     expect(state.folderMissing).toBe(false)
     expect(state.missingRoots).toEqual([])
     // 离线分支已离开（链序落到空库分支）
@@ -178,7 +178,7 @@ describe('App 离线横幅（F1-offline）', () => {
     await wrapper.findAll('.offline-bar button').at(1).trigger('click')
     await flushPromises()
 
-    expect(window.api.models.scan).toHaveBeenCalledWith('D:\\back-lib')
+    expect(window.api.models.scan).toHaveBeenCalledWith('D:\\back-lib', null)
     expect(wrapper.find('.offline-bar').exists()).toBe(false)
     expect(wrapper.findComponent(LibraryToolbar).exists()).toBe(true)
     wrapper.unmount()

@@ -28,6 +28,7 @@ import {
 import { clearDeferredOwners, primeHeaderInfoCache } from '../decorate'
 import { clearDeferredJobs } from '../../../services/thumbs'
 import { slimModelsForList, logPayloadSize } from '../list-payload'
+import { beginListSnapshot } from '../list-delta'
 import {
   withMaintenanceLock,
   wrapHandler,
@@ -115,15 +116,20 @@ export function registerLibraryHandlers() {
           perf(`本地索引 ${cachedIndex.models.length} 个模型`)
           // OPT-PAYLOAD：秒开列表下发瘦身模型（先合成元数据展示字段再剥离，
           // 顺序不可颠倒——合成依赖 folderSubCategory）
-          const slimmed = slimModelsForList(
-            overlayCurrentMeta(/** @type {any[]} */ (cachedIndex.models)),
+          // SCAN-DELTA：播种列表快照并随响应下发代际（切库后的后台校验
+          // 扫描据此可回差量）
+          const overlaid = overlayCurrentMeta(
+            /** @type {any[]} */ (cachedIndex.models),
           )
+          const slimmed = slimModelsForList(overlaid)
           logPayloadSize('models:openLibrary', slimmed.approxBytes)
+          const snap = beginListSnapshot(root, overlaid)
           return {
             root,
             settings,
             cached: true,
             models: slimmed.models,
+            snap: { root, gen: snap.gen },
             savedAt: cachedIndex.savedAt,
             durationMs: cachedIndex.durationMs,
           }

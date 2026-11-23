@@ -183,6 +183,8 @@ export async function partialScanModels(dirs) {
 
   const token = ++scanToken
   const modelsRef = state.models
+  // SCAN-DELTA：请求前捕获快照代际（合并后 replaceModels 会复位，收尾恢复）
+  const prevSnapGen = state.listSnap?.gen
   state.partialScanning = true
   let fallbackFull = false
   let canceled = false
@@ -302,6 +304,12 @@ export async function partialScanModels(dirs) {
     // O7：局部扫描返回的新对象自带最新哈希，清理这些 id 的预热覆盖
     clearHashOverrides(incomingIds)
     replaceModels(untouched.concat(incoming))
+    // SCAN-DELTA：局部合并不改变快照代际——主进程已按本次装饰结果同步
+    // 注册表（list-delta.updateListSnapshotPartial），渲染层合并结果与注册表
+    // 内容一致，后续全量扫描仍可走差量。replaceModels 已复位代际，此处恢复
+    if (state.listSnap === null && typeof prevSnapGen === 'number') {
+      state.listSnap = { root, gen: prevSnapGen }
+    }
     // 类型别名仅收窄赋值目标，运行时仍写回同一 shallowReactive 对象
     // （形状见 LastScanSnapshot）
     /** @type {{ lastScan: LastScanSnapshot | null }} */

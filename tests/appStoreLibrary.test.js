@@ -106,7 +106,7 @@ describe('F1 本地索引：秒切库与后台校验', () => {
         (t) => t.type === 'success' && t.text.includes('秒开本地索引'),
       ),
     ).toBe(true)
-    expect(api.models.scan).toHaveBeenCalledWith('D:\\other')
+    expect(api.models.scan).toHaveBeenCalledWith('D:\\other', null)
 
     releaseScan({
       root: 'D:\\other',
@@ -507,7 +507,7 @@ describe('库路径失效闭环（F1-offline）', () => {
     expect(api.settings.update).toHaveBeenCalledWith({
       modelsFolders: ['E:\\other'],
     })
-    expect(api.models.scan).toHaveBeenCalledWith('F:\\new-home')
+    expect(api.models.scan).toHaveBeenCalledWith('F:\\new-home', null)
     // 扫描成功：离线态清除，新路径成为激活库
     expect(state.folder).toBe('F:\\new-home')
     expect(state.folderMissing).toBe(false)
@@ -531,7 +531,7 @@ describe('库路径失效闭环（F1-offline）', () => {
 
     expect(state.toasts.some((t) => t.type === 'error')).toBe(true)
     // 清理失败不阻断：扫描仍发起并完成恢复
-    expect(api.models.scan).toHaveBeenCalledWith('F:\\new-home')
+    expect(api.models.scan).toHaveBeenCalledWith('F:\\new-home', null)
     expect(state.folderMissing).toBe(false)
   })
 })

@@ -145,6 +145,11 @@ function estimatePayloadBytes(models) {
   return Math.round((sampledBytes / sampled) * total)
 }
 
+/** 差量载荷观测口径（SCAN-DELTA）：增量 upsert 列表的估算字节数 */
+export function estimateListPayloadBytes(models) {
+  return estimatePayloadBytes(Array.isArray(models) ? models : [])
+}
+
 /** 载荷体积日志辅助：KB 取整（<1KB 按 1KB 计，便于小库观测） */
 function formatPayloadKB(bytes) {
   return `${Math.max(1, Math.round(bytes / 1024))}KB`

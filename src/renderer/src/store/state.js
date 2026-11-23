@@ -188,6 +188,12 @@ export const state = shallowReactive({
   // { count, durationMs }
   lastScan: /** @type {{ count: number, durationMs: number } | null} */ (null),
   models: /** @type {Array<Record<string, any>>} */ (shallowReactive([])),
+  // SCAN-DELTA 列表快照代际：与主进程列表快照注册表配对的握手凭证。
+  // { root, gen } = 当前列表对应主进程某次全量下发（loadStore/openLibrary/
+  // scan 全量响应的 snap 字段）；null = 无有效快照（扫描请求将走全量下发）。
+  // 全量应用后赋值，replaceModels 默认复位（全量应用方在调用后重新记账），
+  // 增量应用（applyModelDelta）不改变代际——主进程注册表同步更新，两侧一致
+  listSnap: /** @type {{ root: string, gen: number } | null} */ (null),
   // 筛选 / 排序（平铺字段始终为活动视图的镜像，B-02）
   viewMode: 'grid', // 首页视图模式：grid（网格卡片）/ list（紧凑列表）
   typeFilter: 'all',
@@ -437,6 +443,10 @@ export function isLibraryBusy() {
 export function replaceModels(list) {
   state.models = shallowReactive(list)
   rebuildModelIndex()
+  // 旧快照代际随整体替换作废（SCAN-DELTA）：全量应用方在调用后按响应
+  // snap 重新记账；增量合并（partial-scan）与离线清空等路径按需恢复/保持 null。
+  // 默认复位保证任何绕过记账的替换都不会携带过期代际（fail-safe）
+  state.listSnap = null
   // 覆盖映射只对当前列表内 id 有意义：移除已不存在的条目，避免跨库切换
   // 携带旧库标注、删除模型的覆盖在重扫后复活
   for (const id of hashOverrides.keys()) {
@@ -452,6 +462,73 @@ export function replaceModels(list) {
       modelIndexById.has(id),
     )
   }
+}
+
+/**
+ * 增量应用模型列表差量（SCAN-DELTA）：全量扫描的差量响应（主进程对
+ * 上次下发快照的 upsert/remove）就地合并进当前列表——未变化模型对象
+ * 保持引用稳定，搜索域 WeakMap 缓存与 PERF-SORT 排序缓存对新列表继续
+ * 复用；列表级整体赋值一次，派生链（筛选/排序/计数）单次重算。
+ * @param {{ upsert?: Array<Record<string, any>>, remove?: string[] }} delta
+ *   主进程差量载荷（upsert 为瘦身后的最新装饰结果；remove 为已消失模型 id）
+ * @returns {{ changed: boolean, upsertedIds: string[], removedIds: string[] }}
+ *   changed=false 表示差量为空（未触碰列表，派生链零重算）；
+ *   removedIds 仅含实际从列表移除的 id（详情页清理判定用）
+ */
+export function applyModelDelta(delta) {
+  const upsert = Array.isArray(delta?.upsert) ? delta.upsert : []
+  const remove = Array.isArray(delta?.remove) ? delta.remove : []
+  /** @type {string[]} */
+  const upsertedIds = []
+  /** @type {string[]} */
+  const removedIds = []
+  if (upsert.length === 0 && remove.length === 0) {
+    return { changed: false, upsertedIds, removedIds }
+  }
+  const removeSet = new Set(remove)
+  const upsertById = new Map()
+  for (const m of upsert) {
+    if (m && typeof m.id === 'string') upsertById.set(m.id, m)
+  }
+  // 既有元素就地换身/剔除，保持原顺序：排序键未变的元素在新数组中的
+  // 位置不变，filteredModels 的排序缓存（PERF-SORT 逐项 id/键快照比对）
+  // 对未变化部分继续命中复用
+  /** @type {Array<Record<string, any>>} */
+  const next = []
+  for (const m of state.models) {
+    const id = m?.id
+    if (removeSet.has(id)) {
+      removedIds.push(id)
+      continue
+    }
+    const updated = upsertById.get(id)
+    if (updated !== undefined) {
+      upsertById.delete(id)
+      upsertedIds.push(id)
+      next.push(updated)
+    } else {
+      next.push(m)
+    }
+  }
+  // 新增模型追加尾部：展示顺序由 filteredModels 统一排序决定，基础数组
+  // 顺序仅影响稳定排序的同键并列（全量扫描的目录序本就无展示语义）
+  for (const [id, m] of upsertById) {
+    upsertedIds.push(id)
+    next.push(m)
+  }
+  state.models = shallowReactive(next)
+  rebuildModelIndex()
+  // 覆盖映射与选区剪枝（与 replaceModels 同口径，仅作用于本次移除的 id）
+  for (const id of removeSet) {
+    hashOverrides.delete(id)
+    metaOverrides.delete(id)
+  }
+  if (state.multiSelect.ids.length > 0) {
+    state.multiSelect.ids = state.multiSelect.ids.filter((id) =>
+      modelIndexById.has(id),
+    )
+  }
+  return { changed: true, upsertedIds, removedIds }
 }
 
 /**

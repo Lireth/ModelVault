@@ -132,8 +132,26 @@ const api = {
      * 返回 { overview, warnings } 或 { error }
      */
     crossLibraryOverview: () => invokeValidated('models:crossLibraryOverview'),
-    /** 扫描模型目录，返回 { models, byType, errors } 或 { canceled } / { error } */
-    scan: (folder) => invokeValidated('models:scan', { folder }),
+    /**
+     * 扫描模型目录，返回 { models, byType, errors, snap } 或
+     * { delta: { upsert, remove }, total, snap } / { canceled } / { error }。
+     * SCAN-DELTA：snapshot 为渲染层持有的快照标识 { root, gen }（上次全量
+     * 下发响应的 snap 字段原样回传）；主进程代际一致时仅回差量，失配自动
+     * 降级全量。
+     * @param {string} folder 模型库根目录
+     * @param {{ root: string, gen: number }|null} [snapshot] 快照代际标识
+     */
+    scan: (folder, snapshot) => {
+      const payload = { folder }
+      if (
+        snapshot &&
+        typeof snapshot === 'object' &&
+        Number.isFinite(snapshot.gen)
+      ) {
+        payload.snapshot = snapshot
+      }
+      return invokeValidated('models:scan', payload)
+    },
     /** 取消进行中的扫描，返回 { ok } */
     cancelScan: () => invokeValidated('models:cancelScan'),
     /**

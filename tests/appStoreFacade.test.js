@@ -15,6 +15,7 @@ const EXPECTED_EXPORTS = [
   // 状态与常量
   'state',
   'replaceModels',
+  'applyModelDelta',
   'replaceSettings',
   'MODEL_TYPES',
   'SUB_CATEGORIES',
