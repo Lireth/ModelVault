@@ -224,7 +224,14 @@ async function onInstallUpdate() {
     <p v-else class="setting-desc">版本信息加载中…</p>
     <!-- 应用内检查更新（E1）：portable 分发无自动更新，引导前往 Release 页下载 -->
     <div class="update-row">
-      <button class="btn" :disabled="checkingUpdate" @click="onCheckUpdate">
+      <!-- 下载进行中禁用检查入口（B-1.2）：检查结果会覆盖 updateInfo，
+           hasUpdate 变化时下载区（进度/取消）随 v-if 整体消失，用户失去
+           对进行中下载的可见性与控制；主进程同时锁定模块态下载资产 -->
+      <button
+        class="btn"
+        :disabled="checkingUpdate || downloadProgress !== null"
+        @click="onCheckUpdate"
+      >
         {{ checkingUpdate ? '检查中…' : '检查更新' }}
       </button>
       <span v-if="updateInfo?.error" class="update-msg error">{{

@@ -72,6 +72,7 @@ import {
   fetchAllowedUpdateUrl,
   findUpdateAssets,
   setPendingUpdate,
+  isUpdateDownloading,
   getUpdateDir,
   getDownloadedFile,
   downloadUpdatePackage,
@@ -231,6 +232,44 @@ describe('模块态（渲染层不可注入 URL 的结构性保证）', () => {
     expect(UPDATE_DIR).toBe(path.join(fakeUserData, 'update'))
     armPending(1)
     expect(getDownloadedFile()).toBe('')
+  })
+
+  it('下载进行中 setPendingUpdate 锁定模块态（B-1.2：检查更新不破坏下载资产）', async () => {
+    const content = Buffer.from('ABCDEFGHIJ')
+    armPending(content.length)
+    routeFetches({
+      checksum: checksumRes(`${sha256Hex(content)}  ModelVault-9.9.9.exe`),
+      download: (_url, options) =>
+        new Promise((_, rej) => {
+          options.signal.addEventListener('abort', () =>
+            rej(new DOMException('已终止', 'AbortError')),
+          )
+        }),
+    })
+    const p = downloadUpdatePackage()
+    await vi.waitFor(() => expect(net.fetch).toHaveBeenCalledTimes(2))
+    expect(isUpdateDownloading()).toBe(true)
+
+    // 模拟下载中检查更新返回「无更新」（清空资产）：被忽略，重试入口存活
+    setPendingUpdate(null, '')
+    const busy = await downloadUpdatePackage()
+    expect(busy).toEqual({ error: expect.stringContaining('正在下载中') })
+
+    expect(cancelUpdateDownload()).toEqual({ ok: true })
+    expect(await p).toEqual({ canceled: true })
+    expect(isUpdateDownloading()).toBe(false)
+
+    // 闸门释放：setPendingUpdate 恢复生效，换版本/重试下载链路可用
+    const retry = Buffer.from('1234')
+    armPending(retry.length)
+    routeFetches({
+      checksum: checksumRes(`${sha256Hex(retry)}  ModelVault-9.9.9.exe`),
+      download: new Response(retry, { status: 200 }),
+    })
+    const r = await downloadUpdatePackage()
+    expect(r.error).toBeUndefined()
+    expect(r.path).toBe(TARGET)
+    expect(r.size).toBe(retry.length)
   })
 })
 
