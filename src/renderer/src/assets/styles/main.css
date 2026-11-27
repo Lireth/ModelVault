@@ -450,6 +450,8 @@ textarea::placeholder {
   flex-direction: column;
   gap: 3px;
   min-width: 0;
+  /* 占满操作区之外的剩余宽度：说明小字据此单行截断（省略号） */
+  flex: 1;
 }
 
 .setting-title {
@@ -457,17 +459,15 @@ textarea::placeholder {
   font-weight: 600;
 }
 
+/* 说明小字统一单行：展示不完整时末尾以省略号标记，
+   悬停经 SettingsPage 的全文浮窗展示完整内容 */
 .setting-desc {
+  display: block;
   font-size: 11px;
   color: var(--text-muted);
-}
-
-/* 需要单行截断的场景（如模型文件夹路径）：悬停经 title 显示完整内容 */
-.setting-desc-ellipsis {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 460px;
 }
 
 .setting-actions {

@@ -553,6 +553,9 @@ onUnmounted(() => {
   gap: 16px;
   padding: 20px 24px 0;
   min-height: 0;
+  /* 允许收缩到可用宽度：否则单行不换行的文本（设置页说明小字）
+     会以最小内容宽度把内容区撑出窗口，右侧操作按钮被裁掉 */
+  min-width: 0;
   align-content: start;
 }
 

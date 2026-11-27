@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import SettingsAbout from './settings/SettingsAbout.vue'
 import SettingsAppearance from './settings/SettingsAppearance.vue'
 import SettingsBackup from './settings/SettingsBackup.vue'
@@ -35,6 +35,61 @@ import {
 const { form, fillForm, onCancel, parseExcludeDirs } = useSettingsForm()
 
 const saving = ref(false)
+
+/* ---------------- 说明小字悬停浮窗 ---------------- */
+
+/**
+ * 介绍小字统一单行展示（main.css .setting-desc），超出以省略号截断；
+ * 悬停实际被截断的条目时经 Teleport 浮层展示完整文案。浮层 fixed 定位，
+ * 避免被设置页的 overflow 与 backdrop-filter 包含块裁剪。
+ */
+const descTip = ref(null)
+/** 当前悬停的说明节点：同一节点内不重复测量 */
+let descTipEl = null
+
+/** 收起全文浮窗 */
+function hideDescTip() {
+  descTip.value = null
+  descTipEl = null
+}
+
+function onDescHover(e) {
+  const el = e.target?.closest?.('.setting-desc')
+  if (!el || el === descTipEl) return
+  descTipEl = el
+  // 未截断（完整可见）的说明不弹窗
+  if (el.scrollWidth <= el.clientWidth) {
+    descTip.value = null
+    return
+  }
+  const text = el.textContent.trim()
+  if (!text) {
+    descTip.value = null
+    return
+  }
+  const rect = el.getBoundingClientRect()
+  descTip.value = { text, left: rect.left, top: rect.top, bottom: rect.bottom }
+}
+
+/** 指针离开说明小字：移向另一条说明时不收起，交由下一次 hover 接管 */
+function onDescLeave(e) {
+  if (e.relatedTarget?.closest?.('.setting-desc')) return
+  hideDescTip()
+}
+
+/** 浮窗定位：下方空间不足时翻到说明上方，水平按视口收窄 */
+const descTipStyle = computed(() => {
+  const tip = descTip.value
+  if (!tip) return null
+  const maxWidth = Math.min(420, window.innerWidth - 24)
+  const above = tip.bottom + 96 > window.innerHeight
+  return {
+    left: `${Math.max(12, Math.min(tip.left, window.innerWidth - maxWidth - 12))}px`,
+    top: `${above ? tip.top - 6 : tip.bottom + 6}px`,
+    maxWidth: `${maxWidth}px`,
+    transform: above ? 'translateY(-100%)' : 'none',
+  }
+})
 
 /** 组件挂载时（settingsOpen 已为 true，watch 不会触发）以及后续打开时填充表单 */
 onMounted(() => {
@@ -140,7 +195,12 @@ async function onSave() {
       </button>
     </header>
 
-    <div class="settings-body">
+    <div
+      class="settings-body"
+      @mouseover="onDescHover"
+      @mouseout="onDescLeave"
+      @scroll="hideDescTip"
+    >
       <!-- 通用（OPT-01 拆分：settings/SettingsGeneral.vue） -->
       <SettingsGeneral :form="form" />
 
@@ -166,6 +226,18 @@ async function onSave() {
         保存
       </button>
     </footer>
+
+    <!-- 说明小字全文浮窗（Teleport 到 body：不被页面滚动容器裁剪） -->
+    <Teleport to="body">
+      <div
+        v-if="descTip"
+        class="setting-desc-tip"
+        :style="descTipStyle"
+        role="tooltip"
+      >
+        {{ descTip.text }}
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -222,5 +294,25 @@ async function onSave() {
   padding: 16px var(--page-inset);
   border-top: 1px solid var(--glass-border);
   flex-shrink: 0;
+}
+
+/* 说明小字全文浮窗：与设置组同款玻璃质感，悬停即显且不拦截指针 */
+.setting-desc-tip {
+  position: fixed;
+  z-index: var(--z-toast);
+  padding: 6px 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: normal;
+  /* 长路径等无断点文本按需断行，避免浮窗横向溢出 */
+  overflow-wrap: anywhere;
+  pointer-events: none;
 }
 </style>
