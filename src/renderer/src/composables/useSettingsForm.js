@@ -13,7 +13,9 @@ import {
 } from '../store/appStore'
 
 /** 规范化 NSFW 模糊样式（与主进程 store-settings.normalizeNsfwBlur 同语义）：
- * 旧版布尔值迁移（true=blur/false=off），非法值回退默认「模糊」 */
+ * 旧版布尔值迁移（true=blur/false=off），非法值回退默认「模糊」
+ * @param {unknown} raw 原始设置值（兼容旧版布尔）
+ */
 function normalizeNsfwBlur(raw) {
   if (raw === true) return 'blur'
   if (raw === false) return 'off'
@@ -95,6 +97,7 @@ export function useSettingsForm() {
 
   /** 表单字段快照（数组字段排序复制；excludeDirs 按原文记录） */
   function formSnapshotValue() {
+    /** @type {Record<string, any>} */
     const snapshot = {}
     for (const [key, value] of Object.entries(form)) {
       snapshot[key] = Array.isArray(value) ? [...value].sort() : value
@@ -166,7 +169,10 @@ export function useSettingsForm() {
       ...new Set(
         form.excludeText
           .split(/[\n,;，；]/)
-          .map((s) => s.trim().replace(/^[\\/]+|[\\/]+$/g, ''))
+          .map(
+            /** @param {string} s */
+            (s) => s.trim().replace(/^[\\/]+|[\\/]+$/g, ''),
+          )
           .filter(Boolean),
       ),
     ]

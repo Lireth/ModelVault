@@ -84,7 +84,11 @@ describe('CivitaiPanel 识别入口', () => {
       .trigger('click')
     await flushPromises()
 
-    expect(window.api.models.civitaiIdentify).toHaveBeenCalledWith('m1')
+    expect(window.api.models.civitaiIdentify).toHaveBeenCalledWith(
+      'm1',
+      false,
+      true,
+    )
     const link = wrapper.find('.civitai-link')
     expect(link.exists()).toBe(true)
     expect(link.attributes('href')).toBe(
@@ -446,7 +450,11 @@ describe('CivitaiPanel 识别在途会话守卫', () => {
         .attributes('disabled'),
     ).toBeUndefined()
     expect(window.api.models.civitaiIdentify).toHaveBeenCalledTimes(1)
-    expect(window.api.models.civitaiIdentify).toHaveBeenCalledWith('m1')
+    expect(window.api.models.civitaiIdentify).toHaveBeenCalledWith(
+      'm1',
+      false,
+      true,
+    )
     wrapper.unmount()
   })
 
@@ -471,7 +479,11 @@ describe('CivitaiPanel 识别在途会话守卫', () => {
       .find((b) => b.text().includes('识别 Civitai 模型'))
       .trigger('click')
     await flushPromises()
-    expect(window.api.models.civitaiIdentify).toHaveBeenLastCalledWith('m2')
+    expect(window.api.models.civitaiIdentify).toHaveBeenLastCalledWith(
+      'm2',
+      false,
+      true,
+    )
 
     resolveFirst({ found: false })
     await flushPromises()

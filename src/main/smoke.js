@@ -1,6 +1,7 @@
 import { app, BrowserWindow, nativeImage, protocol } from 'electron'
 import fs from 'node:fs/promises'
 import logger from './logger'
+import { unrefTimeout } from './utils'
 import { renderThumbJpeg } from './services/thumb-renderer'
 import { errorMessage } from '../shared/error-text'
 
@@ -20,7 +21,13 @@ const THUMB_CHECK_TIMEOUT_MS = 15000
 /** 整体兜底超时：任何卡死都必须让 CI 拿到明确失败而非挂起 */
 const TOTAL_TIMEOUT_MS = 40000
 
-/** 等待一个 Promise，超时 reject */
+/**
+ * 等待一个 Promise，超时 reject
+ * @param {Promise<any>} promise 目标 Promise
+ * @param {number} ms 超时毫秒
+ * @param {string} label 超时错误文案前缀
+ * @returns {Promise<any>}
+ */
 function withTimeout(promise, ms, label) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label}超时`)), ms)
@@ -54,6 +61,12 @@ function waitForRendererLoad(win) {
       cleanup()
       resolve()
     }
+    /**
+     * did-fail-load 事件回调
+     * @param {import('electron').Event} _event 事件对象
+     * @param {number} code 错误码
+     * @param {string} desc 错误描述
+     */
     const onFail = (_event, code, desc) => {
       cleanup()
       reject(new Error(`渲染页面加载失败 [${code}] ${desc}`))
@@ -125,10 +138,9 @@ export async function runStartupSmoke(win) {
     app.exit(ok ? 0 : 1)
   }
 
-  const failsafe = setTimeout(() => {
+  const failsafe = unrefTimeout(() => {
     void finish(new Error('启动冒烟总超时'))
   }, TOTAL_TIMEOUT_MS)
-  failsafe.unref?.()
 
   try {
     await waitForRendererLoad(win)

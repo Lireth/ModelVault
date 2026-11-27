@@ -55,7 +55,10 @@ export function useMainProcessEvents() {
    */
   let fsChangedPendingDirs = null
 
-  /** 把本轮变更子树并入待处理集合（多轮事件合并，null 表示当前无待处理） */
+  /**
+   * 把本轮变更子树并入待处理集合（多轮事件合并，null 表示当前无待处理）
+   * @param {string[]} [dirs] 变更子树相对目录列表
+   */
   function queuePendingDirs(dirs) {
     if (!fsChangedPendingDirs) fsChangedPendingDirs = new Set()
     for (const d of dirs || []) fsChangedPendingDirs.add(d)
@@ -66,6 +69,8 @@ export function useMainProcessEvents() {
    * 有变更子树走局部增量扫描，空列表（旧载荷/无法定位）由 store 回退全量扫描。
    * root 为事件发生时的库根快照（B-01）：定时器触发时若用户已切库，
    * 旧根子树必须丢弃，不能用于新库。
+   * @param {string[]} dirs 变更子树相对目录列表
+   * @param {string} root 事件发生时的库根
    */
   function scheduleFsRescan(dirs, root) {
     if (fsChangedTimer) clearTimeout(fsChangedTimer)
@@ -82,6 +87,10 @@ export function useMainProcessEvents() {
     }, 1000)
   }
 
+  /**
+   * 目录变更事件回调（models:fsChanged 载荷）
+   * @param {{ root: string, dirs?: string[] }} payload
+   */
   function onFsChanged({ root, dirs }) {
     if (root !== state.folder || !state.settings.autoRescan) return
     const subDirs = Array.isArray(dirs) ? dirs : []
@@ -114,34 +123,61 @@ export function useMainProcessEvents() {
 
   function subscribe() {
     // 订阅扫描进度事件
-    unsubscribeProgress = window.api.models.onScanProgress((progress) => {
-      state.progress = progress
-    })
+    unsubscribeProgress = window.api.models.onScanProgress(
+      /** @param {{ dirs: number, found: number, current: string }} progress */
+      (progress) => {
+        state.progress = progress
+      },
+    )
     // 订阅右键菜单动作事件
-    unsubscribeMenu = window.api.models.onMenuAction(({ id, action }) => {
-      handleMenuAction(id, action)
-    })
+    unsubscribeMenu = window.api.models.onMenuAction(
+      /** @param {{ id: string, action: string }} payload */
+      ({ id, action }) => {
+        handleMenuAction(id, action)
+      },
+    )
     // 订阅后台缩略图生成完成事件（首扫卡片先显示原图，缩略图补齐后替换）
-    unsubscribeThumbs = window.api.models.onThumbsReady(({ updates }) => {
-      applyThumbUpdates(updates)
-    })
+    unsubscribeThumbs = window.api.models.onThumbsReady(
+      /**
+       * @param {{ updates: Array<{ id: string, coverUrl?: string,
+       *   coverThumb?: { path: string, thumbUrl: string } }> }} payload
+       */
+      ({ updates }) => {
+        applyThumbUpdates(updates)
+      },
+    )
     // 订阅持久化落盘失败事件（B1/C7）：元数据与设置的落盘都在保存响应之后异步发生，
     // 失败须提示用户重试，否则磁盘错误时静默丢失
-    unsubscribeStoreError = window.api.models.onStoreError(({ message }) => {
-      toast('error', `数据保存失败: ${message}，请检查磁盘后重新保存`)
-    })
+    unsubscribeStoreError = window.api.models.onStoreError(
+      /** @param {{ message: string }} payload */
+      ({ message }) => {
+        toast('error', `数据保存失败: ${message}，请检查磁盘后重新保存`)
+      },
+    )
     // 订阅目录变更事件（E8）：autoRescan 开启时自动重扫
     unsubscribeFsChanged = window.api.models.onFsChanged?.(onFsChanged)
     // 订阅后台哈希预热进度事件（Civitai 识别加速）：整体替换快照，
     // 详情页 Civitai 面板按当前模型 id 匹配展示；完成事件携带的哈希经
     // applyHashUpdate 回填模型对象（FEAT-1 重复检测渐进可用）
-    unsubscribeWarmup = window.api.models.onWarmupProgress?.((progress) => {
-      state.warmup = progress
-      applyHashUpdate(progress)
-    })
+    unsubscribeWarmup = window.api.models.onWarmupProgress?.(
+      /**
+       * @param {{ active: boolean, id: string, percent: number,
+       *   hashedBytes: number, totalBytes: number, done: number,
+       *   remaining: number, hash?: string,
+       *   completions?: Array<{ id: string, hash: string }> }} progress
+       */
+      (progress) => {
+        state.warmup = progress
+        applyHashUpdate(progress)
+      },
+    )
     // 订阅启动自动检查更新结果（O-3）：仅在有新版本时推送一次，
     // 记录到 update store 并 toast 提示，设置页「关于」直接展示
     unsubscribeUpdateAvailable = window.api.app.onUpdateAvailable?.(
+      /**
+       * @param {{ hasUpdate?: boolean, current?: string, latest?: string,
+       *   releaseUrl?: string }} payload
+       */
       (payload) => {
         applyUpdateAvailable(payload)
       },
@@ -157,6 +193,10 @@ export function useMainProcessEvents() {
     // 订阅跨库传输进度事件（OPT-18）：快照写入传输浮层（done/total/字节），
     // 无进行中传输时事件被浮层状态兜底忽略（finally 置 null）
     unsubscribeTransferProgress = window.api.models.onTransferProgress?.(
+      /**
+       * @param {{ done: number, total: number, bytes: number,
+       *   totalBytes: number, canceled?: boolean }} progress
+       */
       (progress) => {
         if (transferState.busy) transferState.progress = progress
       },
@@ -164,6 +204,11 @@ export function useMainProcessEvents() {
     // 订阅模型导入进度事件（OPT-02）：全局导入浮条读取快照；
     // 无进行中导入时忽略迟到事件（importModels finally 会置 null）
     unsubscribeImportProgress = window.api.models.onImportProgress?.(
+      /**
+       * @param {{ done: number, total: number, bytes: number,
+       *   totalBytes: number, fileName?: string,
+       *   canceled?: boolean }} progress
+       */
       (progress) => {
         if (!state.importing) return
         // 保留本地「取消中」标记：主进程事件到达前取消按钮不得回弹为可点击

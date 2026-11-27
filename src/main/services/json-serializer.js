@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { Worker } from 'node:worker_threads'
 import logger from '../logger'
+import { unrefTimeout } from '../utils'
 import { errorMessage } from '../../shared/error-text'
 
 /**
@@ -68,7 +69,13 @@ let worker = null
 let nextTaskId = 0
 const pending = new Map()
 
-/** 主线程回退路径：文本 + 可选哈希 */
+/**
+ * 主线程回退路径：文本 + 可选哈希
+ * @param {any} value 待序列化值
+ * @param {string} hashPrefix 哈希前缀
+ * @param {boolean} needHash 是否计算 SHA256
+ * @returns {{text: string, bytes: number, hash: string}}
+ */
 function serializeOnMainThread(value, hashPrefix, needHash) {
   const text = JSON.stringify(value)
   return {
@@ -83,7 +90,11 @@ function serializeOnMainThread(value, hashPrefix, needHash) {
   }
 }
 
-/** 终止 worker 并拒绝全部在途任务（调用方会回退主线程） */
+/**
+ * 终止 worker 并拒绝全部在途任务（调用方会回退主线程）
+ * @param {import('node:worker_threads').Worker} w 待终止的 worker
+ * @param {unknown} cause 失败原因
+ */
 function failWorker(w, cause) {
   if (worker !== w) return
   worker = null
@@ -146,10 +157,9 @@ export async function serializeJsonOffThread(value, options = {}) {
     const w = ensureWorker()
     const id = nextTaskId++
     return await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timer = unrefTimeout(() => {
         failWorker(w, new Error(`JSON 序列化超时（${timeoutMs}ms）`))
       }, timeoutMs)
-      timer.unref?.()
       pending.set(id, { resolve, reject, timer })
       try {
         w.postMessage({ id, value, hash: needHash, hashPrefix })
@@ -181,10 +191,9 @@ export async function parseJsonOffThread(text) {
     const w = ensureWorker()
     const id = nextTaskId++
     return await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timer = unrefTimeout(() => {
         failWorker(w, new Error(`JSON 解析超时（${PARSE_TIMEOUT_MS}ms）`))
       }, PARSE_TIMEOUT_MS)
-      timer.unref?.()
       pending.set(id, { resolve, reject, timer })
       try {
         w.postMessage({ id, op: 'parse', text })

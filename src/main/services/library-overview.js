@@ -32,12 +32,20 @@ const MAX_SOURCE_BYTES = 64 * 1024 * 1024
 /** 索引超过该时长视为较旧，报告中给出提示（毫秒） */
 const STALE_INDEX_MS = 7 * 24 * 60 * 60 * 1000
 
-/** 路径归一化键（Windows 大小写不敏感） */
+/**
+ * 路径归一化键（Windows 大小写不敏感）
+ * @param {string} root 模型库根目录
+ * @returns {string}
+ */
 function rootKeyOf(root) {
   return path.resolve(root).toLowerCase()
 }
 
-/** 库显示名：目录名；盘符根（D:\）回退完整路径 */
+/**
+ * 库显示名：目录名；盘符根（D:\）回退完整路径
+ * @param {string} root 模型库根目录
+ * @returns {string}
+ */
 function libraryName(root) {
   const base = path.basename(root)
   return base || root
@@ -61,14 +69,25 @@ export function normalizeLibraryRoots(roots) {
   return result
 }
 
-/** 绝对模型路径 → 库内相对路径（POSIX；不在库内时回退文件名） */
+/**
+ * 绝对模型路径 → 库内相对路径（POSIX；不在库内时回退文件名）
+ * @param {string} root 模型库根目录
+ * @param {string} absPath 模型绝对路径
+ * @param {string} [fallbackName] 回退文件名（缺省用 absPath 的 basename）
+ * @returns {string}
+ */
 function relativePathOf(root, absPath, fallbackName) {
   const rel = relativeWithin(absPath, root)
   if (rel) return rel.split(path.sep).join('/')
   return fallbackName || path.basename(absPath)
 }
 
-/** 索引记录 → 聚合条目（只保留统计所需字段，控制内存） */
+/**
+ * 索引记录 → 聚合条目（只保留统计所需字段，控制内存）
+ * @param {string} root 模型库根目录
+ * @param {any} record 本地索引中的模型记录
+ * @returns {OverviewEntry}
+ */
 function indexEntry(root, record) {
   const name = typeof record.name === 'string' ? record.name : ''
   return {
@@ -80,7 +99,13 @@ function indexEntry(root, record) {
   }
 }
 
-/** 元数据键 → 聚合条目（store.json 不含 size，容量按未知处理） */
+/**
+ * 元数据键 → 聚合条目（store.json 不含 size，容量按未知处理）
+ * @param {string} root 模型库根目录
+ * @param {string} relKey 元数据相对键
+ * @param {any} meta 元数据条目
+ * @returns {OverviewEntry}
+ */
 function storeEntry(root, relKey, meta) {
   const normalizedKey = String(relKey).split('\\').join('/')
   return {
@@ -119,7 +144,14 @@ function storeEntry(root, relKey, meta) {
  */
 
 /**
+ * 重复组成员（库根 + 库内相对路径 + 大小）
+ * @typedef {{root: string, rootKey: string, library: string, relPath: string,
+ *   name: string, size: number}} DuplicateMember
+ */
+
+/**
  * 读取某库的 store.json（索引缺失时的回退）。
+ * @param {string} root 模型库根目录
  * @returns {Promise<{entries: OverviewEntry[], savedAt: number} | null>} 不可读返回 null
  */
 async function readStoreEntries(root) {
@@ -175,6 +207,7 @@ export function buildLibraryOverview(libraries, now = Date.now()) {
   }))
 
   // 全库按 hash 聚合；同一库内同一绝对路径只计一次（索引异常时防御）
+  /** @type {Map<string, {hash: string, members: DuplicateMember[]}>} */
   const byHash = new Map()
   for (const lib of libs) {
     const seen = new Set()
@@ -319,6 +352,7 @@ export async function collectLibraryOverview() {
       .stat(root)
       .then((s) => s.isDirectory())
       .catch(() => false)
+    /** @type {OverviewEntry[]} */
     let models = []
     let source = 'none'
     let savedAt = 0

@@ -57,6 +57,7 @@ function sanitizeBaseline(root, snapshot, excludeNames) {
  *   基线原样保留，不随本次回填删除）
  */
 export function removeSnapshotSubtree(w, absDir, excludeAbs = []) {
+  /** @type {(dir: string) => boolean} */
   const isExcluded = (dir) =>
     excludeAbs.length > 0 &&
     excludeAbs.some((ex) => relativeWithin(dir, ex) !== null)
@@ -81,10 +82,15 @@ export function removeSnapshotSubtree(w, absDir, excludeAbs = []) {
  * - 清理后若无剩余项，取消已安排的防抖广播（扫描结果已包含这些变更）。
  * B5：读取失败的子树（excludes）本次未被扫描覆盖，其待广播项保留——
  * 停扫后补发将再次触发局部扫描，磁盘恢复后自动收敛（无需手动全量扫描）。
+ * @param {WatcherState} w 监控状态
+ * @param {string[]|null} scopes 受影响子树（null = 全量扫描）
+ * @param {string[]} [excludes] 读取失败的子树（保留其待广播项）
  */
 function clearScannedPendingDirs(w, scopes, excludes = []) {
+  /** @type {(dir: string) => boolean} */
   const isExcluded = (dir) =>
     excludes.length > 0 && isRelDirInScope(dir, excludes)
+  /** @type {(set: Set<string>) => void} */
   const clearSet = (set) => {
     if (scopes === null) {
       set.clear()
@@ -106,7 +112,12 @@ function clearScannedPendingDirs(w, scopes, excludes = []) {
   }
 }
 
-/** 全量扫描基线：整体替换名称快照，内容基线延后重建 */
+/**
+ * 全量扫描基线：整体替换名称快照，内容基线延后重建
+ * @param {WatcherState} w 监控状态
+ * @param {Map<string, string[]>} snapshot 扫描产出的目录快照
+ * @returns {boolean} 是否应用成功
+ */
 export function applyFullBaseline(w, snapshot) {
   const baseline = sanitizeBaseline(w.root, snapshot, w.excludeNames)
   if (baseline.size === 0) return false
@@ -130,6 +141,11 @@ export function applyFullBaseline(w, snapshot) {
  * B5 保护——永久性锁定目录否则会以轮询间隔为周期无限重复注定失败的
  * 局部扫描；放弃保护后该子树按普通扫描结果收敛，恢复可读后由轮询差异
  * 自动重新检出（B5 恢复语义不变）。
+ * @param {WatcherState} w 监控状态
+ * @param {string[]} dirs 受影响子树（POSIX 相对路径）
+ * @param {Map<string, string[]>} snapshot 扫描产出的目录快照
+ * @param {string[]} [excludeDirs] 读取失败的子树
+ * @returns {boolean} 是否应用成功
  */
 export function applyPartialBaseline(w, dirs, snapshot, excludeDirs = []) {
   const scopes = dedupeAndPruneDescendants(Array.isArray(dirs) ? dirs : [])
@@ -150,11 +166,14 @@ export function applyPartialBaseline(w, dirs, snapshot, excludeDirs = []) {
   const givenUps = excludes.filter(
     (rel) => (w.failedDirRetries.get(rel) || 0) >= maxRetries,
   )
+  /** @type {(relPosix: string) => boolean} */
   const isExcluded = (relPosix) =>
     excludes.length > 0 && isRelDirInScope(relPosix, excludes)
+  /** @type {(relPosix: string) => boolean} */
   const isGivenUp = (relPosix) =>
     givenUps.length > 0 && isRelDirInScope(relPosix, givenUps)
   // 连续失败达到上限的失败子树不再受 B5 保护（#52）
+  /** @type {(relPosix: string) => boolean} */
   const isProtected = (relPosix) => isExcluded(relPosix) && !isGivenUp(relPosix)
   const protectedExcludes = excludes.filter((rel) => !givenUps.includes(rel))
   const excludeAbs = protectedExcludes

@@ -114,6 +114,7 @@ let lastFailedToastAt = 0
  * 子树读取失败的可见反馈（B5）：按目录集合去重 + 60s 节流——
  * 失败子树的待广播项被保留，watcher 会自动重试直至恢复，期间相同
  * 失败不重复弹提示；目录集合变化或超过间隔则再次提示。
+ * @param {string[]} failedDirs 读取失败的子树相对目录集合
  */
 function notifyFailedDirs(failedDirs) {
   const key = [...failedDirs].sort().join('|')
@@ -183,6 +184,8 @@ export async function partialScanModels(dirs) {
 
   const token = ++scanToken
   const modelsRef = state.models
+  // SCAN-DELTA：请求前捕获快照代际（合并后 replaceModels 会复位，收尾恢复）
+  const prevSnapGen = state.listSnap?.gen
   state.partialScanning = true
   let fallbackFull = false
   let canceled = false
@@ -273,8 +276,11 @@ export async function partialScanModels(dirs) {
     // 全量扫描在途：其结果将整体覆盖列表，此时合并局部结果没有意义
     if (state.scanning) return
 
-    const incoming = Array.isArray(res.models) ? res.models : []
+    const incoming = /** @type {Array<Record<string, any>>} */ (
+      Array.isArray(res.models) ? res.models : []
+    )
     const incomingIds = new Set(incoming.map((m) => m.id))
+    /** @type {string[]} */
     const removedIds = []
     // 以主进程实际扫描的子树为准（主进程可能进一步收敛到一级目录），
     // 避免合并范围与扫描范围不一致留下陈旧条目
@@ -302,6 +308,12 @@ export async function partialScanModels(dirs) {
     // O7：局部扫描返回的新对象自带最新哈希，清理这些 id 的预热覆盖
     clearHashOverrides(incomingIds)
     replaceModels(untouched.concat(incoming))
+    // SCAN-DELTA：局部合并不改变快照代际——主进程已按本次装饰结果同步
+    // 注册表（list-delta.updateListSnapshotPartial），渲染层合并结果与注册表
+    // 内容一致，后续全量扫描仍可走差量。replaceModels 已复位代际，此处恢复
+    if (state.listSnap === null && typeof prevSnapGen === 'number') {
+      state.listSnap = { root, gen: prevSnapGen }
+    }
     // 类型别名仅收窄赋值目标，运行时仍写回同一 shallowReactive 对象
     // （形状见 LastScanSnapshot）
     /** @type {{ lastScan: LastScanSnapshot | null }} */

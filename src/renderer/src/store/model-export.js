@@ -127,7 +127,10 @@ function csvCell(value, numeric = false) {
   return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe
 }
 
-/** Markdown 单元格转义（反斜杠/竖线/换行） */
+/**
+ * Markdown 单元格转义（反斜杠/竖线/换行）
+ * @param {any} value 原始值
+ */
 function mdCell(value) {
   const text = value === null || value === undefined ? '' : String(value)
   // CodeQL #12：先转义反斜杠再转义竖线——只转 | 时输入自带的 \ 会

@@ -193,6 +193,55 @@ describe('models:scan 防重入（B4）', () => {
   })
 })
 
+describe('models:scan SCAN-DELTA 增量响应', () => {
+  it('全量响应携带 snap，代际一致时二次扫描回差量，失配回退全量', async () => {
+    const scan = getRegisteredHandler('models:scan')
+    await registerLibrary(root)
+    const model = {
+      id: path.join(root, 'a.safetensors'),
+      name: 'a',
+      ext: '.safetensors',
+      type: 'lora',
+      size: 1,
+      mtimeMs: 1,
+      covers: [],
+    }
+    // 两次扫描返回同一装饰对象（decorateCache 命中语义 = 内容未变）。
+    // mockImplementation 每次返回新数组：handler 会排空 models 数组（O8），
+    // 共享数组会让第二次扫描拿到空列表
+    vi.mocked(scanModels).mockImplementation(async () => ({
+      models: [model],
+      errors: [],
+      dirCount: 1,
+    }))
+
+    // 首次扫描：无快照 → 全量下发并播种代际
+    const first = await scan(makeEvent(), { folder: root })
+    expect(first.models).toHaveLength(1)
+    expect(first.snap).toEqual({ root, gen: expect.any(Number) })
+
+    // 二次扫描（同装饰引用）：代际一致 → 仅回差量，不重发全量列表
+    const second = await scan(makeEvent(), {
+      folder: root,
+      snapshot: { root, gen: first.snap.gen },
+    })
+    expect(second.delta).toBeDefined()
+    expect(second.models).toBeUndefined()
+    expect(second.delta.upsert).toHaveLength(0)
+    expect(second.delta.remove).toHaveLength(0)
+    expect(second.total).toBe(1)
+    expect(second.snap).toEqual({ root, gen: first.snap.gen })
+
+    // 代际失配（窗口重载/清空列表模拟）→ 全量下发并颁发新代际
+    const third = await scan(makeEvent(), {
+      folder: root,
+      snapshot: { root, gen: first.snap.gen - 1 },
+    })
+    expect(third.models).toHaveLength(1)
+    expect(third.snap.gen).not.toBe(first.snap.gen)
+  })
+})
+
 describe('models:partialScan（A-03）', () => {
   it('全量扫描进行中局部扫描立即拒绝（共用扫描锁）', async () => {
     const scan = getRegisteredHandler('models:scan')

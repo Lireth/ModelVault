@@ -20,7 +20,10 @@ import { confirmDialog, toast } from './toast'
  */
 
 /** 已保存的视图列表（设置项镜像；无该字段的旧数据回退空数组） */
-export const savedViews = computed(() => state.settings.savedViews || [])
+export const savedViews = computed(
+  () =>
+    /** @type {Array<Record<string, any>>} */ (state.settings.savedViews || []),
+)
 
 /**
  * 视图标签筛选归一化（FEAT-01）：
@@ -39,7 +42,11 @@ function viewTagFilters(v) {
   return [...new Set(raw.filter((t) => typeof t === 'string' && t))]
 }
 
-/** 两组标签是否等价（与选择顺序无关） */
+/**
+ * 两组标签是否等价（与选择顺序无关）
+ * @param {string[]} a 标签组一
+ * @param {string[]} b 标签组二
+ */
 function sameTagFilters(a, b) {
   if (a.length !== b.length) return false
   const left = [...a].sort()
@@ -63,7 +70,10 @@ function snapshotFilters() {
   }
 }
 
-/** 视图与当前筛选状态逐项一致 */
+/**
+ * 视图与当前筛选状态逐项一致
+ * @param {Record<string, any>} v 视图对象
+ */
 function viewMatchesCurrent(v) {
   return (
     v.search === state.search &&
@@ -87,7 +97,10 @@ export const activeSavedViewId = computed(() => {
   return hit ? hit.id : ''
 })
 
-/** 视图摘要（侧栏 tooltip）：筛选条件 + 排序；无筛选条件时以「全部模型」兜底 */
+/**
+ * 视图摘要（侧栏 tooltip）：筛选条件 + 排序；无筛选条件时以「全部模型」兜底
+ * @param {Record<string, any>} v 视图对象
+ */
 export function viewSummary(v) {
   const parts = []
   if (v.typeFilter && v.typeFilter !== 'all')

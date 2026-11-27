@@ -122,6 +122,13 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
 
+    # O2：Electron / electron-builder 二进制镜像经 job 级环境变量注入
+    #（.npmrc 仅保留 registry——镜像键非 npm 项目配置，npm 11+ 会告警；
+    # @electron/get 与 electron-builder 读取同名环境变量，行为等价）
+    env:
+      ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+      ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
+
     steps:
       # ---------- 环境准备 ----------
 
@@ -134,8 +141,9 @@ jobs:
           node-version: '24'
           cache: npm # 缓存 npm 依赖包
 
-      # 缓存 Electron / electron-builder 二进制（.npmrc 指向 npmmirror 镜像，
-      # 首次下载约 100MB+，缓存后大幅加速）。键随 lock 文件变化自动失效。
+      # 缓存 Electron / electron-builder 二进制（ELECTRON_MIRROR 等环境变量
+      # 指向 npmmirror 镜像，首次下载约 100MB+，缓存后大幅加速）。
+      # 键随 lock 文件变化自动失效。
       - name: 缓存 Electron 二进制
         uses: actions/cache@v6
         with:

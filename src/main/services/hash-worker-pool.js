@@ -1,5 +1,6 @@
 import { Worker } from 'node:worker_threads'
 import logger from '../logger'
+import { unrefTimeout, backoffMs } from '../utils'
 import { errorMessage } from '../../shared/error-text'
 
 /**
@@ -206,7 +207,9 @@ let crashStreak = 0
  * - background：批量预热等后台任务，让路于前台。
  * 优先级只影响取队顺序；并行度由槽位数决定。
  */
+/** @type {HashPoolTask[]} */
 const foregroundQueue = []
+/** @type {HashPoolTask[]} */
 const backgroundQueue = []
 
 /** 构造“后台任务已让路”错误（仅线程池内部使用） */
@@ -292,7 +295,8 @@ function clearRestartTimer() {
 function rejectQueued(err) {
   for (const queue of [foregroundQueue, backgroundQueue]) {
     while (queue.length > 0) {
-      const task = queue.shift()
+      // while 长度判定保证 shift 必命中（类型 cast，运行时零改动）
+      const task = /** @type {HashPoolTask} */ (queue.shift())
       if (task.settled) continue
       task.settled = true
       if (task.abortListener)
@@ -319,16 +323,16 @@ function recordCrash() {
     crashStreak = 0
     return
   }
-  const delay = Math.min(
-    RESTART_BASE_DELAY_MS * 2 ** Math.max(0, crashStreak - 1),
+  const delay = backoffMs(
+    RESTART_BASE_DELAY_MS,
+    crashStreak,
     RESTART_MAX_DELAY_MS,
   )
   if (restartTimer) return
-  restartTimer = setTimeout(() => {
+  restartTimer = unrefTimeout(() => {
     restartTimer = null
     pump()
   }, delay)
-  restartTimer.unref?.()
 }
 
 /**
@@ -353,7 +357,10 @@ function handleSlotFailure(slot, w, cause) {
   recordCrash()
 }
 
-/** 结束槽位当前在途任务的占位（仅状态清理，结算本身由消息路由完成） */
+/**
+ * 结束槽位当前在途任务的占位（仅状态清理，结算本身由消息路由完成）
+ * @param {HashPoolSlot} slot 目标槽位
+ */
 function settleSlot(slot) {
   const task = slot.currentTask
   if (task?.abortListener) {
@@ -366,7 +373,8 @@ function settleSlot(slot) {
 function nextTask() {
   for (const queue of [foregroundQueue, backgroundQueue]) {
     while (queue.length > 0) {
-      const task = queue.shift()
+      // while 长度判定保证 shift 必命中（类型 cast，运行时零改动）
+      const task = /** @type {HashPoolTask} */ (queue.shift())
       if (!task.settled) return task
     }
   }
@@ -397,6 +405,7 @@ function trimSlots() {
  * 通知其中一个槽位的 worker 在下一读块边界中止；等其回传 done 后
  * pump 再启动前台任务，避免新旧任务并发读写同一个 worker 的共享
  * abort 标志。多槽位（OPT-3）下其余后台任务不受影响，继续并行执行。
+ * @param {HashPoolTask} task 待入队任务
  */
 function enqueueTask(task) {
   // 新任务到达时无需继续等待退避：立即尝试重建并派发
@@ -428,7 +437,11 @@ function enqueueTask(task) {
   pump()
 }
 
-/** 从两个队列中移除指定任务（取消排队任务用） */
+/**
+ * 从两个队列中移除指定任务（取消排队任务用）
+ * @param {HashPoolTask} task 待移除任务
+ * @returns {boolean} 是否移除成功
+ */
 function dequeueTask(task) {
   for (const queue of [foregroundQueue, backgroundQueue]) {
     const idx = queue.indexOf(task)
@@ -479,7 +492,10 @@ function pump() {
   }
 }
 
-/** 线程池重置：清除重启计划并拒绝当前与队列中全部任务 */
+/**
+ * 线程池重置：清除重启计划并拒绝当前与队列中全部任务
+ * @param {Error} err 拒绝原因
+ */
 function failAll(err) {
   clearRestartTimer()
   crashStreak = 0

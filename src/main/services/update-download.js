@@ -114,7 +114,10 @@ export function fetchAllowedUpdateUrl(url, options) {
 /** 瞬时网络错误重试的退避间隔（ms） */
 const TRANSIENT_RETRY_DELAY_MS = 500
 
-/** 等待指定毫秒（重试退避） */
+/**
+ * 等待指定毫秒（重试退避）
+ * @param {number} ms 毫秒
+ */
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -192,11 +195,31 @@ let downloadAbort = null
 
 /**
  * 记录检查更新得到的可用资产（由 updater.checkForUpdate 调用）。
+ * 下载进行中一律忽略（B-1.2）：检查更新结果只影响渲染层展示，不得覆盖
+ * 模块态下载资产——否则「下载中检查返回无更新」会清空 pendingAssets，
+ * 下载失败后的重试入口断裂；「下载中检查返回新版本」则造成下载包与
+ * 展示版本错位。下载结束后下一次检查更新自然刷新资产。
  * @param {{downloadUrl: string, checksumUrl: string, size: number}|null} assets
  * @param {string} latest 最新版本号
  */
 export function setPendingUpdate(assets, latest) {
+  if (downloadAbort) {
+    logger.warn(
+      `更新包下载中，忽略检查更新对下载资产的覆盖（latest=${String(latest).slice(0, 32)}）`,
+    )
+    return
+  }
   pendingAssets = assets ? { ...assets, latest } : null
+}
+
+/**
+ * 是否有进行中的更新包下载（渲染层禁用「检查更新」入口的判定依据）：
+ * 下载期间模块态资产处于锁定态（见 setPendingUpdate），检查更新入口
+ * 一并冻结，避免「下载的是 A 版、界面显示 B 版」的状态失配。
+ * @returns {boolean}
+ */
+export function isUpdateDownloading() {
+  return downloadAbort !== null
 }
 
 /** 更新包缓存目录（安装模块共用） */
@@ -214,14 +237,22 @@ export function getDownloadedChecksum() {
   return downloadedChecksum
 }
 
-/** 流式计算文件 SHA256（小写 hex；安装前复核复用同一实现） */
+/**
+ * 流式计算文件 SHA256（小写 hex；安装前复核复用同一实现）
+ * @param {string} filePath 文件绝对路径
+ * @returns {Promise<string>} 64 位十六进制哈希
+ */
 export async function hashFile(filePath) {
   const hash = createHash('sha256')
   await updateHashFromFile(hash, filePath)
   return hash.digest('hex').toLowerCase()
 }
 
-/** 把文件内容流式喂入既有 hash（续传时先补齐已下载部分的哈希状态） */
+/**
+ * 把文件内容流式喂入既有 hash（续传时先补齐已下载部分的哈希状态）
+ * @param {import('node:crypto').Hash} hash 进行中的哈希对象
+ * @param {string} filePath 文件绝对路径
+ */
 async function updateHashFromFile(hash, filePath) {
   const stream = fs.createReadStream(filePath)
   for await (const chunk of stream) hash.update(chunk)

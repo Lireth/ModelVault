@@ -28,6 +28,7 @@ import {
 import { clearDeferredOwners, primeHeaderInfoCache } from '../decorate'
 import { clearDeferredJobs } from '../../../services/thumbs'
 import { slimModelsForList, logPayloadSize } from '../list-payload'
+import { beginListSnapshot } from '../list-delta'
 import {
   withMaintenanceLock,
   wrapHandler,
@@ -115,15 +116,20 @@ export function registerLibraryHandlers() {
           perf(`本地索引 ${cachedIndex.models.length} 个模型`)
           // OPT-PAYLOAD：秒开列表下发瘦身模型（先合成元数据展示字段再剥离，
           // 顺序不可颠倒——合成依赖 folderSubCategory）
-          const slimmed = slimModelsForList(
-            overlayCurrentMeta(/** @type {any[]} */ (cachedIndex.models)),
+          // SCAN-DELTA：播种列表快照并随响应下发代际（切库后的后台校验
+          // 扫描据此可回差量）
+          const overlaid = overlayCurrentMeta(
+            /** @type {any[]} */ (cachedIndex.models),
           )
+          const slimmed = slimModelsForList(overlaid)
           logPayloadSize('models:openLibrary', slimmed.approxBytes)
+          const snap = beginListSnapshot(root, overlaid)
           return {
             root,
             settings,
             cached: true,
             models: slimmed.models,
+            snap: { root, gen: snap.gen },
             savedAt: cachedIndex.savedAt,
             durationMs: cachedIndex.durationMs,
           }
@@ -174,7 +180,7 @@ export function registerLibraryHandlers() {
       // V-02 切库状态机：选择阶段只把目录加入库列表（供随后的 models:scan
       // 通过白名单校验），不提前写 modelsFolder——只有扫描成功才由 scan 链路
       // 提交为激活库；扫描失败/取消时保持原激活库不变
-      const folders = getSettings().modelsFolders || []
+      const folders = /** @type {any[]} */ (getSettings().modelsFolders || [])
       const known = folders.some(
         (f) =>
           typeof f === 'string' && f.toLowerCase() === folder.toLowerCase(),

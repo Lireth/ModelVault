@@ -41,9 +41,12 @@ import { errorMessage } from '../../../shared/error-text'
  * Civitai 示例图导入链路复用（同一封面结构与缩略图刷新约定）。
  */
 
-/** 由元数据构造渲染进程使用的封面列表（含绝对路径与 mvimg URL） */
+/**
+ * 由元数据构造渲染进程使用的封面列表（含绝对路径与 mvimg URL）
+ * @param {Record<string, any>} meta 模型元数据
+ */
 function coverListFromMeta(meta) {
-  return (meta?.covers || []).map((rel) => {
+  return /** @type {string[]} */ (meta?.covers || []).map((rel) => {
     const abs = resolveCoverSafe(rel)
     return { rel, path: abs, url: abs ? toImageUrl(abs) : '' }
   })
@@ -79,7 +82,7 @@ export function appendCoverMeta(id, absCover) {
   }
   const existing = getModelMeta(id) || {}
   const covers = Array.isArray(existing.covers)
-    ? existing.covers.filter((c) => c !== coverRel)
+    ? /** @type {string[]} */ (existing.covers).filter((c) => c !== coverRel)
     : []
   covers.push(coverRel)
   const meta = setModelMeta(id, {
@@ -127,7 +130,11 @@ export function registerCoverHandlers() {
   // - 维护锁（OPT-14）：与大维护操作（扫描/恢复/跨库传输/切库）互斥——
   //   pruneOrphanCovers 与整目录交换期间新增/删除封面会让恢复结果与
   //   元数据指向错位。file-op 彼此兼容，不改变封面链路的可用并发
-  /** 归属校验（realpath），非法返回错误文案 */
+  /**
+   * 归属校验（realpath），非法返回错误文案
+   * @param {string} id 模型绝对路径
+   * @param {string} message 越界错误文案
+   */
   const checkCoverTarget = (id, message) =>
     checkModelIdInRootReal(id, { message })
 
@@ -229,6 +236,7 @@ export function registerCoverHandlers() {
           (typeof cover === 'string' && cover ? '' : '无效的封面参数')
         if (invalid) return { error: invalid }
         const existing = getModelMeta(id) || {}
+        /** @type {string[]} */
         const covers = Array.isArray(existing.covers) ? existing.covers : []
         if (!covers.includes(cover)) {
           return { error: '封面不存在，无法删除' }

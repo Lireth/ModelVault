@@ -2,10 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { shell } from 'electron'
+import { shell, dialog, Menu, clipboard, BrowserWindow } from 'electron'
 import { fakeUserData } from './setup'
 import logger from '../src/main/logger'
-import { getRegisteredHandler, makeEvent } from './helpers/modelsIpc'
+import {
+  getRegisteredHandler,
+  makeEvent,
+  makeWindow,
+} from './helpers/modelsIpc'
 
 /**
  * models:deleteModel 特征测试（D1，先测后拆基线）：
@@ -21,7 +25,7 @@ vi.mock('electron', () => ({
     getAllWindows: vi.fn(() => []),
   }),
   clipboard: { read: vi.fn(), writeText: vi.fn() },
-  dialog: { showOpenDialog: vi.fn() },
+  dialog: { showOpenDialog: vi.fn(), showSaveDialog: vi.fn() },
   ipcMain: { handle: vi.fn() },
   Menu: { buildFromTemplate: vi.fn() },
   shell: { trashItem: vi.fn(), showItemInFolder: vi.fn() },
@@ -373,5 +377,223 @@ describe('models:reveal 越界校验（C6）', () => {
       error: '无效的路径',
     })
     expect(shell.showItemInFolder).not.toHaveBeenCalled()
+  })
+})
+
+describe('models:popupMenu 原生右键菜单', () => {
+  beforeEach(() => {
+    // 跨用例隔离：菜单构建/剪贴板/定位调用与假窗口返回值不得互相污染
+    vi.mocked(Menu.buildFromTemplate).mockReset()
+    vi.mocked(clipboard.writeText).mockReset()
+    vi.mocked(shell.showItemInFolder).mockReset()
+    vi.mocked(BrowserWindow.fromWebContents).mockReset()
+  })
+
+  /**
+   * 弹出右键菜单并捕获 buildFromTemplate 收到的模板。
+   * @returns {Promise<{res: object, template: any[], popup: any, win: any}>}
+   */
+  async function openMenu(id, win = makeWindow()) {
+    vi.mocked(BrowserWindow.fromWebContents).mockReturnValue(win)
+    const popup = vi.fn()
+    /** @type {any[]} */
+    let template = []
+    vi.mocked(Menu.buildFromTemplate).mockImplementation((tpl) => {
+      template = tpl
+      return { popup }
+    })
+    const res = await getRegisteredHandler('models:popupMenu')(makeEvent(win), {
+      id,
+    })
+    return { res, template, popup, win }
+  }
+  const item = (tpl, text) => tpl.find((it) => it.label === text)
+
+  it('普通模型：基础项齐全，点击经 menuAction 事件回传渲染进程', async () => {
+    const abs = path.join(root, 'menu-a.safetensors')
+    await fs.writeFile(abs, 'x')
+    const { res, template, popup, win } = await openMenu(abs)
+    expect(res).toEqual({ ok: true })
+    expect(popup).toHaveBeenCalledTimes(1)
+    // 无推荐参数/触发词：对应复制项不出现
+    expect(item(template, '复制推荐参数')).toBeUndefined()
+    expect(item(template, '复制触发词')).toBeUndefined()
+    expect(item(template, '收藏')).toBeTruthy()
+    expect(item(template, '禁用此模型')).toBeTruthy()
+
+    item(template, '打开详情').click()
+    expect(win.webContents.send).toHaveBeenCalledWith('models:menuAction', {
+      id: abs,
+      action: 'openDetail',
+    })
+    item(template, '禁用此模型').click()
+    expect(win.webContents.send).toHaveBeenCalledWith('models:menuAction', {
+      id: abs,
+      action: 'disableModel',
+    })
+    item(template, '移入回收站').click()
+    expect(win.webContents.send).toHaveBeenCalledWith('models:menuAction', {
+      id: abs,
+      action: 'deleteModel',
+    })
+    item(template, '复制文件路径').click()
+    expect(clipboard.writeText).toHaveBeenCalledWith(abs)
+    item(template, '打开所在文件夹').click()
+    expect(shell.showItemInFolder).toHaveBeenCalledWith(abs)
+  })
+
+  it('禁用中且标注完整：启用项/取消收藏/复制推荐参数/复制触发词', async () => {
+    const abs = path.join(root, 'menu-b.safetensors.disabled')
+    await fs.writeFile(abs, 'x')
+    setModelMeta(abs, {
+      favorite: true,
+      triggerWords: 'kw1, kw2',
+      params: {
+        steps: 20,
+        cfgMin: 5,
+        cfgMax: 7,
+        sampler: 'Euler a',
+        scheduler: 'normal',
+        resMin: 512,
+        resMax: 768,
+      },
+    })
+    const { template, win } = await openMenu(abs)
+    expect(item(template, '启用此模型')).toBeTruthy()
+    expect(item(template, '禁用此模型')).toBeUndefined()
+    expect(item(template, '取消收藏')).toBeTruthy()
+
+    item(template, '启用此模型').click()
+    expect(win.webContents.send).toHaveBeenCalledWith('models:menuAction', {
+      id: abs,
+      action: 'enableModel',
+    })
+    item(template, '复制推荐参数').click()
+    expect(clipboard.writeText).toHaveBeenCalledWith(
+      'Steps: 20, CFG: 5~7, Sampler: Euler a, Scheduler: normal, Size: 512x768',
+    )
+    item(template, '复制触发词').click()
+    expect(clipboard.writeText).toHaveBeenCalledWith('kw1, kw2')
+  })
+
+  it('窗口已销毁：动作静默跳过不触碰 webContents，菜单仍正常弹出', async () => {
+    const abs = path.join(root, 'menu-c.safetensors')
+    await fs.writeFile(abs, 'x')
+    const { res, template, popup, win } = await openMenu(
+      abs,
+      makeWindow({ destroyed: true }),
+    )
+    expect(res).toEqual({ ok: true })
+    expect(popup).toHaveBeenCalledTimes(1)
+    item(template, '打开详情').click()
+    expect(win.webContents.send).not.toHaveBeenCalled()
+  })
+
+  it('越界模型拒绝且不构建菜单（O6）', async () => {
+    const outside = path.join(
+      os.tmpdir(),
+      'modelvault-menu-outside.safetensors',
+    )
+    vi.mocked(BrowserWindow.fromWebContents).mockReturnValue(makeWindow())
+    const res = await getRegisteredHandler('models:popupMenu')(makeEvent(), {
+      id: outside,
+    })
+    expect(res).toEqual({ error: '模型不在当前根目录内' })
+    expect(Menu.buildFromTemplate).not.toHaveBeenCalled()
+  })
+})
+
+describe('models:checkHealth / models:repairHealth（V-07 包装通道）', () => {
+  it('体检返回只读报告；一键修复在健康库上空转成功', async () => {
+    const abs = path.join(root, 'health.safetensors')
+    await fs.writeFile(abs, 'x')
+    const check = await getRegisteredHandler('models:checkHealth')(makeEvent())
+    expect(check.error).toBeUndefined()
+    expect(check.report).toBeDefined()
+    expect(check.report.summary).toBeDefined()
+
+    const repair = await getRegisteredHandler('models:repairHealth')(
+      makeEvent(),
+    )
+    expect(repair.error).toBeUndefined()
+    // 无问题库：修复计数全零、不落备份
+    expect(repair.repaired).toEqual({
+      removedMetadata: 0,
+      fixedCoverModels: 0,
+      removedCoverRefs: 0,
+      movedOrphanCovers: 0,
+    })
+    expect(repair.backupPath).toBe('')
+  })
+})
+
+describe('models:exportModelList 模型清单导出（FN-04）', () => {
+  it('不支持的格式拒绝（schema 允许任意短串，枚举语义在 handler）', async () => {
+    const res = await getRegisteredHandler('models:exportModelList')(
+      makeEvent(),
+      { format: 'exe', content: 'x' },
+    )
+    expect(res).toEqual({ error: '不支持的导出格式' })
+  })
+
+  it('保存对话框取消：返回 canceled 且不写文件', async () => {
+    vi.mocked(dialog.showSaveDialog).mockResolvedValue({ canceled: true })
+    const res = await getRegisteredHandler('models:exportModelList')(
+      makeEvent(),
+      { format: 'csv', content: 'name,size' },
+    )
+    expect(res).toEqual({ canceled: true })
+  })
+
+  it('csv/markdown/json 成功落盘：返回路径与字节数，内容原样写入', async () => {
+    for (const format of ['csv', 'markdown', 'json']) {
+      const target = path.join(
+        root,
+        `list-${format}.${format === 'markdown' ? 'md' : format}`,
+      )
+      vi.mocked(dialog.showSaveDialog).mockResolvedValue({
+        canceled: false,
+        filePath: target,
+      })
+      const content = format === 'json' ? '[{"name":"a"}]' : `content-${format}`
+      const res = await getRegisteredHandler('models:exportModelList')(
+        makeEvent(),
+        { format, content },
+      )
+      expect(res.ok).toBe(true)
+      expect(res.path).toBe(target)
+      expect(res.sizeBytes).toBe(Buffer.byteLength(content, 'utf-8'))
+      await expect(fs.readFile(target, 'utf-8')).resolves.toBe(content)
+    }
+    // 对话框收到当前库根窗口与按格式选择的过滤器
+    const call = vi.mocked(dialog.showSaveDialog).mock.calls.at(-1)
+    expect(call[1].filters[0].extensions).toEqual(['json'])
+  })
+
+  it('落盘失败返回错误文案（写入句柄被拒绝）', async () => {
+    const target = path.join(root, 'list.csv')
+    vi.mocked(dialog.showSaveDialog).mockResolvedValue({
+      canceled: false,
+      filePath: target,
+    })
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    // atomicWriteFile 默认自动建父目录，「目录不存在」不构成失败；
+    // 以打开句柄被拒（杀毒/权限类真实故障的等价形态）确定性触发错误分支
+    const openSpy = vi.spyOn(fs, 'open').mockRejectedValue(
+      Object.assign(new Error('EPERM: operation not permitted'), {
+        code: 'EPERM',
+      }),
+    )
+    try {
+      const res = await getRegisteredHandler('models:exportModelList')(
+        makeEvent(),
+        { format: 'csv', content: 'name,size' },
+      )
+      expect(res.error).toContain('模型清单导出失败')
+      await expect(fs.access(target)).rejects.toThrow()
+    } finally {
+      openSpy.mockRestore()
+      warnSpy.mockRestore()
+    }
   })
 })

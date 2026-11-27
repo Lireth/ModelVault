@@ -96,6 +96,7 @@ export async function buildBackupParts(options = {}) {
       : 'full'
   const partial = mode !== 'full'
   const settingsText = JSON.stringify(librarySettings, null, 2)
+  /** @type {import('./backup-format').BackupManifest} */
   const manifest = {
     app: BACKUP_FORMAT,
     // 部分备份使用更高版本号：旧应用不认识 partial，需显式拒绝而非按全量恢复
@@ -154,6 +155,7 @@ export async function buildBackupParts(options = {}) {
       } else {
         keepModels = Object.keys(modelMap)
       }
+      /** @type {Record<string, any>} */
       const filtered = {}
       for (const key of keepModels) filtered[key] = modelMap[key]
       // metadata 模式同样不携带封面

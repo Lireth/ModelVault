@@ -3,13 +3,18 @@ import {
   defaultSettings,
   modelIndexOf,
   replaceModels,
+  applyModelDelta,
   replaceSettings,
   effectiveModelHash,
   setHashOverride,
   clearHashOverrides,
   isLibraryBusy,
 } from './state'
-import { applyCoverOverrides, clearCoverOverrides } from './cover-overrides'
+import {
+  applyCoverOverrides,
+  clearCoverOverrides,
+  clearModelCoverOverrides,
+} from './cover-overrides'
 import { clearBatchFailures } from './multiselect/batch-failures'
 import { exitMultiSelect } from './multiselect/selection'
 import { toast } from './toast'
@@ -50,6 +55,7 @@ function getSystemThemeQuery() {
 /**
  * 解析主题模式为有效主题：system 依系统亮暗取值，未知值回退 dark。
  * 主进程（原生标题栏配色）只认 dark/light，IPC 一律发送解析后的有效主题。
+ * @param {string} mode 主题模式（dark/light/system）
  */
 export function resolveTheme(mode) {
   if (mode === 'system')
@@ -57,7 +63,10 @@ export function resolveTheme(mode) {
   return mode === 'light' ? 'light' : 'dark'
 }
 
-/** 应用库设置（扫描/切库/启动共用）：设置、主题、排序与视图模式 */
+/**
+ * 应用库设置（扫描/切库/启动共用）：设置、主题、排序与视图模式
+ * @param {Record<string, any>|null} [settings] 主进程返回的设置对象
+ */
 function applyLibrarySettings(settings) {
   if (!settings) return
   replaceSettings(settings)
@@ -96,7 +105,7 @@ export async function initApp() {
     // F1-offline：回填失效库清单（小写化），侧栏据此对失效条目灰显标记；
     // 与激活库是否失效无关——其他已保存库同样可能盘符未挂载
     state.missingRoots = Array.isArray(data.rootStatuses)
-      ? data.rootStatuses
+      ? /** @type {Array<Record<string, any>>} */ (data.rootStatuses)
           .filter(
             (r) => r && r.exists === false && typeof r.folder === 'string',
           )
@@ -125,6 +134,10 @@ export async function initApp() {
       // O7：索引中的哈希是权威值，清空后台预热覆盖
       clearHashOverrides()
       replaceModels(cached.models)
+      // SCAN-DELTA：记录快照代际（后续全量扫描据此请求差量响应）
+      if (cached.snap && Number.isFinite(cached.snap.gen)) {
+        state.listSnap = { root: state.folder, gen: cached.snap.gen }
+      }
       state.lastScan = {
         count: cached.models.length,
         durationMs: cached.durationMs || 0,
@@ -159,7 +172,10 @@ function bindSystemThemeListener() {
   })
 }
 
-/** 应用主题：切换 CSS 变量、同步原生标题栏颜色，并重应用强调色（深/浅变体） */
+/**
+ * 应用主题：切换 CSS 变量、同步原生标题栏颜色，并重应用强调色（深/浅变体）
+ * @param {string} theme 主题模式（dark/light/system）
+ */
 export function applyTheme(theme) {
   const effective = resolveTheme(theme)
   document.documentElement.classList.toggle('light', effective === 'light')
@@ -310,6 +326,10 @@ export async function switchRoot(folder) {
       exitMultiSelect()
       replaceModels(res.models)
       state.folder = res.root || folder
+      // SCAN-DELTA：秒开列表的快照代际记账（后台校验扫描据此请求差量）
+      if (res.snap && Number.isFinite(res.snap.gen)) {
+        state.listSnap = { root: state.folder, gen: res.snap.gen }
+      }
       // F1-offline：目标库可打开（主进程已通过存在性校验），清除离线残留
       markRootAvailable(state.folder)
       state.lastScan = {
@@ -348,9 +368,9 @@ export async function removeRoot(folder) {
     toast('warn', '当前打开的模型库不能移除，请先切换到其他库')
     return
   }
-  const next = (state.settings.modelsFolders || []).filter(
-    (f) => f.toLowerCase() !== folder.toLowerCase(),
-  )
+  const next = /** @type {string[]} */ (
+    state.settings.modelsFolders || []
+  ).filter((f) => f.toLowerCase() !== folder.toLowerCase())
   const ok = await saveSettings({ modelsFolders: next })
   if (ok) toast('success', '已从模型库列表移除（磁盘数据不受影响）')
 }
@@ -380,9 +400,9 @@ export async function relocateFolder() {
     // 立即清理死条目（选择相同路径时无需清理：不存在死条目）
     if (oldFolder && oldFolder.toLowerCase() !== folder.toLowerCase()) {
       const lower = oldFolder.toLowerCase()
-      const next = (state.settings.modelsFolders || []).filter(
-        (f) => f.toLowerCase() !== lower,
-      )
+      const next = /** @type {string[]} */ (
+        state.settings.modelsFolders || []
+      ).filter((f) => f.toLowerCase() !== lower)
       await saveSettings({ modelsFolders: next })
       // 死条目从失效清单一并移除：库列表已不含该路径，标记失去对象
       state.missingRoots = state.missingRoots.filter((r) => r !== lower)
@@ -390,6 +410,31 @@ export async function relocateFolder() {
     await scanModels(folder)
   } catch (err) {
     toast('error', `重新定位文件夹失败: ${errorMessage(err)}`)
+  }
+}
+
+/**
+ * 扫描/后台校验完成的结果提示（全量与差量响应共用同一文案口径）：
+ * relink 提示（A-02）与错误目录计数（#62）随响应字段驱动。
+ * @param {{ relinked?: number, errorCount?: number, errors?: any[] }} res 扫描响应
+ * @param {boolean} background 是否后台校验（文案前缀区分）
+ * @param {{ found: number }} counts 库总模型数
+ */
+function notifyScanResult(res, background, { found }) {
+  // A-02：主进程自动重关联了被移动/重命名模型的标注时，告知用户数量
+  const relinked = typeof res.relinked === 'number' ? res.relinked : 0
+  const relinkedSuffix =
+    relinked > 0 ? `（已自动重新关联 ${relinked} 个移动/重命名模型的标注）` : ''
+  const prefix = background ? '后台校验完成' : '扫描完成'
+  // #62：errors 载荷经主进程裁剪，真实错误总数以 errorCount 下发
+  const errorCount = res.errorCount ?? res.errors?.length ?? 0
+  if (errorCount > 0) {
+    toast(
+      'warn',
+      `${prefix}，但有 ${errorCount} 个目录无法读取${relinkedSuffix}`,
+    )
+  } else {
+    toast('success', `${prefix}：发现 ${found} 个模型${relinkedSuffix}`)
   }
 }
 
@@ -437,8 +482,17 @@ export async function scanModels(folder = state.folder, options = {}) {
     state.scanError = ''
   }
   state.progress = { dirs: 0, found: 0, current: '' }
+  // SCAN-DELTA：当前列表持有同根快照时回传代际，主进程一致则仅回差量
+  // （万级库重复重扫的 IPC 载荷从 10MB+ 级降为 KB 级）；根不一致或无快照
+  // 时不回传（主进程走全量下发并颁发新代际）
+  const snapRequest =
+    state.listSnap &&
+    typeof state.listSnap.root === 'string' &&
+    state.listSnap.root.toLowerCase() === targetRoot.toLowerCase()
+      ? state.listSnap
+      : null
   try {
-    const res = await window.api.models.scan(targetRoot)
+    const res = await window.api.models.scan(targetRoot, snapRequest)
     if (res.canceled) {
       // 用户取消：保留上一次扫描/本地索引结果，静默返回
       return false
@@ -461,6 +515,48 @@ export async function scanModels(folder = state.folder, options = {}) {
       }
       return false
     }
+    // SCAN-DELTA：差量代际回显校验（主进程仅在请求代际匹配时回差量，
+    // 校验失败逻辑不可达；命中时作废快照按扫描失败收敛，当前列表保持不动）
+    if (
+      res.delta &&
+      !(res.snap && snapRequest && res.snap.gen === snapRequest.gen)
+    ) {
+      state.listSnap = null
+      if (background) {
+        toast('warn', '增量响应校验失败，请重新扫描')
+      } else {
+        state.scanError = '增量响应校验失败，请重新扫描'
+        toast('error', '增量响应校验失败，请重新扫描')
+      }
+      return false
+    }
+    if (res.delta) {
+      // 新装饰对象以自身封面/哈希字段为准：先清理对应覆盖再应用
+      // （与局部扫描合并同口径；未变化模型的覆盖继续保留）
+      const upsertIds = /** @type {Array<Record<string, any>>} */ (
+        res.delta.upsert || []
+      )
+        .map((m) => m?.id)
+        .filter((id) => typeof id === 'string')
+      clearModelCoverOverrides(upsertIds)
+      clearHashOverrides(upsertIds)
+      applyModelDelta(res.delta)
+      // 扫描成功才提交激活库：差量仅在快照根匹配时出现，folder 不会变化，
+      // 但仍按同一状态机记账（markRootAvailable 等）
+      state.folder = res.root || targetRoot
+      // F1-offline：库恢复可用——清除离线态并把该库移出失效清单
+      markRootAvailable(state.folder)
+      state.lastScan = {
+        count: Number.isFinite(res.total) ? res.total : state.models.length,
+        durationMs: res.durationMs,
+      }
+      // 库设置随模型库走：切库扫描走全量路径，此处仅为设置兜底同步
+      applyLibrarySettings(res.settings)
+      notifyScanResult(res, background, {
+        found: Number.isFinite(res.total) ? res.total : state.models.length,
+      })
+      return true
+    }
     // OP-02：全量扫描装饰结果已携带缓存命中的缩略图 URL，清空旧覆盖后
     // 以新结果为准（缺失缩略图由后续 thumbsReady 重新写入覆盖）
     clearCoverOverrides()
@@ -469,6 +565,10 @@ export async function scanModels(folder = state.folder, options = {}) {
     replaceModels(res.models)
     // 扫描成功后才提交激活库（主进程已在同一维护锁内完成切根）
     state.folder = res.root || targetRoot
+    // SCAN-DELTA：全量响应颁发新快照代际（下次扫描据此请求差量）
+    if (res.snap && Number.isFinite(res.snap.gen)) {
+      state.listSnap = { root: state.folder, gen: res.snap.gen }
+    }
     // 库身份变化（chooseFolder/switchRoot 回退/重新定位）后旧选区整体失效：
     // 退出多选并清空；同库重扫保留存活选区（replaceModels 已剔除消失项）
     if (state.folder.toLowerCase() !== prevFolder.toLowerCase()) {
@@ -479,25 +579,7 @@ export async function scanModels(folder = state.folder, options = {}) {
     state.lastScan = { count: res.models.length, durationMs: res.durationMs }
     // 库设置随模型库走：切库扫描（chooseFolder/switchRoot）返回目标库的设置
     applyLibrarySettings(res.settings)
-    // A-02：主进程自动重关联了被移动/重命名模型的标注时，告知用户数量
-    const relinkedSuffix =
-      res.relinked > 0
-        ? `（已自动重新关联 ${res.relinked} 个移动/重命名模型的标注）`
-        : ''
-    const prefix = background ? '后台校验完成' : '扫描完成'
-    // #62：errors 载荷经主进程裁剪，真实错误总数以 errorCount 下发
-    const errorCount = res.errorCount ?? res.errors?.length ?? 0
-    if (errorCount > 0) {
-      toast(
-        'warn',
-        `${prefix}，但有 ${errorCount} 个目录无法读取${relinkedSuffix}`,
-      )
-    } else {
-      toast(
-        'success',
-        `${prefix}：发现 ${res.models.length} 个模型${relinkedSuffix}`,
-      )
-    }
+    notifyScanResult(res, background, { found: res.models.length })
     return true
   } catch (err) {
     if (background) {
@@ -515,9 +597,12 @@ export async function scanModels(folder = state.folder, options = {}) {
 
 /** 取消进行中的扫描（扫描调用会以 { canceled: true } 返回） */
 export function cancelScan() {
-  window.api.models.cancelScan().catch((err) => {
-    toast('error', `取消扫描失败: ${err.message}`)
-  })
+  window.api.models.cancelScan().catch(
+    /** @param {any} err */
+    (err) => {
+      toast('error', `取消扫描失败: ${err.message}`)
+    },
+  )
 }
 
 /**

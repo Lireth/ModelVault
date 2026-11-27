@@ -25,6 +25,7 @@ import {
 import { clearDeferredOwners, primeHeaderInfoCache } from '../decorate'
 import { clearDeferredJobs } from '../../../services/thumbs'
 import { slimModelsForList, logPayloadSize } from '../list-payload'
+import { beginListSnapshot } from '../list-delta'
 import { wrapHandler, checkExistingDirectory } from '../../handler'
 import { readLibraryIndex } from '../../../services/library-index'
 import { collectRootStatuses, ensureRootStore } from './session'
@@ -96,13 +97,16 @@ export function registerLoadHandlers() {
               primeHeaderInfoCache(index.models)
               // OPT-PAYLOAD：列表通道下发瘦身模型（先合成元数据展示字段，
               // 再剥离详情消费面重字段，顺序不可颠倒——合成依赖 folderSubCategory）
-              const slimmed = slimModelsForList(
-                overlayCurrentMeta(index.models),
-              )
+              // SCAN-DELTA：播种列表快照（overlay 后条目），随响应下发代际，
+              // 后续全量扫描据此可回差量
+              const overlaid = overlayCurrentMeta(index.models)
+              const slimmed = slimModelsForList(overlaid)
               logPayloadSize('models:loadStore', slimmed.approxBytes)
+              const snap = beginListSnapshot(settings.modelsFolder, overlaid)
               cachedIndex = {
                 ...index,
                 models: slimmed.models,
+                snap: { root: settings.modelsFolder, gen: snap.gen },
               }
             }
             // 启动后后台预热缺失的模型哈希（Civitai 识别加速）：仅入队，

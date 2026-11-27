@@ -52,7 +52,10 @@ export function exitMultiSelect() {
   clearSelectionAnchor()
 }
 
-/** 切换单个模型的选中态 */
+/**
+ * 切换单个模型的选中态
+ * @param {string} id 模型 id
+ */
 export function toggleSelect(id) {
   const ids = state.multiSelect.ids
   const idx = ids.indexOf(id)
@@ -156,6 +159,8 @@ export function invertSelectionFiltered() {
  * 语义：评分高 > 已收藏 > 文件最新（下载/修改时间）；同哈希文件大小必然
  * 一致，无需参与；id 兜底保证完全平手时的确定性。
  * P1-1：评分/收藏经标注覆盖层读取（未重扫的即时标注同样参与择优）。
+ * @param {Record<string, any>} a 候选模型一
+ * @param {Record<string, any>} b 候选模型二
  */
 function betterDuplicate(a, b) {
   const ra = effectiveRating(a)

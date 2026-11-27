@@ -62,6 +62,7 @@ import { CIVITAI_SCHEMAS } from './schema-civitai'
  * @returns {Object<string, import('./rules').SchemaRule>}
  */
 function mergeDomains(domains) {
+  /** @type {Object<string, import('./rules').SchemaRule>} */
   const merged = {}
   for (const domain of domains) {
     for (const [channel, rule] of Object.entries(domain)) {

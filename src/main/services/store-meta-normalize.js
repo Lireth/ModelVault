@@ -62,6 +62,7 @@ export function isUnsafeModelKey(key) {
  * @returns {{version: number, models: Record<string, object>}}
  */
 export function normalizeStoreData(parsed) {
+  /** @type {Record<string, object>} */
   const models = {}
   const source =
     parsed && typeof parsed === 'object'
@@ -92,7 +93,12 @@ function normalizeCoverRef(c) {
   return toRelKey(c) || ''
 }
 
-/** 取新字段；缺失时回退到旧版宽/高字段中的较小值 */
+/**
+ * 取新字段；缺失时回退到旧版宽/高字段中的较小值
+ * @param {any} value 新字段候选值
+ * @param {any[]} legacyValues 旧版字段候选值列表
+ * @returns {number|null} 合法有限数值或 null
+ */
 function pickLegacyRes(value, legacyValues) {
   if (Number.isFinite(value)) return value
   const legacy = legacyValues.filter((v) => Number.isFinite(v))
@@ -122,14 +128,17 @@ function normalizeTags(raw) {
   return out
 }
 
-/** 规范化单条模型元数据，剔除未知字段 */
+/**
+ * 规范化单条模型元数据，剔除未知字段
+ * @param {any} raw 原始元数据（不可信输入）
+ */
 export function normalizeModelMeta(raw) {
   if (!raw || typeof raw !== 'object') return null
   const params = raw.params && typeof raw.params === 'object' ? raw.params : {}
   // 多封面列表（相对路径，顺序即添加顺序），兼容旧版单封面字段；
   // 逐条做绝对路径自愈后过滤失效项（A7）
   let covers = Array.isArray(raw.covers)
-    ? raw.covers
+    ? /** @type {any[]} */ (raw.covers)
         .map(normalizeCoverRef)
         .filter((c) => c && c.length <= 500)
         .slice(0, 50)
@@ -139,7 +148,7 @@ export function normalizeModelMeta(raw) {
     if (healed) covers = [healed]
   }
   let cover = normalizeCoverRef(raw.cover)
-  if (!cover && covers.length > 0) cover = covers[0]
+  if (!cover && covers.length > 0) cover = /** @type {string} */ (covers[0])
   return {
     cover,
     covers,
@@ -181,6 +190,15 @@ export function normalizeModelMeta(raw) {
         ? raw.hash.toLowerCase()
         : '',
     hashMtime: Number.isFinite(raw.hashMtime) ? raw.hashMtime : 0,
+    // OP-C 两阶段查重的快指纹缓存（头尾 1MB SHA256，仅候选筛选用，语义与
+    // 全量 hash 不同绝不混用）：mtime 绑定同 hash/hashMtime 约定
+    quickHash:
+      typeof raw.quickHash === 'string' && /^[0-9a-f]{64}$/i.test(raw.quickHash)
+        ? raw.quickHash.toLowerCase()
+        : '',
+    quickHashMtime: Number.isFinite(raw.quickHashMtime)
+      ? raw.quickHashMtime
+      : 0,
     // F3 使用轨迹：最近打开时间（epoch ms）与累计打开次数。
     // 负数/非数值回退 0（从未打开）；次数封顶防御病态输入。
     lastOpenedAt:
@@ -204,6 +222,17 @@ export function normalizeModelMeta(raw) {
       typeof raw.baseModel === 'string'
         ? raw.baseModel.trim().slice(0, 100)
         : '',
+    // OP-D 未收录负缓存：miss 判定时的哈希（文件替换后 hash 变化即失效）
+    // 与静默期起点；识别成功时随识别写入一并清空
+    civitaiMissHash:
+      typeof raw.civitaiMissHash === 'string' &&
+      /^[0-9a-f]{64}$/i.test(raw.civitaiMissHash)
+        ? raw.civitaiMissHash.toLowerCase()
+        : '',
+    civitaiMissAt:
+      Number.isFinite(raw.civitaiMissAt) && raw.civitaiMissAt > 0
+        ? Math.round(raw.civitaiMissAt)
+        : 0,
     // 自由标签（F-5）：用户自定义多标签，与二级分类标签（固定枚举）互补；
     // 随元数据整体迁移（relink），不参与文件夹整理的目录映射
     tags: normalizeTags(raw.tags),

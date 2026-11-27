@@ -22,6 +22,7 @@ vi.mock('../src/main/services/civitai', () => ({
 }))
 
 import { computeFileHash } from '../src/main/services/civitai'
+import { resetDiskProfileForTests } from '../src/main/services/disk-profile'
 import {
   clearHashFailuresForLibrarySwitch,
   computeAndCacheHash,
@@ -52,6 +53,8 @@ const roots = []
 beforeEach(async () => {
   vi.clearAllMocks()
   resetHashWarmupForTests()
+  // OP-B：磁盘探测缓存按盘符跨用例共享，一并复位保证自动档用例确定性
+  resetDiskProfileForTests()
   setHashRetryDelayForTests(0)
   setWarmupProgressListener(null)
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-warmup-'))
@@ -420,10 +423,33 @@ describe('预热并发（OPT-3）', () => {
     await whenWarmupIdle()
     expect(getModelMeta(b).hash).toBe(fakeHash(2))
   })
+
+  it('自动档（concurrency=0）：小体积测试文件无探测意义，串行语义保持（OP-B）', async () => {
+    const a = await makeModel('auto-a.safetensors')
+    const b = await makeModel('auto-b.safetensors')
+    const d1 = deferredHash()
+    const d2 = deferredHash()
+    const deferreds = [d1, d2]
+    let call = 0
+    computeFileHash.mockImplementation(() => deferreds[call++].promise)
+
+    requestHashWarmup([a, b], { mode: 'full', concurrency: 0, delayMs: 0 })
+    await vi.waitFor(() => expect(computeFileHash).toHaveBeenCalledTimes(1))
+    await new Promise((r) => setTimeout(r, 20))
+    // 文件体积低于探测下限（16MB）→ 保守串行：第二任务不被并行取走
+    expect(computeFileHash).toHaveBeenCalledTimes(1)
+
+    d1.resolve(fakeHash(1))
+    await vi.waitFor(() => expect(computeFileHash).toHaveBeenCalledTimes(2))
+    d2.resolve(fakeHash(2))
+    await whenWarmupIdle()
+    expect(getModelMeta(a).hash).toBe(fakeHash(1))
+    expect(getModelMeta(b).hash).toBe(fakeHash(2))
+  })
 })
 
-describe('哈希预热策略（O1：体积预筛 + 按需计算）', () => {
-  it('candidates：只计算同尺寸模型，体积唯一的模型不读盘哈希', async () => {
+describe('哈希预热策略（O1 体积预筛 + OP-C 两阶段查重）', () => {
+  it('candidates：同尺寸但快指纹互异的模型不做全量哈希，体积唯一的模型不读盘', async () => {
     const a = await makeModel('c1.safetensors', 'a'.repeat(1024))
     const b = await makeModel('c2.safetensors', 'b'.repeat(1024))
     const unique = await makeModel('c3.safetensors', 'u'.repeat(2048))
@@ -440,16 +466,74 @@ describe('哈希预热策略（O1：体积预筛 + 按需计算）', () => {
     )
     await whenWarmupIdle()
 
-    expect(computeFileHash).toHaveBeenCalledTimes(2)
-    expect(computeFileHash.mock.calls.map((call) => call[0]).sort()).toEqual(
-      [a, b].sort(),
-    )
+    // OP-C：a/b 同尺寸但头尾指纹互异（内容必然不同）→ 零全量哈希，
+    // 仅快指纹被缓存；体积唯一的 unique 连指纹都不需要
+    expect(computeFileHash).not.toHaveBeenCalled()
+    expect(getModelMeta(a).quickHash).toBeTruthy()
+    expect(getModelMeta(b).quickHash).toBeTruthy()
+    expect(getModelMeta(a).quickHash).not.toBe(getModelMeta(b).quickHash)
     expect(getModelMeta(unique)).toBeNull()
   })
 
-  it('candidates：后续请求发现同尺寸文件时，补算先前因体积唯一而跳过的模型', async () => {
-    const a = await makeModel('c4.safetensors', 'a'.repeat(1024))
-    const b = await makeModel('c5.safetensors', 'b'.repeat(1024))
+  it('candidates：同尺寸且内容相同 → 指纹命中候选组，两份都全量确认', async () => {
+    const a = await makeModel('cd1.safetensors', 'dup'.repeat(341))
+    const b = await makeModel('cd2.safetensors', 'dup'.repeat(341))
+    computeFileHash.mockResolvedValue(fakeHash(12))
+    const [sa, sb] = await Promise.all([fs.stat(a), fs.stat(b)])
+
+    requestHashWarmup(
+      [
+        { id: a, size: sa.size, mtimeMs: sa.mtimeMs },
+        { id: b, size: sb.size, mtimeMs: sb.mtimeMs },
+      ],
+      { mode: 'candidates', full: true, delayMs: 0 },
+    )
+    await whenWarmupIdle()
+
+    expect(computeFileHash).toHaveBeenCalledTimes(2)
+    expect(getModelMeta(a).hash).toBe(fakeHash(12))
+    expect(getModelMeta(b).hash).toBe(fakeHash(12))
+  })
+
+  it('candidates：首尾相同但中段不同的超集误报 → 全量确认后正确排除', async () => {
+    // 3MB 文件：头 1MB 与尾 1MB 相同，中段 1MB 不同——快指纹必然命中
+    // 候选组（只做减法的筛选语义），交由全量 SHA256 正确排除
+    const head = Buffer.alloc(1024 * 1024, 0x61)
+    const tail = Buffer.alloc(1024 * 1024, 0x62)
+    const midA = Buffer.alloc(1024 * 1024, 0x63)
+    const midB = Buffer.alloc(1024 * 1024, 0x64)
+    const a = await makeModel(
+      'fp-a.safetensors',
+      Buffer.concat([head, midA, tail]),
+    )
+    const b = await makeModel(
+      'fp-b.safetensors',
+      Buffer.concat([head, midB, tail]),
+    )
+    computeFileHash.mockImplementation(async (id) =>
+      id === a ? fakeHash(21) : fakeHash(22),
+    )
+    const [sa, sb] = await Promise.all([fs.stat(a), fs.stat(b)])
+
+    requestHashWarmup(
+      [
+        { id: a, size: sa.size, mtimeMs: sa.mtimeMs },
+        { id: b, size: sb.size, mtimeMs: sb.mtimeMs },
+      ],
+      { mode: 'candidates', full: true, delayMs: 0 },
+    )
+    await whenWarmupIdle()
+
+    // 阶段二：超集误报进入全量确认（两份都计算），哈希互异 → 不构成重复组
+    expect(computeFileHash).toHaveBeenCalledTimes(2)
+    expect(getModelMeta(a).hash).toBe(fakeHash(21))
+    expect(getModelMeta(b).hash).toBe(fakeHash(22))
+    expect(getModelMeta(a).hash).not.toBe(getModelMeta(b).hash)
+  })
+
+  it('candidates：后续请求发现同尺寸同内容文件时，补算先前因体积唯一而跳过的模型', async () => {
+    const a = await makeModel('c4.safetensors', 'same'.repeat(256))
+    const b = await makeModel('c5.safetensors', 'same'.repeat(256))
     computeFileHash.mockResolvedValue(fakeHash(12))
     const [sa, sb] = await Promise.all([fs.stat(a), fs.stat(b)])
 
@@ -462,7 +546,7 @@ describe('哈希预热策略（O1：体积预筛 + 按需计算）', () => {
     await whenWarmupIdle()
     expect(computeFileHash).not.toHaveBeenCalled()
 
-    // 第二次请求：同尺寸文件出现，两份都应补算
+    // 第二次请求：同尺寸且内容相同的文件出现，两份都应补算
     requestHashWarmup([{ id: b, size: sb.size, mtimeMs: sb.mtimeMs }], {
       mode: 'candidates',
       full: false,
@@ -490,9 +574,9 @@ describe('哈希预热策略（O1：体积预筛 + 按需计算）', () => {
     expect(computeFileHash.mock.calls[0][0]).toBe(a)
   })
 
-  it('candidates：体积未知时先 stat 再判定（同尺寸计算、唯一跳过）', async () => {
-    const a = await makeModel('c12.safetensors', 'a'.repeat(1024))
-    const b = await makeModel('c13.safetensors', 'b'.repeat(1024))
+  it('candidates：体积未知时先 stat 再判定（同尺寸同内容计算、唯一跳过）', async () => {
+    const a = await makeModel('c12.safetensors', 'aa'.repeat(512))
+    const b = await makeModel('c13.safetensors', 'aa'.repeat(512))
     const unique = await makeModel('c14.safetensors', 'u'.repeat(2048))
     computeFileHash.mockResolvedValue(fakeHash(16))
 
@@ -511,8 +595,8 @@ describe('哈希预热策略（O1：体积预筛 + 按需计算）', () => {
   })
 
   it('candidates：缓存有效的同尺寸伙伴不再重复计算', async () => {
-    const a = await makeModel('c15.safetensors', 'a'.repeat(1024))
-    const b = await makeModel('c16.safetensors', 'b'.repeat(1024))
+    const a = await makeModel('c15.safetensors', 'cc'.repeat(256))
+    const b = await makeModel('c16.safetensors', 'cc'.repeat(256))
     const [sa, sb] = await Promise.all([fs.stat(a), fs.stat(b)])
     setModelMeta(a, { hash: fakeHash(17), hashMtime: sa.mtimeMs })
     computeFileHash.mockResolvedValue(fakeHash(18))

@@ -27,9 +27,18 @@
     //   pickImportSources/resolveImportTarget）改判别联合返回类型；必中索引
     //   访问与必存正则捕获组类型 cast（运行时零改动）；不可达 null 分支加
     //   同型守卫（clearTimeout 判空、path.join 空根显式 throw 等，逐点核验）
+    // 2026-11-27 已开启（O4 批次，674→0）：noImplicitAny
+    //   ——函数参数/回调补 JSDoc @param 类型；[]/null 初值容器补 @type 声明；
+    //   常量映射表标 Record<string, T>；必中索引（chunks[0]/queue.shift()/
+    //   queue[i]）与互斥契约字段（fetchCivitaiImageShared 的 buf/upstream）
+    //   就地 /** @type {...} */ cast，运行时零改动；跨模块共享结构补写
+    //   typedef 并经 import('./…') 复用（IndexUpdateEntry/DuplicateMember/
+    //   TransferItem/WarmupTask/HashPoolTask/SnapshotEntry/DeliverQueueEntry/
+    //   MetaFlagResolvers 等）；事件回调 payload 按主进程实际发送形状标注
     // 待消化记账（实测错误量为开启成本，修复后随棘轮开启）：
-    //   noImplicitAny（879）→ exactOptionalPropertyTypes（依赖其后的
-    //   strictNullChecks 已开启，剩余成本以 noImplicitAny 为主）
+    //   exactOptionalPropertyTypes（12，均为「可选参数接收可空值」形态——
+    //   signal: AbortSignal|null|undefined 传入 signal?: AbortSignal|null
+    //   类声明，修复模式为目标属性类型补 | undefined）
     "useUnknownInCatchVariables": true,
     "strictNullChecks": true,
     "strictFunctionTypes": true,
@@ -39,6 +48,7 @@
     "noImplicitOverride": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitReturns": true,
+    "noImplicitAny": true,
     "skipLibCheck": true
   },
   "include": [

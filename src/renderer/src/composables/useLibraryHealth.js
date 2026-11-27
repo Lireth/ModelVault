@@ -8,7 +8,10 @@ import { errorMessage } from '../../../shared/error-text'
  * 重复哈希/模型文件完整性），并支持一键安全修复（修复前主进程自动备份 store.json）。
  * 状态与动作自包含，组件仅做模板绑定——可独立于设置页复用与测试。
  */
-/** 模型完整性原因码 → 展示文案（与 library-health.inspectModelIntegrity 对应） */
+/**
+ * 模型完整性原因码 → 展示文案（与 library-health.inspectModelIntegrity 对应）
+ * @type {Record<string, string>}
+ */
 const BROKEN_REASON_LABELS = {
   'zero-size': '0 字节',
   truncated: '数据区截断',

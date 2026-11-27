@@ -4,6 +4,7 @@ import {
   cancelResponseBody,
   isAllowedExternalUrl,
   readResponseTextLimited,
+  unrefTimeout,
 } from '../utils'
 import { getSettings } from './store-settings'
 import { REQUEST_TIMEOUT_MS } from './net-fetch'
@@ -69,7 +70,10 @@ export function compareVersions(a, b) {
   return 0
 }
 
-/** 更新检查请求选项（UA 标识 + GitHub API Accept；超时统一 15s） */
+/**
+ * 更新检查请求选项（UA 标识 + GitHub API Accept；超时统一 15s）
+ * @param {string} current 当前版本号
+ */
 function updateRequestOptions(current) {
   return {
     headers: {
@@ -258,7 +262,10 @@ export async function runStartupUpdateCheck(settings, check, notify) {
   return true
 }
 
-/** 向所有窗口广播「发现新版本」（app:updateAvailable 事件） */
+/**
+ * 向所有窗口广播「发现新版本」（app:updateAvailable 事件）
+ * @param {Record<string, any>} payload 版本信息载荷
+ */
 function broadcastUpdateAvailable(payload) {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
@@ -283,7 +290,7 @@ let startupCheckTimer = null
 export function scheduleStartupUpdateCheck(delayMs = STARTUP_CHECK_DELAY_MS) {
   if (!app.isPackaged || process.env.MODELVAULT_SMOKE === '1') return
   if (startupCheckTimer) clearTimeout(startupCheckTimer)
-  startupCheckTimer = setTimeout(() => {
+  startupCheckTimer = unrefTimeout(() => {
     startupCheckTimer = null
     runStartupUpdateCheck(
       getSettings(),
@@ -291,7 +298,4 @@ export function scheduleStartupUpdateCheck(delayMs = STARTUP_CHECK_DELAY_MS) {
       broadcastUpdateAvailable,
     ).catch((err) => logger.warn(`启动自动检查更新失败: ${err.message}`))
   }, delayMs)
-  // 不阻止进程退出：延迟窗口内用户关窗时，flush 链完成后 app.quit 正常终止
-  // （与其他后台定时器的 unref 规范一致，避免持有闭包拖延退出）
-  startupCheckTimer.unref?.()
 }

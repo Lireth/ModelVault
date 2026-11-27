@@ -48,11 +48,19 @@ import { errorCode, errorMessage } from '../../shared/error-text'
  */
 
 /**
+ * 传输计划条目（规划阶段产出、逐模型执行的单位）。
+ * @typedef {{id: string, meta: Record<string, any>|null, targetPath: string,
+ *   relKey: string, size: number, copiedSidecars?: string[]}} TransferItem
+ */
+
+/**
  * 目标库 journal 目录中未合并 delta 的检测（残留即拒绝迁移）。
  * fail-closed：仅「目录不存在」（目标库从未产生增量日志）视为无残留；
  * 其余读失败（EACCES/EBUSY——杀毒/索引器占用目录等）无法证明没有未合并
  * delta，按存在残留拒绝迁移——否则 writeTargetStore 覆盖 store.json 会
  * 静默丢弃目标库尚未合并的增量标注，恰是本检测要防的场景。
+ * @param {string} targetRoot 目标库根目录
+ * @returns {Promise<boolean>}
  */
 async function hasPendingJournal(targetRoot) {
   const journalDir = path.join(targetRoot, '.modelvault', 'journal')
@@ -77,7 +85,8 @@ async function hasPendingJournal(targetRoot) {
  * 返回，writeTargetStore 会整体覆盖 store.json，静默清空目标库其他模型的
  * 标注与封面引用。损坏文件不在此处越权处理：目标库自身的加载链路
  * （loadData）已具备「备份损坏文件后重置」的自愈流程，先打开一次目标库即可。
- * @returns {Promise<{version: number, models: object}>}
+ * @param {string} targetRoot 目标库根目录
+ * @returns {Promise<{version: number, models: Record<string, object>}>}
  * @throws {Error} 读失败（非 ENOENT）或文件损坏时抛出，调用方必须中止迁移
  */
 async function readTargetStore(targetRoot) {
@@ -105,7 +114,11 @@ async function readTargetStore(targetRoot) {
   }
 }
 
-/** 写回目标库 store.json（目录不存在时创建） */
+/**
+ * 写回目标库 store.json（目录不存在时创建）
+ * @param {string} targetRoot 目标库根目录
+ * @param {{version: number, models: Record<string, object>}} store 待写回的元数据表
+ */
 async function writeTargetStore(targetRoot, store) {
   const dataDir = path.join(targetRoot, '.modelvault')
   await fs.mkdir(dataDir, { recursive: true })
@@ -120,6 +133,8 @@ async function writeTargetStore(targetRoot, store) {
 
 /**
  * 复制单个文件（目标存在时跳过，返回 false）。
+ * @param {string} src 源文件路径
+ * @param {string} dest 目标文件路径
  * @returns {Promise<boolean>} 是否实际复制
  */
 async function copyIfMissing(src, dest) {
@@ -135,6 +150,8 @@ async function copyIfMissing(src, dest) {
 
 /**
  * 移动单个文件：先 try rename（同卷瞬时），跨卷（EXDEV）或失败回退 copy+rm。
+ * @param {string} src 源文件路径
+ * @param {string} dest 目标文件路径
  * @returns {Promise<void>}
  */
 async function moveFile(src, dest) {
@@ -153,7 +170,11 @@ const TRANSFER_PROGRESS_INTERVAL_MS = 200
 /** copy 模式的文件级并发（OPT-18）：重叠磁盘等待；move 保持串行（语义见下） */
 const TRANSFER_COPY_CONCURRENCY = 3
 
-/** 向全部存活窗口广播传输进度（与 warmupProgress 同一广播模式） */
+/**
+ * 向全部存活窗口广播传输进度（与 warmupProgress 同一广播模式）
+ * @param {{done: number, total: number, bytes: number, totalBytes: number,
+ *   canceled: boolean}} progress 进度快照
+ */
 function broadcastTransferProgress(progress) {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
@@ -192,7 +213,8 @@ export async function transferModelsToLibrary({
   }
   // 目标必须是已保存的模型库（settings.modelsFolders），防止任意目录写入
   const saved = (getSettings().modelsFolders || []).some(
-    (f) => typeof f === 'string' && sameResolvedPathIgnoreCase(f, targetRoot),
+    (/** @type {any} */ f) =>
+      typeof f === 'string' && sameResolvedPathIgnoreCase(f, targetRoot),
   )
   if (!saved) {
     return { error: '目标文件夹不是已保存的模型库，请先在侧栏添加该库' }
@@ -216,8 +238,10 @@ export async function transferModelsToLibrary({
   return runMaintenance('import', targetRoot, async () => {
     const failed = []
     const skipped = []
+    /** @type {TransferItem[]} */
     const planned = []
     const aborted = () => signal?.aborted === true
+    /** @type {TransferItem[]} */
     const transferred = []
     const rollbackKeys = []
     // OPT-18：进度节流推送（done/total/字节）； planning 阶段的失败/跳过
@@ -250,7 +274,7 @@ export async function transferModelsToLibrary({
         failed.push({ id: String(id), error: '模型不在当前库内' })
         continue
       }
-      const meta = getModelMeta(id)
+      const meta = /** @type {Record<string, any>|null} */ (getModelMeta(id))
       const targetPath = path.join(targetRoot, relKey)
       let plannedSize
       try {
@@ -340,7 +364,7 @@ export async function transferModelsToLibrary({
 
     // 逐模型传输文件（主文件 + 存在的 sidecar；目标已存在的 sidecar 跳过不覆盖）。
     // OPT-18：取消在模型间隙检查——在途的单个文件传输不打断，已完成部分保留
-    const transferItem = async (item) => {
+    const transferItem = async (/** @type {TransferItem} */ item) => {
       const { id, targetPath, relKey } = item
       try {
         // copyFile/rename 不创建父目录：先确保目标相对目录存在（相对路径镜像）

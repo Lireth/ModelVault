@@ -20,7 +20,10 @@ export const REQUEST_TIMEOUT_MS = 15000
 /** 手动重定向跟随的最大跳数（每一跳都过白名单校验） */
 export const MAX_REDIRECTS = 5
 
-/** 是否为需要跟随的 HTTP 重定向状态 */
+/**
+ * 是否为需要跟随的 HTTP 重定向状态
+ * @param {number} status HTTP 状态码
+ */
 function isRedirectStatus(status) {
   return (
     status === 301 ||
@@ -31,12 +34,18 @@ function isRedirectStatus(status) {
   )
 }
 
-/** 无实体体状态（fetch 规范要求 null body，Response 构造器拒绝携带 body） */
+/**
+ * 无实体体状态（fetch 规范要求 null body，Response 构造器拒绝携带 body）
+ * @param {number} status HTTP 状态码
+ */
 function isNullBodyStatus(status) {
   return status === 204 || status === 205 || status === 304
 }
 
-/** Electron 网络栈对 fetch manual 重定向不支持时的特征错误 */
+/**
+ * Electron 网络栈对 fetch manual 重定向不支持时的特征错误
+ * @param {unknown} err 捕获的错误
+ */
 function isRedirectCancelledError(err) {
   return err instanceof Error && err.message.includes('Redirect was cancelled')
 }
@@ -60,7 +69,7 @@ function probeRedirectTarget(url, options, useSessionCookies) {
   return new Promise((resolve, reject) => {
     // HeadersInit → net.request 要求的普通头记录（Accept/Referer 等简单值，
     // 单值字符串化即可；探测请求不携带 body，无多值头语义）
-    const headersRecord = {}
+    const headersRecord = /** @type {Record<string, string>} */ ({})
     for (const [name, value] of new Headers(options.headers || {})) {
       headersRecord[name] = value
     }
@@ -72,12 +81,14 @@ function probeRedirectTarget(url, options, useSessionCookies) {
       headers: headersRecord,
     })
     let settled = false
+    /** @type {(ok: boolean, value: any) => void} */
     const finish = (ok, value) => {
       if (settled) return
       settled = true
       ok ? resolve(value) : reject(value)
     }
     /** Electron 响应头对象（Record<string, string|string[]>）→ Headers */
+    /** @type {(record: Record<string, any>) => Headers} */
     const headersOf = (record) => {
       const headers = new Headers()
       for (const [name, values] of Object.entries(record || {})) {
@@ -114,6 +125,7 @@ function probeRedirectTarget(url, options, useSessionCookies) {
         })
         return
       }
+      /** @type {Buffer[]} */
       const chunks = []
       incoming.on('error', (err) => finish(false, err))
       incoming.on('data', (chunk) => chunks.push(chunk))
@@ -245,6 +257,7 @@ export function isTransientNetworkError(err) {
     causeRaw && typeof causeRaw === 'object'
       ? /** @type {{code?: unknown, message?: unknown}} */ (causeRaw)
       : {}
+  /** @type {(v: unknown) => string} */
   const text = (v) => (typeof v === 'string' ? v : '')
   const haystack = `${err.message} ${text(errWithCode.code)} ${text(cause.code)} ${text(cause.message)}`
   return TRANSIENT_NET_MARKS.some((mark) => haystack.includes(mark))

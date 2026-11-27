@@ -25,7 +25,13 @@ const MAX_LOG_BYTES = 5 * 1024 * 1024
  */
 const MAX_LOG_FILES_PER_DAY = 5
 
-/** 日志文件路径：index 0 为当日主文件，其余为分片（.1/.2…） */
+/**
+ * 日志文件路径：index 0 为当日主文件，其余为分片（.1/.2…）
+ * @param {string} logDir 日志目录
+ * @param {string} dateStr 日期串（YYYY-MM-DD）
+ * @param {number} index 分片序号
+ * @returns {string} 日志文件绝对路径
+ */
 function logFilePath(logDir, dateStr, index) {
   return path.join(
     logDir,
@@ -49,7 +55,10 @@ function localDateString(date = new Date()) {
   return `${y}-${m}-${d}`
 }
 
-/** 清理超过保留期的旧日志文件（异步执行，失败不影响日志功能） */
+/**
+ * 清理超过保留期的旧日志文件（异步执行，失败不影响日志功能）
+ * @param {string} logDir 日志目录
+ */
 function cleanExpiredLogs(logDir) {
   const cutoff = new Date()
   cutoff.setDate(cutoff.getDate() - LOG_RETENTION_DAYS)
@@ -94,9 +103,17 @@ class Logger {
    * 创建日志写入流并挂错误监听（B14）。
    * 未监听 error 时，磁盘满/权限错误会作为 uncaughtException 抛出，
    * 且此后写日志静默失败；这里降级为控制台输出并置空流，下次写入时尝试重建。
+   * @param {string} dateStr 日期串（YYYY-MM-DD）
+   * @param {number} index 当日分片序号
+   * @returns {import('node:fs').WriteStream} 日志写入流
    */
   createStream(dateStr, index) {
-    const file = logFilePath(this.logDir, dateStr, index)
+    // 仅由 ensureStream 在 logDir 懒初始化完成后调用，null 分支不可达
+    const file = logFilePath(
+      /** @type {string} */ (this.logDir),
+      dateStr,
+      index,
+    )
     // 续写既有文件（同一天内进程重启）时按实际体积初始化计数，否则体积上限失效
     let existing = 0
     try {
@@ -146,6 +163,11 @@ class Logger {
     return this.stream
   }
 
+  /**
+   * 写一条日志（控制台 + 文件，含跨天滚动与体积分片）
+   * @param {string} level 日志级别（INFO/WARN/ERROR）
+   * @param {any[]} args util.format 参数列表
+   */
   write(level, args) {
     const time = new Date().toLocaleString('zh-CN', { hour12: false })
     const line = `[${time}] [${level}] ${util.format(...args)}\n`
@@ -185,14 +207,23 @@ class Logger {
     }
   }
 
+  /**
+   * @param {...any} args util.format 参数列表
+   */
   info(...args) {
     this.write('INFO', args)
   }
 
+  /**
+   * @param {...any} args util.format 参数列表
+   */
   warn(...args) {
     this.write('WARN', args)
   }
 
+  /**
+   * @param {...any} args util.format 参数列表
+   */
   error(...args) {
     this.write('ERROR', args)
   }

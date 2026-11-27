@@ -192,12 +192,18 @@ export function wrapHandler(channel, handler, opts = {}) {
   })
 }
 
-/** 模型 id 入参校验：合法返回空串，非法返回统一错误文案 */
+/**
+ * 模型 id 入参校验：合法返回空串，非法返回统一错误文案
+ * @param {string} id 模型绝对路径
+ */
 export function checkModelId(id) {
   return typeof id === 'string' && id ? '' : '无效的模型标识'
 }
 
-/** 模型 id + 根目录越界的复合校验（元数据/网络等非破坏性操作入口） */
+/**
+ * 模型 id + 根目录越界的复合校验（元数据/网络等非破坏性操作入口）
+ * @param {string} id 模型绝对路径
+ */
 export function checkModelIdInRoot(id) {
   return checkModelId(id) || (isInRoot(id) ? '' : '模型不在当前根目录内')
 }

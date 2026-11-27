@@ -138,19 +138,22 @@ export async function openDetail(id) {
 function recordModelOpen(id) {
   window.api.models
     .recordModelOpen(id)
-    .then((res) => {
-      if (!res?.meta) return
-      applyMetaUpdates(new Map([[id, res.meta]]), (meta, current) => ({
-        lastOpenedAt: Math.max(
-          Number.isFinite(current.lastOpenedAt) ? current.lastOpenedAt : 0,
-          Number.isFinite(meta.lastOpenedAt) ? meta.lastOpenedAt : 0,
-        ),
-        openCount: Math.max(
-          Number.isInteger(current.openCount) ? current.openCount : 0,
-          Number.isInteger(meta.openCount) ? meta.openCount : 0,
-        ),
-      }))
-    })
+    .then(
+      /** @param {any} res */
+      (res) => {
+        if (!res?.meta) return
+        applyMetaUpdates(new Map([[id, res.meta]]), (meta, current) => ({
+          lastOpenedAt: Math.max(
+            Number.isFinite(current.lastOpenedAt) ? current.lastOpenedAt : 0,
+            Number.isFinite(meta.lastOpenedAt) ? meta.lastOpenedAt : 0,
+          ),
+          openCount: Math.max(
+            Number.isInteger(current.openCount) ? current.openCount : 0,
+            Number.isInteger(meta.openCount) ? meta.openCount : 0,
+          ),
+        }))
+      },
+    )
     .catch(() => {})
 }
 

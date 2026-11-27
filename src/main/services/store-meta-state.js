@@ -66,7 +66,10 @@ export const metaState = {
   dataReset: false,
 }
 
-/** 标记脏键并递增变更版本（所有元数据变更的唯一入口） */
+/**
+ * 标记脏键并递增变更版本（所有元数据变更的唯一入口）
+ * @param {string} key 模型相对路径键
+ */
 export function markDirty(key) {
   metaState.dirtyKeys.add(key)
   metaState.mutationVersion += 1

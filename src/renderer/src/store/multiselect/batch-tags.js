@@ -42,6 +42,7 @@ export function normalizeBatchTags(raw) {
     : typeof raw === 'string'
       ? raw.split(/[,，]/)
       : []
+  /** @type {string[]} */
   const out = []
   for (const item of list) {
     if (typeof item !== 'string') continue
@@ -79,7 +80,10 @@ function nextTagsFor(current, input, mode) {
   return replacesAll ? { unchanged: true } : { tags: [...input] }
 }
 
-/** 读取当前模型的最新标签（执行时取值，供意图式增删基于最新状态计算） */
+/**
+ * 读取当前模型的最新标签（执行时取值，供意图式增删基于最新状态计算）
+ * @param {Record<string, any>|null} [model] 模型对象
+ */
 function currentTagsOf(model) {
   return Array.isArray(model?.tags) ? model.tags : []
 }
@@ -110,7 +114,8 @@ function collectTagChanges(ids, input, mode, byId) {
       overflow += 1
       continue
     }
-    items.push({ id, tags: result.tags })
+    // nextTagsFor 保证非 unchanged/overflow 路径必携带 tags（仅收窄类型）
+    items.push({ id, tags: /** @type {string[]} */ (result.tags) })
   }
   return { items, unchanged, overflow }
 }
@@ -242,6 +247,7 @@ export async function batchEditTags(options = {}) {
 
     const metas = new Map()
     // B20/F3：逐项失败保留真实原因，供失败明细面板定位与重建选区重试
+    /** @type {Array<{id: string, error: string}>} */
     const failedItems = []
     const canceled = await submitTagChunks(items, modeLabel, metas, failedItems)
 
@@ -273,7 +279,12 @@ export async function batchEditTags(options = {}) {
   }
 }
 
-/** 记录一条失败明细（契约防御与 IPC 异常共用） */
+/**
+ * 记录一条失败明细（契约防御与 IPC 异常共用）
+ * @param {Array<{id: string, error: string}>} list 失败明细列表
+ * @param {string} id 模型 id
+ * @param {string} [error] 失败原因
+ */
 function failuresPush(list, id, error) {
   list.push({ id, error: error || '未返回结果' })
 }

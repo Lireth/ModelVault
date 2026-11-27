@@ -1,7 +1,7 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import logger from '../logger'
-import { isLinkLikePath, relativeWithin } from '../utils'
+import { isLinkLikePath, relativeWithin, unrefTimeout } from '../utils'
 import { dedupeAndPruneDescendants } from '../../shared/scan-dirs'
 import { isVisibleScanEntry } from './scanner'
 import { removeSnapshotSubtree } from './watcher-baseline'
@@ -47,20 +47,26 @@ import { errorCode } from '../../shared/error-text'
  *   可见性探测——以基础间隔探测使「恢复可见后的首次比对」不受阶梯封顶值
  *   拖累（否则封顶 30s 下，切回应用后最坏要等 30s 才发现隐藏期的变更）；
  * - 可见且有阶梯：按连续空闲轮数爬梯（封顶取末档）。
+ * @param {WatcherState} w 监控状态
  */
 function nextDelay(w) {
   const ladder = w.backoff
   if (!Array.isArray(ladder) || ladder.length === 0) return w.pollInterval
   if (typeof w.isVisible === 'function' && !w.isVisible()) return w.pollInterval
-  return ladder[Math.min(w.idleRounds, ladder.length - 1)]
+  // 下标已钳制在 [0, length-1]，断言仅满足 strictNullChecks，运行时无变化
+  return /** @type {number} */ (
+    ladder[Math.min(w.idleRounds, ladder.length - 1)]
+  )
 }
 
-/** 安排下一轮巡检并对外通告实际延迟（测试钩子 onPollScheduled） */
+/**
+ * 安排下一轮巡检并对外通告实际延迟（测试钩子 onPollScheduled）
+ * @param {WatcherState} w 监控状态
+ */
 export function scheduleNextWalk(w) {
   if (w !== getWatcher() || !getWatcher()) return // 遍历期间监控可能已被停止/替换
   const delay = nextDelay(w)
-  w.timer = setTimeout(() => runWalk(w, false), delay)
-  w.timer.unref?.()
+  w.timer = unrefTimeout(() => runWalk(w, false), delay)
   if (typeof w.onPollScheduled === 'function') w.onPollScheduled(delay)
 }
 
@@ -104,7 +110,7 @@ function handleWalkError(w, err) {
     `目录监控异常（第 ${w.errorRetries}/${maxRetries} 次，${Math.round(delay / 1000)}s 后重探）: ${err.message}`,
   )
   if (w.errorRetryTimer) clearTimeout(w.errorRetryTimer)
-  w.errorRetryTimer = setTimeout(() => {
+  w.errorRetryTimer = unrefTimeout(() => {
     w.errorRetryTimer = null
     if (w !== getWatcher()) return
     fs.stat(w.root).then(
@@ -123,7 +129,6 @@ function handleWalkError(w, err) {
       },
     )
   }, delay)
-  w.errorRetryTimer.unref?.()
   return true
 }
 
@@ -176,7 +181,14 @@ async function collectHotSnapshot(w, hotRels) {
   return { partial, hotRels }
 }
 
-/** 热点巡检的差异比较范围：本轮访问子树内的旧基线条目（子树被删时以缺失参与） */
+/**
+ * 热点巡检的差异比较范围：本轮访问子树内的旧基线条目（子树被删时以缺失参与）
+ * @param {WatcherState} w 监控状态
+ * @param {string} root 监控根目录
+ * @param {string[]} hotRels 热点子树（POSIX 相对路径）
+ * @param {Map<string, string[]>} partial 本轮部分快照
+ * @returns {Map<string, string[]>} 旧基线比较范围
+ */
 function hotOldSub(w, root, hotRels, partial) {
   const oldSub = new Map()
   const hotAbs = hotRels
@@ -194,7 +206,12 @@ function hotOldSub(w, root, hotRels, partial) {
   return oldSub
 }
 
-/** 遍历期间基线被其他路径更新/监控已替换：本轮结果作废（代际校验 B2） */
+/**
+ * 遍历期间基线被其他路径更新/监控已替换：本轮结果作废（代际校验 B2）
+ * @param {WatcherState} w 监控状态
+ * @param {number} revisionAtStart 轮次开始时的快照修订号
+ * @returns {boolean}
+ */
 function isWalkStale(w, revisionAtStart) {
   return (
     w !== getWatcher() ||
@@ -225,7 +242,9 @@ async function runBaselineWalk(w, wantStats, revisionAtStart) {
   }
   if (wantStats) {
     w.statSnapshot = /** @type {Map<string, SnapshotEntry[]>} */ (snapshot)
-    w.snapshot = namesFromSnapshot(snapshot)
+    w.snapshot = namesFromSnapshot(
+      /** @type {Map<string, SnapshotEntry[]>} */ (snapshot),
+    )
     w.lastContentCheckAt = Date.now()
     // OPT-9：基线轮全树已 stat，全部目录记为本轮已校验
     const checkedAt = Date.now()
@@ -298,7 +317,9 @@ async function rebuildStatBaseline(w, revisionAtStart) {
     return false
   }
   w.statSnapshot = /** @type {Map<string, SnapshotEntry[]>} */ (snapshot)
-  w.snapshot = namesFromSnapshot(snapshot)
+  w.snapshot = namesFromSnapshot(
+    /** @type {Map<string, SnapshotEntry[]>} */ (snapshot),
+  )
   const checkedAt = Date.now()
   w.contentCheckedAt = new Map()
   for (const dir of snapshot.keys()) w.contentCheckedAt.set(dir, checkedAt)

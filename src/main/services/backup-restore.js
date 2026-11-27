@@ -2,6 +2,7 @@ import { dialog } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
+import { pruneOldestFiles } from '../utils'
 import { runMaintenance } from './maintenance-lock'
 import {
   COVERS_DIR,
@@ -45,7 +46,11 @@ const RESTORE_TMP_PREFIX = `${DATA_DIR}.restore-`
 /** 覆盖恢复时旧数据的留存目录前缀 */
 const BACKUP_DIR_PREFIX = `${DATA_DIR}.bak-`
 
-/** 路径存在性判断（不区分文件/目录） */
+/**
+ * 路径存在性判断（不区分文件/目录）
+ * @param {string} p 路径
+ * @returns {Promise<boolean>}
+ */
 async function pathExists(p) {
   try {
     await fs.access(p)
@@ -240,7 +245,12 @@ async function restoreLibraryLocked(
   }
 }
 
-/** 选择性恢复前的 store.json 快照（最多保留 10 份，失败不阻断恢复） */
+/**
+ * 选择性恢复前的 store.json 快照（最多保留 10 份，失败不阻断恢复）
+ * @param {string} root 目标模型根目录
+ * @param {number} stamp 快照时间戳（Date.now()）
+ * @returns {Promise<string>} 快照路径（失败/无源文件为空串）
+ */
 async function snapshotSelectiveStore(root, stamp) {
   const source = path.join(root, DATA_DIR, DATA_FILE)
   if (!(await pathExists(source))) return ''
@@ -252,9 +262,7 @@ async function snapshotSelectiveStore(root, stamp) {
     const names = (await fs.readdir(dir))
       .filter((name) => name.startsWith('store-selective-'))
       .sort()
-    for (const old of names.slice(0, Math.max(0, names.length - 10))) {
-      await fs.rm(path.join(dir, old), { force: true }).catch(() => {})
-    }
+    await pruneOldestFiles(dir, names, 10)
     return dest
   } catch (err) {
     logger.warn(`选择性恢复前快照失败（继续合并）: ${errorMessage(err)}`)
@@ -292,6 +300,7 @@ async function restorePartialLibrary(root, filePath, manifest) {
     // 封面同名不覆盖（既有文件优先）；新文件直接写入当前库封面目录。
     // 若后续校验/合并失败，删除本次新写入的封面，避免在库内留下半成品。
     let covers = 0
+    /** @type {string[]} */
     const writtenCovers = []
     try {
       const unzipped = await streamBackupZip(filePath, {

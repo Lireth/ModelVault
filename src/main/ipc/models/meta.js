@@ -15,7 +15,10 @@ import { MAX_TAGS } from '../../../shared/app-enums'
  * 万级选中时产生万次 invoke 与完整 meta 回包。
  */
 
-/** 标签名称校验（F4 全库操作入口）：非空字符串（长度上限由 schema 门禁约束） */
+/**
+ * 标签名称校验（F4 全库操作入口）：非空字符串（长度上限由 schema 门禁约束）
+ * @param {string} tag 标签名
+ */
 function checkTagName(tag) {
   return typeof tag === 'string' && tag.trim() ? '' : '标签名称不能为空'
 }
@@ -46,7 +49,11 @@ function normalizeFlagsPatch({ favorite, nsfw, rating } = {}) {
   return { patch }
 }
 
-/** 单模型快捷标记更新（合并已有元数据后整条落盘） */
+/**
+ * 单模型快捷标记更新（合并已有元数据后整条落盘）
+ * @param {string} id 模型绝对路径
+ * @param {any} patch 快捷标记增量
+ */
 function applyMetaFlags(id, patch) {
   const existing = getModelMeta(id) || {}
   const meta = setModelMeta(id, { ...existing, ...patch })
@@ -54,7 +61,11 @@ function applyMetaFlags(id, patch) {
   return { meta }
 }
 
-/** 单模型标签整体覆写（合并已有元数据后整条落盘） */
+/**
+ * 单模型标签整体覆写（合并已有元数据后整条落盘）
+ * @param {string} id 模型绝对路径
+ * @param {unknown} tags 标签列表
+ */
 function applyModelTags(id, tags) {
   const invalid = checkModelIdInRoot(id)
   if (invalid) return { error: invalid }
@@ -300,7 +311,9 @@ export function registerMetaHandlers() {
         if (!(meta.tags || []).includes(from)) continue
         setModelMeta(id, {
           ...meta,
-          tags: meta.tags.map((t) => (t === from ? to : t)),
+          tags: /** @type {string[]} */ (meta.tags).map((t) =>
+            t === from ? to : t,
+          ),
         })
         changed += 1
       }
@@ -322,7 +335,10 @@ export function registerMetaHandlers() {
       let changed = 0
       for (const [id, meta] of Object.entries(getMetaMapByAbsPath())) {
         if (!(meta.tags || []).includes(tag)) continue
-        setModelMeta(id, { ...meta, tags: meta.tags.filter((t) => t !== tag) })
+        setModelMeta(id, {
+          ...meta,
+          tags: /** @type {string[]} */ (meta.tags).filter((t) => t !== tag),
+        })
         changed += 1
       }
       if (changed > 0) {

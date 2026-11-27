@@ -27,7 +27,10 @@ export async function awaitThumbDrain() {
   }
 }
 
-/** 设置/清除后台缩略图生成任务 Promise */
+/**
+ * 设置/清除后台缩略图生成任务 Promise
+ * @param {Promise<unknown>|null} p 任务 Promise
+ */
 export function setThumbDrainPromise(p) {
   thumbDrainPromise = p
 }
@@ -59,7 +62,10 @@ export const decorateCache = new Map()
  */
 export const headerInfoCache = new Map()
 
-/** 缓存对应的模型根目录（切换根目录时清空缓存） */
+/**
+ * 缓存对应的模型根目录（切换根目录时清空缓存）
+ * @type {string|null}
+ */
 let decorateCacheRoot = null
 
 /** 缓存默认容量（与 decorate.js 的最小容量保持一致） */
@@ -93,6 +99,7 @@ export function setDecorateCacheLimit(limit) {
  * 切换装饰缓存对应根目录：清空缓存并记录新根目录（原子语义，
  * 调用方不得分两步操作 Map 与 root，否则缓存内容与根目录标识会短暂不一致）。
  * 容量同步复位到默认值，随后由全量扫描按新库规模重新调整。
+ * @param {string} root 新的模型根目录
  */
 export function resetDecorateCache(root) {
   decorateCache.clear()

@@ -43,7 +43,10 @@ async function writeModelTags(id, tags, opts = {}) {
   return { meta: res?.meta || null }
 }
 
-/** 读取模型当前生效标签（执行时取最新值，供意图式增删基于最新状态计算） */
+/**
+ * 读取模型当前生效标签（执行时取最新值，供意图式增删基于最新状态计算）
+ * @param {string} id 模型 id
+ */
 function currentTagsOf(id) {
   const idx = modelIndexOf(id)
   if (idx === undefined) return []
@@ -208,6 +211,11 @@ const modelOpChains = new Map()
 /** @type {Promise<void>|null} */
 let bulkTagWritePromise = null
 
+/**
+ * 将任务排入指定模型的串行队列
+ * @param {string} id 模型 id
+ * @param {() => any} task 待执行任务
+ */
 function enqueueModelOp(id, task) {
   const prev = modelOpChains.get(id)
   // C1：锁在入队时捕获（而非执行时读取）——批量开始前已排队的任务不等待

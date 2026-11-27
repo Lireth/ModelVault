@@ -46,5 +46,8 @@ export const modelById = computed(() => {
       if (cachedById.get(m.id) !== m) cachedById.set(m.id, m)
     }
   }
-  return { get: (id) => cachedById.get(id) }
+  return {
+    /** @param {string|null} id 模型 id（null 恒未命中，保持原回退语义） */
+    get: (id) => cachedById.get(id),
+  }
 })

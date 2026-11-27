@@ -42,9 +42,14 @@ const immutableAssetCache = new Map()
 const IMMUTABLE_ASSET_CACHE_MAX = 512
 const IMMUTABLE_ASSET_TTL_MS = 30_000
 /** 上一次所见根目录（检测切换以失效 realpath 缓存） */
+/** @type {string|null|undefined} */
 let lastSeenRoot
 
-/** realpath 带缓存：不存在/不可达的目录缓存为 null（放行时跳过） */
+/**
+ * realpath 带缓存：不存在/不可达的目录缓存为 null（放行时跳过）
+ * @param {string} dir 目录绝对路径
+ * @returns {Promise<string|null>} realpath 结果（不存在为 null）
+ */
 async function realpathCached(dir) {
   let real = realpathCache.get(dir)
   if (real === undefined) {
@@ -168,7 +173,7 @@ export function registerMvimgHandler() {
         throw err
       }
       return withCacheHeaders(
-        new Response(body, {
+        new Response(/** @type {BodyInit} */ (body), {
           status: 200,
           headers: {
             'Content-Type': imageMimeType(realPath),

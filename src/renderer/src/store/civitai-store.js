@@ -9,13 +9,19 @@ import { errorMessage } from '../../../shared/error-text'
  * 识别/补全过程的状态由调用组件自持（busy/最近结果文案）。
  */
 
-/** 补全字段名 → 提示文案映射 */
+/** 补全字段名 → 提示文案映射
+ * @type {Record<string, string>}
+ */
 const APPLIED_LABELS = {
   triggerWords: '触发词',
   note: '备注',
 }
 
-/** 将主进程返回的元数据同步到本地模型列表对应条目 */
+/**
+ * 将主进程返回的元数据同步到本地模型列表对应条目
+ * @param {string} id 模型 id
+ * @param {Record<string, any>|null} [meta] 主进程返回的元数据
+ */
 function applyModelMeta(id, meta) {
   if (!meta) return
   const idx = modelIndexOf(id)
@@ -35,13 +41,15 @@ function applyModelMeta(id, meta) {
 
 /**
  * 在线识别模型（按文件 SHA256 反查 Civitai）。
+ * 详情页手动识别 force=true（OP-D）：绕过未收录负缓存取最新结果——
+ * 用户显式点击即期望当前状态（模型可能刚被作者上架）。
  * @param {string} id 模型 id
  * @returns {Promise<{found: boolean, url?: string, info?: object, error?: string}>}
  */
 export async function civitaiIdentify(id) {
   let res
   try {
-    res = await window.api.models.civitaiIdentify(id)
+    res = await window.api.models.civitaiIdentify(id, false, true)
   } catch (err) {
     toast('error', `Civitai 识别失败: ${errorMessage(err)}`)
     return { found: false, error: errorMessage(err) }
@@ -77,14 +85,23 @@ export async function civitaiComplete(id) {
     if (res.applied?.length) {
       toast(
         'success',
-        `已补全：${res.applied.map((k) => APPLIED_LABELS[k] || k).join('、')}`,
+        `已补全：${res.applied
+          .map(
+            /** @param {string} k */
+            (k) => APPLIED_LABELS[k] || k,
+          )
+          .join('、')}`,
       )
     }
   }
   return res
 }
 
-/** 将封面操作结果同步到本地模型列表（与 covers-store 同一结构约定） */
+/**
+ * 将封面操作结果同步到本地模型列表（与 covers-store 同一结构约定）
+ * @param {string} id 模型 id
+ * @param {Record<string, any>} res 封面操作响应
+ */
 function applyCoverResult(id, res) {
   const idx = modelIndexOf(id)
   if (idx !== undefined) {

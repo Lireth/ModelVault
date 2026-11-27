@@ -309,6 +309,98 @@ describe('models:civitaiIdentify', () => {
     expect(civitaiCompletePatch).not.toHaveBeenCalled()
     expect(res2.applied).toBeUndefined()
   })
+
+  it('OP-D：404 记入未收录负缓存，静默期内同哈希识别零网络快速返回', async () => {
+    const id = await touchModel('miss.safetensors')
+    computeAndCacheHash.mockResolvedValue('a'.repeat(64))
+    fetchCivitaiVersionByHash.mockResolvedValue({ found: false })
+
+    // 首次识别：真实请求 404，写入负缓存（哈希绑定 + 时间戳）
+    const first = await getRegisteredHandler('models:civitaiIdentify')(
+      makeEvent(),
+      { id },
+    )
+    expect(first).toEqual({ found: false })
+    const meta = getModelMeta(id)
+    expect(meta.civitaiMissHash).toBe('a'.repeat(64))
+    expect(meta.civitaiMissAt).toBeGreaterThan(0)
+
+    // 二次识别（批量链路不传 force）：缓存命中零网络
+    const second = await getRegisteredHandler('models:civitaiIdentify')(
+      makeEvent(),
+      { id },
+    )
+    expect(second).toEqual({ found: false, cachedMiss: true })
+    expect(fetchCivitaiVersionByHash).toHaveBeenCalledTimes(1)
+  })
+
+  it('OP-D：force=true（详情页手动识别）绕过负缓存取最新结果', async () => {
+    const id = await touchModel('miss-force.safetensors')
+    computeAndCacheHash.mockResolvedValue('b'.repeat(64))
+    fetchCivitaiVersionByHash.mockResolvedValue({ found: false })
+
+    await getRegisteredHandler('models:civitaiIdentify')(makeEvent(), { id })
+    expect(fetchCivitaiVersionByHash).toHaveBeenCalledTimes(1)
+
+    // force 请求：仍走真实网络（模型可能刚被作者上架），404 刷新静默期
+    await getRegisteredHandler('models:civitaiIdentify')(makeEvent(), {
+      id,
+      force: true,
+    })
+    expect(fetchCivitaiVersionByHash).toHaveBeenCalledTimes(2)
+    expect(getModelMeta(id).civitaiMissAt).toBeGreaterThan(
+      Date.now() - 60 * 1000,
+    )
+  })
+
+  it('OP-D：静默期到期后恢复真实请求；识别成功清除负缓存', async () => {
+    const id = await touchModel('miss-expire.safetensors')
+    const { mtimeMs } = await fs.stat(id)
+    // 预置已过期的负缓存（25h 前）
+    setModelMeta(id, {
+      hash: 'e'.repeat(64),
+      hashMtime: mtimeMs,
+      civitaiMissHash: 'e'.repeat(64),
+      civitaiMissAt: Date.now() - 25 * 60 * 60 * 1000,
+    })
+    fetchCivitaiVersionByHash.mockResolvedValue({ found: false })
+
+    await getRegisteredHandler('models:civitaiIdentify')(makeEvent(), { id })
+    // 过期 → 真实请求，404 刷新静默期
+    expect(fetchCivitaiVersionByHash).toHaveBeenCalledTimes(1)
+
+    // 识别成功（手动 force 绕过刷新后的静默期）：负缓存清除（模型上架后
+    // 的自愈即刻生效）
+    fetchCivitaiVersionByHash.mockResolvedValue({
+      found: true,
+      info: versionInfo(),
+    })
+    await getRegisteredHandler('models:civitaiIdentify')(makeEvent(), {
+      id,
+      force: true,
+    })
+    const meta = getModelMeta(id)
+    expect(meta.civitaiUrl).toBe(versionInfo().url)
+    expect(meta.civitaiMissAt).toBe(0)
+    expect(meta.civitaiMissHash).toBe('')
+  })
+
+  it('OP-D：哈希变化（文件替换）后旧负缓存失效', async () => {
+    const id = await touchModel('miss-hash-change.safetensors')
+    computeAndCacheHash.mockResolvedValue('9'.repeat(64))
+    // 预置针对旧哈希的负缓存（仍在静默期内）
+    setModelMeta(id, {
+      civitaiMissHash: 'f'.repeat(64),
+      civitaiMissAt: Date.now(),
+    })
+    fetchCivitaiVersionByHash.mockResolvedValue({ found: false })
+
+    await getRegisteredHandler('models:civitaiIdentify')(makeEvent(), { id })
+
+    // miss 绑定的旧哈希与本次哈希不匹配 → 真实请求
+    expect(fetchCivitaiVersionByHash).toHaveBeenCalledTimes(1)
+    expect(fetchCivitaiVersionByHash).toHaveBeenCalledWith('9'.repeat(64))
+  })
 })
 
 describe('models:civitaiComplete', () => {

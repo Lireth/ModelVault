@@ -39,7 +39,10 @@ export const unidentifiedCivitaiCount = computed(
   () => state.models.filter((m) => !m.civitaiUrl).length,
 )
 
-/** 请求识别单个模型（队列专用：识别 + 同次补全空缺），异常归一为 error */
+/**
+ * 请求识别单个模型（队列专用：识别 + 同次补全空缺），异常归一为 error
+ * @param {string} id 模型 id
+ */
 async function identifyOne(id) {
   try {
     return await window.api.models.civitaiIdentify(id, true)
@@ -74,7 +77,8 @@ export async function startCivitaiQueue() {
     `将按文件哈希逐个反查 Civitai（当前 ${targets.length} 个未识别模型），` +
       '命中后保存链接并补全空缺的触发词/备注（已有标注不会被覆盖）。' +
       `受站点限速约 1.2 秒/请求，预计至少 ${minutes} 分钟，` +
-      '哈希未预热的模型另需读盘计算。期间可随时取消，已识别部分保留。继续吗？',
+      '哈希未预热的模型另需读盘计算。期间可随时取消，已识别部分保留。' +
+      '近期已确认未收录的模型将快速跳过（不发请求）。继续吗？',
   )
   if (!ok) return
 

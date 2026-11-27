@@ -26,6 +26,7 @@ export async function batchAssignCivitaiTags() {
   if (ids.length === 0 || state.multiSelect.busy) return
   const byId = modelById.value
   // 仅 LoRA 参与分配（7 类标签是 LoRA 专属维度），非 LoRA 计入汇总
+  /** @type {string[]} */
   const loraIds = []
   let notLora = 0
   for (const id of ids) {
@@ -56,7 +57,8 @@ export async function batchAssignCivitaiTags() {
     let firstError = ''
     for (let i = 0; i < loraIds.length; i++) {
       if (state.multiSelect.cancelRequested) break
-      const id = loraIds[i]
+      // i < length：下标必然有效，cast 仅收窄类型
+      const id = /** @type {string} */ (loraIds[i])
       const m = byId.get(id)
       state.multiSelect.progress = `分配标签 ${i + 1}/${loraIds.length}：${m?.alias || m?.name || ''}`
       let res
@@ -236,6 +238,7 @@ export async function batchCivitaiImages() {
   const ids = [...state.multiSelect.ids]
   if (ids.length === 0 || state.multiSelect.busy) return
   const byId = modelById.value
+  /** @type {string[]} */
   const targets = []
   let skippedHasCover = 0
   for (const id of ids) {
@@ -263,7 +266,8 @@ export async function batchCivitaiImages() {
     let firstError = ''
     for (let i = 0; i < targets.length; i++) {
       if (state.multiSelect.cancelRequested) break
-      const id = targets[i]
+      // i < length：下标必然有效，cast 仅收窄类型
+      const id = /** @type {string} */ (targets[i])
       const m = byId.get(id)
       state.multiSelect.progress = `获取示例图 ${i + 1}/${targets.length}：${m?.alias || m?.name || ''}`
       // 识别（主进程顺带保存 civitaiUrl），失败计入 failed
@@ -280,7 +284,9 @@ export async function batchCivitaiImages() {
         continue
       }
       if (res.meta) metas.set(id, res.meta)
-      const images = Array.isArray(res.info?.images) ? res.info.images : []
+      const images = /** @type {Array<Record<string, any>>} */ (
+        Array.isArray(res.info?.images) ? res.info.images : []
+      )
       if (!res.found || images.length === 0) {
         notFound += 1
         continue

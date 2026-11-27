@@ -399,3 +399,132 @@ describe('scanModels 重关联提示（A-02）', () => {
     expect(notice.text).toContain('25 个目录无法读取')
   })
 })
+
+describe('scanModels SCAN-DELTA 差量响应（增量下发协议）', () => {
+  function setGrid(models) {
+    state.folder = 'D:\\models'
+    replaceModels(models)
+    state.listSnap = { root: 'D:\\models', gen: 7 }
+  }
+
+  it('代际匹配时回传快照，差量就地合并：更新换身/新增追加/消失剔除', async () => {
+    setGrid([
+      makeModel('keep-id'),
+      makeModel('updated-id', { note: '旧备注' }),
+      makeModel('gone-id'),
+    ])
+    const keepRef = state.models[0]
+    api.models.scan.mockResolvedValue({
+      delta: {
+        upsert: [
+          makeModel('updated-id', { note: '新备注' }),
+          makeModel('added-id'),
+        ],
+        remove: ['gone-id'],
+      },
+      total: 3,
+      snap: { root: 'D:\\models', gen: 7 },
+      relinked: 0,
+    })
+
+    await scanModels()
+
+    // 请求携带快照代际
+    expect(api.models.scan).toHaveBeenCalledWith('D:\\models', {
+      root: 'D:\\models',
+      gen: 7,
+    })
+    const ids = state.models.map((m) => m.id)
+    // 未变化模型保持原引用（PERF-SORT/搜索域缓存复用语义）
+    expect(state.models[0]).toBe(keepRef)
+    expect(ids).toEqual(['keep-id', 'updated-id', 'added-id'])
+    expect(state.models.find((m) => m.id === 'updated-id').note).toBe('新备注')
+    // 代际不变（增量应用不推进快照代际）
+    expect(state.listSnap).toEqual({ root: 'D:\\models', gen: 7 })
+    expect(state.lastScan).toEqual({ count: 3, durationMs: undefined })
+  })
+
+  it('空差量不触碰列表（派生链零重算）', async () => {
+    setGrid([makeModel('keep-id')])
+    const before = state.models
+    api.models.scan.mockResolvedValue({
+      delta: { upsert: [], remove: [] },
+      total: 1,
+      snap: { root: 'D:\\models', gen: 7 },
+      relinked: 0,
+    })
+
+    await scanModels()
+
+    expect(state.models).toBe(before)
+    expect(state.listSnap).toEqual({ root: 'D:\\models', gen: 7 })
+  })
+
+  it('差量代际回显失配：作废快照按扫描失败收敛，列表保持不动', async () => {
+    setGrid([makeModel('keep-id')])
+    api.models.scan.mockResolvedValue({
+      delta: { upsert: [makeModel('x')], remove: [] },
+      total: 2,
+      snap: { root: 'D:\\models', gen: 8 },
+      relinked: 0,
+    })
+
+    await scanModels()
+
+    expect(state.models.map((m) => m.id)).toEqual(['keep-id'])
+    expect(state.listSnap).toBeNull()
+    expect(
+      state.toasts.some(
+        (t) => t.type === 'error' && t.text.includes('重新扫描'),
+      ),
+    ).toBe(true)
+  })
+
+  it('根不一致时不回传快照（主进程走全量下发并颁发新代际）', async () => {
+    setGrid([makeModel('keep-id')])
+    state.listSnap = { root: 'D:\\other', gen: 5 }
+    api.models.scan.mockResolvedValue({
+      models: [makeModel('fresh-id')],
+      snap: { root: 'D:\\models', gen: 9 },
+      errors: [],
+    })
+
+    await scanModels('D:\\models')
+
+    expect(api.models.scan).toHaveBeenCalledWith('D:\\models', null)
+    expect(state.models.map((m) => m.id)).toEqual(['fresh-id'])
+    expect(state.listSnap).toEqual({ root: 'D:\\models', gen: 9 })
+  })
+
+  it('全量响应携带 snap：应用列表并记账新代际；无 snap 保持 null', async () => {
+    state.folder = 'D:\\models'
+    replaceModels([])
+    api.models.scan.mockResolvedValue({
+      models: [makeModel('m1')],
+      snap: { root: 'D:\\models', gen: 3 },
+      errors: [],
+    })
+    await scanModels()
+    expect(state.listSnap).toEqual({ root: 'D:\\models', gen: 3 })
+
+    // 旧版主进程响应无 snap：不记账，下次扫描仍走全量
+    api.models.scan.mockResolvedValue({ models: [makeModel('m2')], errors: [] })
+    await scanModels()
+    expect(state.listSnap).toBeNull()
+  })
+
+  it('差量路径同步剔除多选选区中已消失的 id', async () => {
+    setGrid([makeModel('gone-id'), makeModel('keep-id')])
+    state.multiSelect.ids = ['gone-id', 'keep-id']
+    api.models.scan.mockResolvedValue({
+      delta: { upsert: [], remove: ['gone-id'] },
+      total: 1,
+      snap: { root: 'D:\\models', gen: 7 },
+      relinked: 0,
+    })
+
+    await scanModels()
+
+    expect(state.multiSelect.ids).toEqual(['keep-id'])
+  })
+})

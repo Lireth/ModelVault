@@ -51,6 +51,7 @@ export function makeApiMock() {
       pasteCover: vi.fn(),
       setDefaultCover: vi.fn(),
       deleteCover: vi.fn(),
+      clearCovers: vi.fn(),
       clearAllCovers: vi.fn(),
       importCover: vi.fn(),
       civitaiIdentify: vi.fn(),

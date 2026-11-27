@@ -22,7 +22,11 @@ import {
  * @property {number|null} [mtimeMs] 文件修改时间（stat 失败为 null）
  */
 
-/** 把并发配置收口到 [1, 64] 的安全区间 */
+/**
+ * 把并发配置收口到 [1, 64] 的安全区间
+ * @param {any} value 并发配置原值
+ * @returns {number} 收口后的并发数
+ */
 export function normalizeConcurrency(value) {
   if (!Number.isFinite(value)) return DEFAULT_TRAVERSAL_CONCURRENCY
   return Math.min(64, Math.max(1, Math.floor(value)))
@@ -81,6 +85,7 @@ export async function collectDirSnapshot(
 
   /** @type {Promise<void>} */
   const walkDone = new Promise((resolve, reject) => {
+    /** @type {(err?: Error) => void} */
     const finish = (err) => {
       if (settled) return
       settled = true
@@ -88,7 +93,10 @@ export async function collectDirSnapshot(
       else resolve()
     }
 
-    /** 处理单个目录：读取条目、写入快照、把子目录追加到队列 */
+    /**
+     * 处理单个目录：读取条目、写入快照、把子目录追加到队列
+     * @param {{dir: string, isRoot: boolean, depth: number}} job 目录节点
+     */
     const readOne = async ({ dir, isRoot, depth }) => {
       let entries
       try {
@@ -194,7 +202,11 @@ export async function collectDirSnapshot(
   return snapshot
 }
 
-/** 内容快照 → 名称快照（两套快照共用结构差异判定） */
+/**
+ * 内容快照 → 名称快照（两套快照共用结构差异判定）
+ * @param {Map<string, SnapshotEntry[]>} statSnapshot 内容快照
+ * @returns {Map<string, string[]>} 名称快照
+ */
 export function namesFromSnapshot(statSnapshot) {
   const names = new Map()
   for (const [dir, entries] of statSnapshot) {
@@ -281,6 +293,11 @@ export function snapshotsEqual(a, b) {
  */
 export function computeSnapshotDiff(root, oldSnap, newSnap) {
   const dirs = new Set()
+  /**
+   * @param {string} dirAbs 目录绝对路径
+   * @param {string[]|undefined} oldNames 旧条目名列表
+   * @param {string[]|undefined} newNames 新条目名列表
+   */
   const consider = (dirAbs, oldNames, newNames) => {
     const a = oldNames || []
     const b = newNames || []
@@ -295,12 +312,18 @@ export function computeSnapshotDiff(root, oldSnap, newSnap) {
   return [...dirs].sort()
 }
 
-/** 内容快照条目是否完全一致（名称/类型/size/mtime 任一不同即视为变更） */
+/**
+ * 内容快照条目是否完全一致（名称/类型/size/mtime 任一不同即视为变更）
+ * @param {SnapshotEntry[]|undefined|null} a 条目列表 A
+ * @param {SnapshotEntry[]|undefined|null} b 条目列表 B
+ * @returns {boolean}
+ */
 function statEntriesEqual(a, b) {
   if (!a || !b || a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) {
-    const left = a[i]
-    const right = b[i]
+    // 长度相等判定后同下标必有值，断言仅满足 strictNullChecks
+    const left = /** @type {SnapshotEntry} */ (a[i])
+    const right = /** @type {SnapshotEntry} */ (b[i])
     if (
       left.name !== right.name ||
       Boolean(left.isDir) !== Boolean(right.isDir) ||
@@ -324,6 +347,11 @@ function statEntriesEqual(a, b) {
  */
 export function computeStatSnapshotDiff(root, oldSnap, newSnap) {
   const dirs = new Set()
+  /**
+   * @param {string} dirAbs 目录绝对路径
+   * @param {SnapshotEntry[]|undefined} oldEntries 旧内容条目列表
+   * @param {SnapshotEntry[]|undefined} newEntries 新内容条目列表
+   */
   const consider = (dirAbs, oldEntries, newEntries) => {
     if (statEntriesEqual(oldEntries, newEntries)) return
     const rel = relativeWithin(dirAbs, root)

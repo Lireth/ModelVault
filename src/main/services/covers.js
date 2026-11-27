@@ -28,12 +28,16 @@ import { errorCode, errorMessage } from '../../shared/error-text'
  * 避免模型目录被意外修改，且随模型文件夹一起移动。
  */
 
-/** 清理文件名中的非法字符 */
+/**
+ * 清理文件名中的非法字符
+ * @param {string} name 原始文件名
+ */
 function sanitizeBaseName(name) {
   return name.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || 'cover'
 }
 
 /** 各图片格式的文件头魔数（防伪装扩展名，判定所需字节均在文件头 12 字节内） */
+/** @type {Array<(b: Buffer) => boolean>} */
 const IMAGE_MAGIC = [
   // PNG: 89 50 4E 47 0D 0A 1A 0A
   (b) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47,
@@ -238,6 +242,7 @@ export async function isValidImageFile(p) {
  */
 export async function saveClipboardImage() {
   try {
+    /** @type {Record<string, string>} */
     const MIME_EXT = {
       'image/png': '.png',
       'image/jpeg': '.jpg',
@@ -271,7 +276,7 @@ export async function saveClipboardImage() {
     }
     const dest = path.join(
       getCoversDir(),
-      `${Date.now()}-clipboard${MIME_EXT[mime]}`,
+      `${Date.now()}-clipboard${MIME_EXT[/** @type {string} */ (mime)]}`,
     )
     await fs.writeFile(dest, Buffer.from(arrayBuffer))
     logger.info(`剪贴板图片已保存: ${dest}`)

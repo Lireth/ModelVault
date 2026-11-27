@@ -182,6 +182,39 @@ describe('元数据规范化', () => {
     expect(invalid.lastOpenedAt).toBe(0)
     expect(invalid.openCount).toBe(0)
   })
+
+  it('quickHash 快指纹缓存规范化：hex 小写收口、非法值清空（OP-C）', async () => {
+    const abs = await touchModel('fp.safetensors')
+    const meta = setModelMeta(abs, {
+      quickHash: 'AB'.repeat(32),
+      quickHashMtime: 12345,
+    })
+    expect(meta.quickHash).toBe('ab'.repeat(32))
+    expect(meta.quickHashMtime).toBe(12345)
+    // 非法指纹清空、非法 mtime 归零（与 hash/hashMtime 同款契约）
+    const bad = setModelMeta(abs, {
+      quickHash: 'not-a-hash',
+      quickHashMtime: Number.NaN,
+    })
+    expect(bad.quickHash).toBe('')
+    expect(bad.quickHashMtime).toBe(0)
+  })
+
+  it('civitaiMiss 负缓存字段规范化：哈希小写收口、时间取整、非法值清空（OP-D）', async () => {
+    const abs = await touchModel('miss.safetensors')
+    const meta = setModelMeta(abs, {
+      civitaiMissHash: 'CD'.repeat(32),
+      civitaiMissAt: 1700000000000.7,
+    })
+    expect(meta.civitaiMissHash).toBe('cd'.repeat(32))
+    expect(meta.civitaiMissAt).toBe(1700000000001)
+    const bad = setModelMeta(abs, {
+      civitaiMissHash: 'nope',
+      civitaiMissAt: -1,
+    })
+    expect(bad.civitaiMissHash).toBe('')
+    expect(bad.civitaiMissAt).toBe(0)
+  })
 })
 
 describe('不可信 store.json 清洗（B-04）', () => {
@@ -1274,21 +1307,24 @@ describe('应用设置规范化', () => {
     expect(s.savedViews[2].tagFilters).toEqual(['旧标签'])
   })
 
-  it('hashWarmupConcurrency 规范化：整数收口 1-4，非法值回退（OPT-3）', async () => {
+  it('hashWarmupConcurrency 规范化：0 自动档 + 1-4 手动档收口，非法值回退（OPT-3/OP-B）', async () => {
     await updateSettings({ hashWarmupConcurrency: 3 })
     let s = await loadSettingsFlushed()
     expect(s.hashWarmupConcurrency).toBe(3)
-    // 越界钳制到上限/下限
+    // 越界钳制到上限；0（自动档哨兵）合法保留
     await updateSettings({ hashWarmupConcurrency: 9 })
     s = await loadSettingsFlushed()
     expect(s.hashWarmupConcurrency).toBe(4)
     await updateSettings({ hashWarmupConcurrency: 0 })
     s = await loadSettingsFlushed()
-    expect(s.hashWarmupConcurrency).toBe(1)
-    // 非数值回退默认 1；小数向下取整
+    expect(s.hashWarmupConcurrency).toBe(0)
+    // 负数向下收口进自动档；非数值回退基准值（自动）；小数向下取整
+    await updateSettings({ hashWarmupConcurrency: -3 })
+    s = await loadSettingsFlushed()
+    expect(s.hashWarmupConcurrency).toBe(0)
     await updateSettings({ hashWarmupConcurrency: 'oops' })
     s = await loadSettingsFlushed()
-    expect(s.hashWarmupConcurrency).toBe(1)
+    expect(s.hashWarmupConcurrency).toBe(0)
     await updateSettings({ hashWarmupConcurrency: 2.9 })
     s = await loadSettingsFlushed()
     expect(s.hashWarmupConcurrency).toBe(2)

@@ -43,9 +43,10 @@ export const VIEW_MODE_DEFS = [
 export const VIEW_MODE_KEYS = new Set(VIEW_MODE_DEFS.map((d) => d.key))
 
 /**
- * 后台哈希预热策略（O1 单一来源：主进程校验与设置页展示共用）：
- * - candidates：仅对同尺寸模型计算（内容相同的文件必然同大小）；
- * - full：全库缺失哈希都计算（旧行为）；
+ * 后台哈希预热策略（O1/OP-C 单一来源：主进程校验与设置页展示共用）：
+ * - candidates：同尺寸组内先按头尾快指纹筛选，仅对指纹相同的候选组计算
+ *   全量 SHA256（内容相同的文件必然同大小、指纹必然相同）；
+ * - full：全库缺失哈希都计算（旧行为，识别预加速）；
  * - off：后台不预热，仅详情页/识别按需计算。
  */
 export const HASH_WARMUP_DEFS = [
@@ -56,6 +57,15 @@ export const HASH_WARMUP_DEFS = [
 
 /** 合法哈希预热策略 key 集合（主进程校验用） */
 export const HASH_WARMUP_KEYS = new Set(HASH_WARMUP_DEFS.map((d) => d.key))
+
+/**
+ * Civitai 未收录负缓存静默期（OP-D）：同哈希识别 404（模型未被 Civitai
+ * 收录）后，静默期内识别链路跳过网络反查——全库批量识别对自训/其他来源
+ * 的模型零请求（此前每轮重付 1.2s 节流 + API 往返）。详情页手动识别
+ * force 绕过缓存取最新结果；模型被作者上架后最迟次日批量识别恢复。
+ * 取 24h 与哈希失败负缓存的退避封顶一致。
+ */
+export const CIVITAI_MISS_TTL_MS = 24 * 60 * 60 * 1000
 
 /**
  * 单次批量标注/标签 IPC 的条目上限（C1 单一来源）：
@@ -89,15 +99,36 @@ export const NSFW_BLUR_DEFS = [
 export const NSFW_BLUR_KEYS = new Set(NSFW_BLUR_DEFS.map((d) => d.key))
 
 /**
- * 哈希预热并发数选项（OPT-3；A-12 单一来源）：设置页分段选择与
- * 主进程 normalize（store-settings 收口 1-4）共用同一区间。
- * 上限 4：并发收益受磁盘随机读限制，更高并发只放大内存与句柄占用。
+ * 哈希预热并发数选项（OPT-3/OP-B；A-12 单一来源）：设置页分段选择与
+ * 主进程 normalize（store-settings 收口）共用同一清单。
+ * - 0 = 自动（默认）：drain 启动时按目标文件所在盘的随机读延迟探测磁盘
+ *   介质（SSD/NVMe → 4、SATA SSD → 2、机械盘/探测失败 → 1），每盘符缓存；
+ * - 1 = 串行：机械硬盘/移动硬盘的保守手动档；
+ * - 2-4：手动档，上限 4——并发收益受磁盘随机读限制，更高并发只放大
+ *   内存与句柄占用。
  */
-export const WARMUP_CONCURRENCY_OPTIONS = [1, 2, 3, 4]
+export const AUTO_WARMUP_CONCURRENCY = 0
+export const WARMUP_CONCURRENCY_OPTIONS = [
+  { key: AUTO_WARMUP_CONCURRENCY, label: '自动' },
+  { key: 1, label: '串行' },
+  { key: 2, label: '2' },
+  { key: 3, label: '3' },
+  { key: 4, label: '4' },
+]
 
-/** 哈希预热并发数合法区间（由选项派生，避免多处硬编码 1/4） */
-export const MIN_WARMUP_CONCURRENCY = Math.min(...WARMUP_CONCURRENCY_OPTIONS)
-export const MAX_WARMUP_CONCURRENCY = Math.max(...WARMUP_CONCURRENCY_OPTIONS)
+/**
+ * 手动档合法区间（由选项派生，避免多处硬编码 1/4）。
+ * 注意 MIN 只约束手动档：0（自动）由 AUTO_WARMUP_CONCURRENCY 哨兵表达，
+ * 合法取值全集 = {0} ∪ [MIN, MAX]。
+ */
+export const MIN_WARMUP_CONCURRENCY = Math.min(
+  ...WARMUP_CONCURRENCY_OPTIONS.filter(
+    (o) => o.key !== AUTO_WARMUP_CONCURRENCY,
+  ).map((o) => o.key),
+)
+export const MAX_WARMUP_CONCURRENCY = Math.max(
+  ...WARMUP_CONCURRENCY_OPTIONS.map((o) => o.key),
+)
 
 /**
  * 模型自由标签上限（F-5 单一来源）：主进程规范化、IPC 前置校验与

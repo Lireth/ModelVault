@@ -45,7 +45,11 @@ const HEALTH_IO_CONCURRENCY = 24
 /** 保留的历史元数据备份份数 */
 const MAX_HEALTH_BACKUPS = 10
 
-/** stat 并返回结果；区分「确实不存在」与「无法访问」（后者绝不能触发自动清理） */
+/**
+ * stat 并返回结果；区分「确实不存在」与「无法访问」（后者绝不能触发自动清理）
+ * @param {string} target 文件路径
+ * @returns {Promise<{stat: import('node:fs').Stats|null, code: string}>}
+ */
 async function statOutcome(target) {
   try {
     return { stat: await fs.stat(target), code: '' }
@@ -54,7 +58,11 @@ async function statOutcome(target) {
   }
 }
 
-/** 不存在类错误：可安全判定为文件缺失；权限/占用等错误不在此列 */
+/**
+ * 不存在类错误：可安全判定为文件缺失；权限/占用等错误不在此列
+ * @param {string} code stat 错误码
+ * @returns {boolean}
+ */
 function isMissingCode(code) {
   return code === 'ENOENT' || code === 'ENOTDIR'
 }
@@ -71,12 +79,20 @@ function isManagedCoverRel(coverRel) {
   return Boolean(rel && rel.startsWith(`${DATA_DIR}/${COVERS_DIR}/`))
 }
 
-/** 元数据条目 → 稳定排序的相对路径键 */
+/**
+ * 元数据条目 → 稳定排序的相对路径键
+ * @param {string} abs 模型绝对路径
+ * @returns {string}
+ */
 function relOf(abs) {
   return toRelKey(abs) || path.basename(abs)
 }
 
-/** 重复哈希分组（仅统计文件仍存在的模型，避免幽灵记录制造假重复） */
+/**
+ * 重复哈希分组（仅统计文件仍存在的模型，避免幽灵记录制造假重复）
+ * @param {{rel: string, hash: string}[]} existingHashes 现存模型的相对路径与哈希
+ * @returns {{hash: string, models: string[]}[]}
+ */
 function groupDuplicates(existingHashes) {
   const byHash = new Map()
   for (const { rel, hash } of existingHashes) {
@@ -164,11 +180,17 @@ async function inspectModelIntegrity(abs, stat, record) {
 async function collectHealth(root) {
   const entries = Object.entries(getMetaMapByAbsPath())
   const index = await readLibraryIndex(root)
+  /** @type {HealthReport['missingFiles']} */
   const missingFiles = []
+  /** @type {HealthReport['brokenModels']} */
   const brokenModels = []
+  /** @type {HealthReport['brokenCovers']} */
   const brokenCovers = []
+  /** @type {HealthReport['inaccessibleFiles']} */
   const inaccessibleFiles = []
+  /** @type {HealthReport['inaccessibleCovers']} */
   const inaccessibleCovers = []
+  /** @type {{rel: string, hash: string}[]} */
   const existingHashes = []
   let totalCoverRefs = 0
   let checkedModels = 0
@@ -282,6 +304,7 @@ async function collectHealth(root) {
 
   // 孤儿封面：文件存在但没有任何元数据引用
   const coversDir = getCoversDir()
+  /** @type {import('node:fs').Dirent[]} */
   let coverEntries = []
   try {
     coverEntries = (
@@ -291,6 +314,7 @@ async function collectHealth(root) {
     if (errorCode(err) !== 'ENOENT') throw err
   }
   const referenced = getReferencedCovers()
+  /** @type {HealthReport['orphanCovers']} */
   const orphanCovers = []
   // OPT-13：孤儿封面 stat 并发化——此前逐个串行 await，数百孤儿封面时
   // 报告生成时间线性放大（机械盘尤甚）；与元数据循环同用有界并发池
@@ -341,7 +365,11 @@ async function collectHealth(root) {
   }
 }
 
-/** 备份 store.json 到 .modelvault/backups/，并清理超过上限的旧备份 */
+/**
+ * 备份 store.json 到 .modelvault/backups/，并清理超过上限的旧备份
+ * @param {string} root 模型库根目录
+ * @returns {Promise<string>} 备份文件路径（源文件不存在时为空串）
+ */
 async function backupStoreFile(root) {
   const source = getDataFilePath(root)
   if (!(await statOutcome(source)).stat) return ''
@@ -362,7 +390,12 @@ async function backupStoreFile(root) {
   return dest
 }
 
-/** 把孤儿封面移入 .modelvault/trash/，保留用户可恢复性 */
+/**
+ * 把孤儿封面移入 .modelvault/trash/，保留用户可恢复性
+ * @param {string} root 模型库根目录
+ * @param {string[]} names 孤儿封面文件名
+ * @returns {Promise<number>} 实际移动数
+ */
 async function moveOrphansToTrash(root, names) {
   if (names.length === 0) return 0
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -383,7 +416,12 @@ async function moveOrphansToTrash(root, names) {
   return moved
 }
 
-/** 清理失效封面引用，返回修正的模型数与移除的引用数 */
+/**
+ * 清理失效封面引用，返回修正的模型数与移除的引用数
+ * @param {string} root 模型库根目录
+ * @param {HealthReport['brokenCovers']} brokenCovers 报告中的失效封面引用
+ * @returns {Promise<{fixedModels: number, removedRefs: number}>}
+ */
 async function repairBrokenCovers(root, brokenCovers) {
   const byModel = new Map()
   for (const item of brokenCovers) {
@@ -397,6 +435,7 @@ async function repairBrokenCovers(root, brokenCovers) {
     const meta = getModelMeta(abs)
     if (!meta) continue
     const brokenSet = new Set(broken)
+    /** @type {string[]} */
     const keep = []
     for (const coverRel of meta.covers || []) {
       if (brokenSet.has(coverRel)) {
@@ -477,6 +516,7 @@ export async function repairLibraryHealth() {
         // 元数据清理后重新计算引用集合，再移动孤儿封面
         const referenced = getReferencedCovers()
         const coversDir = getCoversDir()
+        /** @type {string[]} */
         let entries = []
         try {
           entries = (await fs.readdir(coversDir)).filter(

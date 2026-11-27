@@ -35,13 +35,23 @@ export function createErrorReporter(api) {
   /** 错误签名 → 上次上报时间戳 */
   const lastReportAt = new Map()
 
-  /** 归类签名：堆栈首行（无堆栈取消息）前 80 字符——同一处反复触发归为同类 */
+  /**
+   * 归类签名：堆栈首行（无堆栈取消息）前 80 字符——同一处反复触发归为同类
+   * @param {string} category 来源类别
+   * @param {string} message 错误消息
+   * @param {string} [stack] 错误堆栈
+   */
   function signature(category, message, stack) {
     const head = String(stack || message || '').split('\n')[0] || ''
     return `${category}|${head.slice(0, 80)}`
   }
 
-  /** 节流上报：同类错误间隔内仅首条出账；上报异常降级控制台 */
+  /**
+   * 节流上报：同类错误间隔内仅首条出账；上报异常降级控制台
+   * @param {string} category 来源类别
+   * @param {string} message 错误消息
+   * @param {string} [stack] 错误堆栈
+   */
   function report(category, message, stack) {
     const key = signature(category, message, stack)
     const now = Date.now()

@@ -30,5 +30,6 @@ coverage/
 .screenshots/
 
 # 注意：build/（应用图标）、electron-builder.yml（打包配置）与 .npmrc
-# （registry 与 Electron 二进制镜像，lock resolved 与其一致）必须入库，
-# 否则干净环境下构建/发布流水线不可复现
+# （registry，lock resolved 与其一致）必须入库，否则干净环境下构建/发布
+# 流水线不可复现；Electron 二进制镜像已迁移为环境变量（O2：CI job 级 env
+# 注入 ELECTRON_MIRROR / ELECTRON_BUILDER_BINARIES_MIRROR，本地见 README）

@@ -22,9 +22,11 @@ const THEME_COLORS = {
  * 'constructor'/'toString'/'__proto__' 等键会拿到函数或原型对象，
  * 其颜色字段全为 undefined，令原生标题栏/背景 API 行为不可预期。
  * 本函数是主进程取主题色的唯一收口（窗口创建与 window:setTheme 均经此）。
+ * @param {string} theme 主题名（未知值回退深色）
+ * @returns {{backgroundColor: string, overlayColor: string, symbolColor: string}}
  */
 export function themeColors(theme) {
   return Object.hasOwn(THEME_COLORS, theme)
-    ? THEME_COLORS[theme]
+    ? THEME_COLORS[/** @type {keyof typeof THEME_COLORS} */ (theme)]
     : THEME_COLORS.dark
 }

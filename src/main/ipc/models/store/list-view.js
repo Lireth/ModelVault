@@ -111,7 +111,7 @@ export function buildDetailModel(base) {
           .filter((c) => c && typeof c === 'object')
           .map((c) => [c.rel, c]),
       )
-      merged.covers = meta.covers.map((rel) => {
+      merged.covers = /** @type {string[]} */ (meta.covers).map((rel) => {
         const known = byRel.get(rel)
         const abs = (known && known.path) || resolveCoverSafe(rel)
         return {

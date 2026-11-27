@@ -57,12 +57,20 @@ export function isImportableModelFile(fileName) {
   return MODEL_EXTENSION_SET.has(ext.toLowerCase())
 }
 
-/** 目录是否位于 root 内（含 root 自身；Windows 大小写不敏感，O-1 单一实现） */
+/**
+ * 目录是否位于 root 内（含 root 自身；Windows 大小写不敏感，O-1 单一实现）
+ * @param {string} root 参照目录
+ * @param {string} target 目标路径
+ */
 function isInsideDir(root, target) {
   return relativeWithin(target, root) !== null
 }
 
-/** 目标候选名是否与已有模型/同名 sidecar 冲突 */
+/**
+ * 目标候选名是否与已有模型/同名 sidecar 冲突
+ * @param {string} targetDir 目标目录
+ * @param {string} fileName 候选文件名
+ */
 async function isImportTargetFree(targetDir, fileName) {
   const modelPath = path.join(targetDir, fileName)
   const candidates = [modelPath]
@@ -223,7 +231,10 @@ async function transferFile(
   await copyFileWithProgress(src, dst, { signal, onProgress })
 }
 
-/** 磁盘空间展示（仅用于预检失败文案） */
+/**
+ * 磁盘空间展示（仅用于预检失败文案）
+ * @param {number} bytes 字节数
+ */
 function formatImportBytes(bytes) {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`
   if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
@@ -428,6 +439,7 @@ async function checkImportCapacity(targetDir, copyBytes) {
  */
 async function importOneSource(source, ctx) {
   const sourceName = path.basename(source)
+  /** @type {(error: string) => {imported: boolean, failedError: string}} */
   const failed = (error) => ({ imported: false, failedError: error })
   if (!isImportableModelFile(sourceName)) {
     return failed('不支持的模型文件类型')
@@ -452,6 +464,7 @@ async function importOneSource(source, ctx) {
     return failed(errorMessage(err))
   }
   const targetModel = path.join(ctx.targetDir, plan.fileName)
+  /** @type {string[]} */
   const warnings = []
   try {
     await transferFile(source, targetModel, ctx.mode, {
@@ -551,6 +564,7 @@ async function transferImportFiles({
       /* 窗口销毁/重载：进度推送失败不影响导入主流程 */
     }
   }
+  /** @type {(bytes: number) => void} */
   const onBytes = (bytes) => {
     transferredBytes += bytes
     reportProgress()

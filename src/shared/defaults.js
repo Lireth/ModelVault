@@ -4,7 +4,7 @@
  * 新增设置项只需改这一处。纯数据模块。
  */
 import { MODEL_EXTENSION_NAMES } from './model-extensions'
-import { MIN_WARMUP_CONCURRENCY } from './app-enums'
+import { AUTO_WARMUP_CONCURRENCY, MAX_WARMUP_CONCURRENCY } from './app-enums'
 
 export const DEFAULT_SETTINGS = Object.freeze({
   modelsFolder: '',
@@ -43,10 +43,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // 后台哈希预热策略（O1）：candidates 仅对同尺寸模型计算（默认，最省磁盘）；
   // full 全库预热；off 关闭后台预热（详情页/识别仍可按需计算）
   hashWarmup: 'candidates',
-  // 哈希预热并发数（OPT-3）：同时计算的文件数上限，1 = 串行（机械硬盘/移动
-  // 硬盘默认，避免多路大文件读盘争抢 I/O）；SSD/NVMe 可调高加快全库预热。
-  // 上限 4：并发收益受磁盘随机读限制，更高并发只会放大内存与句柄占用
-  hashWarmupConcurrency: 1,
+  // 哈希预热并发数（OPT-3/OP-B）：同时计算的文件数上限。0 = 自动（默认）——
+  // 按目标文件所在盘的随机读延迟探测磁盘介质（SSD/NVMe → 4、SATA SSD → 2、
+  // 机械盘/探测失败 → 1 串行），每盘符缓存一次；1 = 串行（机械硬盘/移动硬盘
+  // 的手动保守档，避免多路大文件读盘争抢 I/O）；2-4 手动档
+  hashWarmupConcurrency: AUTO_WARMUP_CONCURRENCY,
   // 自动定期元数据备份（OPT-07）：每日对当前库做一次「仅标注」备份写入
   // .modelvault/backups/（KB 级小文件，滚动保留最近 5 份），误删库/磁盘
   // 故障时有最近的标注兜底可恢复；关闭后仍可手动导出
@@ -103,7 +104,9 @@ export const SETTINGS_FORM_FIELDS = Object.freeze([
   {
     key: 'hashWarmupConcurrency',
     kind: 'number',
-    min: MIN_WARMUP_CONCURRENCY,
+    // 合法取值全集 = {0 自动} ∪ [1, MAX]；min 取 0（自动档哨兵）
+    min: AUTO_WARMUP_CONCURRENCY,
+    max: MAX_WARMUP_CONCURRENCY,
     fallback: DEFAULT_SETTINGS.hashWarmupConcurrency,
   },
   { key: 'autoBackup', kind: 'boolean', defaultWhenMissing: true },

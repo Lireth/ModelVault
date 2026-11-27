@@ -94,6 +94,8 @@ npm install
 npm start
 ```
 
+> Electron 二进制镜像（O2）：`electron_mirror` / `electron_builder_binaries_mirror` 非 npm 项目配置键（npm 11+ 会对 `.npmrc` 中的这两项打印 “Unknown project config” 告警），已迁移为环境变量——CI 在 `ci.yml` / `release.yml` 的 job 级 `env` 注入 `ELECTRON_MIRROR` 与 `ELECTRON_BUILDER_BINARIES_MIRROR`；本地开发者在国内网络环境下可在 `npm install` 前设置同名环境变量（PowerShell：`$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'`，另一项同理，值见 CI 工作流）加速首次下载；不设置则回落官方源，功能不受影响。
+
 > pre-commit 门禁（lint-staged）：提交前对**暂存文件**依次执行 `eslint --fix` 与 `prettier --write`（js/mjs/cjs/vue），json/css/html/md/yml 走 `prettier --write`；修复结果自动重新暂存，ESLint 报错即阻断提交。CI 全量门禁口径不变，钩子仅把反馈前移到本地。
 
 ## 技术栈
@@ -175,8 +177,9 @@ ModelVault/
 │   │                             #   装饰管线领域事实（decorate/）、备份恢复、
 │   │                             #   检查更新、Civitai 客户端、哈希预热、
 │   │                             #   safetensors 头部解析等
-│   ├── preload/                  # 预加载脚本：index.js contextBridge + IPC 通道白名单、
-│   │                             #   thumb-preload.js 缩略图渲染子窗口
+│   ├── preload/                  # 预加载脚本（O5 按域拆分）：core.js IPC 通道白名单
+│   │                             #   校验原语、api/ 九域便捷方法切片、index.js 装配门面
+│   │                             #   + contextBridge 暴露；thumb-preload.js 缩略图渲染子窗口
 │   └── renderer/                 # 渲染进程（Vue 3）
 │       └── src/
 │           ├── App.vue / main.js / error-report.js  # 根组件 / 入口 / 错误上报链路
@@ -214,7 +217,7 @@ wrapHandler('my:channel', async (event, payload) => {
 })
 ```
 
-3. 在 `src/preload/index.js` 的 `api` 对象中添加语义化方法（内部统一走 `invokeValidated` / `subscribe`），渲染进程通过 `window.api.myDomain.doThing(payload)` 调用。
+3. 在 `src/preload/api/` 对应域文件（与 schema 域同名：`app.js` / `settings.js` / `store.js` / `scan.js` / `meta.js` / `covers.js` / `files.js` / `backup.js` / `civitai.js`）中添加语义化方法（内部统一走 `core.js` 的 `invokeValidated` / `subscribe`；`index.js` 仅装配 api 面并经 contextBridge 暴露），渲染进程通过 `window.api.myDomain.doThing(payload)` 调用。
 
 4. 业务失败返回 `{ error: '展示文案' }`；preload 会在 IPC 边界统一附加稳定 `code`（枚举见 `src/shared/error-codes.js`，`error` 文案保持不变）。新增失败路径优先用 `ipcError(IPC_ERROR.X, '文案')` 显式给码；渲染层按 `code` 做离线/繁忙/冲突等分支，不要匹配中文文案。
 
@@ -222,7 +225,7 @@ wrapHandler('my:channel', async (event, payload) => {
 
 ### 类型检查
 
-项目为纯 JavaScript，以 TypeScript 编译器 `checkJs` 模式做**纯类型检查**（`npm run typecheck`，无构建产物）：`tsconfig.json` 当前覆盖 `src/shared/`（IPC 通道单一来源注册表、默认设置等跨进程契约）、`src/preload/`、`src/main/` 全层（services、ipc handlers、协议/窗口/入口）以及 `src/renderer/src/` 全部 `.js`（store/composables/components 纯逻辑/常量；`.vue` 模板不在 checkJs 范围，由组件测试覆盖）。`src/renderer/src/store/global.d.ts` 声明 `window.api` 与 `*.vue`/`*.css` 模块。覆盖范围与严格度按棘轮渐进扩展：严格度开关仅开启「实测零错误（或一次性修复后归零）」的项（当前已开启九项：`strictNullChecks` / `strictFunctionTypes` / `strictBindCallApply` / `noImplicitThis` / `noFallthroughCasesInSwitch` / `noImplicitOverride` / `noUncheckedIndexedAccess` / `noImplicitReturns` / `useUnknownInCatchVariables`；剩余 `noImplicitAny`（879）→ `exactOptionalPropertyTypes` 按错误量递增记账待消化，棘轮台账见 `tsconfig.json` 注释）。`useUnknownInCatchVariables` 消化模式已固化：catch 变量按 unknown 处理，`.message/.code/.name/.stack` 一律经 `src/shared/error-text.js` 纯助手（`errorMessage`/`errorCode`/`errorName`/`errorStack`）安全读取，非 Error 抛出值降级为可读文案、行为不漂移；为跨模块共享的数据结构补写 JSDoc 类型标注（如 `SchemaRule`/`WatcherState`/`BackupManifest` typedef）即可让检查器捕获字段改名/漏改类回归，也是消化剩余严格度开关的主要途径。
+项目为纯 JavaScript，以 TypeScript 编译器 `checkJs` 模式做**纯类型检查**（`npm run typecheck`，无构建产物）：`tsconfig.json` 当前覆盖 `src/shared/`（IPC 通道单一来源注册表、默认设置等跨进程契约）、`src/preload/`、`src/main/` 全层（services、ipc handlers、协议/窗口/入口）以及 `src/renderer/src/` 全部 `.js`（store/composables/components 纯逻辑/常量；`.vue` 模板不在 checkJs 范围，由组件测试覆盖）。`src/renderer/src/store/global.d.ts` 声明 `window.api` 与 `*.vue`/`*.css` 模块。覆盖范围与严格度按棘轮渐进扩展：严格度开关仅开启「实测零错误（或一次性修复后归零）」的项（当前已开启十项：`strictNullChecks` / `strictFunctionTypes` / `strictBindCallApply` / `noImplicitThis` / `noFallthroughCasesInSwitch` / `noImplicitOverride` / `noUncheckedIndexedAccess` / `noImplicitReturns` / `useUnknownInCatchVariables` / `noImplicitAny`；剩余 `exactOptionalPropertyTypes`（实测 12，均为「可选参数接收可空值」形态）按错误量递增记账待消化，棘轮台账见 `tsconfig.json` 注释）。`useUnknownInCatchVariables` 消化模式已固化：catch 变量按 unknown 处理，`.message/.code/.name/.stack` 一律经 `src/shared/error-text.js` 纯助手（`errorMessage`/`errorCode`/`errorName`/`errorStack`）安全读取，非 Error 抛出值降级为可读文案、行为不漂移；为跨模块共享的数据结构补写 JSDoc 类型标注（如 `SchemaRule`/`WatcherState`/`BackupManifest` typedef）即可让检查器捕获字段改名/漏改类回归，也是消化剩余严格度开关的主要途径。
 
 ### 快捷键与窗口
 
@@ -237,7 +240,7 @@ wrapHandler('my:channel', async (event, payload) => {
 
 ### 测试
 
-单元测试位于 `tests/`（101 个文件 / 1886 用例；渲染层 store 测试自 appStore.test.js 按域拆分为 appStore*.test.js，共享装配在 `tests/helpers/storeTest.js`）：主进程纯逻辑与 IPC handler（node 环境）、渲染层 store 按域拆分测试、组件交互测试（`@vue/test-utils` + jsdom，文件头 `// @vitest-environment jsdom` 声明）。Electron API 在 `tests/setup.js` 中统一 mock，公共挂载/IPC 脚手架在 `tests/helpers/` 中复用。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证；`npm run test:coverage` 受防退化阈值门禁约束（Statements 75% / Branches 68% / Functions 72% / Lines 77%），门禁按「实测基线下浮 ~10pt」口径随基线上移棘轮渐进上调（棘轮记录见 `vitest.config.mjs` 注释）。
+单元测试位于 `tests/`（105 个文件 / 1954 用例；渲染层 store 测试自 appStore.test.js 按域拆分为 appStore*.test.js，共享装配在 `tests/helpers/storeTest.js`）：主进程纯逻辑与 IPC handler（node 环境）、渲染层 store 按域拆分测试、组件交互测试（`@vue/test-utils` + jsdom，文件头 `// @vitest-environment jsdom` 声明）。Electron API 在 `tests/setup.js` 中统一 mock，公共挂载/IPC 脚手架在 `tests/helpers/` 中复用。新增纯函数模块或组件交互时请同步补充用例，运行 `npm test` 验证；`npm run test:coverage` 受防退化阈值门禁约束（Statements 79% / Branches 71% / Functions 77% / Lines 81%），门禁按「实测基线下浮 ~10pt」口径随基线上移棘轮渐进上调（棘轮记录见 `vitest.config.mjs` 注释）。
 
 ### CI 与发版
 

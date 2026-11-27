@@ -100,7 +100,13 @@ export function isConditionalHit(request, stat) {
   return false
 }
 
-/** 构造 304 响应：携带缓存策略与验证器（ETag/Last-Modified）供缓存更新元数据 */
+/**
+ * 构造 304 响应：携带缓存策略与验证器（ETag/Last-Modified）供缓存更新元数据
+ * @param {boolean} immutable 是否不可变资产
+ * @param {string} etag 弱 ETag 验证器
+ * @param {string} lastModified Last-Modified 头值
+ * @returns {Response} 304 响应
+ */
 export function notModifiedResponse(immutable, etag, lastModified) {
   const headers = new Headers()
   headers.set('Cache-Control', cacheControlValue(immutable))
@@ -113,6 +119,7 @@ export function notModifiedResponse(immutable, etag, lastModified) {
 /**
  * 图片扩展名 → Content-Type（PERF-6 直读响应自行下发；扩展名集合与
  * scanner.IMAGE_EXTENSIONS 一致，白名单校验未命中的请求到不了这里）。
+ * @type {Record<string, string>}
  */
 const IMAGE_MIME_TYPES = {
   '.png': 'image/png',

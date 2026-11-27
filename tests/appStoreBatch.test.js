@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+﻿import { describe, it, expect, beforeEach } from 'vitest'
 import {
   makeApiMock,
   resetStoreTestState,
@@ -902,7 +902,7 @@ describe('批量循环陈旧目标跳过（#54：与 civitai-queue 陈旧目标�
     await batchToggleDisabled(true)
 
     expect(api.models.toggleDisabled).toHaveBeenCalledTimes(1)
-    expect(api.models.scan).toHaveBeenCalledWith('D:\\lib')
+    expect(api.models.scan).toHaveBeenCalledWith('D:\\lib', null)
     expect(state.scanning).toBe(false)
     expect(state.toasts.some((t) => t.text.includes('请稍候'))).toBe(false)
   })

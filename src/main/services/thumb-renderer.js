@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { app, BrowserWindow } from 'electron'
 import logger from '../logger'
+import { unrefTimeout } from '../utils'
 import { startPerf } from './perf'
 
 /**
@@ -83,13 +84,12 @@ function clearIdleTimer() {
 /** 安排空闲回收：仅当窗口存在且没有在途任务时启动；重复调用幂等 */
 function scheduleIdleDestroy() {
   if (idleTimer || pending.size > 0 || !win) return
-  idleTimer = setTimeout(() => {
+  idleTimer = unrefTimeout(() => {
     idleTimer = null
     if (pending.size > 0) return
     logger.info(`缩略图渲染窗口空闲 ${idleTimeoutMs}ms，已回收`)
     destroyWindow()
   }, idleTimeoutMs)
-  idleTimer.unref?.()
 }
 
 /** 渲染任务超时上限（测试钩子：注入小值避免真实等待） */
@@ -115,6 +115,7 @@ export function setThumbRendererIdleTimeoutForTests(ms) {
  * 拒绝全部在途任务并清空任务表（崩溃/销毁路径专用）：进程已死或服务关闭时
  * 在途任务无渲染载体，重排无意义；超时路径走 handleTaskTimeout 的
  * 单任务隔离与其余任务重排（FIX-7），不再经由此处连坐。
+ * @param {Error} err 拒绝原因
  */
 function failAll(err) {
   for (const task of pending.values()) {

@@ -93,6 +93,8 @@ export function setDecorateCachePolicyForTests(policy = {}) {
       : DECORATE_CACHE_HARD_MAX
 }
 
+const signatureCache = new WeakMap()
+
 /**
  * 计算影响装饰结果的元数据签名（任一标注变化都会使缓存失效）。
  *
@@ -105,8 +107,6 @@ export function setDecorateCachePolicyForTests(policy = {}) {
  * @param {Record<string, any>} meta 模型元数据
  * @returns {string} 签名字符串
  */
-const signatureCache = new WeakMap()
-
 export function metaSignature(meta) {
   const cached = signatureCache.get(meta)
   if (cached !== undefined) return cached
@@ -132,7 +132,10 @@ export function metaSignature(meta) {
   return signature
 }
 
-/** 容错解析相对封面路径（失败返回 ''） */
+/**
+ * 容错解析相对封面路径（失败返回 ''）
+ * @param {string} cover 相对封面路径
+ */
 export function resolveCoverSafe(cover) {
   try {
     return resolveCover(cover)
@@ -159,6 +162,7 @@ export function resolveCoverSafe(cover) {
  */
 async function cachedThumbMissing(cached, thumbNames) {
   // [源图路径, 缩略图路径] 对：命中缓存以源图为键，据此查询已知存在性
+  /** @type {Array<[string, string]>} */
   const pairs = []
   if (cached.thumbPath) {
     pairs.push([cached.decorated?.cover || '', cached.thumbPath])
@@ -259,14 +263,17 @@ async function decorateOne(
   // 校验多封面列表，过滤已丢失的文件。
   // 批内并行校验（B4）：逐张串行 await 会让多封面模型成为 64 路批并行的串行瓶颈
   const coverChecks = await Promise.all(
-    (meta.covers || []).map(async (rel) => {
+    /** @type {string[]} */ (meta.covers || []).map(async (rel) => {
       const resolved = resolveCoverSafe(rel)
       return resolved && (await isValidImageFile(resolved))
         ? { rel, path: resolved, url: toImageUrl(resolved) }
         : null
     }),
   )
-  const covers = coverChecks.filter(Boolean)
+  const covers =
+    /** @type {Array<{rel: string, path: string, url: string, thumbPath?: string, thumbUrl?: string}>} */ (
+      coverChecks.filter(Boolean)
+    )
   // 默认封面：优先显式设置值，缺省取第一张；再缺省回退 sidecar 预览图
   const defaultEntry =
     covers.find((c) => c.rel === meta.cover) || covers[0] || null
@@ -497,7 +504,6 @@ export async function decorateModels(models, signal, opts = {}) {
 
 export {
   clearDeferredOwners,
-  flushThumbReadyUpdates,
   sendThumbReady,
   startThumbDrain,
   trackDeferredOwner,

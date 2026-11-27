@@ -133,7 +133,11 @@ function peekThumbNegative(key, mtimeMs) {
 
 /** 写入命中缓存（key 为源图小写路径；超限按插入序淘汰最旧）。
  * ttlMs 可选：负判定镜像条目须与负缓存自身一同到期（failed 的静默期可短于
- * 命中缓存 TTL——镜像若独立存续会遮蔽到期重试通道） */
+ * 命中缓存 TTL——镜像若独立存续会遮蔽到期重试通道）
+ * @param {string} key 源图小写路径
+ * @param {{hit: boolean, verdict?: string, thumbPath: string, mtimeMs: number}} entry 命中条目（expiresAt 由本函数补齐）
+ * @param {number} [ttlMs] 自定义 TTL（毫秒）
+ */
 function putThumbHitCache(key, entry, ttlMs) {
   if (hitCache.size >= THUMB_HIT_CACHE_MAX) {
     hitCache.delete(hitCache.keys().next().value)
@@ -151,7 +155,11 @@ function getThumbsDir() {
   return path.join(root, '.modelvault', THUMBS_DIR)
 }
 
-/** 缩略图文件名：源图路径哈希（小写化，兼容 Windows 大小写）+ mtime */
+/**
+ * 缩略图文件名：源图路径哈希（小写化，兼容 Windows 大小写）+ mtime
+ * @param {string} absCover 源图绝对路径
+ * @param {number} mtimeMs 源图修改时间（ms）
+ */
 function thumbFileName(absCover, mtimeMs) {
   const hash = crypto
     .createHash('md5')
@@ -194,6 +202,8 @@ export async function readThumbDirSnapshot() {
  * P1-3：不生成结论结构化返回（small/oversize/failed 可负缓存；offline 为
  * 瞬态不负缓存），源图 stat 失败与落盘失败照常抛出由调用方容错（瞬态，
  * 不入负缓存）。
+ * @param {string} absCover 源图绝对路径
+ * @param {string} thumbPath 目标缩略图路径
  * @returns {Promise<{ok: true, thumbPath: string}
  *   | {ok: false, verdict: 'small'|'oversize'|'failed'|'offline'}>}
  */

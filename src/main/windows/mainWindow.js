@@ -5,6 +5,7 @@ import logger from '../logger'
 import { getSettings, atomicWriteFile } from '../services/store'
 import { destroyThumbRenderer } from '../services/thumb-renderer'
 import { themeColors } from '../theme'
+import { unrefTimeout } from '../utils'
 import { errorMessage } from '../../shared/error-text'
 
 /** 默认窗口尺寸 */
@@ -90,7 +91,10 @@ function createRendererCrashRecovery(win, hooks = {}, timing = {}) {
   }
 
   const api = {
-    /** render-process-gone 事件入口 */
+    /**
+     * render-process-gone 事件入口
+     * @param {{reason?: string}} [details] 进程退出详情
+     */
     onRendererGone(details = {}) {
       // clean-exit：页面正常退出（窗口关闭链路），重载会与关闭编排竞争
       if (details.reason === 'clean-exit' || isDestroyed()) return
@@ -105,7 +109,7 @@ function createRendererCrashRecovery(win, hooks = {}, timing = {}) {
         return
       }
       // 退避重载：页面重新加载后由渲染层启动链路经 loadStore 秒开恢复状态
-      reloadTimer = setTimeout(() => {
+      reloadTimer = unrefTimeout(() => {
         reloadTimer = null
         if (isDestroyed()) return
         totalRecovered += 1
@@ -114,16 +118,14 @@ function createRendererCrashRecovery(win, hooks = {}, timing = {}) {
         )
         win.webContents.reload()
       }, reloadDelayMs * consecutive)
-      reloadTimer.unref?.()
     },
     /** did-finish-load 事件入口：页面重新可用；存活一段时间后清零连续计数 */
     onRendererLoaded() {
       if (survivalTimer) clearTimeout(survivalTimer)
-      survivalTimer = setTimeout(() => {
+      survivalTimer = unrefTimeout(() => {
         survivalTimer = null
         consecutive = 0
       }, survivalResetMs)
-      survivalTimer.unref?.()
     },
     /** 用户在放弃弹框中选择「重新加载」：重置计数后重载 */
     manualReload() {
@@ -163,6 +165,10 @@ let pendingStateSave = null
  * 窗口几何数值是否在合理范围内：仅 Number.isFinite 不足以拦截负数尺寸与
  * 1e12 类极端值——它们会原样进入 BrowserWindow 构造，导致启动窗口行为
  * 不可预期（如不可见/占满虚拟桌面）。
+ * @param {number} x 窗口 x 坐标
+ * @param {number} y 窗口 y 坐标
+ * @param {number} width 窗口宽度
+ * @param {number} height 窗口高度
  * @returns {boolean}
  */
 function isPlausibleGeometry(x, y, width, height) {
@@ -213,7 +219,10 @@ export async function loadWindowState() {
   }
 }
 
-/** 保存窗口状态（取最大化前的正常边界，避免记录铺满全屏的坐标；原子写入防损坏） */
+/**
+ * 保存窗口状态（取最大化前的正常边界，避免记录铺满全屏的坐标；原子写入防损坏）
+ * @param {import('electron').BrowserWindow} win 主窗口实例
+ */
 async function saveWindowState(win) {
   try {
     const state = { ...win.getNormalBounds(), maximized: win.isMaximized() }
@@ -301,7 +310,9 @@ export async function createMainWindow(windowStateOverride = undefined) {
   // 关闭时保存窗口状态（尺寸/位置/是否最大化），下次启动恢复。
   // 保存 promise 记录到模块变量，退出路径经 flushWindowStateSave 等待落盘（B12）
   mainWindow.on('close', () => {
-    pendingStateSave = saveWindowState(mainWindow)
+    pendingStateSave = saveWindowState(
+      /** @type {import('electron').BrowserWindow} */ (mainWindow),
+    )
   })
 
   mainWindow.on('closed', () => {

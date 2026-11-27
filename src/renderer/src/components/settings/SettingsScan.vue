@@ -64,8 +64,8 @@ defineProps({
         <span class="setting-title">后台哈希预热</span>
         <span class="setting-desc">
           重复检测需要文件
-          SHA256。「仅重复候选」只计算大小相同的模型（内容相同的文件必然同大小），磁盘读取最少；
-          「全库」为所有缺失哈希的模型计算；「关闭」仅在你识别或打开详情页时按需计算。
+          SHA256。「仅重复候选」先按体积与首尾指纹快筛，只对指纹相同的候选组计算完整
+          SHA256（磁盘读取最少，识别仍按需计算）；「全库」为所有缺失哈希的模型计算；「关闭」仅在你识别或打开详情页时按需计算。
         </span>
       </div>
       <div class="seg-group">
@@ -86,20 +86,21 @@ defineProps({
       <div class="setting-info">
         <span class="setting-title">预热并发数</span>
         <span class="setting-desc">
-          同时计算的模型文件数。1
-          为逐个串行（机械硬盘/移动硬盘推荐，避免多路大文件读盘互相争抢）；固态硬盘可调高以加快「全库」预热的完成速度。
+          同时计算的模型文件数。「自动」按模型所在磁盘的类型探测并发（固态硬盘
+          提升并行、机械硬盘保持串行）；「串行」为逐个计算（机械硬盘/移动硬盘
+          手动保守档）；2-4 为固定并发档。
         </span>
       </div>
       <div class="seg-group">
         <button
-          v-for="n in WARMUP_CONCURRENCY_OPTIONS"
-          :key="n"
+          v-for="o in WARMUP_CONCURRENCY_OPTIONS"
+          :key="o.key"
           type="button"
           class="seg-btn"
-          :class="{ active: form.hashWarmupConcurrency === n }"
-          @click="form.hashWarmupConcurrency = n"
+          :class="{ active: form.hashWarmupConcurrency === o.key }"
+          @click="form.hashWarmupConcurrency = o.key"
         >
-          {{ n }}
+          {{ o.label }}
         </button>
       </div>
     </div>

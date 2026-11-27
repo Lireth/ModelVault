@@ -1,6 +1,7 @@
 /* global __MODELVAULT_SIGNER_THUMBPRINT__ */
 import { spawn } from 'node:child_process'
 import logger from '../logger'
+import { unrefTimeout } from '../utils'
 
 /**
  * 更新包校验（自 update-download.js 拆出）：
@@ -37,7 +38,11 @@ export function parseChecksumHash(text) {
   return m ? /** @type {string} */ (m[1]).toLowerCase() : ''
 }
 
-/** 证书指纹规范化：去分隔符并统一大写（Get-AuthenticodeSignature 输出带空格） */
+/**
+ * 证书指纹规范化：去分隔符并统一大写（Get-AuthenticodeSignature 输出带空格）
+ * @param {unknown} value 指纹原值
+ * @returns {string} 规范化指纹
+ */
 export function normalizeThumbprint(value) {
   return String(value || '')
     .replace(/[^a-fA-F0-9]/g, '')
@@ -136,6 +141,7 @@ function queryAuthenticode(filePath) {
     let timer = null
     /** @type {import('node:child_process').ChildProcess|null} */
     let child = null
+    /** @type {(value: {status:string, thumbprint:string, subject:string}|null) => void} */
     const finish = (value) => {
       if (settled) return
       settled = true
@@ -163,7 +169,7 @@ function queryAuthenticode(filePath) {
       finish(null)
       return
     }
-    timer = setTimeout(() => {
+    timer = unrefTimeout(() => {
       try {
         child?.kill()
       } catch {
@@ -171,7 +177,6 @@ function queryAuthenticode(filePath) {
       }
       finish(null)
     }, SIGNATURE_CHECK_TIMEOUT_MS)
-    timer.unref?.()
     child.stdout?.on('data', (chunk) => {
       stdout += chunk.toString()
       if (stdout.length > 256 * 1024) {

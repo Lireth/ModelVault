@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
 import { renameReplacing } from './atomic-write'
-import { samePathIgnoreCase } from '../utils'
+import { samePathIgnoreCase, unrefTimeout, pruneOldestFiles } from '../utils'
 import { DATA_DIR, getCurrentRoot, getSettings } from './store'
 import { releaseMaintenance, tryAcquireMaintenance } from './maintenance-lock'
 import { buildBackupParts } from './backup-export'
@@ -62,7 +62,10 @@ const DIR_IO_TIMEOUT_MS = 5000
 /** 目录 IO 等待上限（测试可注入；生产代码严禁调用注入器） */
 let dirIoTimeoutMs = DIR_IO_TIMEOUT_MS
 
-/** 注入目录 IO 等待上限（仅供单元测试使用） */
+/**
+ * 注入目录 IO 等待上限（仅供单元测试使用）
+ * @param {number} ms 等待上限（ms）
+ */
 export function setAutoBackupDirIoTimeoutForTests(ms) {
   dirIoTimeoutMs = Number.isFinite(ms) && ms >= 0 ? ms : DIR_IO_TIMEOUT_MS
 }
@@ -102,16 +105,18 @@ let checkTimer = null
 /** 备份在途标记（防重入） */
 let running = false
 
-/** 调度下一次检查（全局唯一；unref 不阻止进程退出） */
+/**
+ * 调度下一次检查（全局唯一；unref 不阻止进程退出）
+ * @param {number} delayMs 延迟（ms）
+ */
 function scheduleNext(delayMs) {
   if (checkTimer) clearTimeout(checkTimer)
-  checkTimer = setTimeout(() => {
+  checkTimer = unrefTimeout(() => {
     checkTimer = null
     runAutoBackupIfDue()
       .catch((err) => logger.warn(`自动备份检查失败: ${err.message}`))
       .finally(() => scheduleNext(CHECK_INTERVAL_MS))
   }, delayMs)
-  checkTimer.unref?.()
 }
 
 /**
@@ -194,7 +199,9 @@ async function lastAutoBackupAt(dir) {
 
 /** 滚动清理超出保留数的旧备份（字典序即时间序；尽力而为）。
  * 确认损坏的包（EOCD 缺失的半截包，A4）不占保留名额，直接清除；
- * 打开失败（瞬时 IO）不作判定留待下次，避免误删有效备份。 */
+ * 打开失败（瞬时 IO）不作判定留待下次，避免误删有效备份。
+ * @param {string} dir 备份目录
+ */
 async function pruneAutoBackups(dir) {
   try {
     const names = (await fs.readdir(dir))
@@ -212,18 +219,16 @@ async function pruneAutoBackups(dir) {
       }
       intact.push(name)
     }
-    for (const old of intact.slice(
-      0,
-      Math.max(0, intact.length - AUTO_BACKUP_KEEP),
-    )) {
-      await fs.rm(path.join(dir, old), { force: true }).catch(() => {})
-    }
+    await pruneOldestFiles(dir, intact, AUTO_BACKUP_KEEP)
   } catch {
     /* 清理失败仅留下多余的旧备份，不影响正确性 */
   }
 }
 
-/** 清扫强退残留的 .tmp 半成品（running 互斥保证执行时无在途写入，A4） */
+/**
+ * 清扫强退残留的 .tmp 半成品（running 互斥保证执行时无在途写入，A4）
+ * @param {string} dir 备份目录
+ */
 async function sweepStaleTmp(dir) {
   try {
     for (const name of await fs.readdir(dir)) {

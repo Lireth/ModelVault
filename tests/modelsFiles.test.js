@@ -950,3 +950,134 @@ describe('破坏性文件操作的 realpath 归属（O6）', () => {
     }
   })
 })
+
+describe('models:toggleDisabled 禁用/启用改名链路（files-rename）', () => {
+  let root
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'modelvault-rename-'))
+    roots.push(root)
+    setDataRoot(root)
+    await loadData()
+    registerFilesHandlers()
+  })
+
+  afterAll(async () => {
+    for (const dir of roots) {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+
+  it('禁用：文件加 .disabled 后缀且元数据键即时迁移', async () => {
+    const abs = path.join(root, 'style-a.safetensors')
+    await fs.writeFile(abs, 'x')
+    setModelMeta(abs, { alias: '测试标注', favorite: true })
+
+    const handler = getRegisteredHandler('models:toggleDisabled')
+    const res = await handler(makeEvent(), { id: abs, disabled: true })
+    const disabledPath = `${abs}.disabled`
+    expect(res).toEqual({ path: disabledPath })
+    await expect(fs.access(disabledPath)).resolves.toBeUndefined()
+    await expect(fs.access(abs)).rejects.toThrow()
+    // 标注随改名即时迁移：新键可读、旧键不复存在
+    expect(getModelMeta(disabledPath)?.alias).toBe('测试标注')
+    expect(getModelMeta(abs)).toBeNull()
+  })
+
+  it('启用：去除 .disabled 后缀，元数据键随迁回原名', async () => {
+    const disabledPath = path.join(root, 'style-b.safetensors.disabled')
+    await fs.writeFile(disabledPath, 'x')
+    setModelMeta(disabledPath, { note: '禁用中的备注' })
+
+    const handler = getRegisteredHandler('models:toggleDisabled')
+    const res = await handler(makeEvent(), {
+      id: disabledPath,
+      disabled: false,
+    })
+    const abs = path.join(root, 'style-b.safetensors')
+    expect(res).toEqual({ path: abs })
+    await expect(fs.access(abs)).resolves.toBeUndefined()
+    expect(getModelMeta(abs)?.note).toBe('禁用中的备注')
+    expect(getModelMeta(disabledPath)).toBeNull()
+  })
+
+  it('幂等：状态未变化时直接返回原路径，不触碰磁盘', async () => {
+    const abs = path.join(root, 'style-c.safetensors')
+    await fs.writeFile(abs, 'x')
+    const handler = getRegisteredHandler('models:toggleDisabled')
+    expect(await handler(makeEvent(), { id: abs, disabled: false })).toEqual({
+      path: abs,
+    })
+    const disabledPath = path.join(root, 'style-d.safetensors.disabled')
+    await fs.writeFile(disabledPath, 'x')
+    expect(
+      await handler(makeEvent(), { id: disabledPath, disabled: true }),
+    ).toEqual({ path: disabledPath })
+    await expect(fs.access(abs)).resolves.toBeUndefined()
+  })
+
+  it('无效参数拒绝：空标识走 handler 语义文案，非法 disabled 类型被 schema 前置拦截', async () => {
+    const handler = getRegisteredHandler('models:toggleDisabled')
+    expect(await handler(makeEvent(), { id: '', disabled: true })).toEqual({
+      error: '无效的模型标识',
+    })
+    // disabled 非布尔在 schema 层即拒绝（handler 内语义校验为纵深防御）
+    const abs = path.join(root, 'style-e.safetensors')
+    await fs.writeFile(abs, 'x')
+    const res = await handler(makeEvent(), { id: abs, disabled: 'yes' })
+    expect(typeof res.error).toBe('string')
+    expect(res.error).not.toBe('无效的禁用状态')
+    await expect(fs.access(abs)).resolves.toBeUndefined()
+    await expect(fs.access(`${abs}.disabled`)).rejects.toThrow()
+  })
+
+  it('目标名已存在时拒绝（含 .disabled 占位目录），原文件不受扰动', async () => {
+    const abs = path.join(root, 'style-f.safetensors')
+    await fs.writeFile(abs, 'x')
+    await fs.mkdir(`${abs}.disabled`)
+    const handler = getRegisteredHandler('models:toggleDisabled')
+    const res = await handler(makeEvent(), { id: abs, disabled: true })
+    expect(res).toEqual({ error: '目标文件名已存在' })
+    await expect(fs.access(abs)).resolves.toBeUndefined()
+  })
+
+  it('磁盘改名失败时返回错误且不迁移元数据', async () => {
+    const abs = path.join(root, 'style-g.safetensors')
+    await fs.writeFile(abs, 'x')
+    setModelMeta(abs, { alias: '保留' })
+    const handler = getRegisteredHandler('models:toggleDisabled')
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const renameSpy = vi
+      .spyOn(fs, 'rename')
+      .mockRejectedValue(
+        Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' }),
+      )
+    try {
+      const res = await handler(makeEvent(), { id: abs, disabled: true })
+      expect(res.error).toBe('改名失败: EBUSY: resource busy')
+      // 改名未成功：元数据仍挂在原键下，等待用户重试
+      expect(getModelMeta(abs)?.alias).toBe('保留')
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('禁用/启用改名失败'),
+      )
+    } finally {
+      renameSpy.mockRestore()
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('大维护操作持锁期间禁用被拒（OPT-14 互斥）', async () => {
+    const abs = path.join(root, 'style-h.safetensors')
+    await fs.writeFile(abs, 'x')
+    const token = tryAcquireMaintenance('scan', root)
+    try {
+      const handler = getRegisteredHandler('models:toggleDisabled')
+      const res = await handler(makeEvent(), { id: abs, disabled: true })
+      expect(res).toEqual({ error: '正在扫描中，请稍候' })
+      await expect(fs.access(abs)).resolves.toBeUndefined()
+      await expect(fs.access(`${abs}.disabled`)).rejects.toThrow()
+    } finally {
+      releaseMaintenance(token)
+    }
+  })
+})

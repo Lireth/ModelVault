@@ -66,7 +66,18 @@ const TIME_UNITS = {
 const BOOL_VALUES = new Set(['yes', 'no', 'true', 'false', '1', '0'])
 
 /**
+ * 快捷标注解析器三元组（O7）：渲染层注入覆盖层有效值读取器。
+ * @typedef {Object} MetaFlagResolvers
+ * @property {(model: any) => boolean} favorite 有效收藏态读取器
+ * @property {(model: any) => boolean} nsfw 有效 NSFW 读取器
+ * @property {(model: any) => number} rating 有效评分读取器
+ */
+
+/**
  * 比较运算语义（size/score 共用）：v 为被比较值（缺失视为不命中）。
+ * @param {any} v 被比较值
+ * @param {string} op 比较符
+ * @param {number} n 目标数值
  */
 function compareOp(v, op, n) {
   if (typeof v !== 'number') return false
@@ -87,6 +98,10 @@ function compareOp(v, op, n) {
 /**
  * 年龄比较（mtime/opened 共用）：裸值（op '=' 且携带输入单位 unitMs）
  * 按单位粒度取整后比较——毫秒级全等不可命中，按「距今 N 个单位」判定。
+ * @param {number} ageMs 距今毫秒数
+ * @param {string} op 比较符
+ * @param {number} ms 目标毫秒数
+ * @param {number} [unitMs] 输入单位毫秒粒度（裸值时携带）
  */
 function compareAge(ageMs, op, ms, unitMs) {
   if (op === '=' && unitMs) {
@@ -119,7 +134,9 @@ function parseFilter(prefix, value) {
       // parseFloat(undefined) 同为 NaN，判定结果不变）
       const amount = parseFloat(m[2] ?? '')
       if (!Number.isFinite(amount)) return null
-      const unit = (m[3] || 'mb').toLowerCase()
+      const unit = /** @type {keyof typeof SIZE_UNITS} */ (
+        (m[3] || 'mb').toLowerCase()
+      )
       return {
         kind: 'size',
         op: m[1] || '=',
@@ -154,7 +171,9 @@ function parseFilter(prefix, value) {
       if (!m) return null
       const amount = parseFloat(m[2] ?? '')
       if (!Number.isFinite(amount)) return null
-      const unit = (m[3] || 'd').toLowerCase()
+      const unit = /** @type {keyof typeof TIME_UNITS} */ (
+        (m[3] || 'd').toLowerCase()
+      )
       return {
         kind: 'mtime',
         op: m[1] || '=',
@@ -191,7 +210,9 @@ function parseFilter(prefix, value) {
       if (!m) return null
       const amount = parseFloat(m[2] ?? '')
       if (!Number.isFinite(amount)) return null
-      const unit = (m[3] || 'd').toLowerCase()
+      const unit = /** @type {keyof typeof TIME_UNITS} */ (
+        (m[3] || 'd').toLowerCase()
+      )
       return {
         kind: 'opened',
         never: false,
@@ -266,7 +287,13 @@ function modelExtOf(m) {
 
 /** 单条件命中判定（与 parseFilter 的 kind 一一对应；resolveHash/resolveFlags
  * 为 O7 覆盖解析器——哈希走预热回填覆盖，标注三元组走快捷标注覆盖；
- * resolveDuplicate 为「重复组」解析器，dup: 语法经它读取当前可见重复集合） */
+ * resolveDuplicate 为「重复组」解析器，dup: 语法经它读取当前可见重复集合）
+ * @param {Record<string, any>} m 模型对象
+ * @param {any} f 过滤条件（parseFilter 产出）
+ * @param {(model: any) => string} resolveHash 有效哈希解析器
+ * @param {MetaFlagResolvers|null} resolveFlags 快捷标注解析器
+ * @param {((model: any) => boolean)|null} resolveDuplicate 重复组解析器
+ */
 function matchFilter(m, f, resolveHash, resolveFlags, resolveDuplicate) {
   switch (f.kind) {
     case 'base': {
@@ -275,7 +302,7 @@ function matchFilter(m, f, resolveHash, resolveFlags, resolveDuplicate) {
       return base.toLowerCase().includes(f.text)
     }
     case 'tag':
-      return (m.tags || []).some(
+      return /** @type {string[]} */ (m.tags || []).some(
         (t) => typeof t === 'string' && t.toLowerCase().includes(f.text),
       )
     case 'type':
@@ -392,7 +419,7 @@ export function parseSearchQuery(raw) {
  * @param {any[]} filters parseSearchQuery 产出的条件列表
  * @param {(model: any) => string} [resolveHash] 有效哈希解析器
  *   （默认读取模型自带 hash；渲染层传入覆盖映射解析器，O7）
- * @param {Record<string, (model: any) => any>|null} [resolveFlags] 快捷标注解析器
+ * @param {MetaFlagResolvers|null} [resolveFlags] 快捷标注解析器
  * @param {((model: any) => boolean)|null} [resolveDuplicate] 重复组解析器
  *   （渲染层传入当前可见重复集合查询；未注入时 dup: 恒不命中）
  * @returns {boolean}
