@@ -94,6 +94,8 @@ npm install
 npm start
 ```
 
+> Electron 二进制镜像（O2）：`electron_mirror` / `electron_builder_binaries_mirror` 非 npm 项目配置键（npm 11+ 会对 `.npmrc` 中的这两项打印 “Unknown project config” 告警），已迁移为环境变量——CI 在 `ci.yml` / `release.yml` 的 job 级 `env` 注入 `ELECTRON_MIRROR` 与 `ELECTRON_BUILDER_BINARIES_MIRROR`；本地开发者在国内网络环境下可在 `npm install` 前设置同名环境变量（PowerShell：`$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'`，另一项同理，值见 CI 工作流）加速首次下载；不设置则回落官方源，功能不受影响。
+
 > pre-commit 门禁（lint-staged）：提交前对**暂存文件**依次执行 `eslint --fix` 与 `prettier --write`（js/mjs/cjs/vue），json/css/html/md/yml 走 `prettier --write`；修复结果自动重新暂存，ESLint 报错即阻断提交。CI 全量门禁口径不变，钩子仅把反馈前移到本地。
 
 ## 技术栈
