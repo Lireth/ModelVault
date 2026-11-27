@@ -772,7 +772,7 @@ textarea::placeholder {
   margin-bottom: 8px;
 }
 
-.stats-section .stats-empty {
+.stats-empty {
   font-size: var(--font-xs);
   color: var(--text-muted);
   margin: 4px 0;

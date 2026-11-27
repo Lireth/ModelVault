@@ -129,7 +129,7 @@ export function wasDataReset() {
  * SWITCH_FLUSH_TIMEOUT_MS 同一底线——挂起磁盘上的原子写可在内核层阻塞
  * 数十秒，恢复路径持有的全局维护锁不能为此永久卡死。
  */
-export const RELOAD_SAVE_WAIT_TIMEOUT_MS = 5000
+const RELOAD_SAVE_WAIT_TIMEOUT_MS = 5000
 
 /** 恢复重载写盘等待上限（测试可注入；生产代码严禁调用注入器） */
 let reloadSaveWaitTimeoutMs = RELOAD_SAVE_WAIT_TIMEOUT_MS

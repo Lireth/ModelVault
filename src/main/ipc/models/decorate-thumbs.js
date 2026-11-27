@@ -72,7 +72,7 @@ const thumbReadySender = createBatchedSender({
 })
 
 /** 立即发送已累积的缩略图更新并清空定时器 */
-export function flushThumbReadyUpdates() {
+function flushThumbReadyUpdates() {
   thumbReadySender.flush()
 }
 

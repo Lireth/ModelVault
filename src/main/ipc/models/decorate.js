@@ -504,7 +504,6 @@ export async function decorateModels(models, signal, opts = {}) {
 
 export {
   clearDeferredOwners,
-  flushThumbReadyUpdates,
   sendThumbReady,
   startThumbDrain,
   trackDeferredOwner,
