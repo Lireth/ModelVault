@@ -27,22 +27,32 @@ import { MAX_BATCH_META_IDS } from '../src/shared/app-enums'
  * - 代表性通道的合法/篡改 payload 通过性锁定。
  */
 
+/** 递归收集 src/preload 全部 .js（O5 按域拆分后调用点位于 api/ 子目录，
+ * 对账必须覆盖整棵子树，否则拆分会被误判为「登记通道无调用」） */
+function collectPreloadSources() {
+  const dir = path.resolve(__dirname, '../src/preload')
+  const files = []
+  for (const name of fs.readdirSync(dir, { recursive: true })) {
+    const full = path.join(dir, String(name))
+    if (String(name).endsWith('.js') && fs.statSync(full).isFile()) {
+      files.push(fs.readFileSync(full, 'utf-8'))
+    }
+  }
+  return files
+}
+
 /** 从 preload 源码提取 api 层的 invokeValidated 调用点通道（避免导入 electron） */
 function extractPreloadInvokeChannels() {
-  const source = fs.readFileSync(
-    path.resolve(__dirname, '../src/preload/index.js'),
-    'utf-8',
+  return collectPreloadSources().flatMap((source) =>
+    [...source.matchAll(/invokeValidated\(\s*'([^']+)'/g)].map((m) => m[1]),
   )
-  return [...source.matchAll(/invokeValidated\(\s*'([^']+)'/g)].map((m) => m[1])
 }
 
 /** 从 preload 源码提取 subscribe 事件订阅点通道 */
 function extractPreloadSubscribeChannels() {
-  const source = fs.readFileSync(
-    path.resolve(__dirname, '../src/preload/index.js'),
-    'utf-8',
+  return collectPreloadSources().flatMap((source) =>
+    [...source.matchAll(/subscribe\(\s*'([^']+)'/g)].map((m) => m[1]),
   )
-  return [...source.matchAll(/subscribe\(\s*'([^']+)'/g)].map((m) => m[1])
 }
 
 /** 从主进程源码提取 wrapHandler 注册点通道（ipc.js + ipc/models 递归全部 .js） */

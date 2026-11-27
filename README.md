@@ -177,8 +177,9 @@ ModelVault/
 │   │                             #   装饰管线领域事实（decorate/）、备份恢复、
 │   │                             #   检查更新、Civitai 客户端、哈希预热、
 │   │                             #   safetensors 头部解析等
-│   ├── preload/                  # 预加载脚本：index.js contextBridge + IPC 通道白名单、
-│   │                             #   thumb-preload.js 缩略图渲染子窗口
+│   ├── preload/                  # 预加载脚本（O5 按域拆分）：core.js IPC 通道白名单
+│   │                             #   校验原语、api/ 九域便捷方法切片、index.js 装配门面
+│   │                             #   + contextBridge 暴露；thumb-preload.js 缩略图渲染子窗口
 │   └── renderer/                 # 渲染进程（Vue 3）
 │       └── src/
 │           ├── App.vue / main.js / error-report.js  # 根组件 / 入口 / 错误上报链路
@@ -216,7 +217,7 @@ wrapHandler('my:channel', async (event, payload) => {
 })
 ```
 
-3. 在 `src/preload/index.js` 的 `api` 对象中添加语义化方法（内部统一走 `invokeValidated` / `subscribe`），渲染进程通过 `window.api.myDomain.doThing(payload)` 调用。
+3. 在 `src/preload/api/` 对应域文件（与 schema 域同名：`app.js` / `settings.js` / `store.js` / `scan.js` / `meta.js` / `covers.js` / `files.js` / `backup.js` / `civitai.js`）中添加语义化方法（内部统一走 `core.js` 的 `invokeValidated` / `subscribe`；`index.js` 仅装配 api 面并经 contextBridge 暴露），渲染进程通过 `window.api.myDomain.doThing(payload)` 调用。
 
 4. 业务失败返回 `{ error: '展示文案' }`；preload 会在 IPC 边界统一附加稳定 `code`（枚举见 `src/shared/error-codes.js`，`error` 文案保持不变）。新增失败路径优先用 `ipcError(IPC_ERROR.X, '文案')` 显式给码；渲染层按 `code` 做离线/繁忙/冲突等分支，不要匹配中文文案。
 
