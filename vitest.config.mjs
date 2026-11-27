@@ -30,6 +30,10 @@ export default defineConfig({
       //   缓存/模型对比/跨库传输浮层/设置页标签面板，+84 用例）后基线上移至
       //   Stmts 85.29 / Branch 78.77 / Funcs 82.89 / Lines 87.81，
       //   门禁随棘轮上调至 75/68/72/77。
+      // - 2026-11-27 O3 覆盖率盲区补测（禁用改名链路/右键菜单与清单导出/
+      //   跨库总览集成/封面操作链路/JSON 线程回退，+42 用例）后基线上移至
+      //   Stmts 89.05 / Branch 81.92 / Funcs 87.15 / Lines 91.67，
+      //   门禁随棘轮上调至 79/71/77/81。
       // 按全局总量判定（perFile=false）；纯 re-export 门面仍排除（见
       // exclude），避免以 0% 逻辑稀释全局均值（拆分产生的无逻辑聚合门面同理）。
       provider: 'v8',
@@ -45,10 +49,10 @@ export default defineConfig({
         'tests/helpers/**',
       ],
       thresholds: {
-        statements: 75,
-        branches: 68,
-        functions: 72,
-        lines: 77,
+        statements: 79,
+        branches: 71,
+        functions: 77,
+        lines: 81,
         perFile: false,
       },
     },

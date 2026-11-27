@@ -6,10 +6,16 @@ import {
 } from './helpers/storeTest'
 import {
   clearAllCovers,
+  clearCovers,
+  deleteCover,
   importCoversFromDrop,
+  pasteCover,
   replaceModels,
+  saveModelData,
   selectedModel,
+  setDefaultCover,
   state,
+  uploadCover,
 } from '../src/renderer/src/store/appStore'
 
 /**
@@ -154,5 +160,172 @@ describe('批量拖拽导入封面（OPT-9）', () => {
     const res2 = await importCoversFromDrop('m1', null)
     expect(res2.total).toBe(0)
     expect(api.models.importCover).not.toHaveBeenCalled()
+  })
+})
+
+describe('封面操作链路（上传/粘贴/设默认/删除/清空）', () => {
+  /** 主进程封面操作的标准成功响应（covers 为最新完整列表） */
+  function coverRes(n = 1) {
+    return {
+      cover: `covers/c${n}.png`,
+      coverUrl: `mvimg://local/covers/c${n}.png`,
+      covers: Array.from({ length: n }, (_, i) => ({
+        rel: `covers/c${i + 1}.png`,
+        path: `p${i + 1}`,
+        url: `u${i + 1}`,
+      })),
+      meta: {},
+    }
+  }
+  function seedModel() {
+    replaceModels([makeModel('m1', { covers: [] })])
+    state.selectedId = 'm1'
+  }
+
+  it('uploadCover 成功：列表追加、默认封面与缩略图覆盖同步更新', async () => {
+    seedModel()
+    api.models.uploadCover.mockResolvedValue(coverRes(2))
+    expect(await uploadCover('m1')).toBe(true)
+    const m = state.models[0]
+    expect(m.covers).toHaveLength(2)
+    expect(m.cover).toBe('covers/c2.png')
+    expect(m.hasManualCover).toBe(true)
+    // OP-02：新 coverUrl 同步覆盖缩略图，卡片立即显示新封面
+    expect(selectedModel.value.coverUrl).toBe('mvimg://local/covers/c2.png')
+    expect(state.toasts.at(-1)).toMatchObject({ type: 'success' })
+  })
+
+  it('uploadCover 业务失败提示错误；用户取消静默返回', async () => {
+    seedModel()
+    api.models.uploadCover.mockResolvedValue({
+      error: '文件内容不是有效的图片，已拒绝导入',
+    })
+    expect(await uploadCover('m1')).toBe(false)
+    expect(state.toasts.at(-1)).toMatchObject({ type: 'error' })
+    expect(state.models[0].covers).toHaveLength(0)
+
+    state.toasts.splice(0)
+    api.models.uploadCover.mockResolvedValue({ canceled: true })
+    expect(await uploadCover('m1')).toBe(false)
+    expect(state.toasts).toHaveLength(0)
+  })
+
+  it('pasteCover 成功与失败', async () => {
+    seedModel()
+    api.models.pasteCover.mockResolvedValue(coverRes(1))
+    expect(await pasteCover('m1')).toBe(true)
+    expect(state.models[0].cover).toBe('covers/c1.png')
+    expect(state.toasts.at(-1).text).toContain('剪贴板')
+
+    api.models.pasteCover.mockResolvedValue({ error: '剪贴板中没有图片' })
+    expect(await pasteCover('m1')).toBe(false)
+    expect(state.toasts.at(-1)).toMatchObject({ type: 'error' })
+  })
+
+  it('setDefaultCover 成功切换默认显示；失败提示且不改动列表', async () => {
+    seedModel()
+    api.models.setDefaultCover.mockResolvedValue(coverRes(3))
+    expect(await setDefaultCover('m1', 'covers/c3.png')).toBe(true)
+    expect(api.models.setDefaultCover).toHaveBeenCalledWith(
+      'm1',
+      'covers/c3.png',
+    )
+    expect(state.models[0].cover).toBe('covers/c3.png')
+
+    api.models.setDefaultCover.mockResolvedValue({ error: '封面不存在' })
+    expect(await setDefaultCover('m1', 'covers/gone.png')).toBe(false)
+    expect(state.toasts.at(-1).text).toBe('封面不存在')
+  })
+
+  it('deleteCover 成功回退下一张封面；失败提示', async () => {
+    seedModel()
+    // 删除默认后主进程回退：响应携带剩余列表与新的默认封面
+    api.models.deleteCover.mockResolvedValue(coverRes(1))
+    expect(await deleteCover('m1', 'covers/c2.png')).toBe(true)
+    expect(api.models.deleteCover).toHaveBeenCalledWith('m1', 'covers/c2.png')
+    expect(state.models[0].covers).toHaveLength(1)
+    expect(state.toasts.at(-1).text).toBe('封面已删除')
+
+    api.models.deleteCover.mockResolvedValue({ error: '删除封面失败' })
+    expect(await deleteCover('m1', 'covers/c1.png')).toBe(false)
+    expect(state.toasts.at(-1)).toMatchObject({ type: 'error' })
+  })
+
+  it('clearCovers 成功清空单模型示例图；失败提示', async () => {
+    seedModel()
+    api.models.clearCovers.mockResolvedValue({
+      cover: '',
+      coverUrl: '',
+      covers: [],
+      meta: {},
+    })
+    expect(await clearCovers('m1')).toBe(true)
+    const m = state.models[0]
+    expect(m.covers).toEqual([])
+    expect(m.cover).toBe('')
+    expect(m.hasManualCover).toBe(false)
+    // 一键移除全部示例图同步清掉失效缩略图覆盖（OP-02）
+    expect(selectedModel.value.coverUrl).toBe('')
+    expect(state.toasts.at(-1).text).toBe('已移除全部示例图')
+
+    api.models.clearCovers.mockResolvedValue({ error: '清理失败' })
+    expect(await clearCovers('m1')).toBe(false)
+  })
+
+  it('id 已不在列表（并发删除后）：跳过状态同步仍按成功提示', async () => {
+    replaceModels([])
+    api.models.deleteCover.mockResolvedValue(coverRes(1))
+    expect(await deleteCover('gone', 'covers/c1.png')).toBe(true)
+    expect(state.models).toHaveLength(0)
+    expect(state.toasts.at(-1)).toMatchObject({ type: 'success' })
+  })
+})
+
+describe('saveModelData 详情保存（covers-store）', () => {
+  beforeEach(() => {
+    replaceModels([makeModel('m1')])
+  })
+
+  it('成功后同步参数/备注/别名/子分类/触发词到本地列表', async () => {
+    api.models.saveModelData.mockResolvedValue({
+      meta: {
+        params: { steps: 25 },
+        note: '新备注',
+        alias: '展示名',
+        subCategory: 'role',
+        triggerWords: 'kw',
+      },
+    })
+    expect(
+      await saveModelData('m1', {
+        params: { steps: 25 },
+        note: '新备注',
+      }),
+    ).toBe(true)
+    const m = state.models[0]
+    expect(m.note).toBe('新备注')
+    expect(m.alias).toBe('展示名')
+    expect(m.subCategory).toBe('role')
+    expect(m.triggerWords).toBe('kw')
+    expect(m.params).toEqual({ steps: 25 })
+    expect(state.toasts.at(-1).text).toBe('参数已保存')
+  })
+
+  it('silent 模式（批量编辑）不弹成功提示', async () => {
+    api.models.saveModelData.mockResolvedValue({ meta: {} })
+    expect(await saveModelData('m1', { note: 'n' }, { silent: true })).toBe(
+      true,
+    )
+    expect(state.toasts).toHaveLength(0)
+  })
+
+  it('业务失败与通道异常均提示错误并返回 false', async () => {
+    api.models.saveModelData.mockResolvedValue({ error: '模型不存在' })
+    expect(await saveModelData('m1', { note: 'n' })).toBe(false)
+    expect(state.toasts.at(-1).text).toBe('模型不存在')
+
+    api.models.saveModelData.mockRejectedValue(new Error('IPC 通道异常'))
+    expect(await saveModelData('m1', { note: 'n' })).toBe(false)
+    expect(state.toasts.at(-1).text).toContain('保存失败')
   })
 })
