@@ -43,6 +43,8 @@ export default defineConfig({
         // 计入门面只会以 0% 稀释基线，逻辑在子模块中计量
         'src/main/services/store.js',
         'src/main/services/backup.js',
+        'src/main/services/hash-warmup.js',
+        'src/main/services/civitai.js',
         'src/renderer/src/store/appStore.js',
         'src/renderer/src/store/multiselect.js',
         'src/renderer/src/store/filter.js',
