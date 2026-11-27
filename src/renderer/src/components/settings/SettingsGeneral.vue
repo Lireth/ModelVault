@@ -37,9 +37,11 @@ async function onImportModels(mode) {
     <div class="setting-row">
       <div class="setting-info">
         <span class="setting-title">模型文件夹</span>
-        <span class="setting-desc" :title="state.folder">{{
-          state.folder || '尚未选择模型文件夹'
-        }}</span>
+        <span
+          class="setting-desc setting-desc-ellipsis"
+          :title="state.folder"
+          >{{ state.folder || '尚未选择模型文件夹' }}</span
+        >
       </div>
       <div class="setting-actions">
         <button

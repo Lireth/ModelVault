@@ -460,14 +460,14 @@ textarea::placeholder {
 .setting-desc {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* 需要单行截断的场景（如模型文件夹路径）：悬停经 title 显示完整内容 */
+.setting-desc-ellipsis {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 460px;
-}
-
-.setting-col .setting-desc {
-  white-space: normal;
 }
 
 .setting-actions {
