@@ -1,7 +1,7 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import logger from '../logger'
-import { isLinkLikePath, relativeWithin } from '../utils'
+import { isLinkLikePath, relativeWithin, unrefTimeout } from '../utils'
 import { dedupeAndPruneDescendants } from '../../shared/scan-dirs'
 import { isVisibleScanEntry } from './scanner'
 import { removeSnapshotSubtree } from './watcher-baseline'
@@ -66,8 +66,7 @@ function nextDelay(w) {
 export function scheduleNextWalk(w) {
   if (w !== getWatcher() || !getWatcher()) return // 遍历期间监控可能已被停止/替换
   const delay = nextDelay(w)
-  w.timer = setTimeout(() => runWalk(w, false), delay)
-  w.timer.unref?.()
+  w.timer = unrefTimeout(() => runWalk(w, false), delay)
   if (typeof w.onPollScheduled === 'function') w.onPollScheduled(delay)
 }
 
@@ -111,7 +110,7 @@ function handleWalkError(w, err) {
     `目录监控异常（第 ${w.errorRetries}/${maxRetries} 次，${Math.round(delay / 1000)}s 后重探）: ${err.message}`,
   )
   if (w.errorRetryTimer) clearTimeout(w.errorRetryTimer)
-  w.errorRetryTimer = setTimeout(() => {
+  w.errorRetryTimer = unrefTimeout(() => {
     w.errorRetryTimer = null
     if (w !== getWatcher()) return
     fs.stat(w.root).then(
@@ -130,7 +129,6 @@ function handleWalkError(w, err) {
       },
     )
   }, delay)
-  w.errorRetryTimer.unref?.()
   return true
 }
 

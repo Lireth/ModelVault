@@ -1,10 +1,27 @@
 /**
  * 文件系统原语：
- * 损坏数据的滚动备份（时间戳命名 + 保留份数上限）。
+ * 损坏数据的滚动备份（时间戳命名 + 保留份数上限）与滚动清理。
  */
 
 import fs from 'node:fs/promises'
 import path from 'node:path'
+
+/**
+ * 滚动清理：按调用方给定的时间序（字典序即时间序）文件名列表删除超出
+ * keep 份数的最旧条目。尽力而为——单个删除失败静默忽略（多余旧文件不
+ * 影响正确性），不抛错。
+ * @param {string} dir 目标目录
+ * @param {string[]} sortedNames 按时间升序排列的文件名（已按前缀过滤）
+ * @param {number} keep 保留份数
+ */
+export async function pruneOldestFiles(dir, sortedNames, keep) {
+  for (const old of sortedNames.slice(
+    0,
+    Math.max(0, sortedNames.length - keep),
+  )) {
+    await fs.rm(path.join(dir, old), { force: true }).catch(() => {})
+  }
+}
 
 /**
  * 损坏数据文件的保底备份（时间戳命名 + 滚动保留）：
@@ -36,9 +53,7 @@ export async function preserveCorruptedFile(file, keep = 3) {
     const names = (await fs.readdir(dir))
       .filter((name) => name.startsWith(`${base}.bak-`))
       .sort()
-    for (const old of names.slice(0, Math.max(0, names.length - keep))) {
-      await fs.rm(path.join(dir, old), { force: true }).catch(() => {})
-    }
+    await pruneOldestFiles(dir, names, keep)
   } catch {
     /* 清理失败仅留下多余的旧备份，不影响正确性 */
   }

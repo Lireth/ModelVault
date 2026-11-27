@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { backoffMs } from '../utils'
 import { errorCode } from '../../shared/error-text'
 
 /**
@@ -44,7 +45,7 @@ export async function renameReplacing(tmp, file) {
       // OPT-13：线性 20ms×5（总 300ms）在杀毒/索引器占用窗口面前偏短，
       // 改指数退避（25→50→100→200→400，总 ~775ms）覆盖更长的占用窗口
       await new Promise((resolve) =>
-        setTimeout(resolve, 25 * 2 ** (attempt - 1)),
+        setTimeout(resolve, backoffMs(25, attempt)),
       )
     }
   }

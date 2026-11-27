@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { Worker } from 'node:worker_threads'
 import logger from '../logger'
+import { unrefTimeout } from '../utils'
 import { errorMessage } from '../../shared/error-text'
 
 /**
@@ -156,10 +157,9 @@ export async function serializeJsonOffThread(value, options = {}) {
     const w = ensureWorker()
     const id = nextTaskId++
     return await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timer = unrefTimeout(() => {
         failWorker(w, new Error(`JSON 序列化超时（${timeoutMs}ms）`))
       }, timeoutMs)
-      timer.unref?.()
       pending.set(id, { resolve, reject, timer })
       try {
         w.postMessage({ id, value, hash: needHash, hashPrefix })
@@ -191,10 +191,9 @@ export async function parseJsonOffThread(text) {
     const w = ensureWorker()
     const id = nextTaskId++
     return await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const timer = unrefTimeout(() => {
         failWorker(w, new Error(`JSON 解析超时（${PARSE_TIMEOUT_MS}ms）`))
       }, PARSE_TIMEOUT_MS)
-      timer.unref?.()
       pending.set(id, { resolve, reject, timer })
       try {
         w.postMessage({ id, op: 'parse', text })

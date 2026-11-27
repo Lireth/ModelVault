@@ -1,7 +1,12 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
-import { isSettledWithin, samePathIgnoreCase } from '../utils'
+import {
+  isSettledWithin,
+  samePathIgnoreCase,
+  unrefTimeout,
+  backoffMs,
+} from '../utils'
 import { atomicWriteFile } from './atomic-write'
 import { notifyStoreSaveError } from './store-events'
 import { isUnsafeModelKey } from './store-meta-normalize'
@@ -155,13 +160,12 @@ async function ensureDataDir() {
 /** 离线跳过后安排一次自动重试（库恢复可用时自动补写内存中的修改） */
 function scheduleOfflineRetry() {
   if (metaState.offlineRetryTimer || metaState.saveSuppressed) return
-  metaState.offlineRetryTimer = setTimeout(() => {
+  metaState.offlineRetryTimer = unrefTimeout(() => {
     metaState.offlineRetryTimer = null
     if (getCurrentRoot() && !metaState.saveSuppressed) {
       saveStoreDeltaNow().catch(notifyStoreSaveError)
     }
   }, OFFLINE_RETRY_MS)
-  metaState.offlineRetryTimer.unref?.()
 }
 
 export function clearOfflineRetry() {
@@ -185,17 +189,17 @@ function scheduleSaveRetry() {
   }
   if (metaState.saveRetryFailures > SAVE_RETRY_MAX_FAILURES) return
   if (metaState.offlineRetryTimer || metaState.saveSuppressed) return
-  const delay = Math.min(
-    saveRetryBaseMs * 2 ** (metaState.saveRetryFailures - 1),
+  const delay = backoffMs(
+    saveRetryBaseMs,
+    metaState.saveRetryFailures,
     SAVE_RETRY_MAX_MS,
   )
-  metaState.offlineRetryTimer = setTimeout(() => {
+  metaState.offlineRetryTimer = unrefTimeout(() => {
     metaState.offlineRetryTimer = null
     if (getCurrentRoot() && !metaState.saveSuppressed) {
       saveStoreDeltaNow().catch(notifyStoreSaveError)
     }
   }, delay)
-  metaState.offlineRetryTimer.unref?.()
 }
 
 /** 防抖保存：短时间内多次修改只落盘一次 */

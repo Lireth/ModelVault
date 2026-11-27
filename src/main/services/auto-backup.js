@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
 import { renameReplacing } from './atomic-write'
-import { samePathIgnoreCase } from '../utils'
+import { samePathIgnoreCase, unrefTimeout, pruneOldestFiles } from '../utils'
 import { DATA_DIR, getCurrentRoot, getSettings } from './store'
 import { releaseMaintenance, tryAcquireMaintenance } from './maintenance-lock'
 import { buildBackupParts } from './backup-export'
@@ -111,13 +111,12 @@ let running = false
  */
 function scheduleNext(delayMs) {
   if (checkTimer) clearTimeout(checkTimer)
-  checkTimer = setTimeout(() => {
+  checkTimer = unrefTimeout(() => {
     checkTimer = null
     runAutoBackupIfDue()
       .catch((err) => logger.warn(`自动备份检查失败: ${err.message}`))
       .finally(() => scheduleNext(CHECK_INTERVAL_MS))
   }, delayMs)
-  checkTimer.unref?.()
 }
 
 /**
@@ -220,12 +219,7 @@ async function pruneAutoBackups(dir) {
       }
       intact.push(name)
     }
-    for (const old of intact.slice(
-      0,
-      Math.max(0, intact.length - AUTO_BACKUP_KEEP),
-    )) {
-      await fs.rm(path.join(dir, old), { force: true }).catch(() => {})
-    }
+    await pruneOldestFiles(dir, intact, AUTO_BACKUP_KEEP)
   } catch {
     /* 清理失败仅留下多余的旧备份，不影响正确性 */
   }

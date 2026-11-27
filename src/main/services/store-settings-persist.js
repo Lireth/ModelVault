@@ -4,7 +4,7 @@ import { app } from 'electron'
 import logger from '../logger'
 import { atomicWriteFile } from './atomic-write'
 import { notifyStoreSaveError } from './store-events'
-import { isSettledWithin, samePathIgnoreCase } from '../utils'
+import { isSettledWithin, samePathIgnoreCase, unrefTimeout } from '../utils'
 import { SETTINGS_FILE, getLibSettingsFilePath } from './store-paths'
 import { errorCode } from '../../shared/error-text'
 
@@ -88,11 +88,10 @@ function scheduleSettingsSaveFlush() {
     0,
     Math.min(settingsSaveDelayMs, SETTINGS_SAVE_MAX_WAIT_MS - elapsed),
   )
-  settingsSaveTimer = setTimeout(() => {
+  settingsSaveTimer = unrefTimeout(() => {
     settingsSaveTimer = null
     flushPendingSettingsSaves()
   }, delay)
-  settingsSaveTimer.unref?.()
 }
 
 /**

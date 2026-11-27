@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import logger from '../logger'
+import { backoffMs } from '../utils'
 import { getModelMeta, setModelMeta } from './store'
 import { computeFileHash } from './civitai'
 import {
@@ -152,9 +153,11 @@ function recordHashFailure(id, mtimeMs, err) {
     prev && prev.mtimeMs === (Number.isFinite(mtimeMs) ? mtimeMs : null),
   )
   const attempts = sameVersion ? prev.attempts + 1 : 1
-  const backoff = Math.min(
-    hashFailRetryBaseMs * HASH_FAIL_BACKOFF_FACTOR ** (attempts - 1),
+  const backoff = backoffMs(
+    hashFailRetryBaseMs,
+    attempts,
     HASH_FAIL_RETRY_MAX_MS,
+    HASH_FAIL_BACKOFF_FACTOR,
   )
   if (hashFailures.size >= HASH_FAIL_MAX_ENTRIES && !prev) {
     // 病态防御：丢弃最旧记录（Map 保持插入序）为新记录腾位

@@ -2,6 +2,7 @@ import { dialog } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
+import { pruneOldestFiles } from '../utils'
 import { runMaintenance } from './maintenance-lock'
 import {
   COVERS_DIR,
@@ -261,9 +262,7 @@ async function snapshotSelectiveStore(root, stamp) {
     const names = (await fs.readdir(dir))
       .filter((name) => name.startsWith('store-selective-'))
       .sort()
-    for (const old of names.slice(0, Math.max(0, names.length - 10))) {
-      await fs.rm(path.join(dir, old), { force: true }).catch(() => {})
-    }
+    await pruneOldestFiles(dir, names, 10)
     return dest
   } catch (err) {
     logger.warn(`选择性恢复前快照失败（继续合并）: ${errorMessage(err)}`)

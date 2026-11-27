@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
-import { samePathIgnoreCase } from '../utils'
+import { samePathIgnoreCase, unrefTimeout } from '../utils'
 import { atomicWriteFile } from './atomic-write'
 import { parseJsonOffThread, serializeJsonOffThread } from './json-serializer'
 import { DATA_DIR, getIndexFilePath } from './store-paths'
@@ -356,12 +356,11 @@ export function queueLibraryIndexUpdate(root, payload = {}) {
     0,
     Math.min(indexUpdateDebounceMs, INDEX_UPDATE_MAX_WAIT_MS - elapsed),
   )
-  entry.timer = setTimeout(() => {
+  entry.timer = unrefTimeout(() => {
     entry.timer = null
     pendingIndexUpdates.delete(key)
     void updateLibraryIndex(root, payloadFromEntry(entry))
   }, delay)
-  entry.timer.unref?.()
   return true
 }
 

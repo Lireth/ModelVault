@@ -1,6 +1,7 @@
 /* global __MODELVAULT_SIGNER_THUMBPRINT__ */
 import { spawn } from 'node:child_process'
 import logger from '../logger'
+import { unrefTimeout } from '../utils'
 
 /**
  * 更新包校验（自 update-download.js 拆出）：
@@ -168,7 +169,7 @@ function queryAuthenticode(filePath) {
       finish(null)
       return
     }
-    timer = setTimeout(() => {
+    timer = unrefTimeout(() => {
       try {
         child?.kill()
       } catch {
@@ -176,7 +177,6 @@ function queryAuthenticode(filePath) {
       }
       finish(null)
     }, SIGNATURE_CHECK_TIMEOUT_MS)
-    timer.unref?.()
     child.stdout?.on('data', (chunk) => {
       stdout += chunk.toString()
       if (stdout.length > 256 * 1024) {

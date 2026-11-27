@@ -1,3 +1,5 @@
+import { unrefTimeout } from '../../utils'
+
 /**
  * 事件窗口合批发送器（OPT-22 自 decorate/civitai 两份逐行同构实现收敛）：
  * 「时间窗 + 阈值 + 单飞定时器 + 强制刷新」机器的单一实现。
@@ -63,8 +65,7 @@ export function createBatchedSender({ flushMs, maxBatch, deliver }) {
       return
     }
     if (timer) return
-    timer = setTimeout(flush, flushMs)
-    timer.unref?.()
+    timer = unrefTimeout(flush, flushMs)
   }
 
   function drop() {

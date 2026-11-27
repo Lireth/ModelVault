@@ -4,6 +4,7 @@ import {
   cancelResponseBody,
   isAllowedExternalUrl,
   readResponseTextLimited,
+  unrefTimeout,
 } from '../utils'
 import { getSettings } from './store-settings'
 import { REQUEST_TIMEOUT_MS } from './net-fetch'
@@ -289,7 +290,7 @@ let startupCheckTimer = null
 export function scheduleStartupUpdateCheck(delayMs = STARTUP_CHECK_DELAY_MS) {
   if (!app.isPackaged || process.env.MODELVAULT_SMOKE === '1') return
   if (startupCheckTimer) clearTimeout(startupCheckTimer)
-  startupCheckTimer = setTimeout(() => {
+  startupCheckTimer = unrefTimeout(() => {
     startupCheckTimer = null
     runStartupUpdateCheck(
       getSettings(),
@@ -297,7 +298,4 @@ export function scheduleStartupUpdateCheck(delayMs = STARTUP_CHECK_DELAY_MS) {
       broadcastUpdateAvailable,
     ).catch((err) => logger.warn(`启动自动检查更新失败: ${err.message}`))
   }, delayMs)
-  // 不阻止进程退出：延迟窗口内用户关窗时，flush 链完成后 app.quit 正常终止
-  // （与其他后台定时器的 unref 规范一致，避免持有闭包拖延退出）
-  startupCheckTimer.unref?.()
 }

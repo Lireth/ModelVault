@@ -5,6 +5,7 @@ import logger from '../logger'
 import { getSettings, atomicWriteFile } from '../services/store'
 import { destroyThumbRenderer } from '../services/thumb-renderer'
 import { themeColors } from '../theme'
+import { unrefTimeout } from '../utils'
 import { errorMessage } from '../../shared/error-text'
 
 /** 默认窗口尺寸 */
@@ -108,7 +109,7 @@ function createRendererCrashRecovery(win, hooks = {}, timing = {}) {
         return
       }
       // 退避重载：页面重新加载后由渲染层启动链路经 loadStore 秒开恢复状态
-      reloadTimer = setTimeout(() => {
+      reloadTimer = unrefTimeout(() => {
         reloadTimer = null
         if (isDestroyed()) return
         totalRecovered += 1
@@ -117,16 +118,14 @@ function createRendererCrashRecovery(win, hooks = {}, timing = {}) {
         )
         win.webContents.reload()
       }, reloadDelayMs * consecutive)
-      reloadTimer.unref?.()
     },
     /** did-finish-load 事件入口：页面重新可用；存活一段时间后清零连续计数 */
     onRendererLoaded() {
       if (survivalTimer) clearTimeout(survivalTimer)
-      survivalTimer = setTimeout(() => {
+      survivalTimer = unrefTimeout(() => {
         survivalTimer = null
         consecutive = 0
       }, survivalResetMs)
-      survivalTimer.unref?.()
     },
     /** 用户在放弃弹框中选择「重新加载」：重置计数后重载 */
     manualReload() {

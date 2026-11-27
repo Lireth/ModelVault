@@ -1,6 +1,7 @@
 import { app, BrowserWindow, nativeImage, protocol } from 'electron'
 import fs from 'node:fs/promises'
 import logger from './logger'
+import { unrefTimeout } from './utils'
 import { renderThumbJpeg } from './services/thumb-renderer'
 import { errorMessage } from '../shared/error-text'
 
@@ -137,10 +138,9 @@ export async function runStartupSmoke(win) {
     app.exit(ok ? 0 : 1)
   }
 
-  const failsafe = setTimeout(() => {
+  const failsafe = unrefTimeout(() => {
     void finish(new Error('启动冒烟总超时'))
   }, TOTAL_TIMEOUT_MS)
-  failsafe.unref?.()
 
   try {
     await waitForRendererLoad(win)

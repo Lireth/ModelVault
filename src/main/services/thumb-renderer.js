@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { app, BrowserWindow } from 'electron'
 import logger from '../logger'
+import { unrefTimeout } from '../utils'
 import { startPerf } from './perf'
 
 /**
@@ -83,13 +84,12 @@ function clearIdleTimer() {
 /** 安排空闲回收：仅当窗口存在且没有在途任务时启动；重复调用幂等 */
 function scheduleIdleDestroy() {
   if (idleTimer || pending.size > 0 || !win) return
-  idleTimer = setTimeout(() => {
+  idleTimer = unrefTimeout(() => {
     idleTimer = null
     if (pending.size > 0) return
     logger.info(`缩略图渲染窗口空闲 ${idleTimeoutMs}ms，已回收`)
     destroyWindow()
   }, idleTimeoutMs)
-  idleTimer.unref?.()
 }
 
 /** 渲染任务超时上限（测试钩子：注入小值避免真实等待） */

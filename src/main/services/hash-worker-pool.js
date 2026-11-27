@@ -1,5 +1,6 @@
 import { Worker } from 'node:worker_threads'
 import logger from '../logger'
+import { unrefTimeout, backoffMs } from '../utils'
 import { errorMessage } from '../../shared/error-text'
 
 /**
@@ -322,16 +323,16 @@ function recordCrash() {
     crashStreak = 0
     return
   }
-  const delay = Math.min(
-    RESTART_BASE_DELAY_MS * 2 ** Math.max(0, crashStreak - 1),
+  const delay = backoffMs(
+    RESTART_BASE_DELAY_MS,
+    crashStreak,
     RESTART_MAX_DELAY_MS,
   )
   if (restartTimer) return
-  restartTimer = setTimeout(() => {
+  restartTimer = unrefTimeout(() => {
     restartTimer = null
     pump()
   }, delay)
-  restartTimer.unref?.()
 }
 
 /**
