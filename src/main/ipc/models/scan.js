@@ -237,6 +237,7 @@ export function registerScanHandlers() {
           // 新对象，原始元素不再被引用；大库扫描期间原始数组、装饰数组与 IPC
           // 结构化克隆三份并存，此步可砍掉约 1/3 的瞬时内存峰值
           models.length = 0
+          /** @type {Record<string, number>} */
           const byType = {}
           for (const m of decorated) {
             byType[m.type] = (byType[m.type] || 0) + 1
@@ -282,6 +283,7 @@ export function registerScanHandlers() {
           // 同步目录监控状态（E8）：autoRescan 开启时监听当前根目录，变更触发自动重扫。
           // 排除名单须现读内存设置而非扫描前快照：扫描期间用户经 settings:update
           // 更新过 excludeDirs 时，旧快照会把 watcher 名单回退为扫描前的值
+          /** @type {{nativeWatch: boolean, baseline?: Map<string, string[]>}} */
           const watcherTiming = { nativeWatch: true }
           // OPT-02：扫描已产出目录名快照，直接交给 watcher 作为基线，跳过
           // 扫描结束后的重复全树遍历；旧版本/mock 缺该字段时保持原有行为

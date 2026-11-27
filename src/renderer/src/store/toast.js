@@ -7,7 +7,12 @@ import { state } from './state'
 
 let toastSeq = 0
 
-/** 弹出轻提示 */
+/**
+ * 弹出轻提示
+ * @param {string} type 类型（success/error/warn/info）
+ * @param {string} text 提示文案
+ * @param {number} [duration] 自动关闭延时（ms）
+ */
 export function toast(type, text, duration = 3200) {
   const id = ++toastSeq
   state.toasts.push({ id, type, text })
@@ -16,7 +21,10 @@ export function toast(type, text, duration = 3200) {
   }, duration)
 }
 
-/** 手动关闭轻提示（U6：Toast 关闭按钮） */
+/**
+ * 手动关闭轻提示（U6：Toast 关闭按钮）
+ * @param {number} id 轻提示 id
+ */
 export function dismissToast(id) {
   const idx = state.toasts.findIndex((t) => t.id === id)
   if (idx >= 0) state.toasts.splice(idx, 1)

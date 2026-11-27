@@ -52,8 +52,10 @@ export function normalizeBatchParamsPatch(raw) {
   if (!raw || typeof raw !== 'object') {
     return { error: '请至少填写一个推荐参数' }
   }
-  const patch = {}
-  /** 空白 → undefined；可解析 → number；非法 → NaN */
+  const patch = /** @type {Record<string, number | string>} */ ({})
+  /** 空白 → undefined；可解析 → number；非法 → NaN
+   * @param {any} v 表单字段值
+   */
   const num = (v) => {
     if (v === null || v === undefined) return undefined
     if (typeof v === 'string' && v.trim() === '') return undefined
@@ -93,7 +95,11 @@ export function normalizeBatchParamsPatch(raw) {
   return { patch }
 }
 
-/** 当前参数是否已完全包含补丁值（无变化模型不进 IPC） */
+/**
+ * 当前参数是否已完全包含补丁值（无变化模型不进 IPC）
+ * @param {Record<string, any>|null} params 模型既有参数
+ * @param {Record<string, any>} patch 参数补丁
+ */
 function isPatchApplied(params, patch) {
   if (!params || typeof params !== 'object') return false
   return Object.entries(patch).every(([key, value]) => params[key] === value)
@@ -121,7 +127,12 @@ function collectParamChanges(ids, patch, byId) {
   return { items, unchanged }
 }
 
-/** 记录一条失败明细 */
+/**
+ * 记录一条失败明细
+ * @param {Array<{id: string, error: string}>} list 失败明细列表
+ * @param {string} id 模型 id
+ * @param {string} [error] 失败原因
+ */
 function failuresPush(list, id, error) {
   list.push({ id, error: error || '未返回结果' })
 }
@@ -233,6 +244,7 @@ export async function batchEditParams(rawPatch) {
     }
 
     const metas = new Map()
+    /** @type {Array<{id: string, error: string}>} */
     const failedItems = []
     const canceled = await submitParamChunks(items, metas, failedItems)
 

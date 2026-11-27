@@ -26,7 +26,10 @@ const VALID_THEMES = new Set(['dark', 'light', 'system'])
 /** 强调色取值：预设 key（短字符串，渲染层解析未知值回退默认）或 #rrggbb 自定义色 */
 const ACCENT_COLOR_RE = /^#[0-9a-fA-F]{6}$/
 
-/** 规范化强调色：预设 key（≤20 字符）或自定义 hex，其余回退默认 */
+/**
+ * 规范化强调色：预设 key（≤20 字符）或自定义 hex，其余回退默认
+ * @param {unknown} raw 设置原文
+ */
 function normalizeAccentColor(raw) {
   if (typeof raw !== 'string') return DEFAULT_SETTINGS.accentColor
   const v = raw.trim()
@@ -56,15 +59,19 @@ export function defaultBootstrapSettings() {
  */
 export function defaultLibrarySettings() {
   const base = defaultSettings()
+  /** @type {Record<string, any>} */
   const out = {}
   for (const key of LIBRARY_SETTING_KEYS) {
-    const value = base[key]
+    const value = /** @type {Record<string, any>} */ (base)[key]
     out[key] = Array.isArray(value) ? [...value] : value
   }
   return out
 }
 
-/** 规范化扩展名列表：仅接受已知扩展名并去重；为空时回退到全部 */
+/**
+ * 规范化扩展名列表：仅接受已知扩展名并去重；为空时回退到全部
+ * @param {unknown} raw 原始扩展名数组
+ */
 function normalizeExtensions(raw) {
   const list = Array.isArray(raw)
     ? raw
@@ -106,6 +113,7 @@ function normalizeViewTagFilters(raw) {
     : typeof raw === 'string' && raw
       ? [raw]
       : []
+  /** @type {string[]} */
   const out = []
   for (const item of list) {
     if (typeof item !== 'string') continue
@@ -210,7 +218,10 @@ function normalizeModelsFolders(rawFolders, modelsFolder) {
   return result
 }
 
-/** 规范化引导字段：仅接受 modelsFolder / modelsFolders */
+/**
+ * 规范化引导字段：仅接受 modelsFolder / modelsFolders
+ * @param {any} raw 原始设置对象（不可信输入）
+ */
 export function normalizeBootstrapSettings(raw) {
   return {
     modelsFolder: typeof raw?.modelsFolder === 'string' ? raw.modelsFolder : '',
@@ -223,14 +234,17 @@ export function normalizeBootstrapSettings(raw) {
   }
 }
 
-/** 规范化库字段：仅接受已知字段并校验类型（引导字段一律剔除，恢复/导入安全） */
+/**
+ * 规范化库字段：仅接受已知字段并校验类型（引导字段一律剔除，恢复/导入安全）
+ * @param {any} raw 原始设置对象（不可信输入）
+ */
 export function normalizeLibrarySettings(raw) {
   const base = defaultLibrarySettings()
   if (!raw || typeof raw !== 'object') return base
   const excludeDirs = Array.isArray(raw.excludeDirs)
     ? [
         ...new Set(
-          raw.excludeDirs
+          /** @type {any[]} */ (raw.excludeDirs)
             .filter((d) => typeof d === 'string')
             // 统一小写：scanner 以小写目录名匹配（Windows 不区分大小写），去重亦随之不区分大小写
             .map((d) => d.trim().toLowerCase())
@@ -276,7 +290,10 @@ export function normalizeLibrarySettings(raw) {
   }
 }
 
-/** 规范化合并设置（内存统一入口）：库字段 + 引导字段 */
+/**
+ * 规范化合并设置（内存统一入口）：库字段 + 引导字段
+ * @param {any} raw 原始设置对象（不可信输入）
+ */
 export function normalizeSettings(raw) {
   return {
     ...normalizeLibrarySettings(raw),

@@ -55,6 +55,7 @@ function getSystemThemeQuery() {
 /**
  * 解析主题模式为有效主题：system 依系统亮暗取值，未知值回退 dark。
  * 主进程（原生标题栏配色）只认 dark/light，IPC 一律发送解析后的有效主题。
+ * @param {string} mode 主题模式（dark/light/system）
  */
 export function resolveTheme(mode) {
   if (mode === 'system')
@@ -62,7 +63,10 @@ export function resolveTheme(mode) {
   return mode === 'light' ? 'light' : 'dark'
 }
 
-/** 应用库设置（扫描/切库/启动共用）：设置、主题、排序与视图模式 */
+/**
+ * 应用库设置（扫描/切库/启动共用）：设置、主题、排序与视图模式
+ * @param {Record<string, any>|null} [settings] 主进程返回的设置对象
+ */
 function applyLibrarySettings(settings) {
   if (!settings) return
   replaceSettings(settings)
@@ -101,7 +105,7 @@ export async function initApp() {
     // F1-offline：回填失效库清单（小写化），侧栏据此对失效条目灰显标记；
     // 与激活库是否失效无关——其他已保存库同样可能盘符未挂载
     state.missingRoots = Array.isArray(data.rootStatuses)
-      ? data.rootStatuses
+      ? /** @type {Array<Record<string, any>>} */ (data.rootStatuses)
           .filter(
             (r) => r && r.exists === false && typeof r.folder === 'string',
           )
@@ -168,7 +172,10 @@ function bindSystemThemeListener() {
   })
 }
 
-/** 应用主题：切换 CSS 变量、同步原生标题栏颜色，并重应用强调色（深/浅变体） */
+/**
+ * 应用主题：切换 CSS 变量、同步原生标题栏颜色，并重应用强调色（深/浅变体）
+ * @param {string} theme 主题模式（dark/light/system）
+ */
 export function applyTheme(theme) {
   const effective = resolveTheme(theme)
   document.documentElement.classList.toggle('light', effective === 'light')
@@ -361,9 +368,9 @@ export async function removeRoot(folder) {
     toast('warn', '当前打开的模型库不能移除，请先切换到其他库')
     return
   }
-  const next = (state.settings.modelsFolders || []).filter(
-    (f) => f.toLowerCase() !== folder.toLowerCase(),
-  )
+  const next = /** @type {string[]} */ (
+    state.settings.modelsFolders || []
+  ).filter((f) => f.toLowerCase() !== folder.toLowerCase())
   const ok = await saveSettings({ modelsFolders: next })
   if (ok) toast('success', '已从模型库列表移除（磁盘数据不受影响）')
 }
@@ -393,9 +400,9 @@ export async function relocateFolder() {
     // 立即清理死条目（选择相同路径时无需清理：不存在死条目）
     if (oldFolder && oldFolder.toLowerCase() !== folder.toLowerCase()) {
       const lower = oldFolder.toLowerCase()
-      const next = (state.settings.modelsFolders || []).filter(
-        (f) => f.toLowerCase() !== lower,
-      )
+      const next = /** @type {string[]} */ (
+        state.settings.modelsFolders || []
+      ).filter((f) => f.toLowerCase() !== lower)
       await saveSettings({ modelsFolders: next })
       // 死条目从失效清单一并移除：库列表已不含该路径，标记失去对象
       state.missingRoots = state.missingRoots.filter((r) => r !== lower)
@@ -526,7 +533,9 @@ export async function scanModels(folder = state.folder, options = {}) {
     if (res.delta) {
       // 新装饰对象以自身封面/哈希字段为准：先清理对应覆盖再应用
       // （与局部扫描合并同口径；未变化模型的覆盖继续保留）
-      const upsertIds = (res.delta.upsert || [])
+      const upsertIds = /** @type {Array<Record<string, any>>} */ (
+        res.delta.upsert || []
+      )
         .map((m) => m?.id)
         .filter((id) => typeof id === 'string')
       clearModelCoverOverrides(upsertIds)
@@ -588,9 +597,12 @@ export async function scanModels(folder = state.folder, options = {}) {
 
 /** 取消进行中的扫描（扫描调用会以 { canceled: true } 返回） */
 export function cancelScan() {
-  window.api.models.cancelScan().catch((err) => {
-    toast('error', `取消扫描失败: ${err.message}`)
-  })
+  window.api.models.cancelScan().catch(
+    /** @param {any} err */
+    (err) => {
+      toast('error', `取消扫描失败: ${err.message}`)
+    },
+  )
 }
 
 /**

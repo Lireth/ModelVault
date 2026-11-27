@@ -62,6 +62,7 @@ export function isUnsafeModelKey(key) {
  * @returns {{version: number, models: Record<string, object>}}
  */
 export function normalizeStoreData(parsed) {
+  /** @type {Record<string, object>} */
   const models = {}
   const source =
     parsed && typeof parsed === 'object'
@@ -92,7 +93,12 @@ function normalizeCoverRef(c) {
   return toRelKey(c) || ''
 }
 
-/** 取新字段；缺失时回退到旧版宽/高字段中的较小值 */
+/**
+ * 取新字段；缺失时回退到旧版宽/高字段中的较小值
+ * @param {any} value 新字段候选值
+ * @param {any[]} legacyValues 旧版字段候选值列表
+ * @returns {number|null} 合法有限数值或 null
+ */
 function pickLegacyRes(value, legacyValues) {
   if (Number.isFinite(value)) return value
   const legacy = legacyValues.filter((v) => Number.isFinite(v))
@@ -122,14 +128,17 @@ function normalizeTags(raw) {
   return out
 }
 
-/** 规范化单条模型元数据，剔除未知字段 */
+/**
+ * 规范化单条模型元数据，剔除未知字段
+ * @param {any} raw 原始元数据（不可信输入）
+ */
 export function normalizeModelMeta(raw) {
   if (!raw || typeof raw !== 'object') return null
   const params = raw.params && typeof raw.params === 'object' ? raw.params : {}
   // 多封面列表（相对路径，顺序即添加顺序），兼容旧版单封面字段；
   // 逐条做绝对路径自愈后过滤失效项（A7）
   let covers = Array.isArray(raw.covers)
-    ? raw.covers
+    ? /** @type {any[]} */ (raw.covers)
         .map(normalizeCoverRef)
         .filter((c) => c && c.length <= 500)
         .slice(0, 50)
@@ -139,7 +148,7 @@ export function normalizeModelMeta(raw) {
     if (healed) covers = [healed]
   }
   let cover = normalizeCoverRef(raw.cover)
-  if (!cover && covers.length > 0) cover = covers[0]
+  if (!cover && covers.length > 0) cover = /** @type {string} */ (covers[0])
   return {
     cover,
     covers,

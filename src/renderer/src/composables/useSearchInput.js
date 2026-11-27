@@ -24,6 +24,7 @@ export function useSearchInput() {
   /**
    * FEAT-07：拉丁字母查询可能走拼音域，按需启动拼音引擎。
    * 动态分块在搜索防抖窗口内加载；就绪后过滤 computed 自动重算。
+   * @param {string} value 搜索输入值
    */
   function maybeEnsurePinyin(value) {
     if (typeof value === 'string' && /[a-z]/i.test(value)) {

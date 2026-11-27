@@ -27,9 +27,12 @@ import {
  * @param {() => void} clearSearch 清空搜索（Esc 逐层退出的最后一层）
  */
 export function useGlobalShortcuts(searchFieldEl, clearSearch) {
-  /** 事件目标是否为可编辑控件（打字场景，除 Ctrl+F 外交由原生行为） */
+  /**
+   * 事件目标是否为可编辑控件（打字场景，除 Ctrl+F 外交由原生行为）
+   * @param {KeyboardEvent} e 键盘事件
+   */
   function isEditableTarget(e) {
-    const t = e.target
+    const t = /** @type {any} */ (e.target)
     if (!t || !t.tagName) return false
     return (
       t.tagName === 'INPUT' ||
@@ -147,6 +150,10 @@ export function useGlobalShortcuts(searchFieldEl, clearSearch) {
     }
   }
 
+  /**
+   * 全局 keydown 分发入口
+   * @param {KeyboardEvent} e 键盘事件
+   */
   function onGlobalKeydown(e) {
     const ctx = {
       key: e.key.toLowerCase(),

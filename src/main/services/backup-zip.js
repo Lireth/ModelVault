@@ -105,9 +105,10 @@ export function writeBackupZipToFile(filePath, contents) {
     const out = createWriteStream(filePath)
     let settled = false
     /** drain 等待者（写缓冲满后登记，drain 事件统一唤醒） */
+    /** @type {Array<(value?: any) => void>} */
     let drainWaiters = []
     let writePending = false
-    const fail = (err) => {
+    const fail = (/** @type {Error} */ err) => {
       if (settled) return
       settled = true
       const waiters = drainWaiters
@@ -225,7 +226,11 @@ export function writeBackupZipToFile(filePath, contents) {
   })
 }
 
-/** 人类可读的 MB 文案（错误提示用） */
+/**
+ * 人类可读的 MB 文案（错误提示用）
+ * @param {number} bytes 字节数
+ * @returns {string}
+ */
 function formatLimit(bytes) {
   return `${Math.floor(bytes / 1024 / 1024)}MB`
 }
@@ -244,10 +249,16 @@ function backupEntryLimit(name) {
   return 0
 }
 
-/** 合并解压分块（空/单块避免额外分配） */
+/**
+ * 合并解压分块（空/单块避免额外分配）
+ * @param {Uint8Array[]} chunks 解压分块
+ * @param {number} size 总字节数
+ * @returns {Uint8Array}
+ */
 function concatBytes(chunks, size) {
   if (chunks.length === 0) return new Uint8Array(0)
-  if (chunks.length === 1) return chunks[0]
+  // length===1 判定保证索引 0 必命中（类型 cast，运行时零改动）
+  if (chunks.length === 1) return /** @type {Uint8Array} */ (chunks[0])
   const out = new Uint8Array(size)
   let offset = 0
   for (const chunk of chunks) {
@@ -285,11 +296,13 @@ export async function streamBackupZip(
   // 无原型对象：条目名来自不可信 zip，避免任何特殊键影响查找语义
   const entries = Object.create(null)
   const seen = new Set()
+  /** @type {Promise<void>[]} */
   const coverWrites = []
   let entryCount = 0
   let totalBytes = 0
+  /** @type {unknown} */
   let failure = null
-  const fail = (err) => {
+  const fail = (/** @type {unknown} */ err) => {
     if (!failure) failure = err
   }
 
@@ -334,6 +347,7 @@ export async function streamBackupZip(
       return
     }
 
+    /** @type {Uint8Array[]} */
     const chunks = []
     let received = 0
     file.ondata = (err, chunk, final) => {
@@ -424,6 +438,9 @@ export async function readBackupManifest(filePath) {
 /**
  * 第二遍：解出恢复所需的设置/元数据/封面（带逐条与总量上限）。
  * @param {string} filePath zip 文件路径
+ * @param {{coverWriter?: ((name: string, data: Uint8Array) => Promise<void>) | null,
+ *   skipCovers?: boolean}} [options] coverWriter 封面落盘回调；skipCovers
+ *   连封面解压也跳过（仅设置恢复场景）
  * @returns {Promise<{files: Record<string, Uint8Array>, skippedCovers: number}>}
  */
 export async function unzipBackupEntries(filePath, options = {}) {

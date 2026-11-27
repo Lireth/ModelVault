@@ -162,7 +162,11 @@ export function normalizeBaseModel(text) {
   return 'other'
 }
 
-/** 家族 key 是否合法（持久化校验用，如智能视图 baseFilter 字段） */
+/**
+ * 家族 key 是否合法（持久化校验用，如智能视图 baseFilter 字段）
+ * @param {unknown} key 待校验值
+ * @returns {boolean}
+ */
 export function isBaseFamilyKey(key) {
   return typeof key === 'string' && BASE_FAMILY_KEYS.has(key)
 }

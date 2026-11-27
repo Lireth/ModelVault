@@ -62,6 +62,7 @@ export function slimModelForList(m) {
   // autoInfo 收敛为搜索域消费面字段；详情字段（networkModule/tensorStats
   // 等）由 models:getDetail 返回完整对象时恢复
   if (m.autoInfo && typeof m.autoInfo === 'object') {
+    /** @type {Record<string, any>} */
     const slimAuto = {}
     for (const key of AUTO_INFO_LIST_KEYS) slimAuto[key] = m.autoInfo[key]
     out.autoInfo = slimAuto
@@ -145,12 +146,18 @@ function estimatePayloadBytes(models) {
   return Math.round((sampledBytes / sampled) * total)
 }
 
-/** 差量载荷观测口径（SCAN-DELTA）：增量 upsert 列表的估算字节数 */
+/**
+ * 差量载荷观测口径（SCAN-DELTA）：增量 upsert 列表的估算字节数
+ * @param {any[]} models 增量条目
+ */
 export function estimateListPayloadBytes(models) {
   return estimatePayloadBytes(Array.isArray(models) ? models : [])
 }
 
-/** 载荷体积日志辅助：KB 取整（<1KB 按 1KB 计，便于小库观测） */
+/**
+ * 载荷体积日志辅助：KB 取整（<1KB 按 1KB 计，便于小库观测）
+ * @param {number} bytes 估算字节数
+ */
 function formatPayloadKB(bytes) {
   return `${Math.max(1, Math.round(bytes / 1024))}KB`
 }

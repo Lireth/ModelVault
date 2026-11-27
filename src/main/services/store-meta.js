@@ -134,7 +134,10 @@ export const RELOAD_SAVE_WAIT_TIMEOUT_MS = 5000
 /** 恢复重载写盘等待上限（测试可注入；生产代码严禁调用注入器） */
 let reloadSaveWaitTimeoutMs = RELOAD_SAVE_WAIT_TIMEOUT_MS
 
-/** 注入恢复重载的写盘等待上限（仅供单元测试使用） */
+/**
+ * 注入恢复重载的写盘等待上限（仅供单元测试使用）
+ * @param {number} ms 毫秒
+ */
 export function setReloadSaveWaitTimeoutForTests(ms) {
   reloadSaveWaitTimeoutMs =
     Number.isFinite(ms) && ms >= 0 ? ms : RELOAD_SAVE_WAIT_TIMEOUT_MS
@@ -286,7 +289,10 @@ async function migrateLegacyData() {
   }
 }
 
-/** 读取单条模型元数据（键为模型绝对路径） */
+/**
+ * 读取单条模型元数据（键为模型绝对路径）
+ * @param {string} modelId 模型绝对路径
+ */
 export function getModelMeta(modelId) {
   if (!metaState.data) return null
   const relKey = toRelKey(modelId)
@@ -295,6 +301,7 @@ export function getModelMeta(modelId) {
 
 /** 以绝对路径返回模型元数据表（供主进程内部消费，如库体检） */
 export function getMetaMapByAbsPath() {
+  /** @type {Record<string, any>} */
   const result = {}
   const root = getCurrentRoot()
   if (!metaState.data || !root) return result
@@ -375,7 +382,9 @@ export function setModelMeta(modelId, meta) {
  *   updated 为成功写入的 id 与规范化后的元数据；failed 为逐项失败原因
  */
 export function setModelMetaMany(entries) {
+  /** @type {Array<{id: string, meta: Record<string, any>}>} */
   const updated = []
+  /** @type {Array<{id: string, error: string}>} */
   const failed = []
   if (!metaState.data || !Array.isArray(entries)) return { updated, failed }
   for (const entry of entries) {
@@ -403,7 +412,10 @@ export function setModelMetaMany(entries) {
   return { updated, failed }
 }
 
-/** 删除单条模型元数据（模型文件被移入回收站时调用） */
+/**
+ * 删除单条模型元数据（模型文件被移入回收站时调用）
+ * @param {string} modelId 模型绝对路径
+ */
 export function removeModelMeta(modelId) {
   if (!metaState.data) return false
   const relKey = toRelKey(modelId)
@@ -471,7 +483,10 @@ export const SWITCH_FLUSH_TIMEOUT_MS = 5000
 /** 切库 flush 超时（测试可注入；生产代码严禁调用注入器） */
 let switchFlushTimeoutMs = SWITCH_FLUSH_TIMEOUT_MS
 
-/** 注入切库 flush 超时（仅供单元测试使用） */
+/**
+ * 注入切库 flush 超时（仅供单元测试使用）
+ * @param {number} ms 毫秒
+ */
 export function setSwitchFlushTimeoutForTests(ms) {
   switchFlushTimeoutMs =
     Number.isFinite(ms) && ms >= 0 ? ms : SWITCH_FLUSH_TIMEOUT_MS
@@ -501,6 +516,7 @@ let switchSeq = 0
  * 数据在切库后丢弃，与退出超时同一取舍），继续切库绝不永久卡死维护锁。
  * 迟到残尾的跨库防护由持久层的同根守卫（writeSnapshot/writeDeltaJournal）
  * 拦截，收尾段由切库代际守卫作废。
+ * @param {string|null} root 新模型根目录
  */
 export async function switchDataRoot(root) {
   const seq = ++switchSeq
@@ -528,7 +544,7 @@ export async function switchDataRoot(root) {
  * pruneOrphanCovers 时回收）；含标注/哈希的条目保守保留——文件移回或
  * 改名还原时，下次扫描仍可重新关联。
  *
- * @param {Array<{id:string, name:string, ext:string, size:number, mtimeMs:number}>} scanned
+ * @param {Array<Record<string, any>>} scanned
  *   scanner 本次扫描出的模型列表
  * @param {object} [options]
  * @param {string[]} [options.affectedDirs] 本次扫描覆盖的相对目录（POSIX，'' 为根直属；
@@ -553,6 +569,7 @@ export function relinkScannedMeta(scanned, options = {}) {
     : null
   /** 键的相对目录是否落在受影响集合内（OP-09 共享实现；null = 全量语义）；
       B5：读取失败的子树排除在外——扫描不到不等于已删除 */
+  /** @type {(key: string) => boolean} */
   const keyInScope = (key) =>
     (!affectedDirs || isRelKeyInScope(key, affectedDirs)) &&
     !(excludeDirs && isRelKeyInScope(key, excludeDirs))

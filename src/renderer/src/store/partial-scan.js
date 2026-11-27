@@ -114,6 +114,7 @@ let lastFailedToastAt = 0
  * 子树读取失败的可见反馈（B5）：按目录集合去重 + 60s 节流——
  * 失败子树的待广播项被保留，watcher 会自动重试直至恢复，期间相同
  * 失败不重复弹提示；目录集合变化或超过间隔则再次提示。
+ * @param {string[]} failedDirs 读取失败的子树相对目录集合
  */
 function notifyFailedDirs(failedDirs) {
   const key = [...failedDirs].sort().join('|')
@@ -275,8 +276,11 @@ export async function partialScanModels(dirs) {
     // 全量扫描在途：其结果将整体覆盖列表，此时合并局部结果没有意义
     if (state.scanning) return
 
-    const incoming = Array.isArray(res.models) ? res.models : []
+    const incoming = /** @type {Array<Record<string, any>>} */ (
+      Array.isArray(res.models) ? res.models : []
+    )
     const incomingIds = new Set(incoming.map((m) => m.id))
+    /** @type {string[]} */
     const removedIds = []
     // 以主进程实际扫描的子树为准（主进程可能进一步收敛到一级目录），
     // 避免合并范围与扫描范围不一致留下陈旧条目

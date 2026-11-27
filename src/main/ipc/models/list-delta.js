@@ -36,7 +36,10 @@ const snapshots = new Map()
 /** 全局快照代际计数器（单调递增，跨库不复用） */
 let genCounter = 0
 
-/** 注册表键：库根路径小写化（Windows 大小写不敏感语义） */
+/**
+ * 注册表键：库根路径小写化（Windows 大小写不敏感语义）
+ * @param {string} root 库根目录
+ */
 function rootKey(root) {
   return String(root || '').toLowerCase()
 }

@@ -49,6 +49,7 @@ export const CIV_SCHEME = 'civimg'
 const CIVIMG_MAX_CONCURRENT = 6
 /** 在途并发计数与 FIFO 等待队列 */
 let civimgActive = 0
+/** @type {Array<() => void>} FIFO 等待队列（每项为获槽执行函数） */
 const civimgWaitQueue = []
 
 /**
@@ -307,11 +308,14 @@ export function registerCivimgHandler() {
       // Buffer（经零拷贝视图满足 BodyInit 类型，与缓存命中路径一致；
       // 在途去重的并发请求共享同一不可变 Buffer 的各自视图，内容只读），
       // 长度由 Response 自动计算，不继承上游可能失真的 Content-Length
-      const headers = proxyMediaHeaders(shared.upstream)
+      // errorStatus 分支已在上方短路返回，此处 upstream/buf 必为成功形状
+      const headers = proxyMediaHeaders(
+        /** @type {Response} */ (shared.upstream),
+      )
       headers.set('Cache-Control', 'public, max-age=86400')
-      return new Response(toBodyView(shared.buf), {
-        status: shared.upstream.status,
-        statusText: shared.upstream.statusText,
+      return new Response(toBodyView(/** @type {Buffer} */ (shared.buf)), {
+        status: /** @type {Response} */ (shared.upstream).status,
+        statusText: /** @type {Response} */ (shared.upstream).statusText,
         headers,
       })
     } catch (err) {

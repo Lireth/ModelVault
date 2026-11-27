@@ -62,6 +62,7 @@ export function dedupeAndPruneDescendants(dirs) {
  * @returns {string[]}
  */
 export function collapseDirsToTopLevel(dirs) {
+  /** @type {string[]} */
   const out = []
   const seen = new Set()
   for (const item of Array.isArray(dirs) ? dirs : []) {
@@ -73,7 +74,8 @@ export function collapseDirsToTopLevel(dirs) {
       }
       continue
     }
-    const top = item.split('/')[0]
+    // 非空串 split 首段必存在（noUncheckedIndexedAccess 下的必中索引）
+    const top = /** @type {string} */ (item.split('/')[0])
     if (!seen.has(top)) {
       seen.add(top)
       out.push(top)

@@ -16,10 +16,15 @@ import {
 /**
  * 后台缩略图延迟登记的归属表：源图路径 -> 引用该封面的模型 id 集合。
  * 后台生成完成后按此推送渲染进程更新对应卡片的 coverUrl。
+ * @type {Map<string, Set<string>>}
  */
 const deferredOwners = new Map()
 
-/** 登记一条延迟缩略图的模型归属 */
+/**
+ * 登记一条延迟缩略图的模型归属
+ * @param {string} absCover 封面绝对路径
+ * @param {string} modelId 模型绝对路径
+ */
 export function trackDeferredThumb(absCover, modelId) {
   let owners = deferredOwners.get(absCover)
   if (!owners) {
@@ -71,7 +76,11 @@ export function flushThumbReadyUpdates() {
   thumbReadySender.flush()
 }
 
-/** 累积一条/一批缩略图更新；ctx=目标窗口，切换时先送达上一窗口 */
+/**
+ * 累积一条/一批缩略图更新；ctx=目标窗口，切换时先送达上一窗口
+ * @param {import('electron').BrowserWindow|null} win 目标窗口（null/已销毁时静默跳过）
+ * @param {Array<{id:string, coverUrl?:string, coverThumb?:{path:string, thumbUrl:string}}>} updates 更新条目
+ */
 function queueThumbReady(win, updates) {
   if (
     !win ||
@@ -126,6 +135,7 @@ export function clearDeferredOwners() {
  * 其执行时经 drainDeferredThumbs 现取 getThumbsDir()，切根后会把旧根源图
  * 的缩略图写进新根 thumbs 目录（B10 声称已防住的同类竞态）；且旧任务的
  * finally 会把新一轮 promise 误清为 null，使保护彻底失效。
+ * @param {import('electron').BrowserWindow|null} win 目标窗口
  */
 export function startThumbDrain(win) {
   if (deferredOwners.size === 0) return
@@ -138,10 +148,12 @@ export function startThumbDrain(win) {
         const ids = ownersSnapshot.get(absCover)
         if (!ids?.size) return
         const thumbUrl = toImageUrl(thumbPath)
+        /** @type {Array<{id: string, coverUrl: string, coverThumb?: {path: string, thumbUrl: string}}>} */
         const updates = []
         for (const id of ids) {
           const entry = decorateCache.get(id)
           if (!entry) continue
+          /** @type {{id: string, coverUrl: string, coverThumb?: {path: string, thumbUrl: string}}} */
           const update = { id, coverUrl: '' }
           if (entry.deferredCover === absCover) {
             entry.deferredCover = ''
@@ -152,9 +164,9 @@ export function startThumbDrain(win) {
           // OPT-1：轮播封面（含作为默认封面的 covers 条目）缩略图生成完成后
           // 回写装饰缓存（下一轮扫描命中即携带），并以 coverThumb 通知渲染层
           // 更新对应 covers 条目（渲染层轮播据此从原图切换为缩略图）
-          const coverEntry = (entry.decorated.covers || []).find(
-            (cv) => cv.path === absCover,
-          )
+          const coverEntry = /** @type {Array<Record<string, any>>} */ (
+            entry.decorated.covers || []
+          ).find((cv) => cv.path === absCover)
           if (coverEntry) {
             coverEntry.thumbPath = thumbPath
             coverEntry.thumbUrl = thumbUrl

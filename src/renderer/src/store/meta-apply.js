@@ -5,7 +5,10 @@ import { state, modelIndexOf, setMetaOverride } from './state'
  * 仅依赖 state，供单模型操作与封面/批量操作复用。
  */
 
-/** 从主进程规范化 meta 提取快捷标注三元组（覆盖层写入的统一形状） */
+/**
+ * 从主进程规范化 meta 提取快捷标注三元组（覆盖层写入的统一形状）
+ * @param {Record<string, any>} meta 主进程规范化元数据
+ */
 function flagsFromMeta(meta) {
   return {
     favorite: meta.favorite === true,

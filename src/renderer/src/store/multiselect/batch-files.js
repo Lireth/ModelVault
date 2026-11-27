@@ -133,6 +133,7 @@ export async function batchApplyTriggers() {
   if (ids.length === 0 || state.multiSelect.busy) return
   const byId = modelById.value
   // 目标：有候选且当前无触发词的模型；其余静默跳过（汇总提示）
+  /** @type {Array<Record<string, any>>} */
   const targets = []
   for (const id of ids) {
     const m = byId.get(id)
@@ -157,13 +158,18 @@ export async function batchApplyTriggers() {
     )
     const metaMap = new Map()
     // B20/F3：逐项失败保留真实原因
+    /** @type {Array<{id: string, error: any}>} */
     const failures = []
     results.forEach((r, i) => {
+      // results 与 targets 一一对应（mapWithConcurrency 保持顺序）：cast 仅收窄类型
       if (r.status === 'fulfilled' && r.value?.meta)
-        metaMap.set(targets[i].id, r.value.meta)
+        metaMap.set(
+          /** @type {Record<string, any>} */ (targets[i]).id,
+          r.value.meta,
+        )
       else
         failures.push({
-          id: targets[i].id,
+          id: /** @type {Record<string, any>} */ (targets[i]).id,
           error:
             r.status === 'rejected'
               ? r.reason?.message
@@ -210,9 +216,10 @@ export async function batchToggleDisabled(disabled) {
         stale += 1
         continue
       }
-      const res = await window.api.models
-        .toggleDisabled(id, disabled)
-        .catch((err) => ({ error: err.message }))
+      const res = await window.api.models.toggleDisabled(id, disabled).catch(
+        /** @param {any} err */
+        (err) => ({ error: err.message }),
+      )
       if (res && !res.error) ok += 1
       else failures.push({ id, error: res?.error || '未返回结果' })
     }
@@ -274,13 +281,15 @@ export async function batchDeleteModels() {
     )
     const deletedIds = new Set()
     // B20/F3：逐项失败保留真实原因，失败项可经明细面板重建选区重试
+    /** @type {Array<{id: string, error: any}>} */
     const failures = []
     results.forEach((r, i) => {
+      // results 与 targets 一一对应（mapWithConcurrency 保持顺序）：cast 仅收窄类型
       if (r.status === 'fulfilled' && !r.value?.error)
         deletedIds.add(targets[i])
       else
         failures.push({
-          id: targets[i],
+          id: /** @type {string} */ (targets[i]),
           error:
             r.status === 'rejected'
               ? r.reason?.message

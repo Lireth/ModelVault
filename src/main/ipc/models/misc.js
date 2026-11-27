@@ -32,7 +32,10 @@ import { errorMessage } from '../../../shared/error-text'
 // 此处 re-export 维持 misc 的既有导入路径（tests/modelsStore.test.js 等）
 export { sidecarFilesFor }
 
-/** 将推荐参数格式化为可复制的文本（用于右键菜单「复制推荐参数」） */
+/**
+ * 将推荐参数格式化为可复制的文本（用于右键菜单「复制推荐参数」）
+ * @param {Record<string, any>|null} params 推荐参数
+ */
 export function paramSummaryFromMeta(params) {
   if (!params) return ''
   const parts = []
@@ -54,7 +57,10 @@ export function paramSummaryFromMeta(params) {
   return parts.join(', ')
 }
 
-/** 路径是否为 .disabled 后缀的禁用模型（F10，大小写不敏感；仅本模块使用） */
+/**
+ * 路径是否为 .disabled 后缀的禁用模型（F10，大小写不敏感；仅本模块使用）
+ * @param {string} p 模型路径
+ */
 function isDisabledPath(p) {
   return typeof p === 'string' && p.toLowerCase().endsWith('.disabled')
 }
@@ -131,6 +137,7 @@ export function registerMiscHandlers() {
       const win = BrowserWindow.fromWebContents(event.sender)
       const meta = getModelMeta(id) || {}
       // 菜单项点击时窗口可能已关闭（打开菜单后按 Alt+F4），须判销毁防 webContents 抛错
+      /** @type {(action: string) => void} */
       const send = (action) => {
         if (win && !win.isDestroyed()) {
           win.webContents.send('models:menuAction', { id, action })
@@ -237,7 +244,9 @@ export function registerMiscHandlers() {
         markdown: { ext: 'md', label: 'Markdown 文件' },
         json: { ext: 'json', label: 'JSON 文件' },
       }
-      const spec = Object.hasOwn(specs, format) ? specs[format] : null
+      const spec = Object.hasOwn(specs, format)
+        ? specs[/** @type {keyof typeof specs} */ (format)]
+        : null
       if (!spec) return { error: '不支持的导出格式' }
       if (typeof content !== 'string') return { error: '导出内容无效' }
       // 字符上限由 schema 前置把关，这里再按 UTF-8 字节兜底（中文 3 字节/字）

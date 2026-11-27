@@ -115,6 +115,7 @@ export function setThumbRendererIdleTimeoutForTests(ms) {
  * 拒绝全部在途任务并清空任务表（崩溃/销毁路径专用）：进程已死或服务关闭时
  * 在途任务无渲染载体，重排无意义；超时路径走 handleTaskTimeout 的
  * 单任务隔离与其余任务重排（FIX-7），不再经由此处连坐。
+ * @param {Error} err 拒绝原因
  */
 function failAll(err) {
   for (const task of pending.values()) {

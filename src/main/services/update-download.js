@@ -114,7 +114,10 @@ export function fetchAllowedUpdateUrl(url, options) {
 /** 瞬时网络错误重试的退避间隔（ms） */
 const TRANSIENT_RETRY_DELAY_MS = 500
 
-/** 等待指定毫秒（重试退避） */
+/**
+ * 等待指定毫秒（重试退避）
+ * @param {number} ms 毫秒
+ */
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -234,14 +237,22 @@ export function getDownloadedChecksum() {
   return downloadedChecksum
 }
 
-/** 流式计算文件 SHA256（小写 hex；安装前复核复用同一实现） */
+/**
+ * 流式计算文件 SHA256（小写 hex；安装前复核复用同一实现）
+ * @param {string} filePath 文件绝对路径
+ * @returns {Promise<string>} 64 位十六进制哈希
+ */
 export async function hashFile(filePath) {
   const hash = createHash('sha256')
   await updateHashFromFile(hash, filePath)
   return hash.digest('hex').toLowerCase()
 }
 
-/** 把文件内容流式喂入既有 hash（续传时先补齐已下载部分的哈希状态） */
+/**
+ * 把文件内容流式喂入既有 hash（续传时先补齐已下载部分的哈希状态）
+ * @param {import('node:crypto').Hash} hash 进行中的哈希对象
+ * @param {string} filePath 文件绝对路径
+ */
 async function updateHashFromFile(hash, filePath) {
   const stream = fs.createReadStream(filePath)
   for await (const chunk of stream) hash.update(chunk)

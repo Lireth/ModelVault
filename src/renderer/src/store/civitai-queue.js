@@ -39,7 +39,10 @@ export const unidentifiedCivitaiCount = computed(
   () => state.models.filter((m) => !m.civitaiUrl).length,
 )
 
-/** 请求识别单个模型（队列专用：识别 + 同次补全空缺），异常归一为 error */
+/**
+ * 请求识别单个模型（队列专用：识别 + 同次补全空缺），异常归一为 error
+ * @param {string} id 模型 id
+ */
 async function identifyOne(id) {
   try {
     return await window.api.models.civitaiIdentify(id, true)

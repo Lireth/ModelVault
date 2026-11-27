@@ -24,7 +24,10 @@ import { errorMessage } from '../../../shared/error-text'
 export function useBackupTransfer({ onRestored } = {}) {
   const backupBusy = ref(false)
 
-  /** 导出备份：应用设置 + 当前库标注/封面 → zip（对话框与打包均在主进程） */
+  /**
+   * 导出备份：应用设置 + 当前库标注/封面 → zip（对话框与打包均在主进程）
+   * @param {{ mode: string, ids?: string[] }} [options] 导出模式与筛选 id
+   */
   async function onExportBackup(options = { mode: 'full' }) {
     backupBusy.value = true
     try {

@@ -142,7 +142,10 @@ const PREFIX_ITEMS = SEARCH_SYNTAX.map((s) => ({
   desc: s.desc,
 }))
 
-/** 有界值域操作符的值建议（freeform 的 tag/size/score/mtime/author/trigger/hash/path/uses 不提示） */
+/**
+ * 有界值域操作符的值建议（freeform 的 tag/size/score/mtime/author/trigger/hash/path/uses 不提示）
+ * @type {Record<string, Array<{key: string, insert: string, label: string}>>}
+ */
 const VALUE_ITEMS = {
   base: BASE_FAMILIES.map((f) => ({
     key: `value:base:${f.key}`,
@@ -169,6 +172,10 @@ const VALUE_ITEMS = {
   opened: [{ key: 'value:opened:never', insert: 'never ', label: '从未打开' }],
 }
 
+/**
+ * 布尔值项候选（yes/no）
+ * @param {string} prefix 操作符前缀
+ */
 function boolItems(prefix) {
   return [
     { key: `value:${prefix}:yes`, insert: 'yes ', label: '是' },
@@ -180,7 +187,8 @@ function boolItems(prefix) {
  * 计算光标处的补全建议。
  * @param {string} raw 搜索框原始文本
  * @param {number} [caret] 光标位置（缺省取文本末尾）
- * @returns {{start: number, end: number, items: Array}|null}
+ * @returns {{start: number, end: number,
+ *   items: Array<{key: string, insert: string, label: string}>}|null}
  *   start/end 为替换区间（applySearchSuggestion 消费）；items 为候选列表
  *   （insert 为插入文本、label 为说明）。无候选（空白词边界/无匹配操作符/
  *   freeform 值位置）返回 null。
@@ -235,7 +243,11 @@ export function applySearchSuggestion(raw, sugg, item) {
   return src.slice(0, sugg.start) + item.insert + src.slice(sugg.end)
 }
 
-/** 补全应用后的光标落点（插入文本末尾） */
+/**
+ * 补全应用后的光标落点（插入文本末尾）
+ * @param {{start: number, end: number}} sugg 建议结果
+ * @param {{insert: string}} item 选中的候选
+ */
 export function caretAfterSuggestion(sugg, item) {
   return sugg.start + item.insert.length
 }

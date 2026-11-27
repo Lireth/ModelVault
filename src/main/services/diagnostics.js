@@ -45,7 +45,11 @@ const MAX_CACHE_DEPTH = 6
 /** 文件 stat 并发上限 */
 const CACHE_STAT_CONCURRENCY = 16
 
-/** 截取文件尾部（日志追加写入，最新内容在末尾） */
+/**
+ * 截取文件尾部（日志追加写入，最新内容在末尾）
+ * @param {string} file 文件路径
+ * @param {number} maxBytes 尾部截取上限（字节）
+ */
 async function readTail(file, maxBytes) {
   const fh = await fs.open(file, 'r')
   try {
@@ -91,7 +95,12 @@ async function collectLogs() {
   return logs
 }
 
-/** 递归列出目录内文件（深度/数量有界；ENOENT 返回空） */
+/**
+ * 递归列出目录内文件（深度/数量有界；ENOENT 返回空）
+ * @param {string} dir 目录路径
+ * @param {number} maxFiles 文件数上限
+ * @param {number} maxDepth 遍历深度上限
+ */
 async function listFiles(dir, maxFiles, maxDepth) {
   const files = []
   const queue = [{ dir, depth: 0 }]
@@ -118,7 +127,10 @@ async function listFiles(dir, maxFiles, maxDepth) {
   return { files, truncated: files.length >= maxFiles }
 }
 
-/** 目录体积统计（文件数/字节数；目录不存在时 exists=false） */
+/**
+ * 目录体积统计（文件数/字节数；目录不存在时 exists=false）
+ * @param {string} dir 目录路径
+ */
 async function measureDir(dir) {
   const exists = await fs
     .stat(dir)
@@ -143,7 +155,10 @@ async function measureDir(dir) {
   }
 }
 
-/** 单个文件信息（不存在或无权限时 exists=false） */
+/**
+ * 单个文件信息（不存在或无权限时 exists=false）
+ * @param {string} file 文件路径
+ */
 async function fileInfo(file) {
   try {
     const stat = await fs.stat(file)
@@ -181,7 +196,10 @@ function summarizeMetadata(metaMap) {
   return summary
 }
 
-/** 库的基础信息（只读 stat，不读取索引内容） */
+/**
+ * 库的基础信息（只读 stat，不读取索引内容）
+ * @param {string} root 库根目录
+ */
 async function collectLibraryInfo(root) {
   const index = await fileInfo(getIndexFilePath(root))
   const store = await fileInfo(getDataFilePath(root))
@@ -253,7 +271,11 @@ async function collectDiagnosticsReport() {
   }
 }
 
-/** 以 Promise 包装 fflate 异步 zip（避免同步压缩阻塞主进程） */
+/**
+ * 以 Promise 包装 fflate 异步 zip（避免同步压缩阻塞主进程）
+ * @param {import('fflate').AsyncZippable} files 条目名 → 内容
+ * @returns {Promise<Uint8Array>}
+ */
 function zipFiles(files) {
   return new Promise((resolve, reject) => {
     zip(files, { level: 6 }, (err, data) => (err ? reject(err) : resolve(data)))
@@ -293,6 +315,7 @@ export async function exportDiagnostics(win) {
   )
   if (result.canceled || !result.filePath) return { canceled: true }
 
+  /** @type {Record<string, Uint8Array>} */
   const files = {
     [DIAGNOSTICS_JSON_ENTRY]: strToU8(JSON.stringify(report, null, 2)),
   }

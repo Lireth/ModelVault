@@ -182,6 +182,10 @@ function recordHashFailure(id, mtimeMs, err) {
  * - off：后台不预热，仅保留详情页/识别链路的按需计算。
  * 服务层缺省 full 保持既有调用语义；应用入口始终显式传入设置值。
  */
+/**
+ * 预热策略档位（candidates 候选预筛 / full 全量 / off 关闭）。
+ * @typedef {'candidates'|'full'|'off'} WarmupMode
+ */
 const VALID_MODES = new Set(['candidates', 'full', 'off'])
 const DEFAULT_MODE = 'full'
 
@@ -320,7 +324,9 @@ function emitProgress(snap, force = false) {
  * 待预热队列（FIFO；优先任务 unshift 插队）：
  * 元素为 { id, force, mode }——force 标记详情页/识别的按需任务（不受策略限制），
  * mode 记录入队时的策略快照，避免设置切换后对已排队任务产生歧义。
+ * @typedef {{id: string, force: boolean, mode: WarmupMode}} WarmupTask
  */
+/** @type {WarmupTask[]} */
 const queue = []
 /** 队列去重集合（与 queue 同步维护） */
 const queued = new Set()
@@ -342,7 +348,11 @@ let draining = false
 /** 扫描期间置 true：drain 暂停取队（已在计算的单个文件不中断） */
 let paused = false
 
-/** 等待指定毫秒（重试退避） */
+/**
+ * 等待指定毫秒（重试退避）
+ * @param {number} ms 毫秒
+ * @returns {Promise<void>}
+ */
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -356,6 +366,7 @@ function delay(ms) {
  * @param {boolean} priority 是否前台优先任务
  * @param {{active: boolean, id: string, percent: number, hashedBytes: number,
  *   totalBytes: number, hash: string}} snap 进度快照
+ * @param {AbortSignal} signal 取消信号（同 id 新版本请求取代旧任务时中止）
  * @returns {Promise<string>} SHA256
  */
 async function computeHashWithRetry(id, priority, snap, signal) {
@@ -472,8 +483,13 @@ export function computeAndCacheHash(id, mtimeMs, options = {}) {
   return promise
 }
 
-/** 规范化请求项：字符串或 {id, size, mtimeMs} 对象（扫描装饰结果可直接传入） */
+/**
+ * 规范化请求项：字符串或 {id, size, mtimeMs} 对象（扫描装饰结果可直接传入）
+ * @param {Array<string|{id?: string, size?: number|null, mtimeMs?: number|null}>} items
+ * @returns {Array<{id: string, size: number|null, mtimeMs: number|null}>}
+ */
 function normalizeRequestItems(items) {
+  /** @type {Array<{id: string, size: number|null, mtimeMs: number|null}>} */
   const out = []
   for (const item of Array.isArray(items) ? items : []) {
     if (typeof item === 'string' && item) {
@@ -486,20 +502,32 @@ function normalizeRequestItems(items) {
     ) {
       out.push({
         id: item.id,
-        size: Number.isFinite(item.size) ? item.size : null,
-        mtimeMs: Number.isFinite(item.mtimeMs) ? item.mtimeMs : null,
+        // isFinite 判定为真时必为有限数（类型 cast，运行时零改动）
+        size: Number.isFinite(item.size)
+          ? /** @type {number} */ (item.size)
+          : null,
+        mtimeMs: Number.isFinite(item.mtimeMs)
+          ? /** @type {number} */ (item.mtimeMs)
+          : null,
       })
     }
   }
   return out
 }
 
-/** 策略值收口：未知值回退 full（保持既有调用方语义） */
+/**
+ * 策略值收口：未知值回退 full（保持既有调用方语义）
+ * @param {any} mode 请求携带的策略值（未知值回退 DEFAULT_MODE）
+ * @returns {WarmupMode}
+ */
 function normalizeMode(mode) {
   return VALID_MODES.has(mode) ? mode : DEFAULT_MODE
 }
 
-/** 从体积反查索引中移除某 id（更新体积前调用） */
+/**
+ * 从体积反查索引中移除某 id（更新体积前调用）
+ * @param {string} id 模型绝对路径
+ */
 function removeFromSizeIndex(id) {
   const info = knownInfo.get(id)
   if (!info || !Number.isFinite(info.size)) return
@@ -541,7 +569,11 @@ function rememberInfo(id, size, mtimeMs) {
   }
 }
 
-/** 缓存是否确定有效（哈希存在且 mtime 与已知值一致；mtime 未知时保守返回 false） */
+/**
+ * 缓存是否确定有效（哈希存在且 mtime 与已知值一致；mtime 未知时保守返回 false）
+ * @param {string} id 模型绝对路径
+ * @returns {boolean}
+ */
 function hasValidCachedHash(id) {
   const info = knownInfo.get(id)
   const meta = getModelMeta(id)
@@ -597,13 +629,20 @@ async function ensureQuickFingerprint(id) {
  */
 function dropQueuedBackground() {
   for (let i = queue.length - 1; i >= 0; i--) {
-    if (queue[i].force) continue
-    queued.delete(queue[i].id)
+    // 循环边界保证 i < queue.length，索引必命中（类型 cast，运行时零改动）
+    if (/** @type {WarmupTask} */ (queue[i]).force) continue
+    queued.delete(/** @type {WarmupTask} */ (queue[i]).id)
     queue.splice(i, 1)
   }
 }
 
-/** 入队（force=true 时插队，供详情页/识别按需任务使用） */
+/**
+ * 入队（force=true 时插队，供详情页/识别按需任务使用）
+ * @param {string} id 模型绝对路径
+ * @param {boolean} force 是否按需优先任务（插队）
+ * @param {WarmupMode} mode 入队时的策略快照
+ * @returns {boolean} 是否新增/升级了队列任务
+ */
 function pushQueue(id, force, mode) {
   if (queued.has(id)) {
     // priority 请求对已在队任务升级为 force 并移至队首：批量预热先入队的
@@ -760,7 +799,10 @@ export function resumeHashWarmup(delayMs = WARMUP_DELAY_MS) {
   if (queue.length > 0 && !drainTimer && !draining) scheduleDrain(delayMs)
 }
 
-/** 调度一次 drain（全局唯一；重复调度时保留更早的计划，优先任务可提前） */
+/**
+ * 调度一次 drain（全局唯一；重复调度时保留更早的计划，优先任务可提前）
+ * @param {number} delayMs 延迟（ms）
+ */
 function scheduleDrain(delayMs) {
   const runAt = Date.now() + delayMs
   if (drainTimer && runAt >= drainScheduledAt) return
@@ -779,7 +821,8 @@ function scheduleDrain(delayMs) {
  */
 async function drainLane() {
   while (queue.length > 0 && !paused) {
-    const task = queue.shift()
+    // while 长度判定保证 shift 必命中（类型 cast，运行时零改动）
+    const task = /** @type {WarmupTask} */ (queue.shift())
     const id = task.id
     queued.delete(id)
     // 出队即计消费（缓存命中/文件缺失/候选跳过的条目同样计入，保持计数连贯）；

@@ -25,6 +25,8 @@ const byPath = reactive(new Map())
 /**
  * 设置某模型的默认封面展示 URL；空值表示回到模型对象自带字段
  * （封面被清空/替换时必须清除覆盖，否则旧缩略图会继续遮住新封面）。
+ * @param {string} id 模型 id
+ * @param {unknown} url 封面 URL（非有效字符串视为清除覆盖）
  */
 export function setModelCoverUrl(id, url) {
   if (typeof id !== 'string' || !id) return
@@ -32,12 +34,19 @@ export function setModelCoverUrl(id, url) {
   else byModel.delete(id)
 }
 
-/** 清除指定模型集合的封面覆盖（局部扫描返回的新对象以自身字段为准） */
+/**
+ * 清除指定模型集合的封面覆盖（局部扫描返回的新对象以自身字段为准）
+ * @param {Iterable<string>|null} [ids] 模型 id 集合
+ */
 export function clearModelCoverOverrides(ids) {
   for (const id of ids || []) byModel.delete(id)
 }
 
-/** 设置某封面路径的缩略图 URL */
+/**
+ * 设置某封面路径的缩略图 URL
+ * @param {unknown} path 封面文件路径
+ * @param {unknown} url 缩略图 URL
+ */
 function setCoverThumbUrl(path, url) {
   if (typeof path === 'string' && path && typeof url === 'string' && url)
     byPath.set(path, url)
@@ -65,7 +74,10 @@ export function applyCoverOverrides(updates) {
   }
 }
 
-/** 模型卡片的默认封面展示 URL（覆盖优先，回退装饰结果） */
+/**
+ * 模型卡片的默认封面展示 URL（覆盖优先，回退装饰结果）
+ * @param {Record<string, any>|null} [model] 模型对象
+ */
 export function modelCoverUrl(model) {
   if (!model) return ''
   return byModel.get(model.id) || model.coverUrl || ''
@@ -88,6 +100,8 @@ export function coverImageUrl(cover) {
 /**
  * 封面条目的缩略图 URL（覆盖优先，回退装饰结果；列表瘦身条目无 thumbUrl
  * 时由 thumbPath 派生）。
+ * @param {{path?: string, url?: string, thumbUrl?: string,
+ *   thumbPath?: string}|null} cover 封面条目
  */
 export function coverThumbUrl(cover) {
   if (!cover) return ''

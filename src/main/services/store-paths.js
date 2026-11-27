@@ -111,19 +111,28 @@ export function toRelKey(absPath) {
   return rel.split(path.sep).join('/')
 }
 
-/** 判断绝对路径是否位于当前根目录内（Windows 大小写不敏感） */
+/**
+ * 判断绝对路径是否位于当前根目录内（Windows 大小写不敏感）
+ * @param {string} absPath 绝对路径
+ */
 export function isInRoot(absPath) {
   return typeof absPath === 'string' && !!toRelKey(absPath)
 }
 
-/** 相对封面路径 -> 绝对路径 */
+/**
+ * 相对封面路径 -> 绝对路径
+ * @param {string} coverRel 相对封面路径
+ */
 export function resolveCover(coverRel) {
   if (!coverRel || !currentRoot) return ''
   if (path.isAbsolute(coverRel)) return coverRel
   return path.join(currentRoot, coverRel)
 }
 
-/** 绝对封面路径 -> 相对封面路径（仅限封面目录内的文件） */
+/**
+ * 绝对封面路径 -> 相对封面路径（仅限封面目录内的文件）
+ * @param {string} absCover 绝对封面路径
+ */
 export function relativizeCover(absCover) {
   if (!currentRoot || typeof absCover !== 'string') return ''
   // 封面目录自身（相对路径为空）不构成有效封面，与越界同等处理

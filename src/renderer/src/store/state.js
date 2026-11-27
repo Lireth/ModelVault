@@ -69,7 +69,10 @@ export const SORT_OPTIONS = SORT_OPTION_DEFS
 
 const SORT_MAP = Object.fromEntries(SORT_OPTIONS.map((o) => [o.key, o]))
 
-/** 当前排序方式是否支持方向切换（收藏优先/按评分为固定语义排序，不支持，O1） */
+/**
+ * 当前排序方式是否支持方向切换（收藏优先/按评分为固定语义排序，不支持，O1）
+ * @param {string} sortBy 排序方式 key
+ */
 export function sortDirectional(sortBy) {
   return SORT_MAP[sortBy]?.directional !== false
 }
@@ -105,7 +108,10 @@ export const SUB_MAP = Object.fromEntries(
 )
 const TYPE_MAP = Object.fromEntries(MODEL_TYPES.map((t) => [t.key, t]))
 
-/** 按模型类型返回可用的分类标签列表（无标签的类型返回 null） */
+/**
+ * 按模型类型返回可用的分类标签列表（无标签的类型返回 null）
+ * @param {string} type 模型类型 key
+ */
 export function tagsForType(type) {
   if (type === 'lora') return LORA_TAGS
   if (type === 'checkpoint') return CHECKPOINT_TAGS
@@ -113,7 +119,10 @@ export function tagsForType(type) {
   return null
 }
 
-/** 获取类型显示信息 */
+/**
+ * 获取类型显示信息
+ * @param {string} key 模型类型 key
+ */
 export function typeInfo(key) {
   // TYPE_MAP 恒含 other 兜底键（MODEL_TYPES 固定排列），返回必为非空对象
   return /** @type {{ key: string, label: string, color: string }} */ (
@@ -121,7 +130,10 @@ export function typeInfo(key) {
   )
 }
 
-/** 获取二级分类标签显示信息 */
+/**
+ * 获取二级分类标签显示信息
+ * @param {string} key 分类标签 key
+ */
 export function subCategoryInfo(key) {
   return SUB_MAP[key] || null
 }
@@ -290,13 +302,20 @@ export const state = shallowReactive({
  */
 const hashOverrides = reactive(new Map())
 
-/** 模型的有效文件哈希（覆盖优先，无覆盖回退模型自带值） */
+/**
+ * 模型的有效文件哈希（覆盖优先，无覆盖回退模型自带值）
+ * @param {Record<string, any>|null} [model] 模型对象
+ */
 export function effectiveModelHash(model) {
   if (!model) return ''
   return hashOverrides.get(model.id) || model.hash || ''
 }
 
-/** 写入一条哈希覆盖（调用方已确认 id 属于当前列表） */
+/**
+ * 写入一条哈希覆盖（调用方已确认 id 属于当前列表）
+ * @param {string} id 模型绝对路径
+ * @param {string} hash SHA256 哈希
+ */
 export function setHashOverride(id, hash) {
   if (typeof id !== 'string' || !id || typeof hash !== 'string' || !hash) return
   hashOverrides.set(id, hash)
@@ -342,21 +361,30 @@ export function setMetaOverride(id, flags) {
   })
 }
 
-/** 模型的有效收藏态（覆盖优先，无覆盖回退模型自带值） */
+/**
+ * 模型的有效收藏态（覆盖优先，无覆盖回退模型自带值）
+ * @param {Record<string, any>|null} [model] 模型对象
+ */
 export function effectiveFavorite(model) {
   if (!model) return false
   const o = metaOverrides.get(model.id)
   return o ? o.favorite === true : model.favorite === true
 }
 
-/** 模型的有效 NSFW 标记（覆盖优先，无覆盖回退模型自带值） */
+/**
+ * 模型的有效 NSFW 标记（覆盖优先，无覆盖回退模型自带值）
+ * @param {Record<string, any>|null} [model] 模型对象
+ */
 export function effectiveNsfw(model) {
   if (!model) return false
   const o = metaOverrides.get(model.id)
   return o ? o.nsfw === true : model.nsfw === true
 }
 
-/** 模型的有效评分（0-5 整数；覆盖优先，无覆盖回退模型自带值） */
+/**
+ * 模型的有效评分（0-5 整数；覆盖优先，无覆盖回退模型自带值）
+ * @param {Record<string, any>|null} [model] 模型对象
+ */
 export function effectiveRating(model) {
   if (!model) return 0
   const o = metaOverrides.get(model.id)
@@ -438,7 +466,7 @@ export function isLibraryBusy() {
  * 原始引用（零代理开销，O3 目标不变）。传入已是 shallowReactive 的数组时
  * 幂等（Vue 对已代理目标原样返回）。
  * 同时重建 id→下标索引，后续批量封面/哈希回填均走 O(1) 查找。
- * @param {Array} list 新模型列表（原始数组或已代理数组）
+ * @param {Array<Record<string, any>>} list 新模型列表（原始数组或已代理数组）
  */
 export function replaceModels(list) {
   state.models = shallowReactive(list)

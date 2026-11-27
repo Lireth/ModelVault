@@ -36,11 +36,20 @@ function invokeValidated(channel, payload) {
     .then((result) => attachIpcErrorCode(result))
 }
 
-/** 带白名单校验的事件订阅，返回取消监听函数 */
+/**
+ * 带白名单校验的事件订阅，返回取消监听函数
+ * @param {string} channel 事件通道
+ * @param {(payload: any) => void} listener 事件回调
+ * @returns {() => void} 取消监听函数
+ */
 function subscribe(channel, listener) {
   if (!VALID_RECEIVE_CHANNELS.has(channel)) {
     throw new Error(`不允许的 IPC 通道: ${channel}`)
   }
+  /**
+   * @param {import('electron').IpcRendererEvent} _event IPC 事件对象
+   * @param {any} data 事件载荷
+   */
   const handler = (_event, data) => listener(data)
   ipcRenderer.on(channel, handler)
   return () => ipcRenderer.removeListener(channel, handler)
@@ -60,7 +69,11 @@ const api = {
   app: {
     /** 应用与运行时版本信息 */
     getInfo: () => invokeValidated('app:getInfo'),
-    /** 上报渲染进程异常（写入主进程日志） */
+    /**
+     * 上报渲染进程异常（写入主进程日志）
+     * @param {string} message 异常信息
+     * @param {string} [stack] 异常堆栈
+     */
     reportError: (message, stack) =>
       invokeValidated('app:reportError', { message, stack }),
     /** 应用内检查更新（E1）：返回 { current, latest?, hasUpdate, releaseUrl?, canDownload?, downloadSize? } 或 { error } */
@@ -71,12 +84,16 @@ const api = {
     cancelUpdateDownload: () => invokeValidated('app:cancelUpdateDownload'),
     /** 运行更新程序（F-6）：延迟拉起新版本并退出当前应用 */
     installUpdate: () => invokeValidated('app:installUpdate'),
-    /** 订阅更新包下载进度（{ received, total }），返回取消监听函数 */
+    /**
+     * 订阅更新包下载进度（{ received, total }），返回取消监听函数
+     * @param {(payload: any) => void} listener 事件回调
+     */
     onUpdateProgress: (listener) => subscribe('app:updateProgress', listener),
     /**
      * 订阅启动自动检查更新结果（O-3）：仅在有新版本时推送一次，
      * 载荷 { current, latest, releaseUrl, releaseNotes, canDownload, downloadSize }，
      * 返回取消监听函数
+     * @param {(payload: any) => void} listener 事件回调
      */
     onUpdateAvailable: (listener) => subscribe('app:updateAvailable', listener),
     /** 在系统资源管理器中打开日志目录（B-04），返回 { ok } 或 { error } */
@@ -90,13 +107,19 @@ const api = {
 
   /** 窗口相关（最小化/最大化/关闭由原生标题栏叠加层控件处理） */
   window: {
-    /** 切换主题（同步原生标题栏颜色） */
+    /**
+     * 切换主题（同步原生标题栏颜色）
+     * @param {string} theme 主题名
+     */
     setTheme: (theme) => invokeValidated('window:setTheme', { theme }),
   },
 
   /** 应用设置 */
   settings: {
-    /** 更新设置，返回 { settings }（规范化后的完整设置） */
+    /**
+     * 更新设置，返回 { settings }（规范化后的完整设置）
+     * @param {Record<string, any>} patch 设置增量（字段白名单见 schema）
+     */
     update: (patch) => invokeValidated('settings:update', patch),
   },
 
@@ -142,6 +165,7 @@ const api = {
      * @param {{ root: string, gen: number }|null} [snapshot] 快照代际标识
      */
     scan: (folder, snapshot) => {
+      /** @type {{ folder: string, snapshot?: { root: string, gen: number } }} */
       const payload = { folder }
       if (
         snapshot &&
@@ -164,6 +188,7 @@ const api = {
      *   {canceled:true} | {error:string}>}
      */
     importModels: (mode, opId, paths) => {
+      /** @type {{ mode: 'copy'|'move', opId?: string, paths?: string[] }} */
       const payload = { mode }
       if (opId) payload.opId = opId
       if (Array.isArray(paths) && paths.length > 0) payload.paths = paths
@@ -172,22 +197,44 @@ const api = {
     /**
      * 局部增量扫描（A-03）：只扫描指定变更子树，返回这些子树的模型现状。
      * payload 为 { folder, dirs }（dirs 为 POSIX 相对目录数组，'' 为根直属）
+     * @param {{ folder: string, dirs: string[] }} payload 扫描载荷
      */
     partialScan: (payload) => invokeValidated('models:partialScan', payload),
-    /** 保存模型推荐参数与备注 */
+    /**
+     * 保存模型推荐参数与备注
+     * @param {{ id: string, alias?: string, note?: string, subCategory?: string,
+     *   triggerWords?: string, params?: Object<string, any>|null }} payload
+     */
     saveModelData: (payload) =>
       invokeValidated('models:saveModelData', payload),
-    /** 上传模型封面，返回 { cover, coverUrl, covers, meta } 或 { canceled } / { error } */
+    /**
+     * 上传模型封面，返回 { cover, coverUrl, covers, meta } 或 { canceled } / { error }
+     * @param {string} id 模型绝对路径
+     */
     uploadCover: (id) => invokeValidated('models:uploadCover', { id }),
-    /** 将剪贴板图片添加为模型预览图，返回 { cover, coverUrl, covers, meta } 或 { error } */
+    /**
+     * 将剪贴板图片添加为模型预览图，返回 { cover, coverUrl, covers, meta } 或 { error }
+     * @param {string} id 模型绝对路径
+     */
     pasteCover: (id) => invokeValidated('models:pasteCover', { id }),
-    /** 设置默认封面（cover 为封面相对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */
+    /**
+     * 设置默认封面（cover 为封面相对路径），返回 { cover, coverUrl, covers, meta } 或 { error }
+     * @param {string} id 模型绝对路径
+     * @param {string} cover 封面相对路径
+     */
     setDefaultCover: (id, cover) =>
       invokeValidated('models:setDefaultCover', { id, cover }),
-    /** 删除单张封面（cover 为封面相对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */
+    /**
+     * 删除单张封面（cover 为封面相对路径），返回 { cover, coverUrl, covers, meta } 或 { error }
+     * @param {string} id 模型绝对路径
+     * @param {string} cover 封面相对路径
+     */
     deleteCover: (id, cover) =>
       invokeValidated('models:deleteCover', { id, cover }),
-    /** 一键移除全部示例图（清空封面列表并删除物理文件），返回 { cover, coverUrl, covers, meta } 或 { error } */
+    /**
+     * 一键移除全部示例图（清空封面列表并删除物理文件），返回 { cover, coverUrl, covers, meta } 或 { error }
+     * @param {string} id 模型绝对路径
+     */
     clearCovers: (id) => invokeValidated('models:clearCovers', { id }),
     /** 一键清空当前库全部模型的示例图（设置页数据清理），返回 { cleared, images } 或 { error } */
     clearAllCovers: () => invokeValidated('models:clearAllCovers'),
@@ -205,6 +252,7 @@ const api = {
     /**
      * 导出模型清单（FN-04）：渲染层按当前筛选结果生成 csv/markdown/json 文本，
      * 主进程弹保存对话框并原子写入；返回 { ok, path, sizeBytes } / { canceled } / { error }
+     * @param {{ format: string, content: string }} payload 清单格式与文本内容
      */
     exportModelList: (payload) =>
       invokeValidated('models:exportModelList', payload),
@@ -212,27 +260,42 @@ const api = {
      * 导出备份（FEAT-3/FN-08）：设置 + 当前库标注/封面 → zip。
      * options: { mode: 'full'|'selected'|'metadata', ids?: string[] }；
      * 返回 { path, sizeBytes, library, models, covers, mode, partial } / { canceled } / { error }
+     * @param {{ mode: string, ids?: string[] }} options 导出选项
      */
     exportBackup: (options) => invokeValidated('models:exportBackup', options),
     /** 从备份恢复（FEAT-3）：zip → 设置 + 指定库，返回 { settingsRestored, libraryRestored? } / { canceled } / { error } */
     importBackup: () => invokeValidated('models:importBackup'),
-    /** 删除模型文件（移入回收站并清理元数据），返回 { ok } 或 { error } */
+    /**
+     * 删除模型文件（移入回收站并清理元数据），返回 { ok } 或 { error }
+     * @param {string} id 模型绝对路径
+     */
     deleteModel: (id) => invokeValidated('models:deleteModel', { id }),
-    /** 更新快捷标记（收藏/NSFW/评分，仅传需更新的字段），返回 { meta } 或 { error } */
+    /**
+     * 更新快捷标记（收藏/NSFW/评分，仅传需更新的字段），返回 { meta } 或 { error }
+     * @param {{ id: string, favorite?: boolean, nsfw?: boolean,
+     *   rating?: number }} payload
+     */
     setMetaFlags: (payload) => invokeValidated('models:setMetaFlags', payload),
     /**
      * 批量更新快捷标记（C1，单次 IPC）：payload 为 { ids, favorite?, nsfw?,
      * rating? }。返回 { updated: [{ id, favorite, nsfw, rating }],
      * failed: [{ id, error }] }，渲染层据此单趟写标注覆盖层并汇总失败项。
+     * @param {{ ids: string[], favorite?: boolean, nsfw?: boolean,
+     *   rating?: number }} payload
      */
     setMetaFlagsBulk: (payload) =>
       invokeValidated('models:setMetaFlagsBulk', payload),
-    /** 整体覆写模型自由标签（F-5，tags 为全量字符串数组），返回 { meta } 或 { error } */
+    /**
+     * 整体覆写模型自由标签（F-5，tags 为全量字符串数组），返回 { meta } 或 { error }
+     * @param {string} id 模型绝对路径
+     * @param {string[]} tags 全量标签数组
+     */
     setModelTags: (id, tags) =>
       invokeValidated('models:setModelTags', { id, tags }),
     /**
      * 批量整体覆写自由标签（C1，单次 IPC）：items 为 [{ id, tags }]。
      * 返回 { updated: [{ id, tags }], failed: [{ id, error }] }。
+     * @param {Array<{ id: string, tags: string[] }>} items 批量条目
      */
     setModelTagsBulk: (items) =>
       invokeValidated('models:setModelTagsBulk', { items }),
@@ -240,16 +303,31 @@ const api = {
      * 批量推荐参数（F5）：items 为 [{ id, params }]，params 只含需更新的
      * 字段，主进程与各模型已有参数合并；返回 { updated: [{ id, params }],
      * failed: [{ id, error }] }。
+     * @param {Array<{ id: string, params: Object<string, any> }>} items 批量条目
      */
     setModelParamsBulk: (items) =>
       invokeValidated('models:setModelParamsBulk', { items }),
-    /** 全库重命名自由标签（F4，to 已存在时合并），返回 { changed } 或 { error } */
+    /**
+     * 全库重命名自由标签（F4，to 已存在时合并），返回 { changed } 或 { error }
+     * @param {string} from 原标签
+     * @param {string} to 新标签
+     */
     renameTag: (from, to) => invokeValidated('models:renameTag', { from, to }),
-    /** 全库移除自由标签（F4），返回 { changed } 或 { error } */
+    /**
+     * 全库移除自由标签（F4），返回 { changed } 或 { error }
+     * @param {string} tag 待移除标签
+     */
     removeTag: (tag) => invokeValidated('models:removeTag', { tag }),
-    /** 弹出模型右键菜单（原生菜单），动作经 onMenuAction 事件回传 */
+    /**
+     * 弹出模型右键菜单（原生菜单），动作经 onMenuAction 事件回传
+     * @param {string} id 模型绝对路径
+     */
     popupMenu: (id) => invokeValidated('models:popupMenu', { id }),
-    /** 拖拽导入封面（sourcePath 为外部图片绝对路径），返回 { cover, coverUrl, covers, meta } 或 { error } */
+    /**
+     * 拖拽导入封面（sourcePath 为外部图片绝对路径），返回 { cover, coverUrl, covers, meta } 或 { error }
+     * @param {string} id 模型绝对路径
+     * @param {string} sourcePath 外部图片绝对路径
+     */
     importCover: (id, sourcePath) =>
       invokeValidated('models:importCover', { id, path: sourcePath }),
     /**
@@ -257,45 +335,82 @@ const api = {
      * 其他模型库，mode 为 'copy'|'move'；保持相对路径与元数据关联（封面/标注
      * 随条目迁移），返回 { transferred, mode, targetRoot, failed, skipped }
      * 或 { error }
+     * @param {{ ids: string[], targetRoot: string, mode: string,
+     *   opId?: string }} payload
      */
     transferToLibrary: (payload) =>
       invokeValidated('models:transferToLibrary', payload),
-    /** 中止一个在途可取消操作（OPT-18；opId 为发起该操作时附带的令牌） */
+    /**
+     * 中止一个在途可取消操作（OPT-18；opId 为发起该操作时附带的令牌）
+     * @param {string} targetOpId 取消令牌
+     */
     cancelOp: (targetOpId) =>
       invokeValidated('models:cancelOp', { targetOpId }),
-    /** 在资源管理器中显示文件 */
+    /**
+     * 在资源管理器中显示文件
+     * @param {string} path 文件绝对路径
+     */
     reveal: (path) => invokeValidated('models:reveal', { path }),
-    /** 订阅扫描进度，返回取消监听函数 */
+    /**
+     * 订阅扫描进度，返回取消监听函数
+     * @param {(payload: any) => void} listener 事件回调
+     */
     onScanProgress: (listener) => subscribe('models:scanProgress', listener),
-    /** 订阅目录变更事件（E8：{ root }），返回取消监听函数 */
+    /**
+     * 订阅目录变更事件（E8：{ root }），返回取消监听函数
+     * @param {(payload: any) => void} listener 事件回调
+     */
     onFsChanged: (listener) => subscribe('models:fsChanged', listener),
-    /** 订阅元数据落盘失败事件（message: 错误信息），返回取消监听函数 */
+    /**
+     * 订阅元数据落盘失败事件（message: 错误信息），返回取消监听函数
+     * @param {(payload: any) => void} listener 事件回调
+     */
     onStoreError: (listener) => subscribe('models:storeError', listener),
     /** 订阅后台缩略图生成完成事件（updates: [{ id, coverUrl?, coverThumb? }]，
-     * coverThumb 为轮播封面条目缩略图更新 { path, thumbUrl }），返回取消监听函数 */
+     * coverThumb 为轮播封面条目缩略图更新 { path, thumbUrl }），返回取消监听函数
+     * @param {(payload: any) => void} listener 事件回调
+     */
     onThumbsReady: (listener) => subscribe('models:thumbsReady', listener),
-    /** 订阅后台哈希预热进度事件（快照: { active, id, percent, hashedBytes, totalBytes, done, remaining }） */
+    /** 订阅后台哈希预热进度事件（快照: { active, id, percent, hashedBytes, totalBytes, done, remaining }）
+     * @param {(payload: any) => void} listener 事件回调
+     */
     onWarmupProgress: (listener) =>
       subscribe('models:warmupProgress', listener),
-    /** 订阅目录监控停止事件（OPT-16：{ root, reason }），返回取消监听函数 */
+    /**
+     * 订阅目录监控停止事件（OPT-16：{ root, reason }），返回取消监听函数
+     * @param {(payload: any) => void} listener 事件回调
+     */
     onWatcherStopped: (listener) =>
       subscribe('models:watcherStopped', listener),
-    /** 订阅跨库传输进度事件（OPT-18：{ done, total, bytes, totalBytes, canceled? }） */
+    /**
+     * 订阅跨库传输进度事件（OPT-18：{ done, total, bytes, totalBytes, canceled? }）
+     * @param {(payload: any) => void} listener 事件回调
+     */
     onTransferProgress: (listener) =>
       subscribe('models:transferProgress', listener),
     /** 订阅模型导入进度事件（OPT-02：{ done, total, bytes, totalBytes,
-     * fileName, canceled? }） */
+     * fileName, canceled? }）
+     * @param {(payload: any) => void} listener 事件回调
+     */
     onImportProgress: (listener) =>
       subscribe('models:importProgress', listener),
-    /** 订阅右键菜单动作事件，返回取消监听函数 */
+    /**
+     * 订阅右键菜单动作事件，返回取消监听函数
+     * @param {(payload: any) => void} listener 事件回调
+     */
     onMenuAction: (listener) => subscribe('models:menuAction', listener),
-    /** 加/去 .disabled 后缀（F10），返回 { path } 或 { error } */
+    /**
+     * 加/去 .disabled 后缀（F10），返回 { path } 或 { error }
+     * @param {string} id 模型绝对路径
+     * @param {boolean} disabled 是否禁用
+     */
     toggleDisabled: (id, disabled) =>
       invokeValidated('models:toggleDisabled', { id, disabled }),
     /**
      * 库内移动模型（F11，目标目录经原生对话框选择），同名 sidecar 一并移动
      * （目标同名跳过不覆盖，失败回传警告），
      * 返回 { path, targetRelDir, sidecarWarnings } / { canceled } / { error }
+     * @param {string} id 模型绝对路径
      */
     moveModelTo: (id) => invokeValidated('models:moveModelTo', { id }),
     /**
@@ -306,6 +421,8 @@ const api = {
      * 键同步迁移，sidecar 目标同名跳过不覆盖、失败回传警告），
      * 返回 { moved, failed: [{id, error}], skipped: [{id, reason}],
      * sidecarWarnings } 或 { canceled } / { error }
+     * @param {{ moves: Array<{ id: string, subCategory: string }>,
+     *   opId?: string }} payload
      */
     organizeByTags: (payload) =>
       invokeValidated('models:organizeByTags', payload),
@@ -318,6 +435,9 @@ const api = {
      * 单模型链路不传保持原行为）
      * OP-D：force=true 绕过未收录负缓存（详情页手动识别取最新结果）；
      * 批量链路不传——已确认未收录的模型零网络快速返回（响应带 cachedMiss）
+     * @param {string} id 模型绝对路径
+     * @param {boolean} [fillMissing=false] 识别成功后顺带补全空缺字段
+     * @param {boolean} [force=false] 绕过未收录负缓存
      */
     civitaiIdentify: (id, fillMissing = false, force = false) =>
       invokeValidated('models:civitaiIdentify', {
@@ -330,23 +450,28 @@ const api = {
      * 分类标签），返回 { found: true, subCategory, meta }
      * / { found: true, unmapped: true } / { skipped: true, reason? }
      * / { found: false } / { error }
+     * @param {string} id 模型绝对路径
      */
     civitaiCategory: (id) => invokeValidated('models:civitaiCategory', { id }),
     /**
      * Civitai 一键补全（仅填充空缺的触发词/备注），返回
      * { found: true, applied: string[], meta } / { found: false } / { error }
+     * @param {string} id 模型绝对路径
      */
     civitaiComplete: (id) => invokeValidated('models:civitaiComplete', { id }),
     /**
      * 导入 Civitai 示例图为模型封面（images: [{url}]，仅限 Civitai CDN，
      * 单次上限 20 张），返回 { added, failed, cover, coverUrl, covers, meta }
      * 或 { error }
+     * @param {string} id 模型绝对路径
+     * @param {Array<{ url: string }>} images 示例图列表
      */
     civitaiImportImages: (id, images) =>
       invokeValidated('models:civitaiImportImages', { id, images }),
     /**
      * 预热模型哈希（Civitai 识别加速）：详情页打开时调用，后台计算该模型
      * 的 SHA256 并写入元数据缓存，入队即返回 { ok }，不等待计算完成
+     * @param {string} id 模型绝对路径
      */
     warmupHash: (id) => invokeValidated('models:warmupHash', { id }),
   },

@@ -41,7 +41,11 @@ export async function saveModelData(id, payload, opts = {}) {
   return true
 }
 
-/** 将封面操作结果同步到本地模型列表 */
+/**
+ * 将封面操作结果同步到本地模型列表
+ * @param {string} id 模型 id
+ * @param {Record<string, any>} res 封面操作响应
+ */
 function applyCoverResult(id, res) {
   const idx = modelIndexOf(id)
   if (idx !== undefined) {

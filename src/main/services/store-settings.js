@@ -244,7 +244,7 @@ export function getLibrarySettings() {
  * @returns {boolean} 已登记为模型库时为 true
  */
 export function isRegisteredLibrary(dir) {
-  const list = getSettings().modelsFolders || []
+  const list = /** @type {any[]} */ (getSettings().modelsFolders || [])
   const lower = String(dir).toLowerCase()
   return list.some((f) => typeof f === 'string' && f.toLowerCase() === lower)
 }

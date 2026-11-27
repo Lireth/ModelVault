@@ -19,7 +19,9 @@
  * - 释放带令牌校验：过期操作不得释放后来者的锁。
  */
 
-/** 维护类型 → 用户可读文案 */
+/** 维护类型 → 用户可读文案
+ * @type {Record<string, string>}
+ */
 const KIND_LABELS = {
   scan: '扫描中',
   'partial-scan': '扫描中',

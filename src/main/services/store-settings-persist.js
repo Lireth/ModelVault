@@ -20,7 +20,10 @@ export function getSettingsFilePath() {
   return path.join(app.getPath('userData'), SETTINGS_FILE)
 }
 
-/** 目标库目录是否可用（O5：离线库跳过库设置写入，避免重建 .modelvault） */
+/**
+ * 目标库目录是否可用（O5：离线库跳过库设置写入，避免重建 .modelvault）
+ * @param {string} dir 目标目录绝对路径
+ */
 export async function isDirectoryAvailable(dir) {
   try {
     return (await fs.stat(dir)).isDirectory()
@@ -64,6 +67,7 @@ export function setSettingsSaveDelayForTests(ms) {
  */
 /** @type {string | null} */
 let pendingBootstrapSnapshot = null
+/** @type {Array<{root: string, snapshot: string}>} */
 const pendingLibrarySaves = []
 /** @type {ReturnType<typeof setTimeout> | null} */
 let settingsSaveTimer = null
@@ -111,7 +115,10 @@ export function queueBootstrapSave(snapshot) {
 /** @type {string} 抑制中的目标库根目录（空串=未抑制） */
 let librarySaveSuppressedRoot = ''
 
-/** 目标根是否处于恢复抑制窗口 */
+/**
+ * 目标根是否处于恢复抑制窗口
+ * @param {string|null} root 目标库根目录
+ */
 function isLibrarySaveSuppressed(root) {
   return (
     librarySaveSuppressedRoot !== '' &&
@@ -171,7 +178,10 @@ function flushPendingSettingsSaves() {
   }
 }
 
-/** 写失败经监听器通知渲染进程（C7）——防抖路径无调用方等待，通知随任务挂接 */
+/**
+ * 写失败经监听器通知渲染进程（C7）——防抖路径无调用方等待，通知随任务挂接
+ * @param {Promise<unknown>} task 写盘任务
+ */
 function notifySaveFailure(task) {
   task.catch((err) => {
     notifyStoreSaveError(
@@ -180,7 +190,10 @@ function notifySaveFailure(task) {
   })
 }
 
-/** 将引导层快照排入写盘链（唯一的引导层写入通道，与库层同一串行化语义） */
+/**
+ * 将引导层快照排入写盘链（唯一的引导层写入通道，与库层同一串行化语义）
+ * @param {string} snapshot 已序列化的设置 JSON
+ */
 function enqueueBootstrapWrite(snapshot) {
   const task = bootstrapWriteChain.then(() =>
     atomicWriteFile(getSettingsFilePath(), snapshot),
@@ -189,7 +202,10 @@ function enqueueBootstrapWrite(snapshot) {
   return task
 }
 
-/** 立即写入引导层快照（加载迁移等需要等待落定的路径使用） */
+/**
+ * 立即写入引导层快照（加载迁移等需要等待落定的路径使用）
+ * @param {string} snapshot 已序列化的设置 JSON
+ */
 export function writeBootstrapNow(snapshot) {
   return enqueueBootstrapWrite(snapshot)
 }
@@ -220,7 +236,11 @@ function enqueueLibraryWrite(root, text) {
   return task
 }
 
-/** 立即写入库设置（初始化/备份恢复等需要等待落定的路径使用） */
+/**
+ * 立即写入库设置（初始化/备份恢复等需要等待落定的路径使用）
+ * @param {string} root 目标库根目录
+ * @param {string} text 已序列化的设置快照
+ */
 export function writeLibraryNow(root, text) {
   return enqueueLibraryWrite(root, text)
 }
@@ -254,7 +274,10 @@ export async function flushSettingsSave() {
  */
 let settingsFlushAwaitTimeoutMs = 5000
 
-/** 注入设置 flush 等待上限（仅供单元测试使用） */
+/**
+ * 注入设置 flush 等待上限（仅供单元测试使用）
+ * @param {number} ms 毫秒
+ */
 export function setSettingsFlushAwaitTimeoutForTests(ms) {
   settingsFlushAwaitTimeoutMs = Number.isFinite(ms) && ms >= 0 ? ms : 5000
 }

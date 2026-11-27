@@ -15,7 +15,8 @@ import {
  * 详情/确认层/设置页打开时不作用于背景项（详情内快捷键由其自身处理）。
  *
  * @param {KeyboardEvent} e keydown 事件
- * @param {{models: Array, indexById: Map<string, number>, focusModel: Function}} ctx
+ * @param {{models: Array<Record<string, any>>, indexById: Map<string, number>,
+ *   focusModel: (id: string) => void}} ctx
  *   视图上下文：当前列表、id→索引映射、按 id 聚焦函数
  * @returns {boolean} 是否已消费该事件（已 preventDefault + 触发动作）
  */
@@ -42,13 +43,19 @@ export function handleModelActionKey(e, ctx) {
 /**
  * Delete 删除焦点模型：确认后走既有删除链路（移入回收站 + 关联数据清理），
  * 成功后焦点顺延到原位置项（越界取前一项），避免焦点丢回 body 中断键盘流。
+ * @param {string} id 模型 id
+ * @param {{ models: Array<Record<string, any>>, indexById: Map<string, number>,
+ *   focusModel: (id: string) => void }} ctx 视图上下文
  */
 async function deleteFocusedModel(id, { models, indexById, focusModel }) {
   const idx = indexById.get(id)
   const m = idx !== undefined ? models[idx] : null
   if (!m) return
   // 删除前取好顺延目标：删除后列表前移，原位置即下一项
-  const nextId = models[idx + 1]?.id ?? models[idx - 1]?.id
+  // m 非 null 蕴含 idx 必然有效（idx 为 undefined 时 m 恒为 null）：cast 仅收窄类型
+  const nextId =
+    models[/** @type {number} */ (idx) + 1]?.id ??
+    models[/** @type {number} */ (idx) - 1]?.id
   if (
     !(await confirmDialog(`确定将「${m.alias || m.name}」移入系统回收站吗？`))
   )

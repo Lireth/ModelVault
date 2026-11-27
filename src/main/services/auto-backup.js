@@ -62,7 +62,10 @@ const DIR_IO_TIMEOUT_MS = 5000
 /** 目录 IO 等待上限（测试可注入；生产代码严禁调用注入器） */
 let dirIoTimeoutMs = DIR_IO_TIMEOUT_MS
 
-/** 注入目录 IO 等待上限（仅供单元测试使用） */
+/**
+ * 注入目录 IO 等待上限（仅供单元测试使用）
+ * @param {number} ms 等待上限（ms）
+ */
 export function setAutoBackupDirIoTimeoutForTests(ms) {
   dirIoTimeoutMs = Number.isFinite(ms) && ms >= 0 ? ms : DIR_IO_TIMEOUT_MS
 }
@@ -102,7 +105,10 @@ let checkTimer = null
 /** 备份在途标记（防重入） */
 let running = false
 
-/** 调度下一次检查（全局唯一；unref 不阻止进程退出） */
+/**
+ * 调度下一次检查（全局唯一；unref 不阻止进程退出）
+ * @param {number} delayMs 延迟（ms）
+ */
 function scheduleNext(delayMs) {
   if (checkTimer) clearTimeout(checkTimer)
   checkTimer = setTimeout(() => {
@@ -194,7 +200,9 @@ async function lastAutoBackupAt(dir) {
 
 /** 滚动清理超出保留数的旧备份（字典序即时间序；尽力而为）。
  * 确认损坏的包（EOCD 缺失的半截包，A4）不占保留名额，直接清除；
- * 打开失败（瞬时 IO）不作判定留待下次，避免误删有效备份。 */
+ * 打开失败（瞬时 IO）不作判定留待下次，避免误删有效备份。
+ * @param {string} dir 备份目录
+ */
 async function pruneAutoBackups(dir) {
   try {
     const names = (await fs.readdir(dir))
@@ -223,7 +231,10 @@ async function pruneAutoBackups(dir) {
   }
 }
 
-/** 清扫强退残留的 .tmp 半成品（running 互斥保证执行时无在途写入，A4） */
+/**
+ * 清扫强退残留的 .tmp 半成品（running 互斥保证执行时无在途写入，A4）
+ * @param {string} dir 备份目录
+ */
 async function sweepStaleTmp(dir) {
   try {
     for (const name of await fs.readdir(dir)) {

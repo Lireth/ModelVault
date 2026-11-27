@@ -26,7 +26,10 @@ const FAMILY_LABELS = Object.fromEntries(
   BASE_MODEL_FAMILIES.map((family) => [family.key, family.label]),
 )
 
-/** 显示名：别名优先，回退文件名 */
+/**
+ * 显示名：别名优先，回退文件名
+ * @param {Record<string, any>|null} [model] 模型对象
+ */
 function displayNameOf(model) {
   return model?.alias || model?.name || ''
 }
@@ -34,7 +37,10 @@ function displayNameOf(model) {
 /** 中文名称排序比较器（模块级复用，避免每次排序构造 Intl） */
 const zhCollator = new Intl.Collator('zh-CN')
 
-/** 模型的有效基底文本（Civitai 回填优先于空值；autoInfo 为头部解析） */
+/**
+ * 模型的有效基底文本（Civitai 回填优先于空值；autoInfo 为头部解析）
+ * @param {Record<string, any>|null} [model] 模型对象
+ */
 function baseTextOf(model) {
   return String(model?.baseModel || model?.autoInfo?.baseModel || '').trim()
 }

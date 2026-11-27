@@ -38,7 +38,11 @@ export function isAllowedExternalUrl(url) {
   }
 }
 
-/** 字节上限的人类可读文案（错误提示用） */
+/**
+ * 字节上限的人类可读文案（错误提示用）
+ * @param {number} bytes 字节数
+ * @returns {string} MB/KB 文案
+ */
 function formatByteLimit(bytes) {
   return bytes >= 1024 * 1024
     ? `${Math.floor(bytes / 1024 / 1024)}MB`

@@ -89,7 +89,10 @@ export function useVirtualScroll(opts) {
   /** @type {ResizeObserver | null} */
   let resizeObserver = null
 
-  /** 向上查找最近的滚动容器（.content-scroll，App 布局的唯一滚动区） */
+  /**
+   * 向上查找最近的滚动容器（.content-scroll，App 布局的唯一滚动区）
+   * @param {HTMLElement|null} [el] 起始元素
+   */
   function findScrollParent(el) {
     let node = el?.parentElement
     while (node) {

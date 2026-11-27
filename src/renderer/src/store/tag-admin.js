@@ -8,7 +8,10 @@ import { errorMessage } from '../../../shared/error-text'
  * 本地模型列表（元素级整体替换约定），操作即时生效无需重扫。
  */
 
-/** 标签列表规范化：大小写不敏感去重（保留首次出现的写法） */
+/**
+ * 标签列表规范化：大小写不敏感去重（保留首次出现的写法）
+ * @param {string[]} tags 标签列表
+ */
 function dedupeTags(tags) {
   const seen = new Set()
   const out = []

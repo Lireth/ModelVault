@@ -68,7 +68,13 @@ let worker = null
 let nextTaskId = 0
 const pending = new Map()
 
-/** 主线程回退路径：文本 + 可选哈希 */
+/**
+ * 主线程回退路径：文本 + 可选哈希
+ * @param {any} value 待序列化值
+ * @param {string} hashPrefix 哈希前缀
+ * @param {boolean} needHash 是否计算 SHA256
+ * @returns {{text: string, bytes: number, hash: string}}
+ */
 function serializeOnMainThread(value, hashPrefix, needHash) {
   const text = JSON.stringify(value)
   return {
@@ -83,7 +89,11 @@ function serializeOnMainThread(value, hashPrefix, needHash) {
   }
 }
 
-/** 终止 worker 并拒绝全部在途任务（调用方会回退主线程） */
+/**
+ * 终止 worker 并拒绝全部在途任务（调用方会回退主线程）
+ * @param {import('node:worker_threads').Worker} w 待终止的 worker
+ * @param {unknown} cause 失败原因
+ */
 function failWorker(w, cause) {
   if (worker !== w) return
   worker = null

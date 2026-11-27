@@ -56,7 +56,8 @@ const PROGRESS_EMIT_INTERVAL_MS = 80
  *   signal?: AbortSignal, subDirs?: string[]}} [options]
  *   额外排除的目录名（不区分大小写）、扫描的文件扩展名、取消信号；
  *   subDirs 为 A-03 子树局部扫描的相对根 POSIX 目录列表（'' 表示根直属）
- * @returns {Promise<{models: Array, errors: Array, dirCount: number,
+ * @returns {Promise<{models: Array<Record<string, any>>, errors: Array<{dir: string, message: string}>,
+ *   dirCount: number,
  *   dirSnapshot: Map<string, string[]>, dirRawNames: Map<string, string[]>,
  *   failedDirs: string[]}>}
  *   dirSnapshot 为本次实际读取目录的「目录绝对路径 → 排序条目名」快照，
@@ -79,7 +80,9 @@ export async function scanModels(root, onProgress, options = {}) {
       ? options.extensions
       : new Set(options.extensions || MODEL_EXTENSIONS)
   const signal = options.signal
+  /** @type {Array<Record<string, any>>} */
   const models = []
+  /** @type {Array<{dir: string, message: string}>} */
   const errors = []
   // OPT-02：扫描遍历顺带收集目录名快照（与 watcher 的可见性/深度规则一致），
   // 作为监控基线复用；仅保存目录名，不额外 stat 或读文件。
@@ -122,8 +125,10 @@ export async function scanModels(root, onProgress, options = {}) {
   const scoped = Array.isArray(options.subDirs) && options.subDirs.length > 0
   // B5：子树模式下读取失败（非 ENOENT）的相对目录（POSIX）——这些子树
   // 数据可能仍存在，调用方必须保留其既有模型/索引/基线而非按空目录覆盖
+  /** @type {string[]} */
   const failedDirs = []
   const rootResolved = path.resolve(root)
+  /** @type {(abs: string) => boolean} */
   const isInsideRoot = (abs) =>
     relativeWithin(path.resolve(abs), rootResolved) !== null
   const initialDirs = scoped
@@ -149,6 +154,7 @@ export async function scanModels(root, onProgress, options = {}) {
   // 作为变更子树送进局部扫描）——链接子树按空子树处理（与全量扫描口径一致：
   // junction 下没有扫描可见的模型，其路径下的旧索引残留随之移除）。
   // 库根本身（rel=''）不在此列：用户显式登记的库根语义不变
+  /** @type {Array<{dir: string, depth: number, rel: string, descend: boolean}>} */
   const queue = []
   for (const node of initialDirs) {
     if (node.rel !== '' && (await isLinkLikePath(node.dir))) continue
@@ -207,48 +213,53 @@ export async function scanModels(root, onProgress, options = {}) {
       if (unit.skippedNames?.length) {
         dirRawNames.set(unit.dir, unit.visibleNames.concat(unit.skippedNames))
       }
-      unit.fileEntries.forEach((f, index) => {
-        const { stat, err } = unit.stats[index]
-        if (err) {
-          errors.push({ dir: f.fullPath, message: err })
-          return
-        }
-        if (seenIds.has(f.fullPath)) return
-        seenIds.add(f.fullPath)
-        const ext = f.ext || path.extname(f.name).toLowerCase()
-        models.push({
-          id: f.fullPath,
-          // disabled 文件名含双重后缀（x.safetensors.disabled），一并剥离
-          name: path.basename(
-            f.name,
-            ext + (f.disabled ? DISABLED_SUFFIX : ''),
-          ),
-          ext,
-          disabled: f.disabled === true,
-          // PERF-SCAN：文件夹规则已在目录级记忆化，未命中时按文件名关键词兜底
-          type: unit.folderType || typeByFilename(f.name),
-          // 自动分类标签：按文件夹名匹配（目录级记忆化结果，装饰层与
-          // meta.subCategory 合成生效）
-          folderSubCategory: unit.folderSubCategory,
-          relDir: unit.rel,
-          // OPT-11：不再携带 folder（所在库根绝对路径）——全库同一长字符串
-          // 且可由 dirname(id) 派生，渲染层/主进程均无消费方（字段盘点确认），
-          // 万级库的 IPC 载荷/装饰缓存/本地索引各省约 1MB 纯冗余
-          size: stat.size,
-          mtimeMs: stat.mtimeMs,
-          // 添加时间（OPT-1「按添加时间」排序数据源）：随模型对象透传装饰层
-          // 与本地索引（索引保留装饰层额外字段），渲染层缺省时回退 mtimeMs
-          ctimeMs: modelAddedMs(stat),
-        })
-        // 进度合并推送（PROGRESS_EMIT_INTERVAL_MS）：文件名就地更新，
-        // 到达时间窗或扫描收尾时才构造回调载荷
-        lastProgressFile = f.relChild
-        emitProgress(false)
-      })
+      ;/** @type {Array<Record<string, any>>} */ (unit.fileEntries).forEach(
+        (f, index) => {
+          const { stat, err } = unit.stats[index]
+          if (err) {
+            errors.push({ dir: f.fullPath, message: err })
+            return
+          }
+          if (seenIds.has(f.fullPath)) return
+          seenIds.add(f.fullPath)
+          const ext = f.ext || path.extname(f.name).toLowerCase()
+          models.push({
+            id: f.fullPath,
+            // disabled 文件名含双重后缀（x.safetensors.disabled），一并剥离
+            name: path.basename(
+              f.name,
+              ext + (f.disabled ? DISABLED_SUFFIX : ''),
+            ),
+            ext,
+            disabled: f.disabled === true,
+            // PERF-SCAN：文件夹规则已在目录级记忆化，未命中时按文件名关键词兜底
+            type: unit.folderType || typeByFilename(f.name),
+            // 自动分类标签：按文件夹名匹配（目录级记忆化结果，装饰层与
+            // meta.subCategory 合成生效）
+            folderSubCategory: unit.folderSubCategory,
+            relDir: unit.rel,
+            // OPT-11：不再携带 folder（所在库根绝对路径）——全库同一长字符串
+            // 且可由 dirname(id) 派生，渲染层/主进程均无消费方（字段盘点确认），
+            // 万级库的 IPC 载荷/装饰缓存/本地索引各省约 1MB 纯冗余
+            size: stat.size,
+            mtimeMs: stat.mtimeMs,
+            // 添加时间（OPT-1「按添加时间」排序数据源）：随模型对象透传装饰层
+            // 与本地索引（索引保留装饰层额外字段），渲染层缺省时回退 mtimeMs
+            ctimeMs: modelAddedMs(stat),
+          })
+          // 进度合并推送（PROGRESS_EMIT_INTERVAL_MS）：文件名就地更新，
+          // 到达时间窗或扫描收尾时才构造回调载荷
+          lastProgressFile = f.relChild
+          emitProgress(false)
+        },
+      )
     }
   }
 
-  /** 处理单个出队目录：readdir → 分类入队子目录 → 并行 stat → 按序提交 */
+  /**
+   * 处理单个出队目录：readdir → 分类入队子目录 → 并行 stat → 按序提交
+   * @param {{dir: string, depth: number, rel: string, descend: boolean}} node 目录节点
+   */
   async function processDir(node) {
     const seq = nextSeq++
     const { dir, depth, rel, descend } = node
@@ -412,7 +423,10 @@ export async function scanModels(root, onProgress, options = {}) {
       !settled &&
       !signal?.aborted
     ) {
-      const node = queue[qi++]
+      const node =
+        /** @type {{dir: string, depth: number, rel: string, descend: boolean}} */ (
+          queue[qi++]
+        )
       active += 1
       processDir(node)
         .catch((err) => {

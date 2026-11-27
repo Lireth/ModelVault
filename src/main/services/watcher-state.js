@@ -196,7 +196,11 @@ export function notifyWatcherStopped(info) {
   }
 }
 
-/** 目录名小写集合（与 scanner 的 excludeDirs 同规则：按目录名小写匹配） */
+/**
+ * 目录名小写集合（与 scanner 的 excludeDirs 同规则：按目录名小写匹配）
+ * @param {any[]|null|undefined} names 目录名列表
+ * @returns {Set<string>} 小写名称集合
+ */
 export function toNameSet(names) {
   return new Set(
     (names || [])

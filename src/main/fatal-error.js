@@ -36,7 +36,10 @@ const RESTART_LOOP_WINDOW_MS = 60_000
 /** 熔断阈值：窗口内最多自动重启次数 */
 const MAX_AUTO_RELAUNCH_IN_WINDOW = 3
 
-/** 截取错误详情（堆栈优先），超长时截断 */
+/**
+ * 截取错误详情（堆栈优先），超长时截断
+ * @param {any} error 捕获值（Error 或任意抛出值，经可选链降级 String）
+ */
 function errorDetail(error) {
   const text = error?.stack || error?.message || String(error)
   return text.length > MAX_DETAIL_LENGTH

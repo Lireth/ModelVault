@@ -120,7 +120,8 @@ async function measureRandomReadLatency(filePath, fileSize) {
     await handle.close().catch(() => {})
   }
   samples.sort((a, b) => a - b)
-  return samples[Math.floor(samples.length / 2)]
+  // 样本数恒为 PROBE_OFFSET_RATIOS.length（≥1），中位数索引必命中（类型 cast，运行时零改动）
+  return /** @type {number} */ (samples[Math.floor(samples.length / 2)])
 }
 
 /**

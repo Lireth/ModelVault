@@ -375,7 +375,15 @@ export function registerCivitaiHandlers() {
 const HASH_COMPLETION_FLUSH_MS = 150
 const HASH_COMPLETION_MAX_BATCH = 200
 
-/** 向全部存活窗口广播预热事件 */
+/**
+ * 预热进度事件：WarmupProgress 形状；合批完成事件额外携带 completions 列表
+ * @typedef {import('../../services/hash-warmup').WarmupProgress & {completions?: Array<{id: string, hash: string}>}} WarmupProgressEvent
+ */
+
+/**
+ * 向全部存活窗口广播预热事件
+ * @param {WarmupProgressEvent} progress 进度快照
+ */
 function broadcastWarmupProgress(progress) {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
@@ -410,7 +418,10 @@ function flushWarmupCompletionBatch() {
   warmupCompletionSender.flush()
 }
 
-/** 累积一个完成项；达到阈值立即发送，否则在时间窗后合并发送 */
+/**
+ * 累积一个完成项；达到阈值立即发送，否则在时间窗后合并发送
+ * @param {WarmupProgressEvent} progress 完成事件进度快照
+ */
 function queueHashCompletion(progress) {
   warmupCompletionSender.push(progress)
 }

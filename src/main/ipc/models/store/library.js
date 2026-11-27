@@ -180,7 +180,7 @@ export function registerLibraryHandlers() {
       // V-02 切库状态机：选择阶段只把目录加入库列表（供随后的 models:scan
       // 通过白名单校验），不提前写 modelsFolder——只有扫描成功才由 scan 链路
       // 提交为激活库；扫描失败/取消时保持原激活库不变
-      const folders = getSettings().modelsFolders || []
+      const folders = /** @type {any[]} */ (getSettings().modelsFolders || [])
       const known = folders.some(
         (f) =>
           typeof f === 'string' && f.toLowerCase() === folder.toLowerCase(),

@@ -46,7 +46,10 @@ function getCacheDir() {
   return path.join(root, '.modelvault', CACHE_DIR_NAME)
 }
 
-/** 缓存文件名：URL SHA256 + 由 URL 推断的扩展名（读取方不依赖扩展名） */
+/**
+ * 缓存文件名：URL SHA256 + 由 URL 推断的扩展名（读取方不依赖扩展名）
+ * @param {string} url 远程图片 https URL
+ */
 function cacheFileName(url) {
   const hash = createHash('sha256').update(url).digest('hex')
   const m = /\.([a-z0-9]{2,5})(?:$|[?#])/i.exec(url)
@@ -54,6 +57,7 @@ function cacheFileName(url) {
 }
 
 /** 由缓存文件扩展名映射响应 Content-Type（渲染层 <img> 实际按内容嗅探） */
+/** @type {Record<string, string>} */
 const EXT_MIME = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -64,7 +68,10 @@ const EXT_MIME = {
   '.avif': 'image/avif',
 }
 
-/** 缓存条目的响应 Content-Type（未知扩展名留空，交由浏览器嗅探） */
+/**
+ * 缓存条目的响应 Content-Type（未知扩展名留空，交由浏览器嗅探）
+ * @param {string} url 远程图片 https URL
+ */
 export function civCacheContentType(url) {
   return EXT_MIME[path.extname(cacheFileName(url))] || ''
 }
@@ -120,7 +127,10 @@ export async function saveCivImageCache(url, buf) {
   pruneCivImageCache().catch(() => {})
 }
 
-/** 删除 URL 对应的缓存条目（命中校验失败时的自愈入口） */
+/**
+ * 删除 URL 对应的缓存条目（命中校验失败时的自愈入口）
+ * @param {string} url 远程图片 https URL
+ */
 export async function removeCivImageCache(url) {
   const dir = getCacheDir()
   if (!dir) return
@@ -129,7 +139,10 @@ export async function removeCivImageCache(url) {
     .catch(() => {})
 }
 
-/** 缓存条目文件路径（测试定位用）；未选择模型库时返回空串 */
+/**
+ * 缓存条目文件路径（测试定位用）；未选择模型库时返回空串
+ * @param {string} url 远程图片 https URL
+ */
 export function getCivImageCachePath(url) {
   const dir = getCacheDir()
   return dir ? path.join(dir, cacheFileName(url)) : ''

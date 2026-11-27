@@ -42,12 +42,15 @@ export function cancelTransfer() {
 
 /** 可选目标库：已保存库列表去掉当前库 */
 export const transferTargets = computed(() =>
-  (state.settings.modelsFolders || []).filter(
+  /** @type {string[]} */ (state.settings.modelsFolders || []).filter(
     (f) => typeof f === 'string' && f && f !== state.folder,
   ),
 )
 
-/** 库名显示（目录名；盘符根回退完整路径） */
+/**
+ * 库名显示（目录名；盘符根回退完整路径）
+ * @param {string} folder 库根目录绝对路径
+ */
 export function targetDisplayName(folder) {
   const norm = String(folder || '').replace(/[\\/]+$/, '')
   const base = norm.split(/[\\/]/).pop()
@@ -101,12 +104,19 @@ export async function confirmTransfer(targetRoot) {
     totalBytes: 0,
   }
   try {
-    const res = await window.api.models.transferToLibrary({
-      ids: transferState.ids,
-      targetRoot,
-      mode: transferState.mode,
-      opId,
-    })
+    const res = await window.api.models.transferToLibrary(
+      /**
+       * @type {{ ids: string[], targetRoot: string, mode: string }}
+       *   （opId 取消令牌实际透传主进程，preload 声明未记账：跨范围点位，
+       *   就地 cast 保持运行时载荷不变）
+       */
+      ({
+        ids: transferState.ids,
+        targetRoot,
+        mode: transferState.mode,
+        opId,
+      }),
+    )
     if (res?.error) {
       toast('error', res.error)
       return

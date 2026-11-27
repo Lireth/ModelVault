@@ -43,7 +43,21 @@ const INDEX_UPDATE_MAX_WAIT_MS = 3000
 /** 每库最近一次成功写入的内容指纹与文件大小（键为根目录小写） */
 const lastWrittenHash = new Map()
 const lastWrittenSize = new Map()
+/**
+ * 局部索引更新合并队列条目（键为根目录小写）。
+ * @typedef {{
+ *   root: string,
+ *   upserts: Map<string, object>,
+ *   removeIds: Set<string>,
+ *   affectedDirs: Set<string>|null,
+ *   excludeDirs: Set<string>|null,
+ *   timer: ReturnType<typeof setTimeout>|null,
+ *   firstQueuedAt: number
+ * }} IndexUpdateEntry
+ */
+
 /** 每库待合并的局部索引更新 */
+/** @type {Map<string, IndexUpdateEntry>} */
 const pendingIndexUpdates = new Map()
 /** 合并窗口（测试可注入小值） */
 let indexUpdateDebounceMs = INDEX_UPDATE_DEBOUNCE_MS
@@ -92,7 +106,12 @@ export function flushIndexWrites() {
   return indexChain
 }
 
-/** 从模型 id 推导库内相对目录（POSIX；旧索引缺 relDir 时兜底） */
+/**
+ * 从模型 id 推导库内相对目录（POSIX；旧索引缺 relDir 时兜底）
+ * @param {string} root 模型库根目录
+ * @param {string} id 模型绝对路径（模型 id）
+ * @returns {string} 库内相对目录（越界/同级时为 ''）
+ */
 function relDirFromId(root, id) {
   const rel = path.relative(root, id)
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return ''
@@ -100,7 +119,11 @@ function relDirFromId(root, id) {
   return dir === '.' ? '' : dir.split(path.sep).join('/')
 }
 
-/** 记录结构的最低可信校验（保留装饰层额外字段） */
+/**
+ * 记录结构的最低可信校验（保留装饰层额外字段）
+ * @param {any} record 索引中的模型记录
+ * @returns {boolean}
+ */
 function isUsableModel(record) {
   return (
     record &&
@@ -342,7 +365,10 @@ export function queueLibraryIndexUpdate(root, payload = {}) {
   return true
 }
 
-/** 将合并队列条目转换为 updateLibraryIndex 载荷 */
+/**
+ * 将合并队列条目转换为 updateLibraryIndex 载荷
+ * @param {IndexUpdateEntry} entry 合并队列条目
+ */
 function payloadFromEntry(entry) {
   return {
     upsertModels: [...entry.upserts.values()],
@@ -352,7 +378,10 @@ function payloadFromEntry(entry) {
   }
 }
 
-/** 强制 worker 序列化路径（仅供单元测试使用；0 表示所有写入走 worker） */
+/**
+ * 强制 worker 序列化路径（仅供单元测试使用；0 表示所有写入走 worker）
+ * @param {number} count 阈值
+ */
 export function setIndexWorkerThresholdForTests(count) {
   indexWorkerThreshold =
     Number.isFinite(count) && count >= 0 ? count : INDEX_WORKER_THRESHOLD

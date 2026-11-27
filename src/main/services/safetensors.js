@@ -26,6 +26,7 @@ const BIG_HEADER_CONCURRENCY = 4
 let bigHeaderThreshold = BIG_HEADER_THRESHOLD
 let bigHeaderConcurrency = BIG_HEADER_CONCURRENCY
 let bigHeaderActive = 0
+/** @type {Array<(value?: any) => void>} */
 const bigHeaderWaiters = []
 
 /**
@@ -87,7 +88,9 @@ async function runWithHeaderGate(headerLen, task) {
 /** 触发词候选默认提取数量（按训练集出现频次降序） */
 const TAG_CANDIDATES_LIMIT = 15
 
-/** 各 dtype 的单元素字节数（safetensors 规范类型；未知类型按 0 计） */
+/** 各 dtype 的单元素字节数（safetensors 规范类型；未知类型按 0 计）
+ * @type {Record<string, number>}
+ */
 const DTYPE_BYTES = {
   F64: 8,
   I64: 8,
@@ -187,6 +190,7 @@ export function extractTagCandidates(raw, limit = TAG_CANDIDATES_LIMIT) {
  */
 export function extractSafetensorsInfo(metadata) {
   if (!metadata || typeof metadata !== 'object') return null
+  /** @type {(v: unknown) => string} */
   const str = (v) => (typeof v === 'string' ? v.trim() : '')
   const res = parseResolution(str(metadata.ss_resolution))
   const alpha = parseFloat(str(metadata.ss_network_alpha))
@@ -280,7 +284,11 @@ function inferArchitecture(keys) {
   return ''
 }
 
-/** 组件字节分类前缀（顺序敏感：textEncoder 先判，lora_vae 兜底归 vae） */
+/**
+ * 组件字节分类前缀（顺序敏感：textEncoder 先判，lora_vae 兜底归 vae）
+ * @param {string} key 张量键名
+ * @returns {'textEncoder'|'vae'|'unet'|''} 组件名；未分类返回 ''
+ */
 function classifyTensorKey(key) {
   if (
     key.startsWith('conditioner.') ||
@@ -359,7 +367,9 @@ export function analyzeTensorIndex(header) {
   const componentRatios = { textEncoder: 0, unet: 0, vae: 0 }
   if (classified > 0) {
     for (const k of Object.keys(componentRatios)) {
-      componentRatios[k] = componentBytes[k] / classified
+      componentRatios[/** @type {keyof typeof componentRatios} */ (k)] =
+        componentBytes[/** @type {keyof typeof componentBytes} */ (k)] /
+        classified
     }
   }
   const dtypes = [...dtypeParams.entries()]

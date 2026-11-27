@@ -25,8 +25,13 @@ import { errorCode, errorMessage } from '../../shared/error-text'
  */
 
 /** @typedef {import('./watcher-state').WatcherState} WatcherState */
+/** @typedef {import('./watcher-snapshot').SnapshotEntry} SnapshotEntry */
 
-/** 向所有窗口广播目录变更 */
+/**
+ * 向所有窗口广播目录变更
+ * @param {string} root 监控根目录
+ * @param {string[]} [dirs] 变更子树（POSIX 相对路径）
+ */
 function broadcast(root, dirs = []) {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
@@ -97,17 +102,26 @@ async function refreshSnapshotScopes(w, relDirs, unlocated = false) {
       if (rel === '') {
         // 无法定位子树（filename 缺失等）：按全根刷新，后续轮询以本次为基线；
         // unlocated 时 withStats=false，内容基线在此置空（交给内容校验轮重建）
-        w.snapshot = withStats ? namesFromSnapshot(snapshot) : snapshot
-        w.statSnapshot = withStats ? snapshot : null
+        w.snapshot = withStats
+          ? namesFromSnapshot(
+              /** @type {Map<string, SnapshotEntry[]>} */ (snapshot),
+            )
+          : /** @type {Map<string, string[]>} */ (snapshot)
+        w.statSnapshot = withStats
+          ? /** @type {Map<string, SnapshotEntry[]>} */ (snapshot)
+          : null
         continue
       }
       removeSnapshotSubtree(w, abs)
       for (const [dir, names] of snapshot) {
         w.snapshot.set(
           dir,
-          withStats ? names.map((entry) => entry.name) : names,
+          withStats
+            ? /** @type {SnapshotEntry[]} */ (names).map((entry) => entry.name)
+            : /** @type {string[]} */ (names),
         )
-        if (withStats && w.statSnapshot) w.statSnapshot.set(dir, names)
+        if (withStats && w.statSnapshot)
+          w.statSnapshot.set(dir, /** @type {SnapshotEntry[]} */ (names))
       }
     }
   } catch (err) {
@@ -188,13 +202,19 @@ async function deliverBroadcast(w, nativeDirs, confirmedDirs, needsRefresh) {
   broadcast(w.root, dirs)
 }
 
-/** 串行消费广播队列：同一 watcher 同一时刻只交付一轮，避免回填交叉 */
+/**
+ * 串行消费广播队列：同一 watcher 同一时刻只交付一轮，避免回填交叉
+ * @param {WatcherState} w 监控状态
+ */
 async function pumpDeliverQueue(w) {
   if (w.delivering) return
   w.delivering = true
   try {
     while (w === getWatcher() && w.deliverQueue.length > 0) {
-      const entry = w.deliverQueue.shift()
+      // 循环条件保证非空，shift 断言仅满足 strictNullChecks（与轮询链同款）
+      const entry = /** @type {import('./watcher-state').DeliverQueueEntry} */ (
+        w.deliverQueue.shift()
+      )
       try {
         await deliverBroadcast(
           w,
@@ -212,7 +232,10 @@ async function pumpDeliverQueue(w) {
   }
 }
 
-/** 安排防抖广播定时器（扫描期/已有定时器时不重复安排） */
+/**
+ * 安排防抖广播定时器（扫描期/已有定时器时不重复安排）
+ * @param {WatcherState} w 监控状态
+ */
 export function scheduleBroadcastTimer(w) {
   if (w !== getWatcher() || w.scanning || w.debounceTimer) return
   w.debounceTimer = setTimeout(() => {

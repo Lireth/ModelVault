@@ -25,7 +25,11 @@ export function parseWaitForPid(argv) {
   return 0
 }
 
-/** 进程是否仍存活（EPERM 视为存活：存在但无权限） */
+/**
+ * 进程是否仍存活（EPERM 视为存活：存在但无权限）
+ * @param {number} pid 进程 id
+ * @returns {boolean}
+ */
 function isProcessAlive(pid) {
   try {
     process.kill(pid, 0)

@@ -106,6 +106,10 @@ export function setCivitaiApiInterval(ms) {
     Number.isFinite(ms) && ms >= 0 ? ms : CIVITAI_API_MIN_INTERVAL_MS
 }
 
+/**
+ * @param {number} ms 毫秒
+ * @returns {Promise<void>}
+ */
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -235,6 +239,7 @@ export function isAllowedCivitaiImageUrl(url) {
 }
 
 /** 下载响应的 Content-Type → 封面文件扩展名 */
+/** @type {Record<string, string>} */
 const MIME_EXT = {
   'image/jpeg': '.jpg',
   'image/png': '.png',
@@ -476,13 +481,14 @@ export async function fetchCivitaiModelType(modelId) {
   }
   const tags = Array.isArray(raw.tags)
     ? raw.tags
-        .filter((t) => typeof t === 'string' && t.trim())
-        .map((t) => t.trim())
+        .filter((/** @type {any} */ t) => typeof t === 'string' && t.trim())
+        .map((/** @type {any} */ t) => t.trim())
     : []
   return { found: true, type: raw.type.trim(), tags }
 }
 
 /** stripHtml 单次解码的常见实体表（命名 + 数字引用，键为原文形态） */
+/** @type {Record<string, string>} */
 const HTML_TEXT_ENTITIES = {
   '&amp;': '&',
   '&lt;': '<',
@@ -603,6 +609,7 @@ const RANGE_HEADER_RE = /^bytes=\d{0,16}-\d{0,16}$/
  * @returns {Promise<Response>}
  */
 export async function fetchCivitaiVideo(url, range = '') {
+  /** @type {Record<string, string>} */
   const headers = {
     Accept: 'video/mp4,video/webm,video/*;q=0.9,*/*;q=0.5',
     Referer: 'https://civitai.red/',

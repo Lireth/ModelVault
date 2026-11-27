@@ -69,7 +69,10 @@ export function compareVersions(a, b) {
   return 0
 }
 
-/** 更新检查请求选项（UA 标识 + GitHub API Accept；超时统一 15s） */
+/**
+ * 更新检查请求选项（UA 标识 + GitHub API Accept；超时统一 15s）
+ * @param {string} current 当前版本号
+ */
 function updateRequestOptions(current) {
   return {
     headers: {
@@ -258,7 +261,10 @@ export async function runStartupUpdateCheck(settings, check, notify) {
   return true
 }
 
-/** 向所有窗口广播「发现新版本」（app:updateAvailable 事件） */
+/**
+ * 向所有窗口广播「发现新版本」（app:updateAvailable 事件）
+ * @param {Record<string, any>} payload 版本信息载荷
+ */
 function broadcastUpdateAvailable(payload) {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {

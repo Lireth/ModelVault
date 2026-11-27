@@ -56,7 +56,10 @@ export function useDialogFocus({ isOpen, trap = true } = {}) {
     restoreFocusEl = null
   }
 
-  /** Tab 焦点陷阱：Tab 不穿透容器边界，在容器内首末循环 */
+  /**
+   * Tab 焦点陷阱：Tab 不穿透容器边界，在容器内首末循环
+   * @param {KeyboardEvent} e keydown 事件
+   */
   function onContainerKeydown(e) {
     if (!trap || e.key !== 'Tab') return
     const items = focusablesInContainer()

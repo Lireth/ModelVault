@@ -44,14 +44,20 @@ function addedMsOf(m) {
   return Number.isFinite(m.ctimeMs) && m.ctimeMs > 0 ? m.ctimeMs : m.mtimeMs
 }
 
-/** 最近打开时间（epoch ms）：缺失/非法/从未打开统一为 0 */
+/**
+ * 最近打开时间（epoch ms）：缺失/非法/从未打开统一为 0
+ * @param {Record<string, any>} m 模型对象
+ */
 function lastOpenedAtOf(m) {
   return Number.isFinite(m.lastOpenedAt) && m.lastOpenedAt > 0
     ? m.lastOpenedAt
     : 0
 }
 
-/** 累计打开次数：缺失/非法/负数统一为 0 */
+/**
+ * 累计打开次数：缺失/非法/负数统一为 0
+ * @param {Record<string, any>} m 模型对象
+ */
 function openCountOf(m) {
   return Number.isInteger(m.openCount) && m.openCount > 0 ? m.openCount : 0
 }
@@ -109,7 +115,10 @@ function searchParts(m) {
   return parts
 }
 
-/** 构建并缓存模型的合并小写搜索域 */
+/**
+ * 构建并缓存模型的合并小写搜索域
+ * @param {Record<string, any>} m 模型对象
+ */
 function searchHaystack(m) {
   let hay = searchHaystackCache.get(m)
   if (hay !== undefined) return hay
@@ -379,7 +388,10 @@ export const duplicateGroups = computed(() => {
   const visibleIds = new Set(visibleModels.value.map((m) => m.id))
   const groups = []
   for (const group of allDuplicateGroups.value) {
-    const models = group.models.filter((m) => visibleIds.has(m.id))
+    const models = group.models.filter(
+      /** @param {Record<string, any>} m */
+      (m) => visibleIds.has(m.id),
+    )
     if (models.length > 1) {
       groups.push({
         hash: group.hash,
@@ -444,7 +456,9 @@ const filteredUnsorted = computed(() => {
   const dupes = showDuplicatesOnly ? duplicateIdSet.value : null
   // F4 dup: 解析器：仅当查询含 dup token 时才读取重复集合；闭包在循环外
   // 复用，避免结构化搜索时逐模型分配函数
-  const isDuplicate = (model) => duplicateIdSet.value.has(model.id)
+  const isDuplicate =
+    /** @param {Record<string, any>} model */
+    (model) => duplicateIdSet.value.has(model.id)
   const list = []
   // 隐藏 NSFW 模型（设置开关）：统一从 visibleModels 取数（标注覆盖层与
   // 模型自带标记均经 effectiveNsfw 计入）；关闭路径直接复用 state.models
@@ -700,7 +714,9 @@ export const filteredModels = computed(() => {
   }
   // 物化：内层结果被 computed 缓存复用，不得原位变异
   const list = new Array(order.length)
-  for (let i = 0; i < order.length; i++) list[i] = src[order[i]]
+  // order 为 0..n-1 的排列且 i < order.length：order[i] 必然有效，cast 仅收窄类型
+  for (let i = 0; i < order.length; i++)
+    list[i] = src[/** @type {number} */ (order[i])]
   return list
 })
 
@@ -762,6 +778,7 @@ export const visibleTags = computed(() =>
  * 范围一致。收藏/搜索条件不参与（切分类时计数保持稳定，避免数字闪烁）。
  */
 export const typeCounts = computed(() => {
+  /** @type {{ all: number } & Record<string, number>} */
   const counts = { all: 0 }
   for (const m of visibleModels.value) {
     counts.all += 1

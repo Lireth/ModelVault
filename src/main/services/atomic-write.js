@@ -26,6 +26,8 @@ const RENAME_MAX_ATTEMPTS = 5
  * 后到达的 MoveFileExW 替换会确定性失败于 EPERM，短暂退避后重试
  * 待前一路 rename 释放目标即可成功。
  * 供 atomicWriteFile 与 auto-backup（A4 zip 原子落点）共享。
+ * @param {string} tmp 临时文件绝对路径
+ * @param {string} file 目标文件绝对路径
  */
 export async function renameReplacing(tmp, file) {
   for (let attempt = 1; ; attempt++) {
@@ -48,6 +50,11 @@ export async function renameReplacing(tmp, file) {
   }
 }
 
+/**
+ * @param {string} file 目标文件绝对路径
+ * @param {string} content 待写入内容
+ * @param {{createDirs?: boolean}} [options] createDirs=false 时要求目标目录已存在
+ */
 export async function atomicWriteFile(
   file,
   content,

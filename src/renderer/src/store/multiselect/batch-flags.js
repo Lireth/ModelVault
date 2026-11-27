@@ -91,17 +91,26 @@ async function batchApplyFlags(patch, label) {
   }
 }
 
-/** 批量收藏/取消收藏 */
+/**
+ * 批量收藏/取消收藏
+ * @param {boolean} favorite 目标收藏态
+ */
 export function batchFavorite(favorite) {
   return batchApplyFlags({ favorite }, favorite ? '收藏' : '取消收藏')
 }
 
-/** 批量设置 NSFW 标记 */
+/**
+ * 批量设置 NSFW 标记
+ * @param {boolean} nsfw 目标 NSFW 标记
+ */
 export function batchNsfw(nsfw) {
   return batchApplyFlags({ nsfw }, nsfw ? '标记 NSFW' : '取消 NSFW')
 }
 
-/** 批量评分 */
+/**
+ * 批量评分
+ * @param {number} rating 评分（0-5）
+ */
 export function batchRating(rating) {
   return batchApplyFlags({ rating }, `评分 ${rating} 星`)
 }

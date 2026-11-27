@@ -48,7 +48,10 @@ const SNAPSHOT_WORKER_THRESHOLD = 2000
 /** 快照 worker 阈值（测试可注入 0 强制走 worker） */
 let snapshotWorkerThreshold = SNAPSHOT_WORKER_THRESHOLD
 
-/** 注入快照 worker 阈值（仅供单元测试使用；生产代码严禁调用） */
+/**
+ * 注入快照 worker 阈值（仅供单元测试使用；生产代码严禁调用）
+ * @param {number} count 模型数阈值
+ */
 export function setSnapshotWorkerThresholdForTests(count) {
   snapshotWorkerThreshold =
     Number.isFinite(count) && count >= 0 ? count : SNAPSHOT_WORKER_THRESHOLD
@@ -74,7 +77,10 @@ const SAVE_RETRY_MAX_FAILURES = 6
 /** 重试基准间隔（测试可注入缩小；生产代码严禁调用注入器） */
 let saveRetryBaseMs = SAVE_RETRY_BASE_MS
 
-/** 注入写盘异常重试的基准间隔（指数退避由此起算；仅供单元测试使用） */
+/**
+ * 注入写盘异常重试的基准间隔（指数退避由此起算；仅供单元测试使用）
+ * @param {number} ms 毫秒
+ */
 export function setSaveRetryDelayForTests(ms) {
   saveRetryBaseMs = Number.isFinite(ms) && ms >= 0 ? ms : SAVE_RETRY_BASE_MS
 }
@@ -455,7 +461,10 @@ export const FLUSH_AWAIT_TIMEOUT_MS = 5000
 /** flush 等待上限（测试可注入；生产代码严禁调用注入器） */
 let flushAwaitTimeoutMs = FLUSH_AWAIT_TIMEOUT_MS
 
-/** 注入 flush 等待上限（仅供单元测试使用） */
+/**
+ * 注入 flush 等待上限（仅供单元测试使用）
+ * @param {number} ms 毫秒
+ */
 export function setFlushAwaitTimeoutForTests(ms) {
   flushAwaitTimeoutMs =
     Number.isFinite(ms) && ms >= 0 ? ms : FLUSH_AWAIT_TIMEOUT_MS
