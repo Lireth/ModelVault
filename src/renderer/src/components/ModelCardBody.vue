@@ -81,8 +81,10 @@ function onToggleFavorite() {
       <span v-if="state.settings.showSize">{{ formatSize(model.size) }}</span>
       <span v-if="state.settings.showMtime">{{ mtimeText }}</span>
     </div>
-    <!-- 自由标签角标（F-5）：最多展示 3 个，溢出计数收尾 -->
-    <div v-if="cardTags.length" class="tag-row">
+    <!-- 自由标签角标（F-5）：最多展示 3 个，溢出计数收尾。P0-4：始终渲染
+         且单行钳制——卡片高度成为列宽与展示设置的纯函数，虚拟网格按此
+         预测行距，滚动揭示的多标签卡片不再与下一行重叠（#57 根治） -->
+    <div class="tag-row">
       <span v-for="t in cardTags" :key="t" class="card-tag">{{ t }}</span>
       <span
         v-if="(model.tags || []).length > cardTags.length"
@@ -181,15 +183,26 @@ function onToggleFavorite() {
   opacity: 0.7;
 }
 
-/* 自由标签角标（F-5）：小型胶囊，视觉弱于分类标签 */
+/* 自由标签角标（F-5）：小型胶囊，视觉弱于分类标签。
+   P0-4 行高钳制：固定单行高度（18px = 芯片 line-height 16px + 上下
+   padding 1px）+ 始终渲染（无标签卡片占同等高度）+ nowrap——超出行宽
+   的芯片按 flex 收缩为省略号（芯片自身已有 ellipsis），不再换行；
+   卡片高度因此成为「列宽 + 展示设置」的纯函数，未渲染卡片的高度
+   不再随自由标签行数漂移（虚拟网格行重叠 #57 的根治） */
 .tag-row {
+  height: 18px;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 4px;
+  overflow: hidden;
 }
 
 .card-tag {
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: 10px;
+  line-height: 16px;
   padding: 1px 8px;
   border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
