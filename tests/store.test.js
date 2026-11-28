@@ -897,6 +897,51 @@ describe('O5 增量落盘与快照合并', () => {
       fs.access(path.join(journalDir(), 'delta-2000000001.json')),
     ).rejects.toThrow()
   })
+
+  it('空批次收尾不清目录探测 await 间隙新登记的脏键（#154）', async () => {
+    const abs = await touchModel('delta-empty.safetensors')
+    const key = path.relative(root, abs).split(path.sep).join('/')
+    await saveStoreNow() // 建立基线快照，使下一次保存走增量日志分支
+
+    // 直接注入不可写键构造「全批命中 isUnsafeModelKey 过滤 → 空 entries」
+    // 批次（data 键恒为安全键，正常写入流程不会自然产生该批次）
+    metaState.dirtyKeys.add('__proto__')
+
+    // 门控 ensureDataDir 的目录探测：在 await 间隙登记新变更
+    const realMkdir = fs.mkdir.bind(fs)
+    let releaseMkdir = () => {}
+    const gate = new Promise((resolve) => {
+      releaseMkdir = resolve
+    })
+    let gated = false
+    const mkdirSpy = vi
+      .spyOn(fs, 'mkdir')
+      .mockImplementation(async (p, opts) => {
+        if (!gated && String(p).endsWith('.modelvault')) {
+          gated = true
+          await gate
+        }
+        return realMkdir(p, opts)
+      })
+
+    try {
+      const save = saveStoreDeltaNow()
+      await vi.waitFor(() => expect(gated).toBe(true))
+      // await 间隙的并发变更：正常标记脏键并调度防抖
+      setModelMeta(abs, { note: '间隙内的新变更' })
+      releaseMkdir()
+      await save
+
+      // 未修复时空批次收尾会无条件清空 dirtyKeys，间隙内登记的键被抹掉、
+      // 变更永不落盘；守卫后必须保留，由后续落盘轮次持久化
+      expect(metaState.dirtyKeys.has(key)).toBe(true)
+      await flushStoreSave()
+      const disk = JSON.parse(await fs.readFile(storeFile(), 'utf-8'))
+      expect(disk.models[key].note).toBe('间隙内的新变更')
+    } finally {
+      mkdirSpy.mockRestore()
+    }
+  })
 })
 
 describe('reloadCurrentRootData（备份恢复到当前根后的内存重载，B1）', () => {

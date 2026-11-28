@@ -303,6 +303,10 @@ async function writeSnapshot(rootAtStart) {
 async function writeDeltaJournal(keys, rootAtStart) {
   // 调用方 runSave 已校验内存数据存在；防御性早退与 runSave 同一口径
   if (!metaState.data) return false
+  // 版本快照与 writeSnapshot 同一口径（#154）：ensureDataDir 的 await 期间
+  // 可能有新脏键登记，空批次收尾不得无条件清空 dirtyKeys（否则对应变更
+  // 永不落盘，重载/重启即丢失）
+  const versionAtWrite = metaState.mutationVersion
   if (!(await ensureDataDir())) return false
   const seq = metaState.journalSeq + 1
   const entries = []
@@ -315,7 +319,12 @@ async function writeDeltaJournal(keys, rootAtStart) {
     entries.push(meta ? { op: 'set', key, meta } : { op: 'del', key })
   }
   if (entries.length === 0) {
-    metaState.dirtyKeys.clear()
+    // 全批命中 isUnsafeModelKey 过滤：无可写条目。仅当目录探测等待期间无
+    // 新变更时才清空脏键（与 writeSnapshot 收尾同一守卫口径，#154）——
+    // await 间隙登记的新脏键必须保留，由后续落盘轮次持久化
+    if (metaState.mutationVersion === versionAtWrite) {
+      metaState.dirtyKeys.clear()
+    }
     return true
   }
   const journalDir = getJournalDir()
