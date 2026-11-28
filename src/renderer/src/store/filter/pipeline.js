@@ -187,11 +187,40 @@ export const filteredModels = computed(() => {
   return list
 })
 
-// 切换主分类时清空 LoRA 子分类与基底模型筛选，避免残留条件
+/**
+ * 主分类联动挂起标志（P0-2）：程序化整批写入筛选字段期间挂起「切换主分类
+ * 清空 sub/base」联动——写入方自行负责全部字段的完整赋值。watcher 为
+ * sync flush（联动与变更同帧完成），同步标志的置位/复位因此严格覆盖
+ * 突变窗口，不依赖任何调度时序。
+ */
+let typeLinkageSuppressed = false
+
+/**
+ * 在挂起主分类联动的前提下整批应用筛选字段（P0-2 显式契约）：
+ * 供智能视图恢复（saved-views）与基底兼容性一键筛选（compatibility）等
+ * 程序化写入方使用——旧实现各自 `await nextTick()` 等待异步 watcher
+ * 落定后再回填 sub/base，属跨模块调度契约，watcher flush 时机变化即
+ * 静默抹掉刚写入的子分类/基底筛选。
+ * @param {() => void} apply 同步写入 state 筛选字段的函数
+ */
+export function applyFiltersWithoutTypeLinkage(apply) {
+  typeLinkageSuppressed = true
+  try {
+    apply()
+  } finally {
+    typeLinkageSuppressed = false
+  }
+}
+
+// 切换主分类时清空 LoRA 子分类与基底模型筛选，避免残留条件。
+// sync flush：联动与变更同帧完成，无调度时序契约；程序化整批写入
+// 经 applyFiltersWithoutTypeLinkage 显式豁免（P0-2）
 watch(
   () => state.typeFilter,
   () => {
+    if (typeLinkageSuppressed) return
     state.subFilter = ''
     state.baseFilter = ''
   },
+  { flush: 'sync' },
 )

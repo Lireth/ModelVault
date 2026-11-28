@@ -5,7 +5,10 @@ import {
   setMetaOverride,
 } from '../src/renderer/src/store/state'
 import { ensurePinyinEngine } from '../src/renderer/src/store/pinyin'
-import { prebuildPinyinSearchIndex } from '../src/renderer/src/store/filter'
+import {
+  applyFiltersWithoutTypeLinkage,
+  prebuildPinyinSearchIndex,
+} from '../src/renderer/src/store/filter'
 import {
   makeApiMock,
   resetStoreTestState,
@@ -91,6 +94,24 @@ describe('筛选与排序（filteredModels）', () => {
     expect(filteredModels.value.map((m) => m.id)).toEqual(['a'])
     state.typeFilter = 'all'
     expect(filteredModels.value).toHaveLength(3)
+  })
+
+  it('程序化整批写入豁免主分类联动，普通切换仍清空 sub/base（P0-2）', () => {
+    // 豁免路径：智能视图恢复/兼容性一键筛选的程序化写入自带完整字段赋值，
+    // typeFilter 与 sub/base 同帧写入不被联动清空（旧实现靠 nextTick 对抗
+    // 异步 watcher，flush 时机变化即静默抹掉）
+    applyFiltersWithoutTypeLinkage(() => {
+      state.typeFilter = 'lora'
+      state.subFilter = 'role'
+      state.baseFilter = 'pony'
+    })
+    expect(state.typeFilter).toBe('lora')
+    expect(state.subFilter).toBe('role')
+    expect(state.baseFilter).toBe('pony')
+    // 普通路径：用户切换主分类仍清空残留子/基底筛选（sync 联动同帧生效）
+    state.typeFilter = 'all'
+    expect(state.subFilter).toBe('')
+    expect(state.baseFilter).toBe('')
   })
 
   it('搜索覆盖名称/备注名/备注/触发词/分类中文标签', () => {

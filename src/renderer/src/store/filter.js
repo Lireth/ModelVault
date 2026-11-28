@@ -18,5 +18,8 @@ export {
   duplicateWastedBytes,
   allDuplicateWastedBytes,
 } from './filter/visibility'
-export { filteredModels } from './filter/pipeline'
+export {
+  filteredModels,
+  applyFiltersWithoutTypeLinkage,
+} from './filter/pipeline'
 export { tagCounts, allTags, visibleTags, typeCounts } from './filter/tags'

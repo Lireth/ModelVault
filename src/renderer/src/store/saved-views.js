@@ -1,4 +1,4 @@
-import { computed, nextTick } from 'vue'
+import { computed } from 'vue'
 import {
   SORT_OPTIONS,
   sortDirectional,
@@ -8,6 +8,7 @@ import {
 } from './state'
 import { BASE_FAMILIES } from '../../../shared/model-categories'
 import { MAX_SAVED_VIEW_NAME, MAX_SAVED_VIEWS } from '../../../shared/app-enums'
+import { applyFiltersWithoutTypeLinkage } from './filter'
 import { saveSettings } from './library'
 import { confirmDialog, toast } from './toast'
 
@@ -172,22 +173,23 @@ export async function saveCurrentAsView(name) {
 export async function applySavedView(id) {
   const v = savedViews.value.find((x) => x.id === id)
   if (!v) return
-  state.search = v.search
-  state.showFavoritesOnly = v.showFavoritesOnly === true
-  // 旧视图缺省该字段时回退 false（=== true 规避 undefined）
-  state.showDuplicatesOnly = v.showDuplicatesOnly === true
-  state.showSuspectOnly = v.showSuspectOnly === true
-  state.sortBy = v.sortBy
-  state.sortAsc = v.sortAsc
-  // typeFilter 变更会触发 filter.js 的 watcher 清空 subFilter/baseFilter
-  // （flush 在微任务）：先切主分类并等该 watcher 落定，再恢复视图携带的
-  // 子分类与基底筛选；tagFilters 为跨类型维度，不经该 watcher
-  state.typeFilter = v.typeFilter
-  await nextTick()
-  state.subFilter = v.subFilter
-  state.baseFilter = v.baseFilter || ''
-  // FEAT-01：旧视图的单标签字段在读取时迁移为数组
-  state.tagFilters = viewTagFilters(v)
+  // P0-2：整批写入筛选字段并显式豁免「切主分类清空 sub/base」联动——
+  // 旧实现先切主分类再 await nextTick 等异步 watcher 落定后回填，
+  // 属跨模块调度契约（watcher flush 时机变化即静默抹掉视图子筛选）
+  applyFiltersWithoutTypeLinkage(() => {
+    state.search = v.search
+    state.showFavoritesOnly = v.showFavoritesOnly === true
+    // 旧视图缺省该字段时回退 false（=== true 规避 undefined）
+    state.showDuplicatesOnly = v.showDuplicatesOnly === true
+    state.showSuspectOnly = v.showSuspectOnly === true
+    state.sortBy = v.sortBy
+    state.sortAsc = v.sortAsc
+    state.typeFilter = v.typeFilter
+    state.subFilter = v.subFilter
+    state.baseFilter = v.baseFilter || ''
+    // FEAT-01：旧视图的单标签字段在读取时迁移为数组
+    state.tagFilters = viewTagFilters(v)
+  })
   await saveSettings({ sortBy: v.sortBy, sortAsc: v.sortAsc })
 }
 

@@ -1,6 +1,6 @@
-import { computed, nextTick } from 'vue'
+import { computed } from 'vue'
 import { BASE_MODEL_FAMILIES, state } from './state'
-import { visibleModels } from './filter'
+import { applyFiltersWithoutTypeLinkage, visibleModels } from './filter'
 import { closeDetail, selectedModel } from './detail'
 import { toast } from './toast'
 import { normalizeBaseModel } from '../../../shared/model-categories'
@@ -158,17 +158,19 @@ export async function filterCompatibleModels() {
   await closeDetail()
   // 脏表单确认被取消：详情仍打开，保持原筛选不动
   if (state.selectedId) return false
-  state.typeFilter = info.counterpartType
-  // filter.js 的 typeFilter watcher 会清空 subFilter/baseFilter；等它落定后
-  // 再写入基底家族，避免刚设置的 baseFilter 被异步 watcher 抹掉
-  await nextTick()
-  state.subFilter = ''
-  state.baseFilter = info.family
-  state.tagFilters = []
-  state.showFavoritesOnly = false
-  state.showDuplicatesOnly = false
-  state.showSuspectOnly = false
-  state.search = ''
+  // P0-2：整批写入兼容性筛选并显式豁免「切主分类清空 sub/base」联动——
+  // 旧实现 await nextTick 等异步 watcher 落定后再写入基底家族，
+  // 属跨模块调度契约（watcher flush 时机变化即抹掉刚设置的 baseFilter）
+  applyFiltersWithoutTypeLinkage(() => {
+    state.typeFilter = info.counterpartType
+    state.subFilter = ''
+    state.baseFilter = info.family
+    state.tagFilters = []
+    state.showFavoritesOnly = false
+    state.showDuplicatesOnly = false
+    state.showSuspectOnly = false
+    state.search = ''
+  })
   toast(
     'info',
     `已筛选 ${info.familyLabel} 的${info.counterpartLabel}（${info.total} 个）`,
