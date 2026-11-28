@@ -3,6 +3,7 @@ import logger from '../../logger'
 import { sameResolvedPathIgnoreCase } from '../../utils'
 import { exportBackup, importBackup } from '../../services/backup'
 import {
+  endRootReloadWindow,
   getCurrentRoot,
   reloadCurrentRootData,
   reloadLibrarySettings,
@@ -51,44 +52,52 @@ export function registerBackupHandlers() {
   wrapHandler(
     'models:importBackup',
     async (event) => {
-      // 同导出链路：null 父窗口按运行期契约断言
-      const win = /** @type {import('electron').BrowserWindow} */ (
-        BrowserWindow.fromWebContents(event.sender)
-      )
-      const res = await importBackup(win)
-      // 恢复目标为当前激活根时的善后（B1）：磁盘 store.json 已被整目录替换，
-      // 内存元数据、装饰缓存与延迟缩略图任务仍基于恢复前的数据——
-      // 不重载内存：下一次标注写入会用旧数据原子覆盖恢复结果（恢复被静默回滚）；
-      // 不清装饰缓存：签名恰好相同时缓存命中绕过新元数据（thumbs 目录随
-      // .modelvault 整体交换已不存在，thumbs 不入备份），卡片指向失效文件；
-      // 不清延迟任务：旧根封面任务的缩略图会写入恢复后的 thumbs 目录
-      const restoredRoot = res?.libraryRestored?.root
-      const activeRoot = getCurrentRoot()
-      if (
-        restoredRoot &&
-        activeRoot &&
-        sameResolvedPathIgnoreCase(restoredRoot, activeRoot)
-      ) {
-        await awaitThumbDrain()
-        await reloadCurrentRootData()
-        // 库设置随备份恢复：目标库的 .modelvault/settings.json 已随目录交换，
-        // 内存库设置须一并重载，否则下一次设置更新会用旧设置覆盖恢复结果
-        await reloadLibrarySettings(restoredRoot)
-        resetDecorateCache(restoredRoot)
-        clearDeferredOwners()
-        clearDeferredJobs()
-        logger.info(
-          `恢复目标为当前模型库，已重载内存元数据并失效装饰缓存: ${restoredRoot}`,
+      // 恢复屏障（#152）在服务层目录交换前建立，解除与善后链退出绑定：
+      // 无论成功、失败还是取消都经此 finally 兜底解除——恢复失败/取消时
+      // 窗口已建立（屏障在 flush 成功后、解压前开启），必须释放，否则后续
+      // 元数据保存被无限丢弃。窗口未开启时为幂等空操作
+      try {
+        // 同导出链路：null 父窗口按运行期契约断言
+        const win = /** @type {import('electron').BrowserWindow} */ (
+          BrowserWindow.fromWebContents(event.sender)
         )
+        const res = await importBackup(win)
+        // 恢复目标为当前激活根时的善后（B1）：磁盘 store.json 已被整目录替换，
+        // 内存元数据、装饰缓存与延迟缩略图任务仍基于恢复前的数据——
+        // 不重载内存：下一次标注写入会用旧数据原子覆盖恢复结果（恢复被静默回滚）；
+        // 不清装饰缓存：签名恰好相同时缓存命中绕过新元数据（thumbs 目录随
+        // .modelvault 整体交换已不存在，thumbs 不入备份），卡片指向失效文件；
+        // 不清延迟任务：旧根封面任务的缩略图会写入恢复后的 thumbs 目录
+        const restoredRoot = res?.libraryRestored?.root
+        const activeRoot = getCurrentRoot()
+        if (
+          restoredRoot &&
+          activeRoot &&
+          sameResolvedPathIgnoreCase(restoredRoot, activeRoot)
+        ) {
+          await awaitThumbDrain()
+          await reloadCurrentRootData()
+          // 库设置随备份恢复：目标库的 .modelvault/settings.json 已随目录交换，
+          // 内存库设置须一并重载，否则下一次设置更新会用旧设置覆盖恢复结果
+          await reloadLibrarySettings(restoredRoot)
+          resetDecorateCache(restoredRoot)
+          clearDeferredOwners()
+          clearDeferredJobs()
+          logger.info(
+            `恢复目标为当前模型库，已重载内存元数据并失效装饰缓存: ${restoredRoot}`,
+          )
+        }
+        if (res.error) {
+          logger.warn(`备份恢复失败: ${res.error}`)
+        } else if (!res.canceled) {
+          logger.info(
+            `备份已恢复: 设置=${res.settingsRestored} 库=${res.libraryRestored?.root || '无'}`,
+          )
+        }
+        return res
+      } finally {
+        endRootReloadWindow()
       }
-      if (res.error) {
-        logger.warn(`备份恢复失败: ${res.error}`)
-      } else if (!res.canceled) {
-        logger.info(
-          `备份已恢复: 设置=${res.settingsRestored} 库=${res.libraryRestored?.root || '无'}`,
-        )
-      }
-      return res
     },
     { errorPrefix: '备份恢复失败' },
   )

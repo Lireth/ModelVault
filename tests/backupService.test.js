@@ -18,10 +18,13 @@ import {
 } from '../src/main/services/backup'
 import {
   DATA_DIR,
+  endRootReloadWindow,
   flushSettingsSave,
+  flushStoreSave,
   getModelMeta,
   loadData,
   loadSettings,
+  reloadCurrentRootData,
   setDataRoot,
   setFlushAwaitTimeoutForTests,
   setModelMeta,
@@ -89,8 +92,11 @@ vi.mock('../src/main/services/atomic-write', async (importOriginal) => {
 
 // #72 导出并发测试钩子：writeGates 依次拦截各路 zip 写入（对齐并发窗口），
 // failPrefix 命中时模拟写入中途故障；其余调用透传真实实现
-const { zipHook } = vi.hoisted(() => ({
+// #152 恢复解压钩子：gate 在解压入口挂起（构造屏障窗口期）、fail 命中时
+// 模拟解压中途故障（屏障已建立后的失败路径）
+const { zipHook, streamHook } = vi.hoisted(() => ({
   zipHook: { failPrefix: null, writeGates: null },
+  streamHook: { gate: null, fail: false },
 }))
 vi.mock('../src/main/services/backup-zip', async (importOriginal) => {
   const actual = await importOriginal()
@@ -106,6 +112,14 @@ vi.mock('../src/main/services/backup-zip', async (importOriginal) => {
         await gate.promise
       }
       return actual.writeBackupZipToFile(file, parts)
+    },
+    streamBackupZip: async (filePath, opts) => {
+      if (streamHook.fail) throw new Error('模拟解压故障')
+      if (streamHook.gate) {
+        streamHook.gate.entered = true
+        await streamHook.gate.promise
+      }
+      return actual.streamBackupZip(filePath, opts)
     },
   }
 })
@@ -247,6 +261,13 @@ function readZip(filePath) {
   }
   return out
 }
+
+// #152 恢复屏障是模块级全局状态：服务层用例不经 IPC 善后链（解除绑定在
+// ipc/models/backup.js 的 finally），用例结束时统一兜底解除——遗留开启的
+// 窗口会吞掉后续用例的落盘与恢复（EBUSY 级联失败）
+afterEach(() => {
+  endRootReloadWindow()
+})
 
 afterAll(async () => {
   // exportBackup/importBackup 内部写日志会懒创建 logs 目录并打开写入流，
@@ -1684,6 +1705,116 @@ describe('importBackup', () => {
       expect(res.libraryRestored).toBeUndefined()
     } finally {
       spy.mockRestore()
+    }
+  })
+})
+
+describe('恢复屏障窗口（#152：交换前建立、解除与善后链退出绑定）', () => {
+  // 屏障是跨用例的全局状态：任何用例遗留开启窗口都会吞掉后续用例的落盘
+  afterEach(() => {
+    streamHook.gate = null
+    streamHook.fail = false
+    endRootReloadWindow()
+  })
+
+  it('恢复目标为当前根时交换前建立屏障：窗口期写入不落盘，重载后重放', async () => {
+    const root = makeLibrary()
+    setDataRoot(root)
+    await loadData()
+    const dataDir = path.join(root, DATA_DIR)
+    const storeFile = path.join(dataDir, 'store.json')
+
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'barrier.zip'),
+    )
+    dialogMock.showOpenDialog
+      .mockReset()
+      .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
+      .mockResolvedValueOnce({ canceled: false, filePaths: [root] })
+    dialogMock.showMessageBox.mockResolvedValue({ response: 1 })
+
+    // 在解压入口挂起：此刻屏障已建立（flush 成功后、解压前）
+    let releaseUnzip = () => {}
+    const unzipGate = {
+      entered: false,
+      promise: new Promise((resolve) => {
+        releaseUnzip = resolve
+      }),
+    }
+    streamHook.gate = unzipGate
+    let importPromise = null
+    try {
+      importPromise = importBackup(null)
+      await vi.waitFor(() => expect(unzipGate.entered).toBe(true))
+      expect(metaState.saveSuppressedRoot).toBe(root)
+
+      // 窗口期内的 IPC 元数据写入（等价善后链期间的并发标注）：
+      // 防抖被丢弃、无任何落盘把恢复前内存写进将被交换的目录
+      setModelMeta(path.join(root, 'a.safetensors'), { note: '窗口期标注' })
+      expect(metaState.saveTimer).toBeNull()
+      await new Promise((resolve) => setTimeout(resolve, 650))
+      expect(fs.existsSync(path.join(dataDir, 'journal'))).toBe(false)
+      const storeBeforeSwap = fs.readFileSync(storeFile, 'utf8')
+      expect(storeBeforeSwap).toContain('a.safetensors')
+
+      releaseUnzip()
+      const res = await importPromise
+      importPromise = null
+      expect(res.error).toBeUndefined()
+
+      // 服务层不解除屏障（解除与善后链退出绑定）：窗口仍开启
+      expect(metaState.saveSuppressedRoot).toBe(root)
+      // 恢复后磁盘是恢复内容，窗口期写入未污染
+      const storeAfterSwap = fs.readFileSync(storeFile, 'utf8')
+      expect(JSON.parse(storeAfterSwap).models['x.safetensors']).toBeDefined()
+      expect(JSON.parse(storeAfterSwap).models['a.safetensors']).toBeUndefined()
+
+      // 模拟善后链：内存重载 → 解除屏障 → 窗口写入重放进恢复后的数据
+      await reloadCurrentRootData()
+      expect(metaState.saveSuppressedRoot).toBe('')
+      expect(getModelMeta(path.join(root, 'x.safetensors'))).toBeDefined()
+      expect(getModelMeta(path.join(root, 'a.safetensors'))?.note).toBe(
+        '窗口期标注',
+      )
+      // 重放的写入经落盘链持久化（flush 走强制快照）
+      await flushStoreSave()
+      const flushed = JSON.parse(fs.readFileSync(storeFile, 'utf8'))
+      expect(flushed.models['a.safetensors'].note).toBe('窗口期标注')
+      expect(flushed.models['x.safetensors']).toBeDefined()
+    } finally {
+      releaseUnzip()
+      // 断言失败时恢复流程仍在后台持有维护锁：等其落定，防 EBUSY 级联下一用例
+      if (importPromise) await importPromise.catch(() => {})
+    }
+  })
+
+  it('解压失败路径屏障不解除：留给善后链 finally 兜底释放', async () => {
+    const root = makeLibrary()
+    setDataRoot(root)
+    await loadData()
+    const zipPath = makeBackupZip(
+      path.join(mkTmp('modelvault-out-'), 'fail.zip'),
+    )
+    dialogMock.showOpenDialog
+      .mockReset()
+      .mockResolvedValueOnce({ canceled: false, filePaths: [zipPath] })
+      .mockResolvedValueOnce({ canceled: false, filePaths: [root] })
+    dialogMock.showMessageBox.mockResolvedValue({ response: 1 })
+
+    // 故障发生在解压段：屏障已建立（flush 成功后、解压前），失败后必须
+    // 仍处于开启态——若在此解除，善后链到达前的窗口将重新无保护
+    streamHook.fail = true
+    try {
+      const res = await importBackup(null)
+      expect(res.error).toContain('库数据恢复失败')
+      expect(res.error).toContain('模拟解压故障')
+      expect(metaState.saveSuppressedRoot).toBe(root)
+      // 兜底解除（IPC 善后链 finally 的等价动作）
+      expect(endRootReloadWindow()).toBe(true)
+      expect(metaState.saveSuppressedRoot).toBe('')
+    } finally {
+      streamHook.fail = false
+      endRootReloadWindow()
     }
   })
 })

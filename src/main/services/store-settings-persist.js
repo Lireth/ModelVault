@@ -104,7 +104,7 @@ export function queueBootstrapSave(snapshot) {
 }
 
 /**
- * 库设置写盘抑制（#47，与元数据侧 B-02 saveSuppressed 同口径）：
+ * 库设置写盘抑制（#47，与元数据侧 B-02/#152 saveSuppressedRoot 同口径）：
  * 全量恢复的流式解压可达分钟级，目录交换（.modelvault → .bak → 临时目录上位）
  * 期间防抖到期的库设置写入会在让位后用非递归 mkdir 把 .modelvault 重建为
  * 只含 settings.json 的空目录，令交换与回滚双双失败。恢复窗口内对目标根

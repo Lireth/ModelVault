@@ -16,7 +16,12 @@ import {
   removeJournalDir,
 } from './store-meta-journal'
 import { parseJsonOffThread } from './json-serializer'
-import { isSettledWithin, preserveCorruptedFile } from '../utils'
+import {
+  isSettledWithin,
+  preserveCorruptedFile,
+  samePathIgnoreCase,
+  sameResolvedPathIgnoreCase,
+} from '../utils'
 import {
   clearOfflineRetry,
   ensureLibrarySubdir,
@@ -144,13 +149,78 @@ export function setReloadSaveWaitTimeoutForTests(ms) {
 }
 
 /**
- * 恢复重载窗口内落下的并发写入（#73）：维护锁在 restoreLibrary 返回时已释放，
- * loadData 的 readFile/parse 期间 IPC 元数据写入仍可进入——此时写入落在尚未
- * 替换的旧 data 对象上，随整体替换静默丢失。窗口内的写入在此登记，待新数据
- * 就位后由 reloadCurrentRootData 重放。null 表示不在重载窗口内。
- * @type {Array<{relKey: string, normalized: Record<string, any>}> | null}
+ * 恢复屏障窗口内落下的并发写入（#73/#152）：维护锁在 restoreLibrary 返回时
+ * 已释放，解压/交换/awaitThumbDrain/loadData 期间 IPC 元数据写入仍可进入
+ * ——此时写入落在尚未替换（或已被恢复替换）的 data 对象上，随整体替换静默
+ * 丢失。窗口内的写入在此登记（携带写入时刻的根），待新数据就位后由
+ * endRootReloadWindow 重放。null 表示不在恢复屏障窗口内。
+ * @type {Array<{relKey: string, normalized: Record<string, any>, root: string}> | null}
  */
 let reloadPendingWrites = null
+
+/**
+ * 建立恢复屏障窗口（#152，与设置侧 suppressLibrarySettingsSave 同一风险模型）：
+ * 备份恢复在目录交换前调用，覆盖「交换 → awaitThumbDrain → 内存重载」全程
+ * ——此前屏障只从 reloadCurrentRootData 才建立，交换完成到重载之间无锁 IPC
+ * 元数据写入经防抖落盘会把恢复前内存写进刚交换出的新 .modelvault（迟到
+ * delta 还会被 loadData 回放覆盖恢复结果），防抖定时器落在两次 rename 之间
+ * 还会用非递归 mkdir 重建空 .modelvault 令交换与回滚双双失败。
+ * 幂等：窗口已开启时保留既有登记，供 restoreLibraryLocked 与
+ * reloadCurrentRootData 嵌套复用。
+ * @param {string} root 恢复目标根目录（须为当前激活根才建立屏障）
+ * @returns {boolean} 窗口实际建立（或已处于开启态）时为 true
+ */
+export function beginRootReloadWindow(root) {
+  if (reloadPendingWrites) return true
+  // 仅当前激活根需要屏障：恢复到其他库时本根保存照常调度，登记无意义
+  if (
+    !root ||
+    !getCurrentRoot() ||
+    !sameResolvedPathIgnoreCase(root, getCurrentRoot())
+  ) {
+    return false
+  }
+  if (metaState.saveTimer) {
+    clearTimeout(metaState.saveTimer)
+    metaState.saveTimer = null
+  }
+  metaState.saveSuppressedRoot = root
+  metaState.pendingSave = false
+  metaState.pendingSnapshot = false
+  reloadPendingWrites = []
+  return true
+}
+
+/**
+ * 解除恢复屏障窗口并重放窗口内登记的并发写入（#152）。
+ * 解除与 IPC 善后链退出绑定（ipc/models/backup.js 的 finally）：恢复成功后
+ * 服务层不解除——善后链中的 awaitThumbDrain 可达数分钟，提前解除会让该
+ * 窗口内的防抖落盘把恢复前内存覆盖到恢复结果上；恢复失败/取消路径由同一
+ * finally 兜底解除（幂等空操作）。
+ * @returns {boolean} 窗口处于开启态并已解除时为 true
+ */
+export function endRootReloadWindow() {
+  const pending = reloadPendingWrites
+  if (!pending) return false
+  reloadPendingWrites = null
+  metaState.saveSuppressedRoot = ''
+  const currentRoot = getCurrentRoot()
+  let replayed = false
+  if (pending.length > 0 && metaState.data) {
+    // 重放窗口内落下的并发写入（#73）：落在旧对象上的副本已随整体替换
+    // 丢弃，这里把写入时的值补进重载后的新数据并调度一次落盘。
+    // 窗口开启期间可能已切库（#152）：登记携带写入时刻的根，仅重放仍属于
+    // 当前根的条目，跨根登记直接丢弃——旧根写入不得污染切库后的新根数据
+    for (const { relKey, normalized, root } of pending) {
+      if (!currentRoot || !samePathIgnoreCase(root, currentRoot)) continue
+      metaState.data.models[relKey] = normalized
+      markDirty(relKey)
+      replayed = true
+    }
+  }
+  if (replayed) scheduleSave()
+  return true
+}
 
 /**
  * 从磁盘重载当前根目录的元数据，并丢弃在途的防抖保存（备份恢复到当前根后调用）。
@@ -161,21 +231,16 @@ let reloadPendingWrites = null
  * @returns {Promise<object>} 重新加载后的内存数据
  */
 export async function reloadCurrentRootData() {
-  if (metaState.saveTimer) {
-    clearTimeout(metaState.saveTimer)
-    metaState.saveTimer = null
-  }
-  // B-02 恢复屏障：
-  // 1) 丢弃挂起的补写请求，恢复窗口内不再调度新落盘；
-  // 2) 等待已开始的原子写结束（其 rename 不可取消），避免读到交换中的文件
-  //    （B3：等待有上限——超时按有界 flush 同一降级路径继续重载，绝不卡死
-  //    维护锁；写盘仍在后台续跑，迟到收尾由同根守卫与 saveSuppressed 拦截）；
-  // 3) 之后才从磁盘重载，保证内存基线就是恢复后的内容。
-  metaState.saveSuppressed = true
-  metaState.pendingSave = false
-  metaState.pendingSnapshot = false
-  reloadPendingWrites = []
+  // 屏障建立/解除复用恢复窗口（#152）：幂等嵌套——外部（restoreLibraryLocked
+  // 在交换前）已开启时保留既有登记，本函数仅延续窗口直到重载完成
+  beginRootReloadWindow(getCurrentRoot())
   try {
+    // B-02 恢复屏障：
+    // 1) 丢弃挂起的补写请求，恢复窗口内不再调度新落盘；
+    // 2) 等待已开始的原子写结束（其 rename 不可取消），避免读到交换中的文件
+    //    （B3：等待有上限——超时按有界 flush 同一降级路径继续重载，绝不卡死
+    //    维护锁；写盘仍在后台续跑，迟到收尾由同根守卫与屏障判定拦截）；
+    // 3) 之后才从磁盘重载，保证内存基线就是恢复后的内容。
     let awaitingIdle = true
     try {
       const settled = await isSettledWithin(
@@ -199,18 +264,7 @@ export async function reloadCurrentRootData() {
     // 还会把恢复前内存写回刚恢复的文件
     return await loadData()
   } finally {
-    metaState.saveSuppressed = false
-    const pending = reloadPendingWrites
-    reloadPendingWrites = null
-    if (pending && pending.length > 0 && metaState.data) {
-      // 重放窗口内落下的并发写入（#73）：落在旧对象上的副本已随整体替换
-      // 丢弃，这里把写入时的值补进重载后的新数据并调度一次落盘
-      for (const { relKey, normalized } of pending) {
-        metaState.data.models[relKey] = normalized
-        markDirty(relKey)
-      }
-      scheduleSave()
-    }
+    endRootReloadWindow()
   }
 }
 
@@ -351,9 +405,12 @@ function writeMetaEntry(modelId, meta) {
   if (!normalized) return null
   metaState.data.models[relKey] = normalized
   markDirty(relKey)
-  // 重载窗口内额外登记重放（#73）：上面的原地写入落在尚未替换的旧 data
-  // 对象上，loadData 整体替换后会丢失，由 reloadCurrentRootData 补进新数据
-  if (reloadPendingWrites) reloadPendingWrites.push({ relKey, normalized })
+  // 恢复屏障窗口内额外登记重放（#73/#152）：上面的原地写入落在尚未替换的旧
+  // data 对象上，loadData 整体替换后会丢失，由 endRootReloadWindow 补进新数据；
+  // 登记携带写入时刻的根——窗口中途切库后，跨根登记在重放时按根丢弃
+  if (reloadPendingWrites) {
+    reloadPendingWrites.push({ relKey, normalized, root: getCurrentRoot() })
+  }
   return normalized
 }
 

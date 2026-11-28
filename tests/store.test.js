@@ -12,6 +12,8 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   atomicWriteFile,
+  beginRootReloadWindow,
+  endRootReloadWindow,
   flushSettingsSave,
   flushStoreSave,
   getModelMeta,
@@ -1012,13 +1014,13 @@ describe('reloadCurrentRootData（备份恢复到当前根后的内存重载，B
       await vi.waitFor(() => expect(gated).toBe(true))
       const saved = setModelMeta(abs, { note: '重载窗口内的并发修改' })
       expect(saved?.note).toBe('重载窗口内的并发修改')
-      expect(metaState.saveSuppressed).toBe(true)
+      expect(metaState.saveSuppressedRoot).toBe(root)
 
       releaseRead()
       await reload
       // 重放：窗口内的并发写入补进重载后的新数据，屏障已解除
       expect(getModelMeta(abs)?.note).toBe('重载窗口内的并发修改')
-      expect(metaState.saveSuppressed).toBe(false)
+      expect(metaState.saveSuppressedRoot).toBe('')
 
       // 重载完成瞬间磁盘仍保持恢复内容（窗口内未调度任何落盘）
       const storePath = path.join(root, '.modelvault', 'store.json')
@@ -1034,6 +1036,136 @@ describe('reloadCurrentRootData（备份恢复到当前根后的内存重载，B
     } finally {
       vi.restoreAllMocks()
     }
+  })
+})
+
+describe('恢复屏障窗口 beginRootReloadWindow/endRootReloadWindow（#152）', () => {
+  /** 另建一个临时根目录（切库目标） */
+  async function makeOtherRoot() {
+    const other = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'modelvault-otherroot-'),
+    )
+    roots.push(other)
+    return other
+  }
+
+  // 屏障是跨用例的全局状态：任何用例遗留开启窗口都会吞掉后续用例的落盘
+  afterEach(() => {
+    endRootReloadWindow()
+  })
+
+  it('begin 建立屏障：防抖被丢弃、写入登记；end 解除并重放 + 调度落盘', async () => {
+    const abs = await touchModel('barrier.safetensors')
+    const storeFile = path.join(root, '.modelvault', 'store.json')
+    await saveStoreNow() // 先落一版快照，窗口期内磁盘必须保持不变
+
+    expect(beginRootReloadWindow(root)).toBe(true)
+    expect(metaState.saveSuppressedRoot).toBe(root)
+
+    setModelMeta(abs, { alias: '窗口内的修改' })
+    // 屏障内防抖被丢弃（不排队）：无挂起定时器，磁盘保持恢复前内容
+    expect(metaState.saveTimer).toBeNull()
+    expect(JSON.parse(await fs.readFile(storeFile, 'utf-8')).models).toEqual({})
+
+    // 屏障内直接 end（未重载，等价恢复失败后的兜底解除）：登记重放进
+    // 当前内存并调度一次落盘——修改不因屏障而丢失
+    expect(endRootReloadWindow()).toBe(true)
+    expect(metaState.saveSuppressedRoot).toBe('')
+    expect(getModelMeta(abs)?.alias).toBe('窗口内的修改')
+    expect(metaState.saveTimer).not.toBeNull()
+    await flushStoreSave()
+    const disk = JSON.parse(await fs.readFile(storeFile, 'utf-8'))
+    expect(disk.models['barrier.safetensors'].alias).toBe('窗口内的修改')
+  })
+
+  it('begin/end 幂等：重复 begin 保留既有登记，重复 end 为空操作', async () => {
+    const abs = await touchModel('idempotent.safetensors')
+    expect(beginRootReloadWindow(root)).toBe(true)
+    setModelMeta(abs, { alias: '首次登记' })
+    // 已开启时再次 begin：不重置登记（restoreLibraryLocked 与
+    // reloadCurrentRootData 嵌套复用同一窗口）
+    expect(beginRootReloadWindow(root)).toBe(true)
+    setModelMeta(abs, { alias: '二次登记' })
+
+    expect(endRootReloadWindow()).toBe(true)
+    expect(getModelMeta(abs)?.alias).toBe('二次登记')
+    // 未开启时再次 end：幂等空操作（善后链 finally 与重载 finally 重复解除）
+    expect(endRootReloadWindow()).toBe(false)
+  })
+
+  it('屏障按根作用域：切到其他根后新根保存照常调度落盘', async () => {
+    const abs = await touchModel('scoped-a.safetensors')
+    const other = await makeOtherRoot()
+    const otherStoreFile = path.join(other, '.modelvault', 'store.json')
+    expect(beginRootReloadWindow(root)).toBe(true)
+
+    // 屏障内旧根写入被抑制（不调度防抖）
+    setModelMeta(abs, { alias: '被抑制的旧根写入' })
+    expect(metaState.saveTimer).toBeNull()
+
+    // 窗口中途切库（switchDataRoot 的 flush 在屏障内为空操作）
+    await switchDataRoot(other)
+    expect(getCurrentRoot()).toBe(other)
+
+    // 新根写入不受屏障影响：正常调度并落盘
+    const otherAbs = path.join(other, 'scoped-b.safetensors')
+    await fs.mkdir(path.dirname(otherAbs), { recursive: true })
+    await fs.writeFile(otherAbs, 'x')
+    setModelMeta(otherAbs, { alias: '新根照常写入' })
+    expect(metaState.saveTimer).not.toBeNull()
+    await flushStoreSave()
+    expect(
+      JSON.parse(await fs.readFile(otherStoreFile, 'utf-8')).models[
+        'scoped-b.safetensors'
+      ].alias,
+    ).toBe('新根照常写入')
+  })
+
+  it('窗口中途切库：跨根登记在重放时被丢弃，不污染新根数据', async () => {
+    const abs = await touchModel('cross-a.safetensors')
+    const other = await makeOtherRoot()
+    const otherStoreFile = path.join(other, '.modelvault', 'store.json')
+    expect(beginRootReloadWindow(root)).toBe(true)
+    setModelMeta(abs, { alias: '旧根的窗口写入' })
+
+    // 裸切根 + 重载（等价恢复窗口中途用户切库）：内存替换为新根数据
+    setDataRoot(other)
+    await loadData()
+
+    // end 时登记携带的旧根与新根不符：条目被丢弃，无重放则不调度落盘
+    expect(endRootReloadWindow()).toBe(true)
+    expect(metaState.saveSuppressedRoot).toBe('')
+    expect(getModelMeta(abs)).toBeNull()
+    expect(metaState.saveTimer).toBeNull()
+    await expect(fs.access(otherStoreFile)).rejects.toThrow()
+  })
+
+  it('外部已开启窗口内 reloadCurrentRootData：登记保留、重放恰一次', async () => {
+    const abs = await touchModel('nested.safetensors')
+    // 直接整文件替换磁盘 store.json（恢复目录交换的等价形态）
+    await fs.mkdir(path.join(root, '.modelvault'), { recursive: true })
+    await fs.writeFile(
+      path.join(root, '.modelvault', 'store.json'),
+      JSON.stringify({
+        version: 1,
+        models: { 'restored.safetensors': { note: '恢复数据' } },
+      }),
+    )
+
+    expect(beginRootReloadWindow(root)).toBe(true)
+    // 屏障内的并发写入（等价善后链 awaitThumbDrain 期间的 IPC 标注）
+    setModelMeta(abs, { alias: '窗口内并发修改' })
+
+    await reloadCurrentRootData()
+
+    // 嵌套 begin 未重置登记：窗口写入重放进重载后的数据，恢复内容并存
+    expect(getModelMeta(abs)?.alias).toBe('窗口内并发修改')
+    expect(getModelMeta(path.join(root, 'restored.safetensors'))?.note).toBe(
+      '恢复数据',
+    )
+    expect(metaState.saveSuppressedRoot).toBe('')
+    // 重载 finally 已解除屏障：再次 end 为幂等空操作
+    expect(endRootReloadWindow()).toBe(false)
   })
 })
 

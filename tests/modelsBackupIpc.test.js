@@ -41,13 +41,16 @@ vi.mock('../src/main/services/backup.js', () => ({
   importBackup: vi.fn(),
 }))
 
-// 善后链可观测：重载函数以 spy 覆盖（getCurrentRoot/setDataRoot 保留真实实现）
+// 善后链可观测：重载函数以 spy 覆盖（getCurrentRoot/setDataRoot 保留真实实现）；
+// endRootReloadWindow 包装为委托真实实现的 spy（#152：解除与善后链 finally 绑定，
+// 成功/失败/取消路径都要观察到恰好一次解除）
 vi.mock('../src/main/services/store.js', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...actual,
     reloadCurrentRootData: vi.fn(async () => {}),
     reloadLibrarySettings: vi.fn(async () => {}),
+    endRootReloadWindow: vi.fn(() => actual.endRootReloadWindow()),
   }
 })
 
@@ -68,6 +71,7 @@ vi.mock('../src/main/services/thumbs.js', () => ({
 import { registerBackupHandlers } from '../src/main/ipc/models/backup'
 import { exportBackup, importBackup } from '../src/main/services/backup'
 import {
+  endRootReloadWindow,
   reloadCurrentRootData,
   reloadLibrarySettings,
   setDataRoot,
@@ -102,6 +106,7 @@ beforeEach(() => {
   vi.mocked(resetDecorateCache).mockClear()
   vi.mocked(clearDeferredOwners).mockClear()
   vi.mocked(clearDeferredJobs).mockClear()
+  vi.mocked(endRootReloadWindow).mockClear()
   registerBackupHandlers()
 })
 
@@ -160,6 +165,9 @@ describe('models:importBackup', () => {
     expect(resetDecorateCache).toHaveBeenCalledWith(root.toUpperCase())
     expect(clearDeferredOwners).toHaveBeenCalledTimes(1)
     expect(clearDeferredJobs).toHaveBeenCalledTimes(1)
+    // 恢复屏障在善后链完成后解除（#152）：重载 spy 未执行真实 finally，
+    // 此处的一次解除即善后链 finally 的兜底释放
+    expect(endRootReloadWindow).toHaveBeenCalledTimes(1)
   })
 
   it('恢复目标非当前库时不做善后', async () => {
@@ -175,6 +183,8 @@ describe('models:importBackup', () => {
     const out = await getRegisteredHandler('models:importBackup')(makeEvent())
     expect(out.settingsRestored).toBe(true)
     expectNoCleanup()
+    // finally 兜底解除照常执行（窗口未开启时为幂等空操作）
+    expect(endRootReloadWindow).toHaveBeenCalledTimes(1)
   })
 
   it('取消与错误结果透传且不做善后（libraryRestored 缺失）', async () => {
@@ -187,5 +197,7 @@ describe('models:importBackup', () => {
       await getRegisteredHandler('models:importBackup')(makeEvent()),
     ).toEqual({ error: 'zip 损坏' })
     expectNoCleanup()
+    // 失败/取消路径同样经 finally 兜底解除（窗口未开启时为幂等空操作）
+    expect(endRootReloadWindow).toHaveBeenCalledTimes(2)
   })
 })

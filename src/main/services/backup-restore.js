@@ -17,6 +17,7 @@ import {
   normalizeStoreData,
   saveLibrarySettings,
   setModelMeta,
+  beginRootReloadWindow,
   suppressLibrarySettingsSave,
 } from './store'
 import { notifyStoreSaveError } from './store-events'
@@ -151,10 +152,20 @@ async function restoreLibraryLocked(
   // 可达分钟级——期间用户改设置触发的库设置防抖写，会在既有数据让位
   // （.modelvault → .bak）后用非递归 mkdir 把 .modelvault 重建为只含
   // settings.json 的空目录，令目录交换与回滚双双失败。与元数据侧
-  // saveSuppressed 同一口径：抑制窗口内丢弃目标根的库设置待写快照
+  // saveSuppressedRoot 同一口径：抑制窗口内丢弃目标根的库设置待写快照
   // （修改保留在内存；恢复目标为当前库时随重载对齐恢复结果），
   // 解除与流程退出绑定（finally），失败路径同样不遗留抑制
   suppressLibrarySettingsSave(root)
+  // B-02 元数据侧屏障（#152）：与设置侧同一风险模型——解压可达分钟级，
+  // 期间无锁 IPC 元数据写入经防抖落盘会把恢复前内存写进刚交换出的新
+  // .modelvault（迟到 delta 还会被 loadData 回放覆盖恢复结果），防抖定时器
+  // 落在两次 rename 之间还会用非递归 mkdir 重建空 .modelvault 令交换与
+  // 回滚双双失败。屏障仅对当前激活根生效（恢复到其他库时本根保存照常）。
+  // 解除不在本层 finally：维护锁在 restoreLibrary 返回时已释放，善后链的
+  // awaitThumbDrain 可达数分钟，窗口必须延续到内存重载完成——解除绑定到
+  // ipc/models/backup.js 善后链退出的 endRootReloadWindow（幂等，失败/取消
+  // 路径由同一 finally 兜底解除）
+  beginRootReloadWindow(root)
   const dataDir = path.join(root, DATA_DIR)
   const stamp = Date.now()
   const tmpDir = `${dataDir}.restore-${stamp}`

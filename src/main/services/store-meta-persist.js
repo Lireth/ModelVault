@@ -32,8 +32,8 @@ import { errorCode, errorMessage } from '../../shared/error-text'
  *   并安排恢复后的自动补写——绝不重建模型根目录树（O5）；
  * - 写盘异常（EPERM/EBUSY 等瞬时占用，OPT-15）与离线同属「暂时不可写」：
  *   同样自动重试（指数退避封顶 5 分钟，连续超限后暂停），成功后计数归零；
- * - 恢复重载窗口（saveSuppressed，B-02）内丢弃保存请求：旧内存不得写回
- *   刚恢复的文件。
+ * - 恢复屏障窗口（saveSuppressedRoot，B-02/#152，按根作用域）内丢弃保存
+ *   请求：旧内存不得写回刚恢复的文件。
  */
 
 /** 防抖落盘延迟（ms） */
@@ -157,12 +157,29 @@ async function ensureDataDir() {
   }
 }
 
+/**
+ * 恢复屏障判定（#152，与设置侧 librarySaveSuppressedRoot 同口径）：
+ * 仅当 root 为被抑制的根（即恢复目标 = 当前激活根）时生效——按根作用域
+ * 保证恢复到其他库、或窗口中途切库后，当前激活根的保存照常调度。
+ * @param {string | null} root 待判定的根目录（写盘目标根）
+ * @returns {boolean} 该根处于恢复屏障窗口内时为 true
+ */
+export function isMetaSaveSuppressed(root) {
+  return (
+    !!root &&
+    !!metaState.saveSuppressedRoot &&
+    samePathIgnoreCase(root, metaState.saveSuppressedRoot)
+  )
+}
+
 /** 离线跳过后安排一次自动重试（库恢复可用时自动补写内存中的修改） */
 function scheduleOfflineRetry() {
-  if (metaState.offlineRetryTimer || metaState.saveSuppressed) return
+  if (metaState.offlineRetryTimer || isMetaSaveSuppressed(getCurrentRoot()))
+    return
   metaState.offlineRetryTimer = unrefTimeout(() => {
     metaState.offlineRetryTimer = null
-    if (getCurrentRoot() && !metaState.saveSuppressed) {
+    // 屏障按触发时刻的当前根判定：窗口中途切库后，新根的补写照常进行
+    if (getCurrentRoot() && !isMetaSaveSuppressed(getCurrentRoot())) {
       saveStoreDeltaNow().catch(notifyStoreSaveError)
     }
   }, OFFLINE_RETRY_MS)
@@ -188,7 +205,8 @@ function scheduleSaveRetry() {
     )
   }
   if (metaState.saveRetryFailures > SAVE_RETRY_MAX_FAILURES) return
-  if (metaState.offlineRetryTimer || metaState.saveSuppressed) return
+  if (metaState.offlineRetryTimer || isMetaSaveSuppressed(getCurrentRoot()))
+    return
   const delay = backoffMs(
     saveRetryBaseMs,
     metaState.saveRetryFailures,
@@ -196,7 +214,7 @@ function scheduleSaveRetry() {
   )
   metaState.offlineRetryTimer = unrefTimeout(() => {
     metaState.offlineRetryTimer = null
-    if (getCurrentRoot() && !metaState.saveSuppressed) {
+    if (getCurrentRoot() && !isMetaSaveSuppressed(getCurrentRoot())) {
       saveStoreDeltaNow().catch(notifyStoreSaveError)
     }
   }, delay)
@@ -204,8 +222,9 @@ function scheduleSaveRetry() {
 
 /** 防抖保存：短时间内多次修改只落盘一次 */
 export function scheduleSave() {
-  // 恢复重载窗口内不调度：定时器携带的是恢复前的旧内存
-  if (metaState.saveSuppressed) return
+  // 恢复屏障窗口内不调度：定时器携带的是恢复前的旧内存（按当前激活根判定，
+  // 恢复到其他库或窗口中途切库后本根保存不受影响，#152）
+  if (isMetaSaveSuppressed(getCurrentRoot())) return
   if (metaState.saveTimer) clearTimeout(metaState.saveTimer)
   // 记录调度时的根目录（A6）：定时器触发时若根已切换，本次防抖携带的
   // 是旧根数据，直接落盘会写进新根目录的 store.json（跨库污染）——丢弃。
@@ -358,7 +377,8 @@ async function runSaveOnce(forceSnapshot) {
   // 根目录在守卫前一并捕获（同根守卫判据 rootAtStart）：守卫与原先的
   // getCurrentRoot() 调用之间无任何异步间隙，取值与切换时序完全一致
   const rootAtStart = getCurrentRoot()
-  if (!metaState.data || !rootAtStart || metaState.saveSuppressed) return
+  if (!metaState.data || !rootAtStart || isMetaSaveSuppressed(rootAtStart))
+    return
   if (metaState.saving) {
     // 写盘进行中又有新修改：标记待补写；若其中有强制快照请求，补写也必须快照
     metaState.pendingSave = true
@@ -410,8 +430,9 @@ async function runSaveOnce(forceSnapshot) {
       const force = metaState.pendingSnapshot
       metaState.pendingSnapshot = false
       // 补写读取的是当前最新 data，覆盖写盘期间的任何后续修改；
-      // 若已进入恢复重载窗口则丢弃，绝不把旧内存写回刚恢复的文件
-      if (!metaState.saveSuppressed) {
+      // 若已进入恢复屏障窗口则丢弃（按发起保存的根判定，#152），
+      // 绝不把旧内存写回刚恢复的文件
+      if (!isMetaSaveSuppressed(rootAtStart)) {
         ;(force ? runSave(true) : runSave(false)).catch(notifyStoreSaveError)
       }
     }

@@ -73,6 +73,8 @@ export {
   loadData,
   wasDataReset,
   reloadCurrentRootData,
+  beginRootReloadWindow,
+  endRootReloadWindow,
   setReloadSaveWaitTimeoutForTests,
   normalizeStoreData,
   getModelMeta,
