@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed } from 'vue'
 import {
   closeCompare,
   compareState,
@@ -12,7 +12,6 @@ import {
   modelById,
   modelCoverUrl,
   openDetail,
-  state,
   subCategoryInfo,
   typeInfo,
 } from '../store/appStore'
@@ -72,7 +71,13 @@ const FIELD_DEFS = [
 ]
 
 const { containerRef: panelEl, onContainerKeydown: onPanelTab } =
-  useDialogFocus({ isOpen: computed(() => compareState.open) })
+  useDialogFocus({
+    isOpen: computed(() => compareState.open),
+    // ESC 关闭对比层（P0-1 归属模态栈）：确认层打开时位于栈顶，LIFO 让位；
+    // 消除旧实现依赖「子组件 onMounted 先于父组件注册」的时序脆弱性
+    // （旧版 stopImmediatePropagation 注释所述的一次 Esc 双重副作用随之消失）
+    onClose: closeCompare,
+  })
 
 const models = computed(() =>
   compareState.ids.map((id) => modelById.value.get(id)).filter(Boolean),
@@ -93,19 +98,6 @@ function openModel(id) {
   closeCompare()
   openDetail(id)
 }
-
-function onKeydown(e) {
-  if (e.key !== 'Escape' || !compareState.open) return
-  if (state.confirm.visible) return // 确认层优先
-  // 对比层独占消费本次 Esc（ConfirmOverlay 同款「独占消费」约定）：本监听器
-  // 先于全局快捷键注册（子组件 onMounted 先于父组件），放行会令全局处理器
-  // 读到已关闭的 compareState 而连带退出多选（一次 Esc 双重副作用）
-  e.stopImmediatePropagation()
-  closeCompare()
-}
-
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>

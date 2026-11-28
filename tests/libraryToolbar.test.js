@@ -88,13 +88,16 @@ describe('输入自动补全（FEAT-1）', () => {
   })
 
   it('方向键切换高亮候选，Esc 关闭建议', async () => {
-    const wrapper = mountToolbar()
+    // P0-1：Esc 关闭候选归属模态栈（输入框聚焦期间作用域入栈），经
+    // window capture 派发——挂载需附加到 document 使焦点事件可达
+    const wrapper = mount(LibraryToolbar, { attachTo: document.body })
     const input = wrapper.find('input[type="text"]')
     await input.setValue('type:')
     const items = () => wrapper.findAll('.search-suggest li')
     expect(items()[0].classes()).toContain('active')
     await input.trigger('keydown', { key: 'ArrowDown' })
     expect(items()[1].classes()).toContain('active')
+    await input.trigger('focus')
     await input.trigger('keydown', { key: 'Escape' })
     expect(wrapper.find('.search-suggest').exists()).toBe(false)
     wrapper.unmount()

@@ -7,6 +7,7 @@ import {
   SCHEDULERS,
 } from '../constants/modelParams'
 import { normalizeBatchParamsPatch, state, toast } from '../store/appStore'
+import { useDialogFocus } from '../composables/useDialogFocus'
 
 /**
  * 批量推荐参数编辑层（F5）：
@@ -15,7 +16,8 @@ import { normalizeBatchParamsPatch, state, toast } from '../store/appStore'
  * normalizeBatchParamsPatch 预检，失败留在弹层内提示，成功后由父组件
  * 关闭并执行批量更新。
  *
- * 键盘：Esc 关闭（批量进行中不关闭）；Tab 在弹层内循环。
+ * 键盘（P0-1 统一）：Esc 关闭（批量进行中不关闭）经模态栈派发——与焦点
+ * 是否在弹层内解耦，焦点逃出浮层不再击穿全局层；Tab 在弹层内循环。
  */
 
 const emit = defineEmits(['close', 'apply'])
@@ -30,7 +32,6 @@ const form = reactive({
   resMin: '',
   resMax: '',
 })
-const dialogEl = ref(null)
 const firstInputEl = ref(null)
 
 const selectedCount = computed(() => state.multiSelect.ids.length)
@@ -62,37 +63,10 @@ function submit() {
   emit('apply', patch)
 }
 
-/** 弹层内可聚焦元素（Tab 焦点陷阱） */
-function focusables() {
-  if (!dialogEl.value) return []
-  return [
-    ...dialogEl.value.querySelectorAll(
-      'button, input, [href], select, textarea, [tabindex]:not([tabindex="-1"])',
-    ),
-  ].filter((el) => !el.disabled && el.offsetParent !== null)
-}
-
-/** 弹层键盘：Esc 关闭、Tab 首末循环（避免焦点穿透到背景批量栏/网格） */
-function onKeydown(e) {
-  if (e.key === 'Escape') {
-    e.preventDefault()
-    e.stopPropagation()
-    close()
-    return
-  }
-  if (e.key !== 'Tab') return
-  const items = focusables()
-  if (items.length === 0) return
-  const first = items[0]
-  const last = items[items.length - 1]
-  if (e.shiftKey && document.activeElement === first) {
-    e.preventDefault()
-    last.focus()
-  } else if (!e.shiftKey && document.activeElement === last) {
-    e.preventDefault()
-    first.focus()
-  }
-}
+// 焦点陷阱与 Esc 归属统一走 useDialogFocus（P0-1）：Esc 经模态栈派发，
+// Tab 在弹层内首末循环（避免焦点穿透到背景批量栏/网格）
+const { containerRef: dialogEl, onContainerKeydown: onDialogKeydown } =
+  useDialogFocus({ onClose: close })
 
 onMounted(() => {
   nextTick(() => firstInputEl.value?.focus())
@@ -101,7 +75,7 @@ onMounted(() => {
 
 <template>
   <Teleport to="body">
-    <div class="bpe-overlay" @click.self="close" @keydown="onKeydown">
+    <div class="bpe-overlay" @click.self="close" @keydown="onDialogKeydown">
       <section
         ref="dialogEl"
         class="bpe-dialog"

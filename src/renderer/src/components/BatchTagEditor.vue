@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { allTags, state } from '../store/appStore'
 import { MAX_TAG_LEN, MAX_TAGS } from '../../../shared/app-enums'
+import { useDialogFocus } from '../composables/useDialogFocus'
 
 /**
  * 批量自由标签编辑层（FEAT-01）：
@@ -9,7 +10,9 @@ import { MAX_TAG_LEN, MAX_TAGS } from '../../../shared/app-enums'
  * 逗号分隔粘贴」的 chips 方式输入，可从库内标签池点选；提交时仅把最终标签
  * 数组交给 store，覆盖范围与进度由 store 统一处理。
  *
- * 键盘：Esc 关闭（批量进行中不关闭）；Tab 在弹层内循环；Enter 添加标签。
+ * 键盘（P0-1 统一）：Esc 关闭（批量进行中不关闭）经模态栈派发——与焦点
+ * 是否在弹层内解耦，焦点逃出浮层不再击穿全局层；Tab 在弹层内循环；
+ * Enter 添加标签。
  */
 
 const emit = defineEmits(['close', 'apply'])
@@ -28,7 +31,6 @@ const mode = ref('add')
 const tags = ref([])
 const input = ref('')
 const inputEl = ref(null)
-const dialogEl = ref(null)
 
 const selectedCount = computed(() => state.multiSelect.ids.length)
 
@@ -108,6 +110,11 @@ function close() {
   emit('close')
 }
 
+// 焦点陷阱与 Esc 归属统一走 useDialogFocus（P0-1）：Esc 经模态栈派发，
+// Tab 在弹层内首末循环（避免焦点穿透到背景批量栏/网格）
+const { containerRef: dialogEl, onContainerKeydown: onDialogKeydown } =
+  useDialogFocus({ onClose: close })
+
 /**
  * 提交：先把输入框未回车的文本并入，再交给父组件执行批量更新。
  * 空标签或无选中模型时不提交。
@@ -119,38 +126,6 @@ function submit() {
   emit('apply', { mode: mode.value, tags: [...tags.value] })
 }
 
-/** 弹层内可聚焦元素（Tab 焦点陷阱） */
-function focusables() {
-  if (!dialogEl.value) return []
-  return [
-    ...dialogEl.value.querySelectorAll(
-      'button, input, [href], select, textarea, [tabindex]:not([tabindex="-1"])',
-    ),
-  ].filter((el) => !el.disabled && el.offsetParent !== null)
-}
-
-/** 弹层键盘：Esc 关闭、Tab 首末循环（避免焦点穿透到背景批量栏/网格） */
-function onKeydown(e) {
-  if (e.key === 'Escape') {
-    e.preventDefault()
-    e.stopPropagation()
-    close()
-    return
-  }
-  if (e.key !== 'Tab') return
-  const items = focusables()
-  if (items.length === 0) return
-  const first = items[0]
-  const last = items[items.length - 1]
-  if (e.shiftKey && document.activeElement === first) {
-    e.preventDefault()
-    last.focus()
-  } else if (!e.shiftKey && document.activeElement === last) {
-    e.preventDefault()
-    first.focus()
-  }
-}
-
 onMounted(() => {
   nextTick(() => inputEl.value?.focus())
 })
@@ -158,7 +133,7 @@ onMounted(() => {
 
 <template>
   <Teleport to="body">
-    <div class="bte-overlay" @click.self="close" @keydown="onKeydown">
+    <div class="bte-overlay" @click.self="close" @keydown="onDialogKeydown">
       <section
         ref="dialogEl"
         class="bte-dialog"

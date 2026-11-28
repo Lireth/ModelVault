@@ -1,4 +1,5 @@
 import { onMounted, onUnmounted } from 'vue'
+import { escStackDepth } from './useEscStack'
 import {
   allFilteredSelected,
   batchDeleteModels,
@@ -17,7 +18,8 @@ import {
 /**
  * 全局窗口快捷键（B-03，O-4 自 App.vue 按域拆出）：
  * - Ctrl+F 聚焦搜索（面板打开/未选文件夹时无效）；
- * - Esc 逐层退出：多选模式 → 清空搜索词（面板/详情/确认层打开时让位其自有 Esc 逻辑）；
+ * - Esc 逐层退出：多选模式 → 清空搜索词（浮层打开时 Esc 整键归属模态栈
+ *   useEscStack，本层不参与——栈顶浮层的 onClose 可能内置 busy 守卫）；
  * - Ctrl+A 进入多选并全选当前筛选结果；Delete 批量移入回收站（自带确认）；
  * - Ctrl+D 多选时批量收藏，详情打开时收藏当前模型；
  * - 网格内焦点卡片快捷键（方向键导航 / F 收藏 / Delete 单卡删除）由 VirtualModelGrid 处理。
@@ -70,12 +72,15 @@ export function useGlobalShortcuts(searchFieldEl, clearSearch) {
   /**
    * Esc：FEAT-9 队列在途优先请求取消（跨视图存续的全局后台任务）；
    * 其次多选模式优先退出；再次 Esc 才清空搜索词。
-   * 详情打开时 Esc 由 ModelDetail 处理（可能涉及脏表单确认）。
+   * 浮层打开时 Esc 整键归属模态栈（useEscStack 单一派发点），本层不参与：
+   * 真实按键经 capture 派发器 stopPropagation 到不了这里；以 window 为
+   * 目标直派的事件（测试注入）则由栈深守卫让位。
    * @param {KeyboardEvent} e 键盘事件
    * @returns {boolean} 是否已消费
    */
   function handleEscape(e) {
     if (e.key !== 'Escape') return false
+    if (escStackDepth() > 0) return true
     if (state.selectedId === null) {
       if (state.civitaiQueue.running) {
         cancelCivitaiQueue()

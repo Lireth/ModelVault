@@ -14,6 +14,7 @@ import {
   suggestSearchSyntax,
 } from '../store/search-syntax'
 import SearchSyntaxAssist from './SearchSyntaxAssist.vue'
+import { useEscStack } from '../composables/useEscStack'
 import { useSearchInput } from '../composables/useSearchInput'
 
 /**
@@ -116,16 +117,10 @@ function onSearchKeydown(e) {
       applyActiveSuggestion()
       return
     }
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      suggestion.value = null
-      return
-    }
   }
-  if (syntaxHelpOpen.value && e.key === 'Escape') {
-    e.preventDefault()
-    syntaxHelpOpen.value = false
-  }
+  // Esc 分支移除（P0-1）：搜索框聚焦期间 Esc 归属模态栈，由下方
+  // onSearchEsc 层级派发（旧实现仅面板/候选打开时生效，聚焦输入框后
+  // 按 Esc 是死区）
 }
 
 /** 应用候选：键盘确认取当前高亮下标，鼠标点击取事件携带的被点项下标 */
@@ -141,10 +136,42 @@ async function applyActiveSuggestion(index) {
   el?.setSelectionRange(caret, caret)
 }
 
+/** 搜索框聚焦态（Esc 作用域随焦点入/出栈） */
+const searchFocused = ref(false)
+
+function onSearchFocus() {
+  searchFocused.value = true
+}
+
 /** 焦点离开输入框时收起候选（候选点击经 mousedown.prevent 保留焦点先行） */
 function onSearchBlur() {
+  searchFocused.value = false
   suggestion.value = null
 }
+
+/**
+ * 搜索框 Esc 层级派发（P0-1，修复 Ctrl+F 聚焦后的 Esc 死区）：
+ * 输入框聚焦期间作用域入栈，Esc 逐层消费——收起候选 → 收起语法帮助
+ * 面板 → 清空搜索词 → 失焦（归还全局层）。IME 组合态由派发器统一让位
+ * （Esc 取消候选词不触发任何关闭）。
+ */
+function onSearchEsc() {
+  if (suggestion.value) {
+    suggestion.value = null
+    return
+  }
+  if (syntaxHelpOpen.value) {
+    syntaxHelpOpen.value = false
+    return
+  }
+  if (state.search) {
+    clearSearch()
+    return
+  }
+  searchFieldEl.value?.blur()
+}
+
+useEscStack(onSearchEsc, { active: searchFocused })
 
 defineExpose({ searchFieldEl, clearSearch })
 </script>
@@ -179,6 +206,7 @@ defineExpose({ searchFieldEl, clearSearch })
         aria-controls="search-syntax-suggest"
         @input="onSearchInput"
         @keydown="onSearchKeydown"
+        @focus="onSearchFocus"
         @blur="onSearchBlur"
       />
       <button

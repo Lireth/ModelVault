@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import {
   civitaiComplete,
   civitaiIdentify,
@@ -8,6 +8,7 @@ import {
   selectedModel,
   state,
 } from '../../store/appStore'
+import { useEscStack } from '../../composables/useEscStack'
 import { MAX_IMPORT_IMAGES } from '../../../../shared/app-enums'
 
 /**
@@ -93,21 +94,12 @@ function closeVideo() {
   activeVideo.value = null
 }
 
-/** ESC 优先关闭播放器（捕获阶段截断，避免同时触发详情页关闭） */
-function onVideoKeydown(e) {
-  if (e.key === 'Escape' && activeVideo.value) {
-    e.stopPropagation()
-    e.preventDefault()
-    closeVideo()
-  }
-}
+// ESC 优先关闭播放器（P0-1 归属模态栈）：播放器打开期间入栈且高于详情页
+// 作用域，Esc 经单一派发点消费，不再依赖捕获阶段注册顺序截断
+useEscStack(closeVideo, { active: () => Boolean(activeVideo.value) })
 
-onMounted(() =>
-  window.addEventListener('keydown', onVideoKeydown, { capture: true }),
-)
 onBeforeUnmount(() => {
   identifySeq += 1
-  window.removeEventListener('keydown', onVideoKeydown, { capture: true })
 })
 
 // 切换模型时作废在途识别请求并清空上次识别结论与示例图状态（URL 本身随模型

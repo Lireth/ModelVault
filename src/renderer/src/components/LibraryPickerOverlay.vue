@@ -8,6 +8,7 @@ import {
   transferState,
   transferTargets,
 } from '../store/appStore'
+import { useEscStack } from '../composables/useEscStack'
 
 /**
  * 跨库传输选择层（F-3）：从已保存库列表（去掉当前库）中选择目标库并确认
@@ -36,14 +37,17 @@ watch(
   },
 )
 
-function onKeydown(e) {
-  if (e.key === 'Escape') {
-    e.preventDefault()
-    e.stopPropagation()
-    // 传输进行中 Esc=中止（OPT-18），空闲=关闭浮层
+// ESC 取消归属模态栈（P0-1）：传输进行中 Esc=中止（OPT-18），空闲=关闭浮层
+useEscStack(
+  () => {
     if (transferState.busy) cancelTransfer()
     else closeTransfer()
-  } else if (e.key === 'Enter' && e.target?.tagName !== 'BUTTON') {
+  },
+  { active: () => transferState.visible },
+)
+
+function onKeydown(e) {
+  if (e.key === 'Enter' && e.target?.tagName !== 'BUTTON') {
     e.preventDefault()
     e.stopPropagation()
     if (canConfirm.value) confirmTransfer(selectedTarget.value)

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import AutoInfoPanel from './detail/AutoInfoPanel.vue'
 import CivitaiPanel from './detail/CivitaiPanel.vue'
 import CompatibilityPanel from './detail/CompatibilityPanel.vue'
@@ -14,7 +14,6 @@ import {
   saveModelData,
   selectedModel,
   showContextMenu,
-  state,
   toast,
 } from '../store/appStore'
 
@@ -37,25 +36,13 @@ const metaFormRef = ref(null)
 const { containerRef: panelEl, onContainerKeydown: onPanelTab } =
   useDialogFocus({
     isOpen: computed(() => Boolean(selectedModel.value)),
+    // ESC 关闭详情页（U1，P0-1 归属模态栈）：表单有未保存修改时经
+    // closeDetail 内的确认拦截（C8）。确认层/设置页/画廊打开时位于栈顶，
+    // LIFO 天然让位，无需手工 confirm.visible / settingsOpen 守卫
+    onClose: () => {
+      if (selectedModel.value) closeDetail()
+    },
   })
-
-/** ESC 关闭详情页（U1）：设置页打开时让位给它的 ESC 处理；
- *  表单有未保存修改时经 closeDetail 内的确认拦截（C8）。
- *  确认层可见时整键让位（F1）：模态确认期间底层页面不得响应 ESC，
- *  否则会把刚被取消的确认层再次弹出 */
-function onWindowKeydown(e) {
-  if (state.confirm.visible) return
-  if (e.key === 'Escape' && selectedModel.value && !state.settingsOpen) {
-    closeDetail()
-  }
-}
-
-onMounted(() => {
-  window.addEventListener('keydown', onWindowKeydown)
-})
-onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onWindowKeydown)
-})
 
 /** 详情面板右键菜单 */
 function onPanelContextMenu() {

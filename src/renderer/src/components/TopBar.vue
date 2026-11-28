@@ -1,6 +1,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { chooseFolder, scanModels, state } from '../store/appStore'
+import { useEscStack } from '../composables/useEscStack'
 
 /**
  * 窄屏操作菜单（OPT-1）：
@@ -39,17 +40,9 @@ function onWindowPointerDown(e) {
   if (menuOpen.value && !menuRoot.value?.contains(e.target)) closeMenu()
 }
 
-/**
- * ESC 关闭菜单（F1 同款独占策略）：捕获阶段拦截并 stopPropagation，
- * 阻止事件冒泡到窗口上的其他 ESC 处理器（详情页/设置页关闭），
- * 避免关闭菜单的同时误关其他面板。
- */
-function onWindowKeydown(e) {
-  if (e.key === 'Escape' && menuOpen.value) {
-    e.stopPropagation()
-    closeMenu()
-  }
-}
+// ESC 关闭菜单（P0-1 归属模态栈）：菜单打开期间入栈，Esc 归栈顶所有——
+// 菜单后开于详情页/确认层时天然压住其作用域，不再依赖捕获阶段注册顺序
+useEscStack(closeMenu, { active: menuOpen })
 
 /** 断点与 Sidebar.vue 的 960px 联动：跨回宽屏时关闭菜单，避免触发按钮已隐藏而菜单残留 */
 const narrowQuery = window.matchMedia('(max-width: 960px)')
@@ -59,13 +52,11 @@ function onNarrowChange(e) {
 
 onMounted(() => {
   window.addEventListener('pointerdown', onWindowPointerDown)
-  window.addEventListener('keydown', onWindowKeydown, { capture: true })
   narrowQuery.addEventListener('change', onNarrowChange)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('pointerdown', onWindowPointerDown)
-  window.removeEventListener('keydown', onWindowKeydown, { capture: true })
   narrowQuery.removeEventListener('change', onNarrowChange)
 })
 </script>

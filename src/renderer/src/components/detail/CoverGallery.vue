@@ -165,7 +165,9 @@ function onPointerUp() {
   dragging.value = false
 }
 
-/* ---------------- 快捷键（捕获阶段 + 阻断冒泡） ---------------- */
+/* ---------------- 快捷键（捕获阶段 + 阻断冒泡） ----------------
+ * Esc 关闭已归属模态栈（P0-1）：确认层打开时位于栈顶，LIFO 让位；
+ * 此处仅保留方向键/删除/设默认/缩放等画廊专属快捷键 */
 
 function onKeydown(e) {
   // 确认层（删除确认）可见时整键让位（F1：模态确认期间底层不得响应）
@@ -174,11 +176,6 @@ function onKeydown(e) {
   // 浏览器与系统语义，且不拦截、不阻断（继续传播给底层监听）
   if (e.ctrlKey || e.metaKey || e.altKey) return
   switch (e.key) {
-    case 'Escape':
-      e.preventDefault()
-      e.stopPropagation()
-      emit('close')
-      break
     case 'ArrowLeft':
     case 'ArrowUp':
       e.preventDefault()
@@ -227,7 +224,14 @@ function onKeydown(e) {
 
 /* ---------------- 焦点管理（O10：模态焦点陷阱 + 关闭归还触发元素） ---------------- */
 
-const { containerRef: stageEl, focusIn, onContainerKeydown } = useDialogFocus()
+// 挂载即打开态：Esc 关闭经模态栈派发（P0-1），确认层位于栈顶时 LIFO 让位
+const {
+  containerRef: stageEl,
+  focusIn,
+  onContainerKeydown,
+} = useDialogFocus({
+  onClose: () => emit('close'),
+})
 
 onMounted(() => {
   window.addEventListener('keydown', onKeydown, { capture: true })

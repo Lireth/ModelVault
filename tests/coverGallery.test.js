@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import CoverGallery from '../src/renderer/src/components/detail/CoverGallery.vue'
+import ConfirmOverlay from '../src/renderer/src/components/ConfirmOverlay.vue'
 import { state } from '../src/renderer/src/store/appStore'
 import { setupComponentTest, settle } from './helpers/componentTest'
 
@@ -180,14 +181,23 @@ describe('CoverGallery 快捷键', () => {
     wrapper.unmount()
   })
 
-  it('确认层可见时快捷键整键让位（删除确认期间 Esc 不关画廊）', () => {
+  it('确认层可见时快捷键让位：Esc 取消确认层且画廊不关（P0-1 模态栈）', () => {
     state.confirm.visible = true
     const wrapper = mountGallery()
-    pressKey('Escape')
+    // 后于画廊挂载：确认层作用域位于栈顶
+    const confirmWrapper = mount(ConfirmOverlay)
+    // 确认层可见期间：Delete 被画廊 confirm 守卫拦截；Esc 归栈顶确认层，
+    // 仅取消确认层，不关闭画廊
     pressKey('Delete')
-    expect(wrapper.emitted('close')).toBeUndefined()
+    pressKey('Escape')
     expect(wrapper.emitted('delete')).toBeUndefined()
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(state.confirm.visible).toBe(false)
+    // 确认层取消后画廊恢复自有快捷键语义
+    pressKey('Delete')
+    expect(wrapper.emitted('delete')).toHaveLength(1)
     wrapper.unmount()
+    confirmWrapper.unmount()
   })
 })
 

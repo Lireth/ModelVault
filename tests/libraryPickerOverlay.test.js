@@ -143,10 +143,13 @@ describe('键盘语义', () => {
   it('Esc 空闲时关闭浮层', async () => {
     openOverlay()
     const wrapper = mountOverlay()
-    await wrapper
-      .find('.transfer-overlay')
-      .trigger('keydown', { key: 'Escape' })
+    // P0-1：Esc 整键归属模态栈（window capture 单一派发点），与焦点是否
+    // 在浮层内解耦——经 window 直派验证栈顶派发（VTU 默认游离挂载，
+    // 元素派发不经过 window，此处以真实按键路径为准）
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
     expect(transferState.visible).toBe(false)
+    wrapper.unmount()
   })
 
   it('Esc busy 时中止在途传输（OPT-18）而非关闭', async () => {
@@ -171,14 +174,14 @@ describe('键盘语义', () => {
     await settle()
 
     const wrapper = mountOverlay()
-    await wrapper
-      .find('.transfer-overlay')
-      .trigger('keydown', { key: 'Escape' })
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
     expect(window.api.models.cancelOp).toHaveBeenCalledTimes(1)
     expect(transferState.visible).toBe(true)
 
     release()
     await pendingConfirm
+    wrapper.unmount()
   })
 
   it('Enter 确认：已选目标时经确认链路发起传输', async () => {

@@ -1,5 +1,6 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useEscStack } from '../composables/useEscStack'
 import SettingsAbout from './settings/SettingsAbout.vue'
 import SettingsAppearance from './settings/SettingsAppearance.vue'
 import SettingsBackup from './settings/SettingsBackup.vue'
@@ -103,17 +104,10 @@ watch(
   },
 )
 
-/** ESC 键关闭设置页面（与关闭按钮走同一脏保护入口，A9）。
- *  确认层可见时整键让位（F1）：模态确认期间底层页面不得响应 ESC，
- *  否则会把刚被取消的确认层再次弹出 */
-function onKeydown(e) {
-  if (e.isComposing) return // 输入法组合中的按键不拦截（Esc 取消候选词不触发关闭）
-  if (state.confirm.visible) return
-  if (e.key === 'Escape' && state.settingsOpen) onCancel()
-}
-
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+// ESC 键关闭设置页面（P0-1 归属模态栈，与关闭按钮走同一脏保护入口 A9）：
+// 组件随打开态挂载，Esc 作用域随挂载入栈、卸载出栈；IME 组合态由派发器
+// 统一让位，确认层可见时位于栈顶 LIFO 让位（旧版手工守卫随之移除）
+useEscStack(onCancel)
 
 /**
  * 由共享字段清单生成保存载荷（字段增减只需改 shared/defaults，

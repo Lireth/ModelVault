@@ -1,4 +1,5 @@
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { useEscStack } from './useEscStack'
 
 /**
  * 对话框/页面级焦点管理（O10 可达性标准，OPT-03 统一抽取）：
@@ -15,6 +16,11 @@ import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
  *   打开态响应源（boolean watch：false→true 焦点入，true→false 焦点归还）；
  *   省略时不建 watch，由调用方在挂载/交互时机自行调 focusIn（组件挂载即打开态）。
  * @param {boolean} [options.trap=true] 是否启用 Tab 焦点陷阱（模态面板开、页面视图关）
+ * @param {(e: KeyboardEvent) => void} [options.onClose] Esc 关闭动作（P0-1）：
+ *   提供时经 useEscStack 注册 Esc 作用域——isOpen 驱动的常驻组件随打开态
+ *   入/出栈，挂载即打开的组件随挂载入栈、卸载出栈。Esc 派发与焦点是否在
+ *   容器内解耦（容器 @keydown 形态的焦点逃逸缺陷随之消除），与后开浮层的
+ *   让位由模态栈 LIFO 保证，无需手工 confirm.visible 守卫。
  * @returns {{
  *   containerRef: import('vue').Ref<HTMLElement|null>,
  *   focusIn: () => void,
@@ -22,7 +28,7 @@ import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
  *   onContainerKeydown: (e: KeyboardEvent) => void,
  * }} containerRef 绑定到容器元素；onContainerKeydown 绑定容器 @keydown
  */
-export function useDialogFocus({ isOpen, trap = true } = {}) {
+export function useDialogFocus({ isOpen, trap = true, onClose } = {}) {
   /** @type {import('vue').Ref<HTMLElement | null>} */
   const containerRef = ref(null)
   /**
@@ -83,6 +89,12 @@ export function useDialogFocus({ isOpen, trap = true } = {}) {
       if (open && !wasOpen) focusIn()
       else if (!open && wasOpen) restoreFocus()
     })
+  }
+
+  // Esc 归属模态栈（P0-1）：单一 window capture 派发点统一消费，
+  // 与焦点位置、监听注册顺序解耦
+  if (onClose) {
+    useEscStack(onClose, isOpen ? { active: isOpen } : {})
   }
 
   onBeforeUnmount(() => {

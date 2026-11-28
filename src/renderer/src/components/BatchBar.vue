@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import BatchParamsEditor from './BatchParamsEditor.vue'
+import { useEscStack } from '../composables/useEscStack'
 import BatchTagEditor from './BatchTagEditor.vue'
 import {
   allFilteredSelected,
@@ -113,22 +114,22 @@ function onDocClick(e) {
   }
 }
 
-/** Esc 关闭菜单并在捕获阶段截断，避免冒泡触发全局 Esc（退出多选/清搜索词） */
-function onMenuKeydown(e) {
-  if (e.key === 'Escape' && moreOpen.value) {
-    e.stopPropagation()
+// Esc 关闭「更多」菜单（P0-1 归属模态栈）：菜单打开期间入栈并独占消费，
+// 不再冒泡触发全局 Esc（退出多选/清搜索词）；标签/参数编辑层后开时
+// LIFO 压住本作用域
+useEscStack(
+  () => {
     moreOpen.value = false
-  }
-}
+  },
+  { active: moreOpen },
+)
 
 onMounted(() => {
   document.addEventListener('click', onDocClick)
-  window.addEventListener('keydown', onMenuKeydown, { capture: true })
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', onDocClick)
-  window.removeEventListener('keydown', onMenuKeydown, { capture: true })
 })
 </script>
 

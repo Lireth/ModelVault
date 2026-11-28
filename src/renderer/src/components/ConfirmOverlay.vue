@@ -1,6 +1,7 @@
 <script setup>
 import { nextTick, ref, watch } from 'vue'
 import { acceptConfirm, rejectConfirm, state } from '../store/appStore'
+import { useEscStack } from '../composables/useEscStack'
 
 /**
  * 自定义确认层（U4，O9 自 App.vue 拆出）：替代阻塞且脱离主题的
@@ -13,16 +14,16 @@ import { acceptConfirm, rejectConfirm, state } from '../store/appStore'
 const confirmCancelBtn = ref(null)
 const confirmOkBtn = ref(null)
 
+// ESC 取消归属模态栈（P0-1）：确认层打开期间入栈且高于任何底层浮层
+// （详情/设置/画廊），Esc 由栈顶独占消费——旧版「容器拦截 + 底层手工
+// confirm.visible 让位」的独占策略由栈的 LIFO 语义统一保证
+useEscStack(rejectConfirm, { active: () => state.confirm.visible })
+
 /** 确认层键盘交互：焦点在按钮上时 Enter 由按钮原生处理。
- *  stopPropagation（F1）：确认层打开期间键盘事件由本层独占消费，
- *  否则事件继续冒泡到 window，触发详情页/设置页的 ESC 处理器，
- *  脏表单时 closeDetail/onCancel 会把确认层再次弹出，ESC 无法取消 */
+ *  Tab/Enter 的 stopPropagation（F1）：确认层打开期间键盘事件由本层独占
+ *  消费，否则事件继续冒泡到 window（ESC 分发已归模态栈，此处仅 Tab/Enter） */
 function onConfirmKeydown(e) {
-  if (e.key === 'Escape') {
-    e.preventDefault()
-    e.stopPropagation()
-    rejectConfirm()
-  } else if (e.key === 'Tab') {
+  if (e.key === 'Tab') {
     e.preventDefault()
     e.stopPropagation()
     // 两按钮循环焦点陷阱（C4 测试暴露的回归）：此前 Tab 恒聚焦「取消」、

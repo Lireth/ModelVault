@@ -1,32 +1,27 @@
 <script setup>
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted } from 'vue'
 import CrossLibraryOverview from './CrossLibraryOverview.vue'
 import StatsSection from './StatsSection.vue'
-import { closeStats, state } from '../store/appStore'
+import { closeStats } from '../store/appStore'
 import { useDialogFocus } from '../composables/useDialogFocus'
 
 /**
  * 库统计页（自设置页独立成页）：
  * 全屏展示 StatsSection 的库总览/分类占比/标注覆盖率/基底分布/
  * 重复占用/TOP 5；数据全部由渲染层 state.models 派生，打开即最新。
- * 页面骨架与设置页同族（玻璃容器 + 头部关闭 + 可滚动主体），
- * ESC 关闭（确认层可见时让位，F1 独占策略）。
+ * 页面骨架与设置页同族（玻璃容器 + 头部关闭 + 可滚动主体）。
+ * ESC 关闭归属模态栈（P0-1）：确认层可见时位于栈顶 LIFO 让位。
  * 焦点管理（O10/OPT-03）：页面级视图（非遮罩模态，trap=false）——
  * 挂载（打开）时焦点移入页面容器，关闭（卸载）时归还触发元素，
  * 与详情页/对比面板共用 useDialogFocus 同一可达性标准。
  */
 
 // 组件随打开态挂载（App 侧 v-if），故在挂载时机做焦点进入
-const { containerRef, focusIn } = useDialogFocus({ trap: false })
+const { containerRef, focusIn } = useDialogFocus({
+  trap: false,
+  onClose: closeStats,
+})
 onMounted(focusIn)
-
-function onKeydown(e) {
-  if (state.confirm.visible) return
-  if (e.key === 'Escape' && state.statsOpen) closeStats()
-}
-
-onUnmounted(() => window.removeEventListener('keydown', onKeydown))
-onMounted(() => window.addEventListener('keydown', onKeydown))
 </script>
 
 <template>
