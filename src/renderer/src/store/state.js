@@ -47,15 +47,16 @@ export const MODEL_TYPES = [
 
 /**
  * 「其他模型」的二级分类标签（A-12 单一来源 shared/model-categories.js，
- * 主进程校验与渲染展示共用同一定义；此处别名导出保持门面名称不变）。
+ * 主进程校验与渲染展示共用同一定义）——模块内私有别名，供下方
+ * SUB_MAP 构建，无门面导出（渲染层展示经 shared 契约或 LORA_TAGS）。
  */
-export const SUB_CATEGORIES = SUB_CATEGORY_DEFS
+const SUB_CATEGORIES = SUB_CATEGORY_DEFS
 
 /** LoRA 模型的分类标签 */
 export const LORA_TAGS = LORA_TAG_DEFS
 
-/** Checkpoint 模型的自动分类标签（无需手动标注） */
-export const CHECKPOINT_TAGS = CHECKPOINT_TAG_DEFS
+/** Checkpoint 模型的自动分类标签（无需手动标注；模块内私有，供 tagsForType 使用） */
+const CHECKPOINT_TAGS = CHECKPOINT_TAG_DEFS
 
 /** 基底模型家族选项（F-2 基底筛选；A-12 单一来源 shared/model-categories.js） */
 export const BASE_MODEL_FAMILIES = BASE_FAMILIES

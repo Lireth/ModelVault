@@ -57,7 +57,7 @@ export async function loadLibraryOverview(force = false) {
   }
 }
 
-/** 清空缓存（切库/退出等场景可显式调用） */
+/** 清空缓存（库列表变更后调用：新增/移除/重新定位，FN-01） */
 export function resetLibraryOverview() {
   requestToken += 1
   libraryOverview.data = null

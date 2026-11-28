@@ -15,12 +15,9 @@ const EXPECTED_EXPORTS = [
   // 状态与常量
   'state',
   'replaceModels',
-  'applyModelDelta',
   'replaceSettings',
   'MODEL_TYPES',
-  'SUB_CATEGORIES',
   'LORA_TAGS',
-  'CHECKPOINT_TAGS',
   'BASE_MODEL_FAMILIES',
   'SORT_OPTIONS',
   'CARD_SIZE_PRESETS',
@@ -55,7 +52,6 @@ const EXPECTED_EXPORTS = [
   // 库与扫描
   'initApp',
   'applyTheme',
-  'resolveTheme',
   'applyAccent',
   'openSettings',
   'closeSettings',
@@ -82,7 +78,6 @@ const EXPECTED_EXPORTS = [
   'allTags',
   'tagCounts',
   'visibleTags',
-  'visibleTagCounts',
   'duplicateIdSet',
   'duplicateWastedBytes',
   'allDuplicateWastedBytes',
@@ -102,20 +97,13 @@ const EXPECTED_EXPORTS = [
   'loadLibraryOverview',
   'resetLibraryOverview',
   // 封面/缩略图展示覆盖（OP-02；coverImageUrl 为 OPT-PAYLOAD 派生入口）
-  'applyCoverOverrides',
   'modelCoverUrl',
   'coverThumbUrl',
   'coverImageUrl',
   'clearCoverOverrides',
-  // 模型清单导出（FN-04）
-  'EXPORT_FORMATS',
-  'buildExportRows',
-  'buildCsv',
-  'buildMarkdown',
-  'buildJson',
+  // 模型清单导出（FN-04；buildCsv 等构造器经 store/model-export 直测）
   'exportModelList',
   // 模型对比（FN-03）
-  'COMPARE_MAX_MODELS',
   'compareState',
   'openCompare',
   'closeCompare',
@@ -144,7 +132,6 @@ const EXPECTED_EXPORTS = [
   // 多选
   'multiSelectIdSet',
   'multiSelectedModels',
-  'multiSelectUniformType',
   'toggleMultiSelectMode',
   'exitMultiSelect',
   'toggleSelect',

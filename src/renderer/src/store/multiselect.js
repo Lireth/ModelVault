@@ -13,7 +13,6 @@
 export {
   multiSelectIdSet,
   multiSelectedModels,
-  multiSelectUniformType,
   toggleMultiSelectMode,
   exitMultiSelect,
   toggleSelect,

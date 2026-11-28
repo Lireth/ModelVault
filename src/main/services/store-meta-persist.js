@@ -460,7 +460,7 @@ export async function flushStoreSave() {
  * stat/fsync 可在内核层阻塞数十秒，持锁路径（恢复）直接 await
  * flushStoreSave 会把全局维护锁与全部互斥操作永久卡死。
  */
-export const FLUSH_AWAIT_TIMEOUT_MS = 5000
+const FLUSH_AWAIT_TIMEOUT_MS = 5000
 
 /** flush 等待上限（测试可注入；生产代码严禁调用注入器） */
 let flushAwaitTimeoutMs = FLUSH_AWAIT_TIMEOUT_MS

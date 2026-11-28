@@ -23,12 +23,9 @@
 export {
   state,
   replaceModels,
-  applyModelDelta,
   replaceSettings,
   MODEL_TYPES,
-  SUB_CATEGORIES,
   LORA_TAGS,
-  CHECKPOINT_TAGS,
   BASE_MODEL_FAMILIES,
   SORT_OPTIONS,
   CARD_SIZE_PRESETS,
@@ -67,7 +64,6 @@ export { formatSize, formatDate, formatParamSummary } from './format'
 export {
   initApp,
   applyTheme,
-  resolveTheme,
   applyAccent,
   openSettings,
   closeSettings,
@@ -98,7 +94,6 @@ export {
   allTags,
   tagCounts,
   visibleTags,
-  visibleTagCounts,
 } from './filter'
 
 // 全库标签管理（F4：设置页标签管理面板）
@@ -123,7 +118,6 @@ export {
 
 // 封面/缩略图展示覆盖（OP-02：避免缩略图回填触发全量派生重算）
 export {
-  applyCoverOverrides,
   modelCoverUrl,
   coverThumbUrl,
   coverImageUrl,
@@ -131,22 +125,10 @@ export {
 } from './cover-overrides'
 
 // 当前筛选结果导出（FN-04）
-export {
-  EXPORT_FORMATS,
-  buildExportRows,
-  buildCsv,
-  buildMarkdown,
-  buildJson,
-  exportModelList,
-} from './model-export'
+export { exportModelList } from './model-export'
 
 // 模型对比（FN-03）
-export {
-  COMPARE_MAX_MODELS,
-  compareState,
-  openCompare,
-  closeCompare,
-} from './compare'
+export { compareState, openCompare, closeCompare } from './compare'
 
 // 启动自动检查更新（O-3）
 export { updateAvailable, applyUpdateAvailable } from './update'
@@ -184,7 +166,6 @@ export { partialScanModels } from './partial-scan'
 export {
   multiSelectIdSet,
   multiSelectedModels,
-  multiSelectUniformType,
   toggleMultiSelectMode,
   exitMultiSelect,
   toggleSelect,

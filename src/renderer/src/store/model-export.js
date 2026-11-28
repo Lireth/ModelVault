@@ -17,8 +17,8 @@ import { errorMessage } from '../../../shared/error-text'
  * 文本由本模块生成，主进程仅负责保存对话框与原子落盘（不接受路径入参）。
  */
 
-/** 支持格式（与主进程 IPC 校验保持一致） */
-export const EXPORT_FORMATS = ['csv', 'markdown', 'json']
+/** 支持格式（与主进程 IPC 校验保持一致；模块内私有，exportModelList 校验用） */
+const EXPORT_FORMATS = ['csv', 'markdown', 'json']
 
 /** 单个导出文本上限（与 schema 的字符上限一致） */
 const MAX_CONTENT_CHARS = 16 * 1024 * 1024

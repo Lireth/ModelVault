@@ -17,6 +17,7 @@ import {
 } from './cover-overrides'
 import { clearBatchFailures } from './multiselect/batch-failures'
 import { exitMultiSelect } from './multiselect/selection'
+import { resetLibraryOverview } from './library-overview'
 import { toast } from './toast'
 import { ACCENT_PRESETS, CUSTOM_ACCENT_RE } from '../constants/accents'
 import { IPC_ERROR } from '../../../shared/error-codes'
@@ -57,7 +58,7 @@ function getSystemThemeQuery() {
  * 主进程（原生标题栏配色）只认 dark/light，IPC 一律发送解析后的有效主题。
  * @param {string} mode 主题模式（dark/light/system）
  */
-export function resolveTheme(mode) {
+function resolveTheme(mode) {
   if (mode === 'system')
     return getSystemThemeQuery()?.matches ? 'light' : 'dark'
   return mode === 'light' ? 'light' : 'dark'
@@ -272,6 +273,8 @@ export async function chooseFolder() {
     // V-02：选择阶段不提交 state.folder；扫描成功后由 scanModels 统一提交，
     // 失败/取消时保持原库与旧列表
     await scanModels(folder)
+    // 新库入列成功：跨库总览缓存失效，下次打开重新汇总（FN-01）
+    resetLibraryOverview()
   } catch (err) {
     toast('error', `选择文件夹失败: ${errorMessage(err)}`)
   }
@@ -372,7 +375,11 @@ export async function removeRoot(folder) {
     state.settings.modelsFolders || []
   ).filter((f) => f.toLowerCase() !== folder.toLowerCase())
   const ok = await saveSettings({ modelsFolders: next })
-  if (ok) toast('success', '已从模型库列表移除（磁盘数据不受影响）')
+  if (ok) {
+    // 库列表变更：跨库总览缓存失效，下次打开重新汇总（FN-01）
+    resetLibraryOverview()
+    toast('success', '已从模型库列表移除（磁盘数据不受影响）')
+  }
 }
 
 /**
@@ -406,6 +413,8 @@ export async function relocateFolder() {
       await saveSettings({ modelsFolders: next })
       // 死条目从失效清单一并移除：库列表已不含该路径，标记失去对象
       state.missingRoots = state.missingRoots.filter((r) => r !== lower)
+      // 库列表变更（旧路径出列）：跨库总览缓存失效，下次打开重新汇总（FN-01）
+      resetLibraryOverview()
     }
     await scanModels(folder)
   } catch (err) {

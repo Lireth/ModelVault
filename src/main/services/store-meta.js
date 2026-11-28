@@ -478,7 +478,7 @@ export function renameModelMeta(oldId, newId) {
  * 挂起磁盘（死亡网络盘/半挂载 USB）上的 stat/fsync 可在内核层阻塞数十秒，
  * 维护锁期间 UI 卡在「切换中」只能杀进程（退出路径有 5s 底线而切库没有）。
  */
-export const SWITCH_FLUSH_TIMEOUT_MS = 5000
+const SWITCH_FLUSH_TIMEOUT_MS = 5000
 
 /** 切库 flush 超时（测试可注入；生产代码严禁调用注入器） */
 let switchFlushTimeoutMs = SWITCH_FLUSH_TIMEOUT_MS

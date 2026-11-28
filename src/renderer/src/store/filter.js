@@ -19,10 +19,4 @@ export {
   allDuplicateWastedBytes,
 } from './filter/visibility'
 export { filteredModels } from './filter/pipeline'
-export {
-  tagCounts,
-  allTags,
-  visibleTagCounts,
-  visibleTags,
-  typeCounts,
-} from './filter/tags'
+export { tagCounts, allTags, visibleTags, typeCounts } from './filter/tags'

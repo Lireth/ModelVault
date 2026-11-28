@@ -60,9 +60,6 @@ export function registerImageProtocolHandler() {
   logger.info(`自定义协议 ${SCHEME}:// 与 ${CIV_SCHEME}:// 注册完成`)
 }
 
-/** 示例视频地址判定（实现位于 remote-image，此处保持既有导入面） */
-export { isCivitaiVideoUrl } from './protocol/remote-image'
-
 /**
  * 由本地图片绝对路径构造渲染进程可用的 mvimg URL。
  * 实现收敛于 shared/image-url.js（主/渲染两侧单一来源，列表瘦身依赖渲染侧

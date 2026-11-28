@@ -30,14 +30,6 @@ export const multiSelectedModels = computed(() => {
   return out
 })
 
-/** 选中模型的类型是否一致（仅 re-export 保留，供上层判断选区构成） */
-export const multiSelectUniformType = computed(() => {
-  const sel = multiSelectedModels.value
-  if (sel.length === 0) return null
-  const type = sel[0].type
-  return sel.every((m) => m.type === type) ? type : null
-})
-
 /** 进入/退出多选模式（退出时清空选择） */
 export function toggleMultiSelectMode() {
   state.multiSelect.active = !state.multiSelect.active

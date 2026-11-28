@@ -42,7 +42,7 @@ export const allTags = computed(() =>
  * 出现「只属于隐藏模型、选中必为空」的标签。标签管理面板仍使用全库
  * tagCounts/allTags（需要能管理隐藏模型的标签）。
  */
-export const visibleTagCounts = computed(() => {
+const visibleTagCounts = computed(() => {
   // 关闭隐藏开关时与全库计数完全一致，直接复用，避免多一遍 O(n)
   if (state.settings?.hideNsfwModels !== true) return tagCounts.value
   const counts = new Map()
