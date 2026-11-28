@@ -149,12 +149,14 @@ export function setReloadSaveWaitTimeoutForTests(ms) {
 }
 
 /**
- * 恢复屏障窗口内落下的并发写入（#73/#152）：维护锁在 restoreLibrary 返回时
- * 已释放，解压/交换/awaitThumbDrain/loadData 期间 IPC 元数据写入仍可进入
- * ——此时写入落在尚未替换（或已被恢复替换）的 data 对象上，随整体替换静默
- * 丢失。窗口内的写入在此登记（携带写入时刻的根），待新数据就位后由
- * endRootReloadWindow 重放。null 表示不在恢复屏障窗口内。
- * @type {Array<{relKey: string, normalized: Record<string, any>, root: string}> | null}
+ * 恢复屏障窗口内落下的并发写入与删除（#73/#152/#153）：维护锁在
+ * restoreLibrary 返回时已释放，解压/交换/awaitThumbDrain/loadData 期间 IPC
+ * 元数据写入仍可进入——此时写入落在尚未替换（或已被恢复替换）的 data 对象
+ * 上，随整体替换静默丢失。窗口内的写入在此登记（携带写入时刻的根），待新
+ * 数据就位后由 endRootReloadWindow 重放。normalized 为 null 表示窗口内落下
+ * 的删除（removeModelMeta）：恢复副本会让已删除条目复活并写回磁盘，删除
+ * 意图须与新数据对齐后重放。null（数组本身）表示不在恢复屏障窗口内。
+ * @type {Array<{relKey: string, normalized: Record<string, any> | null, root: string}> | null}
  */
 let reloadPendingWrites = null
 
@@ -207,13 +209,18 @@ export function endRootReloadWindow() {
   const currentRoot = getCurrentRoot()
   let replayed = false
   if (pending.length > 0 && metaState.data) {
-    // 重放窗口内落下的并发写入（#73）：落在旧对象上的副本已随整体替换
-    // 丢弃，这里把写入时的值补进重载后的新数据并调度一次落盘。
+    // 重放窗口内落下的并发写入与删除（#73/#153）：落在旧对象上的副本已随
+    // 整体替换丢弃，这里把写入时的值/删除意图补进重载后的新数据并调度一次
+    // 落盘——删除不重放会让恢复副本里的条目复活并写回磁盘。
     // 窗口开启期间可能已切库（#152）：登记携带写入时刻的根，仅重放仍属于
     // 当前根的条目，跨根登记直接丢弃——旧根写入不得污染切库后的新根数据
     for (const { relKey, normalized, root } of pending) {
       if (!currentRoot || !samePathIgnoreCase(root, currentRoot)) continue
-      metaState.data.models[relKey] = normalized
+      if (normalized) {
+        metaState.data.models[relKey] = normalized
+      } else {
+        delete metaState.data.models[relKey]
+      }
       markDirty(relKey)
       replayed = true
     }
@@ -481,6 +488,17 @@ export function removeModelMeta(modelId) {
   if (!relKey || !metaState.data.models[relKey]) return false
   delete metaState.data.models[relKey]
   markDirty(relKey)
+  // 恢复屏障窗口内登记删除意图（#153，与 writeMetaEntry 的写入登记对称）：
+  // 原地删除落在尚未替换（或已被恢复替换）的 data 对象上，loadData 整体
+  // 替换会让恢复副本里的条目复活并写回磁盘，由 endRootReloadWindow 把删除
+  // 意图补进新数据。登记携带删除时刻的根，跨根条目在重放时按根丢弃
+  if (reloadPendingWrites) {
+    reloadPendingWrites.push({
+      relKey,
+      normalized: null,
+      root: getCurrentRoot(),
+    })
+  }
   scheduleSave()
   return true
 }

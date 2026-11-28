@@ -1167,6 +1167,42 @@ describe('恢复屏障窗口 beginRootReloadWindow/endRootReloadWindow（#152）
     // 重载 finally 已解除屏障：再次 end 为幂等空操作
     expect(endRootReloadWindow()).toBe(false)
   })
+
+  it('窗口内的删除不复活：重载后删除意图重放进新数据（#153）', async () => {
+    const abs = await touchModel('del-resurrect.safetensors')
+    const storeFile = path.join(root, '.modelvault', 'store.json')
+    setModelMeta(abs, { note: '将被删除的条目' })
+    await saveStoreNow() // 磁盘与内存一致（等价恢复副本仍含该条目）
+
+    expect(beginRootReloadWindow(root)).toBe(true)
+    // 窗口内的 IPC 删除（等价善后链期间用户删除模型）
+    expect(removeModelMeta(abs)).toBe(true)
+    expect(metaState.saveTimer).toBeNull() // 屏障丢弃防抖
+
+    await reloadCurrentRootData()
+
+    // loadData 从恢复副本读回条目，删除重放使其保持删除状态——
+    // 未登记删除意图时它会原样复活并写回磁盘
+    expect(getModelMeta(abs)).toBeNull()
+    expect(metaState.saveSuppressedRoot).toBe('')
+    await flushStoreSave()
+    expect(JSON.parse(await fs.readFile(storeFile, 'utf8')).models).toEqual({})
+  })
+
+  it('屏障内删除经 end 解除时同样重放：当前内存条目保持删除（#153）', async () => {
+    const abs = await touchModel('del-barrier.safetensors')
+    const storeFile = path.join(root, '.modelvault', 'store.json')
+    setModelMeta(abs, { note: '待删除' })
+    await saveStoreNow()
+
+    expect(beginRootReloadWindow(root)).toBe(true)
+    expect(removeModelMeta(abs)).toBe(true)
+    expect(endRootReloadWindow()).toBe(true)
+    expect(getModelMeta(abs)).toBeNull()
+    expect(metaState.saveTimer).not.toBeNull() // 重放调度落盘
+    await flushStoreSave()
+    expect(JSON.parse(await fs.readFile(storeFile, 'utf8')).models).toEqual({})
+  })
 })
 
 describe('切换根目录与落盘链（A6）', () => {
