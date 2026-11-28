@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import logger from '../logger'
+import { runWithConcurrency } from '../utils'
 import { getJournalDir } from './store-paths'
 import { isUnsafeModelKey, normalizeModelMeta } from './store-meta-normalize'
 import { metaState } from './store-meta-state'
@@ -27,6 +28,14 @@ const MAX_JOURNAL_SEQ = 1_000_000_000
 
 /** 增量批次文件名（delta-<seq>.json，写盘侧 12 位零填充，读取兼容任意位数） */
 const DELTA_BATCH_NAME_RE = /^delta-(\d+)\.json$/
+
+/**
+ * 批次读取/解析的并发上限（P0-3）：崩溃恢复路径可能残留数十个批次，
+ * 有界并发读盘显著短于逐批串行；上限取值远低于机械盘的合理并发（批次
+ * 为独立小文件，8 路已是读放大与调度开销的平衡点），与磁盘介质探测
+ * （disk-profile）无关——此处只优化一次性回放，不改变常规写路径。
+ */
+const JOURNAL_READ_CONCURRENCY = 8
 
 /**
  * 文件名是否为增量日志批次（单一来源：回放过滤与跨库迁移的残留检测共用，
@@ -98,43 +107,62 @@ export async function loadJournal(snapshotSeq) {
     if (seqMatch) batches.push({ name, seq: Number(seqMatch[1]) })
   }
   batches.sort((a, b) => a.seq - b.seq)
-  for (const { name, seq: fileSeq } of batches) {
-    const file = path.join(getJournalDir(), name)
-    let parsed
-    try {
-      parsed = JSON.parse(await fs.readFile(file, 'utf-8'))
-    } catch (err) {
-      // 原子写保证正常情况下不会出现；损坏批次隔离后继续回放后续批次，
-      // 避免一个坏文件让之后所有增量永久无法加载
-      logger.warn(`增量日志批次损坏，已隔离（${name}）: ${errorMessage(err)}`)
+  // P0-3：读取/解析/损坏隔离有界并发（崩溃恢复路径可能残留数十个批次，
+  // 逐批串行 readFile 会拉长重载等待）；结果按输入下标回填，应用阶段
+  // 保持 seq 升序串行——回放顺序语义与旧实现完全一致
+  const loaded = /** @type {Array<{fileSeq: number, entries: any[]}|null>} */ (
+    new Array(batches.length).fill(null)
+  )
+  await runWithConcurrency(
+    batches,
+    /**
+     * @param {{ name: string, seq: number }} batch
+     * @param {number} index 输入下标（seq 升序序位，结果按此回填）
+     */
+    async ({ name, seq: fileSeq }, index) => {
+      const file = path.join(getJournalDir(), name)
       try {
-        await fs.rm(file, { force: true })
-      } catch {
-        /* 隔离失败可忽略，下轮加载会再次尝试 */
+        const parsed = JSON.parse(await fs.readFile(file, 'utf-8'))
+        if (
+          !parsed ||
+          !Number.isInteger(parsed.seq) ||
+          !Array.isArray(parsed.entries) ||
+          // 内容 seq 与文件名 seq 必须一致且在合法区间（防代际漂移）
+          parsed.seq !== fileSeq ||
+          parsed.seq < 1 ||
+          parsed.seq > MAX_JOURNAL_SEQ
+        ) {
+          logger.warn(
+            `增量日志批次格式异常（seq 越界或与文件名不一致），已隔离（${name}）`,
+          )
+          try {
+            await fs.rm(file, { force: true })
+          } catch {
+            /* 隔离失败可忽略 */
+          }
+          return
+        }
+        loaded[index] = {
+          fileSeq,
+          entries: /** @type {any[]} */ (parsed.entries),
+        }
+      } catch (err) {
+        // 原子写保证正常情况下不会出现；损坏批次隔离后继续回放后续批次，
+        // 避免一个坏文件让之后所有增量永久无法加载
+        logger.warn(`增量日志批次损坏，已隔离（${name}）: ${errorMessage(err)}`)
+        try {
+          await fs.rm(file, { force: true })
+        } catch {
+          /* 隔离失败可忽略，下轮加载会再次尝试 */
+        }
       }
-      continue
-    }
-    if (
-      !parsed ||
-      !Number.isInteger(parsed.seq) ||
-      !Array.isArray(parsed.entries) ||
-      // 内容 seq 与文件名 seq 必须一致且在合法区间（防代际漂移）
-      parsed.seq !== fileSeq ||
-      parsed.seq < 1 ||
-      parsed.seq > MAX_JOURNAL_SEQ
-    ) {
-      logger.warn(
-        `增量日志批次格式异常（seq 越界或与文件名不一致），已隔离（${name}）`,
-      )
-      try {
-        await fs.rm(file, { force: true })
-      } catch {
-        /* 隔离失败可忽略 */
-      }
-      continue
-    }
-    if (parsed.seq <= snapshotSeq) continue // 快照已包含
-    for (const entry of parsed.entries) {
+    },
+    JOURNAL_READ_CONCURRENCY,
+  )
+  for (const batch of loaded) {
+    if (!batch) continue // 损坏/格式异常批次已隔离
+    if (batch.fileSeq <= snapshotSeq) continue // 快照已包含
+    for (const entry of batch.entries) {
       if (
         !entry ||
         typeof entry.key !== 'string' ||
@@ -148,7 +176,7 @@ export async function loadJournal(snapshotSeq) {
         delete metaState.data.models[entry.key]
       }
     }
-    metaState.journalSeq = Math.max(metaState.journalSeq, parsed.seq)
-    metaState.journalEntryCount += parsed.entries.length
+    metaState.journalSeq = Math.max(metaState.journalSeq, batch.fileSeq)
+    metaState.journalEntryCount += batch.entries.length
   }
 }

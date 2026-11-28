@@ -236,7 +236,9 @@ async function migrateLegacyData() {
   const oldFile = path.join(app.getPath('userData'), LEGACY_STORE_FILE)
   try {
     const text = await fs.readFile(oldFile, 'utf-8')
-    const parsed = JSON.parse(text)
+    // B1/OPT-03 口径统一（P0-3）：旧版全局 store.json 大库可达数十 MB，
+    // 解析走 JSON 线程（小文本自动回退主线程），冷启动迁移不再冻结主进程
+    const parsed = await parseJsonOffThread(text)
     let imported = 0
     for (const [absId, meta] of Object.entries(parsed?.models || {})) {
       const relKey = toRelKey(absId)

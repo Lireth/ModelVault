@@ -341,10 +341,20 @@ async function writeDeltaJournal(keys, rootAtStart) {
 }
 
 /**
- * 统一写盘入口：增量日志或全量快照。
+ * 写盘链尾（P0-3）：每轮 runSave（含 finally 中补写续跑的一轮）都把本轮
+ * promise 续接到链尾。flushStoreSave 等待链尾即等待「本轮 + 全部补写」
+ * 完成——替代旧的 setImmediate 忙轮询：挂起磁盘（死亡网络盘）上 saving
+ * 永不复位时，轮询以最大频率空转烧 CPU 且无终止条件；等待真实 promise
+ * 则处于挂起态（零 CPU 占用），有界等待路径超时后也仅是挂起而非自旋。
+ * @type {Promise<void>}
+ */
+let saveChainTail = Promise.resolve()
+
+/**
+ * 单轮写盘（无链尾续接；所有调用方必须经 runSave 续链）。
  * @param {boolean} forceSnapshot 是否强制写全量快照
  */
-async function runSave(forceSnapshot) {
+async function runSaveOnce(forceSnapshot) {
   // 根目录在守卫前一并捕获（同根守卫判据 rootAtStart）：守卫与原先的
   // getCurrentRoot() 调用之间无任何异步间隙，取值与切换时序完全一致
   const rootAtStart = getCurrentRoot()
@@ -409,6 +419,21 @@ async function runSave(forceSnapshot) {
 }
 
 /**
+ * 统一写盘入口：增量日志或全量快照（每次调用续接写盘链尾，P0-3）。
+ * @param {boolean} forceSnapshot 是否强制写全量快照
+ */
+function runSave(forceSnapshot) {
+  const current = runSaveOnce(forceSnapshot)
+  // 链尾续接：忽略链上此前的任何失败（inner 已自行兜底上报），推进到本轮；
+  // 补写在上一轮 finally 中同步续链，因此链尾读取方必然看到全部排队写入
+  saveChainTail = saveChainTail.then(
+    () => current,
+    () => current,
+  )
+  return current
+}
+
+/**
  * 增量落盘（防抖保存路径）：只写脏键日志；达到阈值时自动合并快照。
  * @returns {Promise<void>}
  */
@@ -449,8 +474,14 @@ export async function flushStoreSave() {
     return
   }
   await saveStoreNow()
-  while (metaState.saving || metaState.pendingSave) {
-    await new Promise((resolve) => setImmediate(resolve))
+  // P0-3：链尾静止等待（替代 setImmediate 忙轮询）。补写在每轮 finally
+  // 中经 runSave 续链，链尾快照在等待期间可能被后续补写延长——循环至
+  // 链尾不再变化，语义与旧轮询等价（退出时无在途/待补写写盘）。挂起磁盘
+  // 上等待的是真实 promise（挂起态，零 CPU），不再以最大频率空转烧 CPU
+  for (;;) {
+    const tail = saveChainTail
+    await tail
+    if (saveChainTail === tail) return
   }
 }
 
