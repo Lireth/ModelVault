@@ -5,6 +5,7 @@ import { app, dialog } from 'electron'
 import { zip, strToU8 } from 'fflate'
 import logger, { getLogDir } from '../logger'
 import { runWithConcurrency } from '../utils'
+import { renameReplacing } from './atomic-write'
 import { getMaintenanceState } from './maintenance-lock'
 import {
   getCoversDir,
@@ -328,8 +329,11 @@ export async function exportDiagnostics(win) {
   try {
     const bytes = await zipFiles(files)
     await fs.writeFile(tmp, Buffer.from(bytes))
-    await fs.rm(target, { force: true }).catch(() => {})
-    await fs.rename(tmp, target)
+    // 原子替换（#169，与 backup-export/auto-backup 的 zip 落点同一标准）：
+    // renameReplacing 直接覆盖目标并对 Windows 占用竞争退避重试——不再先
+    // rm 目标，rename 持续失败（EPERM 目标被占用）时既有诊断包原样保留，
+    // 仅清理本次 tmp，绝不出现「旧包已删、新包未落位」
+    await renameReplacing(tmp, target)
     const stat = await fs.stat(target)
     logger.info(
       `诊断包已导出: ${target}（${logs.length} 个日志 / ${stat.size} 字节）`,

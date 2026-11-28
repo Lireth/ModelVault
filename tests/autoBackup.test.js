@@ -215,6 +215,28 @@ describe('runAutoBackupIfDue（到期判定与跳过）', () => {
     expect(second.skipped).toBeUndefined()
     expect(await listAutoBackups()).toHaveLength(2)
   })
+
+  it('伪造文件名（科学计数法/超长/未来时间戳）不推迟自动备份（#172）', async () => {
+    setModelMeta(path.join(root, 'a.safetensors'), { alias: 'a' })
+    const t0 = 1_700_000_000_000
+    // EOCD 完整但文件名伪造（库内文件名属半可信输入）：
+    // - 科学计数法：修复前 Number('9e15') 天文数字，now - last 恒负 →
+    //   24h 间隔判定恒真，自动备份被永久跳过且无告警
+    // - 超长纯数字：超 MAX_SAFE_INTEGER 的另一形态
+    // - 未来时间戳：纯数字合法形态，但晚于判定时刻同样不得顶替有效备份
+    await makeValidBackup('9e15')
+    await makeValidBackup('9999999999999999')
+    await makeValidBackup(t0 + 10 * DAY_MS)
+    // 旧文件名解析路径一并拒绝小数形态
+    await makeValidBackup('1.7e12')
+
+    const res = await runAutoBackupIfDue(t0)
+
+    // 伪造名一律不作为「上次备份时间」：本轮正常执行到期备份
+    expect(res.skipped).toBeUndefined()
+    expect(res.path).toBe(path.join(backupsDir(), `auto-${t0}.zip`))
+    expect(await listAutoBackups()).toHaveLength(5)
+  })
 })
 
 describe('备份产出与滚动保留', () => {

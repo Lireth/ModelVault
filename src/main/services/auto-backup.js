@@ -164,10 +164,15 @@ async function checkZipComplete(filePath) {
  * 上一次自动备份的时间戳（解析备份目录内 auto-<stamp>.zip 文件名）。
  * 仅信任 EOCD 完整的 zip（A4）：强退残留的半截包文件名合法但内容不完整，
  * 不得顶替有效备份推迟下次自动备份。
+ * 文件名属半可信输入（#172）：限定纯数字串再解析——Number() 直接收下科学
+ * 计数法（auto-9e15.zip）与小数形态，伪造的天文数字会让 24h 间隔判定恒真，
+ * 自动备份被永久跳过；同时只认不晚于当前时刻的时间戳，超长纯数字串
+ * （如 16 位仍为安全整数的形态）同样不得顶替有效备份。
  * @param {string} dir 备份目录
+ * @param {number} now 本次到期判定时刻（与调用方注入的 now 同源）
  * @returns {Promise<number>} 最近一次的时间戳；目录不存在/无有效备份为 0
  */
-async function lastAutoBackupAt(dir) {
+async function lastAutoBackupAt(dir, now = Date.now()) {
   let names
   try {
     names = await fs.readdir(dir)
@@ -181,13 +186,13 @@ async function lastAutoBackupAt(dir) {
       !name.endsWith(AUTO_BACKUP_SUFFIX)
     )
       continue
-    const stamp = Number(
-      name.slice(
-        AUTO_BACKUP_PREFIX.length,
-        name.length - AUTO_BACKUP_SUFFIX.length,
-      ),
+    const raw = name.slice(
+      AUTO_BACKUP_PREFIX.length,
+      name.length - AUTO_BACKUP_SUFFIX.length,
     )
-    if (!Number.isFinite(stamp) || stamp <= latest) continue
+    if (!/^\d+$/.test(raw)) continue
+    const stamp = Number(raw)
+    if (!Number.isSafeInteger(stamp) || stamp <= latest || stamp > now) continue
     if ((await checkZipComplete(path.join(dir, name))) !== true) {
       logger.warn(`自动备份文件不完整或不可读，已忽略: ${name}`)
       continue
@@ -273,7 +278,7 @@ export async function runAutoBackupIfDue(now = Date.now()) {
     // 可能永不返回；超时/失败释放锁（finally）并跳过本轮，绝不抛未捕获异常
     let last
     try {
-      last = await raceDirIoTimeout(lastAutoBackupAt(dir), dirIoTimeoutMs)
+      last = await raceDirIoTimeout(lastAutoBackupAt(dir, now), dirIoTimeoutMs)
     } catch (err) {
       logger.warn(`自动备份跳过：备份目录读取超时或失败: ${errorMessage(err)}`)
       return { skipped: 'unavailable' }
