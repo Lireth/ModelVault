@@ -1,5 +1,6 @@
 import { app, dialog } from 'electron'
 import logger from './logger'
+import { isSettledWithin } from './utils'
 import { flushSettingsSave, flushStoreSave } from './services/store'
 import { flushWindowStateSave } from './windows/mainWindow'
 import { errorMessage } from '../shared/error-text'
@@ -24,6 +25,25 @@ import { errorMessage } from '../shared/error-text'
 
 /** 致命错误处理进行中标记：处理期间到达的新异常不重复触发重启 */
 let handling = false
+
+/**
+ * 致命错误处理中的落盘等待上限（ms，#158）：与 quit.js 退出路径的 A4 底线
+ * 同一口径——挂起磁盘（死亡网络盘/被杀毒软件锁文件）上 flush 可能永不
+ * settle，无上限等待会让错误框不弹、进程不重不退，handling=true 下整个
+ * 应用僵死为「已崩溃但不退出」。
+ */
+const FLUSH_TIMEOUT_MS = 5000
+
+/** 落盘等待上限（测试可注入；生产代码严禁调用注入器） */
+let flushWaitTimeoutMs = FLUSH_TIMEOUT_MS
+
+/**
+ * 注入致命错误处理的落盘等待上限（仅供单元测试使用）
+ * @param {number} ms 毫秒
+ */
+export function setFlushWaitTimeoutForTests(ms) {
+  flushWaitTimeoutMs = Number.isFinite(ms) && ms >= 0 ? ms : FLUSH_TIMEOUT_MS
+}
 
 /** 错误框中展示的错误信息最大长度（避免超长堆栈撑爆对话框） */
 const MAX_DETAIL_LENGTH = 500
@@ -87,14 +107,23 @@ export async function handleUncaughtException(error) {
   try {
     // 尽力保存：防抖中的元数据与设置立即落盘（含窗口状态，与 quit.js
     // 退出路径三路对齐），减少重启导致的数据丢失。落盘失败不阻断重启
-    // ——数据已可能不一致，续跑风险高于重启
-    await Promise.all([
+    // ——数据已可能不一致，续跑风险高于重启。
+    // 等待有确定性上限（#158，与 quit.js 的 A4 底线同一口径）：磁盘挂起时
+    // flush 可能永不 settle，超时按未完成继续走「提示 + 重启」底线；
+    // flush 链已 catch 兜底，超时后的迟到完成由 app.exit 终结，无副作用
+    const flushChain = Promise.all([
       flushStoreSave(),
       flushSettingsSave(),
       flushWindowStateSave(),
     ]).catch((err) => {
       logger.warn(`致命错误处理中落盘失败: ${err.message}`)
     })
+    const settled = await isSettledWithin(flushChain, flushWaitTimeoutMs)
+    if (!settled) {
+      logger.warn(
+        `致命错误处理中落盘等待超过 ${flushWaitTimeoutMs}ms 仍未完成，按未完成继续（数据可能未完整保存）`,
+      )
+    }
   } finally {
     // 熔断判定：窗口起点（窗口内首次崩溃时刻）不变以维持同一窗口；
     // 窗口过期（超过 RESTART_LOOP_WINDOW_MS）则视为已恢复，重新计数

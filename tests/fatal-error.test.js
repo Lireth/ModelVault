@@ -42,6 +42,7 @@ import { flushWindowStateSave } from '../src/main/windows/mainWindow'
 import {
   handleUncaughtException,
   resetFatalErrorForTests,
+  setFlushWaitTimeoutForTests,
 } from '../src/main/fatal-error'
 
 /** 熔断判定基准时刻（真实量级的 epoch ms） */
@@ -69,6 +70,7 @@ beforeEach(() => {
 afterEach(() => {
   process.argv = realArgv
   nowSpy.mockRestore()
+  setFlushWaitTimeoutForTests()
 })
 
 describe('首次崩溃（成功路径语义回归）', () => {
@@ -98,6 +100,36 @@ describe('首次崩溃（成功路径语义回归）', () => {
       expect.stringContaining('落盘失败'),
     )
     expect(app.relaunch).toHaveBeenCalledTimes(1)
+    expect(app.exit).toHaveBeenCalledWith(1)
+  })
+
+  it('三路 flush 挂起时按上限继续：错误框、relaunch 与 exit 不被阻塞（#158）', async () => {
+    // 挂起磁盘：三路 flush 永不 settle（修复前 await Promise.all 无上限，
+    // 错误框不弹、进程不重不退，整个用例超时挂死）
+    setFlushWaitTimeoutForTests(50)
+    const hang = () => new Promise(() => {})
+    vi.mocked(flushStoreSave).mockImplementationOnce(hang)
+    vi.mocked(flushSettingsSave).mockImplementationOnce(hang)
+    vi.mocked(flushWindowStateSave).mockImplementationOnce(hang)
+
+    await handleUncaughtException(new Error('hung disk'))
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('仍未完成'),
+    )
+    expect(dialog.showErrorBox).toHaveBeenCalledTimes(1)
+    expect(app.relaunch).toHaveBeenCalledTimes(1)
+    expect(app.exit).toHaveBeenCalledWith(1)
+  })
+
+  it('flush 在上限内完成时不触发超时警告', async () => {
+    setFlushWaitTimeoutForTests(5000)
+
+    await handleUncaughtException(new Error('boom'))
+
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      expect.stringContaining('仍未完成'),
+    )
     expect(app.exit).toHaveBeenCalledWith(1)
   })
 
